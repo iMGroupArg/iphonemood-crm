@@ -163,7 +163,20 @@ tbody tr:hover td{background:var(--bg-secondary)}
 </head>
 <body>
 
-<div class="app-shell">
+<div id="login-screen" style="position:fixed;inset:0;background:var(--bg-secondary);display:flex;align-items:center;justify-content:center;z-index:500;flex-direction:column;gap:20px;padding:20px">
+  <div style="text-align:center">
+    <div style="width:56px;height:56px;border-radius:14px;background:var(--blue);color:#fff;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:22px;margin:0 auto 14px">iM</div>
+    <h1 style="font-size:20px;font-weight:600;margin-bottom:4px">iPhoneMood CRM</h1>
+    <p style="font-size:13px;color:var(--text-secondary)">Iniciá sesión con tu cuenta de Google para continuar</p>
+  </div>
+  <button id="login-google-btn" onclick="Auth.iniciarSesionConGoogle()" style="display:flex;align-items:center;gap:10px;background:#fff;border:1px solid var(--border-strong);border-radius:10px;padding:12px 24px;font-size:14px;font-weight:600;color:var(--text);cursor:pointer;box-shadow:0 1px 3px rgba(0,0,0,.08)">
+    <svg width="18" height="18" viewBox="0 0 18 18"><path fill="#4285F4" d="M17.64 9.2c0-.64-.06-1.25-.16-1.84H9v3.48h4.84a4.14 4.14 0 0 1-1.8 2.72v2.26h2.92c1.7-1.57 2.68-3.88 2.68-6.62z"/><path fill="#34A853" d="M9 18c2.43 0 4.47-.81 5.96-2.18l-2.92-2.26c-.81.54-1.84.86-3.04.86-2.34 0-4.32-1.58-5.03-3.7H.96v2.33A9 9 0 0 0 9 18z"/><path fill="#FBBC05" d="M3.97 10.72A5.4 5.4 0 0 1 3.69 9c0-.6.1-1.18.28-1.72V4.95H.96A9 9 0 0 0 0 9c0 1.45.35 2.82.96 4.05l3.01-2.33z"/><path fill="#EA4335" d="M9 3.58c1.32 0 2.5.45 3.44 1.35l2.58-2.58C13.46.89 11.43 0 9 0A9 9 0 0 0 .96 4.95L3.97 7.28C4.68 5.16 6.66 3.58 9 3.58z"/></svg>
+    Continuar con Google
+  </button>
+  <div id="login-status" style="font-size:12px;color:var(--text-secondary);min-height:18px"></div>
+</div>
+
+<div class="app-shell" id="app-shell" style="display:none">
   <div class="sidebar-overlay" id="sidebar-overlay" onclick="App.closeSidebar()"></div>
   <div class="sidebar" id="sidebar">
     <div class="sb-head">
@@ -207,6 +220,17 @@ tbody tr:hover td{background:var(--bg-secondary)}
       <div class="topbar-right">
         <span class="pill pill-blue"><i class="ti ti-currency-dollar"></i> Blue: $<span id="topbar-blue">1075</span></span>
         <span class="pill pill-green"><i class="ti ti-currency-bitcoin"></i> USDT: $<span id="topbar-usdt">1061</span></span>
+        <div id="user-menu" style="position:relative">
+          <button onclick="App.toggleUserMenu()" style="display:flex;align-items:center;gap:6px;background:var(--bg-secondary);border:1px solid var(--border);border-radius:20px;padding:4px 10px 4px 4px;cursor:pointer">
+            <span id="user-avatar" class="av" style="width:22px;height:22px;font-size:9px"></span>
+            <span id="user-name" style="font-size:11px;font-weight:600;max-width:90px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"></span>
+            <i class="ti ti-chevron-down" style="font-size:12px;color:var(--text-secondary)"></i>
+          </button>
+          <div id="user-menu-dropdown" style="display:none;position:absolute;top:36px;right:0;background:var(--bg);border:1px solid var(--border);border-radius:10px;box-shadow:0 4px 16px rgba(0,0,0,.12);min-width:180px;z-index:100;overflow:hidden">
+            <div id="user-email-full" style="padding:10px 14px;font-size:11px;color:var(--text-secondary);border-bottom:1px solid var(--border);word-break:break-all"></div>
+            <div onclick="Auth.cerrarSesion()" style="padding:10px 14px;font-size:12.5px;cursor:pointer;display:flex;align-items:center;gap:8px;color:var(--red)"><i class="ti ti-logout"></i> Cerrar sesión</div>
+          </div>
+        </div>
       </div>
     </div>
 
@@ -501,6 +525,59 @@ const DB = {
   },
   async editarCategoriaGasto(id, cambios) { await supa.from('categorias_gasto').update(cambios).eq('id', id); },
   async borrarCategoriaGasto(id) { await supa.from('categorias_gasto').delete().eq('id', id); },
+};
+
+// ============================================================
+// AUTENTICACIÓN — login con Google y verificación de acceso
+// ============================================================
+const Auth = {
+  usuario: null, // { email, nombre, avatarUrl }
+
+  async iniciarSesionConGoogle() {
+    const { error } = await supa.auth.signInWithOAuth({
+      provider: 'google',
+      options: { redirectTo: window.location.origin }
+    });
+    if (error) { console.error(error); alert('No se pudo iniciar el login con Google. Probá de nuevo.'); }
+  },
+
+  async cerrarSesion() {
+    await supa.auth.signOut();
+    window.location.reload();
+  },
+
+  async obtenerSesionActual() {
+    const { data: { session } } = await supa.auth.getSession();
+    return session;
+  },
+
+  async emailEstaAutorizado(email) {
+    const { data, error } = await supa.from('usuarios_autorizados').select('*').eq('email', email).eq('activo', true).maybeSingle();
+    if (error) { console.error(error); return null; }
+    return data;
+  },
+
+  async listarUsuariosAutorizados() {
+    const { data } = await supa.from('usuarios_autorizados').select('*').order('creado_en', { ascending: true });
+    return data || [];
+  },
+
+  async agregarUsuarioAutorizado(email, nombre) {
+    const { data, error } = await supa.from('usuarios_autorizados').insert({ email: email.toLowerCase().trim(), nombre }).select().single();
+    return { data, error };
+  },
+
+  async quitarUsuarioAutorizado(id) {
+    await supa.from('usuarios_autorizados').delete().eq('id', id);
+  },
+
+  async toggleUsuarioActivo(id, activo) {
+    await supa.from('usuarios_autorizados').update({ activo }).eq('id', id);
+  },
+
+  escucharCambiosDeSesion(callback) {
+    supa.auth.onAuthStateChange((event, session) => callback(event, session));
+  }
 };
 
 </script>
@@ -2200,6 +2277,7 @@ const Panel = {
     const items = [
       ['garantias', 'ti ti-shield', 'Garantías'],
       ['personas', 'ti ti-users', 'Cajas y personas'],
+      ['usuarios', 'ti ti-lock', 'Usuarios y accesos'],
       ['negocio', 'ti ti-building-store', 'Datos del negocio'],
     ];
     document.getElementById('panel-nav').innerHTML = items.map(([k, ic, l]) =>
@@ -2212,6 +2290,7 @@ const Panel = {
     const body = document.getElementById('panel-body');
     if (this.activeTab === 'garantias') body.innerHTML = this.garantiasView();
     else if (this.activeTab === 'personas') body.innerHTML = this.personasView();
+    else if (this.activeTab === 'usuarios') { body.innerHTML = this.usuariosView(); this.cargarUsuarios(); }
     else body.innerHTML = this.negocioView();
   },
 
@@ -2344,6 +2423,72 @@ const Panel = {
         <div><label style="font-size:11px;color:var(--text-secondary);font-weight:600">Dirección</label><input type="text" value="Julio Argentino Roca 700, Granadero Baigorria, Santa Fe" style="width:100%;font-size:12px;padding:7px 10px;border:1px solid var(--border-strong);border-radius:8px;margin-top:4px"></div>
       </div>
     `;
+  },
+
+  usuariosView() {
+    return `
+      <h3 style="font-size:13px;font-weight:600;color:var(--text-secondary);text-transform:uppercase;letter-spacing:.4px;margin-bottom:12px;border-bottom:1px solid var(--border);padding-bottom:8px">Usuarios y accesos</h3>
+      <div style="background:var(--blue-light);border-radius:8px;padding:10px 12px;margin-bottom:14px;font-size:11.5px;color:var(--blue-dark)">
+        <i class="ti ti-info-circle"></i> Solo las cuentas de Gmail listadas acá pueden iniciar sesión en la app. Si alguien intenta entrar con un email que no está en esta lista, va a ver un mensaje de acceso denegado.
+      </div>
+      <div id="usuarios-list" style="margin-bottom:14px"><div class="empty-state"><i class="ti ti-loader-2"></i>Cargando usuarios...</div></div>
+      <div class="card">
+        <div class="card-title" style="margin-bottom:10px"><i class="ti ti-user-plus"></i> Agregar acceso</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px">
+          <div><label style="font-size:11px;color:var(--text-secondary);font-weight:600">Email de Gmail</label><input type="email" id="new-user-email" placeholder="persona@gmail.com" style="width:100%;font-size:12px;padding:7px 10px;border:1px solid var(--border-strong);border-radius:8px;margin-top:4px"></div>
+          <div><label style="font-size:11px;color:var(--text-secondary);font-weight:600">Nombre (opcional)</label><input type="text" id="new-user-nombre" placeholder="ej: Valen" style="width:100%;font-size:12px;padding:7px 10px;border:1px solid var(--border-strong);border-radius:8px;margin-top:4px"></div>
+        </div>
+        <button class="btn btn-primary" onclick="Panel.agregarUsuario()"><i class="ti ti-plus"></i> Dar acceso</button>
+      </div>
+    `;
+  },
+
+  async cargarUsuarios() {
+    const usuarios = await Auth.listarUsuariosAutorizados();
+    const host = document.getElementById('usuarios-list');
+    if (!host) return;
+    if (!usuarios.length) { host.innerHTML = `<div class="empty-state"><i class="ti ti-user-off"></i>Todavía no hay usuarios autorizados cargados</div>`; return; }
+    host.innerHTML = usuarios.map(u => `
+      <div style="display:flex;align-items:center;gap:10px;background:var(--bg);border:1px solid var(--border);border-radius:10px;padding:10px 14px;margin-bottom:8px">
+        <div class="av">${(u.nombre || u.email).substring(0,2).toUpperCase()}</div>
+        <div style="flex:1;min-width:0">
+          <div style="font-size:12.5px;font-weight:600">${u.nombre || '(sin nombre)'}</div>
+          <div style="font-size:11px;color:var(--text-secondary);word-break:break-all">${u.email}</div>
+        </div>
+        <span class="badge ${u.activo ? 'b-green' : 'b-gray'}" style="cursor:pointer" onclick="Panel.toggleUsuario('${u.id}', ${!u.activo})">${u.activo ? 'Activo' : 'Inactivo'}</span>
+        <button class="btn btn-sm" style="color:var(--red)" onclick="Panel.quitarUsuario('${u.id}','${u.email}')"><i class="ti ti-trash"></i></button>
+      </div>
+    `).join('');
+  },
+
+  async agregarUsuario() {
+    const emailInput = document.getElementById('new-user-email');
+    const nombreInput = document.getElementById('new-user-nombre');
+    const email = emailInput.value.trim().toLowerCase();
+    const nombre = nombreInput.value.trim();
+    if (!email || !email.includes('@')) { alert('Ingresá un email válido.'); return; }
+
+    const { error } = await Auth.agregarUsuarioAutorizado(email, nombre);
+    if (error) {
+      if (error.code === '23505') alert('Ese email ya tiene acceso autorizado.');
+      else { alert('Hubo un problema agregando el usuario.'); console.error(error); }
+      return;
+    }
+    emailInput.value = '';
+    nombreInput.value = '';
+    this.cargarUsuarios();
+    toast(`${email} ya puede iniciar sesión en la app con su cuenta de Google.`);
+  },
+
+  async toggleUsuario(id, nuevoEstado) {
+    await Auth.toggleUsuarioActivo(id, nuevoEstado);
+    this.cargarUsuarios();
+  },
+
+  async quitarUsuario(id, email) {
+    if (!confirm(`¿Quitar el acceso de ${email}? Esa persona ya no va a poder iniciar sesión.`)) return;
+    await Auth.quitarUsuarioAutorizado(id);
+    this.cargarUsuarios();
   }
 };
 
@@ -2363,6 +2508,55 @@ const App = {
   },
 
   async init() {
+    const session = await Auth.obtenerSesionActual();
+    if (!session) {
+      this.mostrarLogin();
+      return;
+    }
+    await this.validarYArrancar(session);
+
+    // Si el login redirige y vuelve a esta misma página, Supabase dispara este evento
+    Auth.escucharCambiosDeSesion(async (event, session) => {
+      if (event === 'SIGNED_IN' && session) {
+        await this.validarYArrancar(session);
+      }
+      if (event === 'SIGNED_OUT') {
+        window.location.reload();
+      }
+    });
+  },
+
+  mostrarLogin(mensaje) {
+    document.getElementById('login-screen').style.display = 'flex';
+    document.getElementById('app-shell').style.display = 'none';
+    if (mensaje) document.getElementById('login-status').textContent = mensaje;
+  },
+
+  async validarYArrancar(session) {
+    const email = session.user.email;
+    const statusEl = document.getElementById('login-status');
+    if (statusEl) statusEl.textContent = 'Verificando acceso...';
+
+    const autorizado = await Auth.emailEstaAutorizado(email);
+    if (!autorizado) {
+      this.mostrarLogin(`El usuario ${email} no tiene acceso autorizado a iPhoneMood. Pedile al administrador que lo agregue desde el Panel de control.`);
+      document.getElementById('login-google-btn').innerHTML = `<i class="ti ti-logout"></i> Probar con otra cuenta`;
+      document.getElementById('login-google-btn').onclick = () => Auth.cerrarSesion();
+      return;
+    }
+
+    Auth.usuario = {
+      email,
+      nombre: autorizado.nombre || session.user.user_metadata?.full_name || email.split('@')[0],
+      avatarUrl: session.user.user_metadata?.avatar_url || ''
+    };
+
+    document.getElementById('login-screen').style.display = 'none';
+    document.getElementById('app-shell').style.display = 'flex';
+    document.getElementById('user-avatar').textContent = Auth.usuario.nombre.substring(0, 2).toUpperCase();
+    document.getElementById('user-name').textContent = Auth.usuario.nombre;
+    document.getElementById('user-email-full').textContent = Auth.usuario.email;
+
     document.querySelectorAll('.nav-item').forEach(item => {
       item.addEventListener('click', () => this.goTo(item.dataset.page));
     });
@@ -2385,6 +2579,11 @@ const App = {
     document.getElementById('topbar-blue').textContent = State.refBlue;
     document.getElementById('topbar-usdt').textContent = State.refUsdt;
     this.goTo('dashboard');
+  },
+
+  toggleUserMenu() {
+    const dd = document.getElementById('user-menu-dropdown');
+    dd.style.display = dd.style.display === 'none' ? 'block' : 'none';
   },
 
   toggleSidebar() {
@@ -2416,8 +2615,15 @@ const App = {
     container.style.flexDirection = 'column';
     container.style.overflow = 'hidden';
     this.closeSidebar();
+    document.getElementById('user-menu-dropdown').style.display = 'none';
   }
 };
+
+document.addEventListener('click', (e) => {
+  const menu = document.getElementById('user-menu');
+  const dd = document.getElementById('user-menu-dropdown');
+  if (menu && dd && !menu.contains(e.target)) dd.style.display = 'none';
+});
 
 document.addEventListener('DOMContentLoaded', () => App.init());
 

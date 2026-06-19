@@ -304,7 +304,12 @@ const DB = {
         proveedor: s.proveedor, custodio: this.personasIdToNombre[s.custodio_id] || '', notas: s.notas || '',
         precioReventa: s.precio_reventa ? Number(s.precio_reventa) : null,
         precioMayorista: s.precio_mayorista ? Number(s.precio_mayorista) : null,
-        costoReparacion: Number(s.costo_reparacion) || 0
+        costoReparacion: Number(s.costo_reparacion) || 0,
+        modelo: s.modelo || '', storage: s.storage || '', color: s.color || '',
+        bateriaPct: s.bateria_pct ?? null, ciclosBateria: s.ciclos_bateria ?? null, ram: s.ram || '',
+        estadoProducto: s.estado_producto || '', grado: s.grado || 'Sin grado',
+        esim: !!s.esim, tieneCaja: !!s.tiene_caja, numeroSerie: s.numero_serie || '',
+        destacado: !!s.destacado
       };
     });
 
@@ -395,7 +400,12 @@ const DB = {
       costo_usd: obj.costoUSD, cotizacion: obj.cotiz, precio_ars: obj.precioARS,
       proveedor: obj.proveedor, custodio_id: this.personaId(obj.custodio) || null, notas: obj.notas || '',
       precio_reventa: obj.precioReventa || null, precio_mayorista: obj.precioMayorista || null,
-      costo_reparacion: obj.costoReparacion || 0
+      costo_reparacion: obj.costoReparacion || 0,
+      modelo: obj.modelo || null, storage: obj.storage || null, color: obj.color || null,
+      bateria_pct: obj.bateriaPct || null, ciclos_bateria: obj.ciclosBateria || null, ram: obj.ram || null,
+      estado_producto: obj.estadoProducto || null, grado: obj.grado || 'Sin grado',
+      esim: !!obj.esim, tiene_caja: !!obj.tieneCaja, numero_serie: obj.numeroSerie || null,
+      destacado: !!obj.destacado
     };
     if (idExistente) {
       const { error } = await supa.from('stock').update(row).eq('id', idExistente);
@@ -1305,52 +1315,207 @@ const Stock = {
     return d.toLocaleDateString('es-AR', { day:'2-digit', month:'2-digit' }) + ' ' + d.toLocaleTimeString('es-AR', { hour:'2-digit', minute:'2-digit' });
   },
 
+  CAT_ICONS: { iphone:'ti-device-mobile', android:'ti-device-mobile', mac:'ti-device-laptop', ipad:'ti-device-ipad', watch:'ti-device-watch', audio:'ti-headphones', perfumeria:'ti-droplet', accesorio:'ti-plug', repuesto:'ti-tool', otro:'ti-box' },
+  MODELOS_POR_CAT: {
+    iphone: ['iPhone 11','iPhone 12','iPhone 12 Pro','iPhone 13','iPhone 13 Pro','iPhone 14','iPhone 14 Pro','iPhone 14 Pro Max','iPhone 15','iPhone 15 Plus','iPhone 15 Pro','iPhone 15 Pro Max','iPhone 16','iPhone 16 Pro','iPhone 16 Pro Max','iPhone 17','iPhone 17 Pro','iPhone 17 Pro Max'],
+    android: ['Samsung Galaxy S23','Samsung Galaxy S24','Samsung Galaxy S24+','Samsung Galaxy S24 Ultra','Samsung Galaxy A54','Samsung Galaxy A34','Motorola G84','Motorola G54','Motorola Edge 40','Xiaomi 13'],
+    mac: ['MacBook Air M1','MacBook Air M2','MacBook Air M3','MacBook Pro 14" M3','MacBook Pro 16" M3','Mac Mini M2','iMac M3'],
+    ipad: ['iPad 9ª gen','iPad 10ª gen','iPad Air M2','iPad Mini 6ª gen','iPad Pro 11"','iPad Pro 13"'],
+    watch: ['Apple Watch SE','Apple Watch Series 9','Apple Watch Ultra 2'],
+    audio: ['AirPods 2','AirPods 3','AirPods Pro 2','AirPods Max','Beats Studio Pro'],
+  },
+  STORAGE_OPCIONES: ['32GB','64GB','128GB','256GB','512GB','1TB','2TB'],
+  COLOR_OPCIONES: ['Negro','Blanco','Azul','Verde','Rosa','Rojo','Titanio Natural','Titanio Azul','Titanio Negro','Plata','Dorado','Gris Espacial','Otro'],
+  ESTADO_OPCIONES: ['Nuevo / Sellado','Excelente','Muy bueno','Bueno','Con detalles'],
+  GRADO_OPCIONES: ['Sin grado','A+','A','B','C'],
+  RAM_OPCIONES: ['8GB','16GB','18GB','24GB','32GB','36GB'],
+
   // ===== FORMULARIO =====
 
   openDrawer(mode, id) {
     const existing = mode === 'edit' ? State.stock.find(x => x.id === id) : null;
-    const p = existing || { cat: 'iphone', nombre: '', costoUSD: '', cotiz: State.refBlue, precioARS: '', proveedor: 'Gonza', custodio: '', notas: '', imeis: [], cantidad: 0, cantidadDeclarada: 1, precioReventa: null, precioMayorista: null, costoReparacion: 0 };
+    const p = existing || {
+      cat: 'iphone', nombre: '', costoUSD: '', cotiz: State.refBlue, precioARS: '', proveedor: 'Gonza', custodio: '', notas: '',
+      imeis: [], cantidad: 0, cantidadDeclarada: 1, precioReventa: null, precioMayorista: null, costoReparacion: 0,
+      modelo: '', storage: '', color: '', bateriaPct: null, ciclosBateria: null, ram: '', estadoProducto: '', grado: 'Sin grado',
+      esim: false, tieneCaja: false, numeroSerie: '', destacado: false
+    };
     const host = document.getElementById('stock-drawer-host');
     const esIMEI = this.CATS_IMEI.includes(p.cat);
     const cantidadDeclarada = p.cantidadDeclarada ?? p.cantidad ?? (esIMEI ? 0 : 1);
+
     host.innerHTML = `
       <div class="drawer-bg" style="position:fixed;inset:0;background:rgba(0,0,0,.35);display:flex;justify-content:flex-end;z-index:100" onclick="if(event.target===this) Stock.closeDrawer()">
-        <div style="width:400px;max-width:92vw;background:var(--bg);border-left:1px solid var(--border);display:flex;flex-direction:column;height:100%" onclick="event.stopPropagation()">
+        <div style="width:440px;max-width:94vw;background:var(--bg);border-left:1px solid var(--border);display:flex;flex-direction:column;height:100%" onclick="event.stopPropagation()">
+
           <div style="padding:16px 18px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center">
-            <h3 style="font-size:14px;font-weight:600">${mode==='new'?'Agregar producto':'Editar producto'}</h3>
-            <button class="btn btn-sm" onclick="Stock.closeDrawer()"><i class="ti ti-x"></i></button>
+            <h3 style="font-size:15px;font-weight:600;display:flex;align-items:center;gap:8px"><i class="ti ${this.CAT_ICONS[p.cat]||'ti-box'}" style="color:var(--blue)" id="drawer-icon"></i> ${mode==='new'?'Agregar producto':'Editar producto'}</h3>
+            <div style="display:flex;align-items:center;gap:6px">
+              <button type="button" onclick="Stock.toggleDestacado()" id="destacado-btn" title="Destacar en catálogo" style="background:none;border:none;cursor:pointer;font-size:18px;color:${p.destacado?'#854F0B':'var(--text-secondary)'}"><i class="ti ti-star${p.destacado?'-filled':''}" id="destacado-icon"></i></button>
+              <button class="btn btn-sm" onclick="Stock.closeDrawer()"><i class="ti ti-x"></i></button>
+            </div>
           </div>
+
           <div style="flex:1;overflow-y:auto;padding:16px 18px">
 
-            <div style="margin-bottom:12px"><label style="font-size:11px;color:var(--text-secondary);font-weight:600;display:block;margin-bottom:6px">Categoría</label>
-              <select id="f-cat" style="width:100%;font-size:12px;padding:7px 10px;border:1px solid var(--border-strong);border-radius:8px" onchange="Stock.toggleFields()" onclick="Stock.toggleFields()">
-                ${Object.entries(this.CAT_LABELS).map(([k,v]) => `<option value="${k}" ${p.cat===k?'selected':''}>${v}</option>`).join('')}
-              </select>
-            </div>
-
-            <div style="margin-bottom:12px"><label style="font-size:11px;color:var(--text-secondary);font-weight:600;display:block;margin-bottom:4px">Nombre / modelo</label>
-              <input type="text" id="f-nombre" value="${p.nombre||''}" placeholder="ej: iPhone 15 128GB Negro" style="width:100%;font-size:12px;padding:7px 10px;border:1px solid var(--border-strong);border-radius:8px">
-            </div>
-
-            <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:12px">
-              <div><label style="font-size:11px;color:var(--text-secondary);font-weight:600;display:block;margin-bottom:4px">Costo USD</label><input type="number" id="f-costo" value="${p.costoUSD||''}" style="width:100%;font-size:12px;padding:7px 10px;border:1px solid var(--border-strong);border-radius:8px"></div>
-              <div><label style="font-size:11px;color:var(--text-secondary);font-weight:600;display:block;margin-bottom:4px">Cotización</label><input type="number" id="f-cotiz" value="${p.cotiz||State.refBlue}" oninput="Stock.updatePricePreview()" style="width:100%;font-size:12px;padding:7px 10px;border:1px solid var(--border-strong);border-radius:8px"></div>
-            </div>
-
-            <div style="margin-bottom:12px"><label style="font-size:11px;color:var(--text-secondary);font-weight:600;display:block;margin-bottom:4px">Precio de venta (USD)</label>
-              <input type="number" id="f-precio-usd" value="${p.precioARS && p.cotiz ? (p.precioARS / p.cotiz).toFixed(2) : ''}" placeholder="ej: 790" oninput="Stock.updatePricePreview()" style="width:100%;font-size:12px;padding:7px 10px;border:1px solid var(--border-strong);border-radius:8px">
-              <div class="hint" style="font-size:10.5px;color:var(--text-secondary);margin-top:3px" id="precio-ars-preview">${p.precioARS ? '≈ ' + State.fmtARS(p.precioARS) + ' a la cotización indicada' : ''}</div>
-            </div>
-
-            <button type="button" onclick="Stock.toggleAdvancedPrices()" style="background:none;border:none;color:var(--blue);font-size:11.5px;cursor:pointer;display:flex;align-items:center;gap:4px;padding:0;margin-bottom:12px"><i class="ti ti-chevron-down" id="adv-prices-arrow"></i> Precios avanzados (opcional)</button>
-            <div id="adv-prices-wrap" style="display:none;margin-bottom:6px">
-              <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:12px">
-                <div><label style="font-size:11px;color:var(--text-secondary);font-weight:600;display:block;margin-bottom:4px">Precio reventa (USD)</label><input type="number" id="f-precio-reventa" value="${p.precioReventa||''}" placeholder="opcional" style="width:100%;font-size:12px;padding:7px 10px;border:1px solid var(--border-strong);border-radius:8px"><div class="hint" style="font-size:10px;color:var(--text-secondary);margin-top:3px">Catálogo de revendedores</div></div>
-                <div><label style="font-size:11px;color:var(--text-secondary);font-weight:600;display:block;margin-bottom:4px">Precio mayorista (USD)</label><input type="number" id="f-precio-mayorista" value="${p.precioMayorista||''}" placeholder="opcional" style="width:100%;font-size:12px;padding:7px 10px;border:1px solid var(--border-strong);border-radius:8px"><div class="hint" style="font-size:10px;color:var(--text-secondary);margin-top:3px">Venta por volumen</div></div>
+            <!-- SECCIÓN: IDENTIFICACIÓN DEL PRODUCTO -->
+            <div style="border:1px solid var(--border);border-radius:10px;margin-bottom:12px;overflow:hidden">
+              <div onclick="Stock.toggleSection('sec-id')" style="background:var(--bg-secondary);padding:10px 14px;display:flex;justify-content:space-between;align-items:center;cursor:pointer">
+                <span style="font-size:12.5px;font-weight:600;display:flex;align-items:center;gap:7px"><i class="ti ti-device-mobile"></i> Identificación del Producto</span>
+                <i class="ti ti-chevron-up" id="arr-sec-id"></i>
               </div>
-              <div style="margin-bottom:12px"><label style="font-size:11px;color:var(--text-secondary);font-weight:600;display:block;margin-bottom:4px">Costo de reparación previa (USD)</label><input type="number" id="f-costo-reparacion" value="${p.costoReparacion||0}" style="width:100%;font-size:12px;padding:7px 10px;border:1px solid var(--border-strong);border-radius:8px"><div class="hint" style="font-size:10px;color:var(--text-secondary);margin-top:3px">Si el equipo se reparó antes de ponerlo a la venta</div></div>
+              <div id="sec-id" style="padding:14px">
+
+                <div style="margin-bottom:12px"><label style="font-size:11px;color:var(--text-secondary);font-weight:600;display:block;margin-bottom:6px">Categoría *</label>
+                  <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:6px" id="cat-grid">
+                    ${Object.entries(this.CAT_LABELS).map(([k,v]) => `
+                      <div onclick="Stock.selectCat('${k}')" data-cat="${k}" class="cat-opt" style="border:1.5px solid ${p.cat===k?'var(--blue)':'var(--border)'};background:${p.cat===k?'var(--blue-light)':'var(--bg)'};border-radius:8px;padding:8px 4px;text-align:center;cursor:pointer">
+                        <i class="ti ${this.CAT_ICONS[k]}" style="font-size:18px;color:${p.cat===k?'var(--blue)':'var(--text-secondary)'};display:block;margin-bottom:3px"></i>
+                        <span style="font-size:9.5px;color:${p.cat===k?'var(--blue)':'var(--text-secondary)'};font-weight:${p.cat===k?'600':'400'}">${v}</span>
+                      </div>`).join('')}
+                  </div>
+                </div>
+
+                <input type="hidden" id="f-cat" value="${p.cat}">
+
+                <div style="margin-bottom:12px;background:var(--bg-secondary);border-radius:8px;padding:12px">
+                  <label style="font-size:11px;color:var(--text-secondary);font-weight:600;display:block;margin-bottom:4px">Cantidad de Unidades *</label>
+                  <div style="display:flex;align-items:center;gap:8px">
+                    <button type="button" onclick="Stock.bumpQty(-1)" style="width:32px;height:32px;border:1px solid var(--border-strong);border-radius:8px;background:var(--bg);cursor:pointer;font-size:16px">−</button>
+                    <input type="number" id="f-cantidad" value="${cantidadDeclarada}" min="0" style="width:100%;text-align:center;font-size:13px;font-weight:600;padding:7px 10px;border:1px solid var(--border-strong);border-radius:8px">
+                    <button type="button" onclick="Stock.bumpQty(1)" style="width:32px;height:32px;border:1px solid var(--border-strong);border-radius:8px;background:var(--bg);cursor:pointer;font-size:16px">+</button>
+                  </div>
+                  <div class="hint" style="font-size:10px;color:var(--text-secondary);margin-top:4px" id="cantidad-hint">Cantidad de unidades que tenés, sepas o no todavía los IMEIs de cada una.</div>
+                </div>
+
+                <div id="f-imei-wrap" style="margin-bottom:12px;display:${esIMEI?'block':'none'}">
+                  <label style="font-size:11px;color:var(--text-secondary);font-weight:600;display:block;margin-bottom:4px">IMEI <span style="font-weight:400">(opcional)</span> <span style="font-weight:400" id="imei-count">(${(p.imeis||[]).length} cargados)</span></label>
+                  <div id="imei-chips-wrap" style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:8px"></div>
+                  <div style="display:flex;gap:6px">
+                    <input type="text" id="f-imei-input" placeholder="123456789012345" style="flex:1;font-size:12px;padding:7px 10px;border:1px solid var(--border-strong);border-radius:8px;font-family:monospace" onkeydown="if(event.key==='Enter'){event.preventDefault();Stock.addImei();}">
+                    <button type="button" class="btn btn-sm" onclick="Stock.addImei()"><i class="ti ti-plus"></i> Agregar</button>
+                  </div>
+                  <div class="hint" style="font-size:10px;color:var(--text-secondary);margin-top:4px">Podés dejarlo vacío. Es independiente de la cantidad — vas completando IMEIs a medida que los identificás.</div>
+                </div>
+
+                <div id="f-serie-wrap" style="margin-bottom:12px;display:${p.cat==='mac'?'block':'none'}">
+                  <label style="font-size:11px;color:var(--text-secondary);font-weight:600;display:block;margin-bottom:4px">Número de Serie *</label>
+                  <input type="text" id="f-numero-serie" value="${p.numeroSerie||''}" placeholder="C02ABC123XYZ" style="width:100%;font-size:12px;padding:7px 10px;border:1px solid var(--border-strong);border-radius:8px;font-family:monospace">
+                </div>
+
+                <div id="f-modelo-wrap" style="display:${['iphone','android','mac','ipad','watch','audio'].includes(p.cat)?'block':'none'};margin-bottom:12px">
+                  <label style="font-size:11px;color:var(--text-secondary);font-weight:600;display:block;margin-bottom:4px">Modelo *</label>
+                  <select id="f-modelo" onchange="Stock.toggleModeloOtro()" style="width:100%;font-size:12px;padding:7px 10px;border:1px solid var(--border-strong);border-radius:8px">
+                    <option value="">Seleccionar modelo</option>
+                    ${(this.MODELOS_POR_CAT[p.cat]||[]).map(m => `<option ${p.modelo===m?'selected':''}>${m}</option>`).join('')}
+                    <option value="__otro__" ${p.modelo && !(this.MODELOS_POR_CAT[p.cat]||[]).includes(p.modelo) ? 'selected':''}>Otro (escribir)</option>
+                  </select>
+                  <input type="text" id="f-modelo-otro" value="${p.modelo && !(this.MODELOS_POR_CAT[p.cat]||[]).includes(p.modelo) ? p.modelo : ''}" placeholder="Escribí el modelo" style="width:100%;font-size:12px;padding:7px 10px;border:1px solid var(--border-strong);border-radius:8px;margin-top:6px;display:${p.modelo && !(this.MODELOS_POR_CAT[p.cat]||[]).includes(p.modelo) ? 'block':'none'}">
+                </div>
+
+                <div id="f-nombre-libre-wrap" style="display:${['perfumeria','accesorio','repuesto','otro'].includes(p.cat)?'block':'none'};margin-bottom:12px">
+                  <label style="font-size:11px;color:var(--text-secondary);font-weight:600;display:block;margin-bottom:4px">Nombre del producto *</label>
+                  <input type="text" id="f-nombre-libre" value="${['perfumeria','accesorio','repuesto','otro'].includes(p.cat) ? (p.nombre||'') : ''}" placeholder="ej: Dior Sauvage 100ml" style="width:100%;font-size:12px;padding:7px 10px;border:1px solid var(--border-strong);border-radius:8px">
+                </div>
+
+                <div id="f-specs-grid" style="display:${['iphone','android','mac','ipad'].includes(p.cat)?'grid':'none'};grid-template-columns:1fr 1fr;gap:10px;margin-bottom:12px">
+                  <div><label style="font-size:11px;color:var(--text-secondary);font-weight:600;display:block;margin-bottom:4px">Storage</label>
+                    <select id="f-storage" style="width:100%;font-size:12px;padding:7px 10px;border:1px solid var(--border-strong);border-radius:8px">
+                      <option value="">Seleccionar</option>
+                      ${this.STORAGE_OPCIONES.map(s=>`<option ${p.storage===s?'selected':''}>${s}</option>`).join('')}
+                    </select>
+                  </div>
+                  <div><label style="font-size:11px;color:var(--text-secondary);font-weight:600;display:block;margin-bottom:4px">Color</label>
+                    <select id="f-color" style="width:100%;font-size:12px;padding:7px 10px;border:1px solid var(--border-strong);border-radius:8px">
+                      <option value="">Seleccionar</option>
+                      ${this.COLOR_OPCIONES.map(c=>`<option ${p.color===c?'selected':''}>${c}</option>`).join('')}
+                    </select>
+                  </div>
+                </div>
+
+                <div id="f-bateria-wrap" style="display:${['iphone','android','ipad'].includes(p.cat)?'grid':'none'};grid-template-columns:1fr 1fr;gap:10px;margin-bottom:12px">
+                  <div><label style="font-size:11px;color:var(--text-secondary);font-weight:600;display:block;margin-bottom:4px">Batería %</label>
+                    <input type="number" id="f-bateria" value="${p.bateriaPct??''}" placeholder="85" min="0" max="100" style="width:100%;font-size:12px;padding:7px 10px;border:1px solid var(--border-strong);border-radius:8px">
+                  </div>
+                  <div><label style="font-size:11px;color:var(--text-secondary);font-weight:600;display:block;margin-bottom:4px">Estado del Producto</label>
+                    <select id="f-estado" style="width:100%;font-size:12px;padding:7px 10px;border:1px solid var(--border-strong);border-radius:8px">
+                      <option value="">Seleccionar</option>
+                      ${this.ESTADO_OPCIONES.map(e=>`<option ${p.estadoProducto===e?'selected':''}>${e}</option>`).join('')}
+                    </select>
+                  </div>
+                </div>
+
+                <div id="f-mac-extra-wrap" style="display:${p.cat==='mac'?'block':'none'};margin-bottom:12px">
+                  <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+                    <div><label style="font-size:11px;color:var(--text-secondary);font-weight:600;display:block;margin-bottom:4px">Ciclos de Batería</label>
+                      <input type="number" id="f-ciclos" value="${p.ciclosBateria??''}" placeholder="250" style="width:100%;font-size:12px;padding:7px 10px;border:1px solid var(--border-strong);border-radius:8px">
+                    </div>
+                    <div><label style="font-size:11px;color:var(--text-secondary);font-weight:600;display:block;margin-bottom:4px">RAM</label>
+                      <select id="f-ram" style="width:100%;font-size:12px;padding:7px 10px;border:1px solid var(--border-strong);border-radius:8px">
+                        <option value="">Seleccionar</option>
+                        ${this.RAM_OPCIONES.map(r=>`<option ${p.ram===r?'selected':''}>${r}</option>`).join('')}
+                      </select>
+                    </div>
+                  </div>
+                  <label style="font-size:11px;color:var(--text-secondary);font-weight:600;display:block;margin:10px 0 4px">Estado del Producto</label>
+                  <select id="f-estado-mac" style="width:100%;font-size:12px;padding:7px 10px;border:1px solid var(--border-strong);border-radius:8px">
+                    <option value="">Seleccionar</option>
+                    ${this.ESTADO_OPCIONES.map(e=>`<option ${p.estadoProducto===e?'selected':''}>${e}</option>`).join('')}
+                  </select>
+                </div>
+
+                <div id="f-caracteristicas-wrap" style="display:${esIMEI?'block':'none'};background:var(--bg-secondary);border-radius:8px;padding:12px">
+                  <div style="font-size:10px;color:var(--text-secondary);font-weight:600;text-transform:uppercase;letter-spacing:.4px;margin-bottom:8px">Características</div>
+                  <div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap">
+                    <div style="display:flex;align-items:center;gap:6px">
+                      <label style="font-size:11px;color:var(--text-secondary);font-weight:600">Grado</label>
+                      <select id="f-grado" style="font-size:12px;padding:5px 8px;border:1px solid var(--border-strong);border-radius:8px">
+                        ${this.GRADO_OPCIONES.map(g=>`<option ${p.grado===g?'selected':''}>${g}</option>`).join('')}
+                      </select>
+                    </div>
+                    <label style="display:flex;align-items:center;gap:5px;font-size:12px;cursor:pointer"><input type="checkbox" id="f-esim" ${p.esim?'checked':''} style="width:14px;height:14px"> eSIM</label>
+                    <label style="display:flex;align-items:center;gap:5px;font-size:12px;cursor:pointer"><input type="checkbox" id="f-caja" ${p.tieneCaja?'checked':''} style="width:14px;height:14px"> Tiene Caja</label>
+                  </div>
+                </div>
+
+              </div>
             </div>
 
+            <!-- SECCIÓN: PRECIOS -->
+            <div style="border:1px solid var(--border);border-radius:10px;margin-bottom:12px;overflow:hidden">
+              <div onclick="Stock.toggleSection('sec-precios')" style="background:var(--bg-secondary);padding:10px 14px;display:flex;justify-content:space-between;align-items:center;cursor:pointer">
+                <span style="font-size:12.5px;font-weight:600;display:flex;align-items:center;gap:7px"><i class="ti ti-currency-dollar"></i> Precios</span>
+                <i class="ti ti-chevron-up" id="arr-sec-precios"></i>
+              </div>
+              <div id="sec-precios" style="padding:14px">
+
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:12px">
+                  <div><label style="font-size:11px;color:var(--text-secondary);font-weight:600;display:block;margin-bottom:4px">Precio de Compra (USD) *</label>
+                    <input type="number" id="f-costo" value="${p.costoUSD||''}" placeholder="800" style="width:100%;font-size:12px;padding:7px 10px;border:1px solid var(--border-strong);border-radius:8px">
+                  </div>
+                  <div><label style="font-size:11px;color:var(--text-secondary);font-weight:600;display:block;margin-bottom:4px">Cotización usada</label>
+                    <input type="number" id="f-cotiz" value="${p.cotiz||State.refBlue}" oninput="Stock.updatePricePreview()" style="width:100%;font-size:12px;padding:7px 10px;border:1px solid var(--border-strong);border-radius:8px">
+                  </div>
+                </div>
+
+                <div style="margin-bottom:12px"><label style="font-size:11px;color:var(--text-secondary);font-weight:600;display:block;margin-bottom:4px">Precio de Venta Sugerido (USD) *</label>
+                  <input type="number" id="f-precio-usd" value="${p.precioARS && p.cotiz ? (p.precioARS / p.cotiz).toFixed(2) : ''}" placeholder="1000" oninput="Stock.updatePricePreview()" style="width:100%;font-size:12px;padding:7px 10px;border:1px solid var(--border-strong);border-radius:8px">
+                  <div class="hint" style="font-size:10px;color:var(--text-secondary);margin-top:3px" id="precio-ars-preview">${p.precioARS ? '≈ ' + State.fmtARS(p.precioARS) + ' a la cotización indicada — se precarga al crear una venta' : 'Se precargará al crear una venta'}</div>
+                </div>
+
+                <button type="button" onclick="Stock.toggleAdvancedPrices()" style="background:none;border:none;color:var(--blue);font-size:11.5px;cursor:pointer;display:flex;align-items:center;gap:4px;padding:0;margin-bottom:10px"><i class="ti ti-chevron-down" id="adv-prices-arrow"></i> Mostrar precios avanzados</button>
+                <div id="adv-prices-wrap" style="display:none">
+                  <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:12px">
+                    <div><label style="font-size:11px;color:var(--text-secondary);font-weight:600;display:block;margin-bottom:4px">Precio Reventa (USD)</label><input type="number" id="f-precio-reventa" value="${p.precioReventa||''}" placeholder="opcional" style="width:100%;font-size:12px;padding:7px 10px;border:1px solid var(--border-strong);border-radius:8px"><div class="hint" style="font-size:10px;color:var(--text-secondary);margin-top:3px">Catálogo de revendedores</div></div>
+                    <div><label style="font-size:11px;color:var(--text-secondary);font-weight:600;display:block;margin-bottom:4px">Precio Mayorista (USD)</label><input type="number" id="f-precio-mayorista" value="${p.precioMayorista||''}" placeholder="opcional" style="width:100%;font-size:12px;padding:7px 10px;border:1px solid var(--border-strong);border-radius:8px"><div class="hint" style="font-size:10px;color:var(--text-secondary);margin-top:3px">Venta por volumen</div></div>
+                  </div>
+                  <div><label style="font-size:11px;color:var(--text-secondary);font-weight:600;display:block;margin-bottom:4px">Costo de Reparación previa (USD)</label><input type="number" id="f-costo-reparacion" value="${p.costoReparacion||0}" style="width:100%;font-size:12px;padding:7px 10px;border:1px solid var(--border-strong);border-radius:8px"><div class="hint" style="font-size:10px;color:var(--text-secondary);margin-top:3px">Si el equipo se reparó antes de ponerlo a la venta</div></div>
+                </div>
+
+              </div>
+            </div>
+
+            <!-- LOGÍSTICA Y NOTAS -->
             <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:12px">
               <div><label style="font-size:11px;color:var(--text-secondary);font-weight:600;display:block;margin-bottom:4px">Proveedor</label>
                 <select id="f-prov" style="width:100%;font-size:12px;padding:7px 10px;border:1px solid var(--border-strong);border-radius:8px">
@@ -1363,26 +1528,6 @@ const Stock = {
                   ${State.personas.map(x=>`<option ${p.custodio===x?'selected':''}>${x}</option>`).join('')}
                 </select>
               </div>
-            </div>
-
-            <div style="margin-bottom:12px;background:var(--bg-secondary);border-radius:8px;padding:12px">
-              <label style="font-size:11px;color:var(--text-secondary);font-weight:600;display:block;margin-bottom:4px">Cantidad de unidades</label>
-              <div style="display:flex;align-items:center;gap:8px">
-                <button type="button" onclick="Stock.bumpQty(-1)" style="width:32px;height:32px;border:1px solid var(--border-strong);border-radius:8px;background:var(--bg);cursor:pointer;font-size:16px">−</button>
-                <input type="number" id="f-cantidad" value="${cantidadDeclarada}" min="0" style="width:100%;text-align:center;font-size:13px;font-weight:600;padding:7px 10px;border:1px solid var(--border-strong);border-radius:8px">
-                <button type="button" onclick="Stock.bumpQty(1)" style="width:32px;height:32px;border:1px solid var(--border-strong);border-radius:8px;background:var(--bg);cursor:pointer;font-size:16px">+</button>
-              </div>
-              <div class="hint" style="font-size:10.5px;color:var(--text-secondary);margin-top:4px" id="cantidad-hint">Cantidad de unidades que tenés, sepas o no todavía los IMEIs de cada una.</div>
-            </div>
-
-            <div id="f-imei-wrap" style="margin-bottom:12px;display:${esIMEI?'block':'none'}">
-              <label style="font-size:11px;color:var(--text-secondary);font-weight:600;display:block;margin-bottom:4px">IMEIs identificados <span style="font-weight:400" id="imei-count">(${(p.imeis||[]).length})</span></label>
-              <div id="imei-chips-wrap" style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:8px"></div>
-              <div style="display:flex;gap:6px">
-                <input type="text" id="f-imei-input" placeholder="Ingresá un IMEI y tocá Agregar" style="flex:1;font-size:12px;padding:7px 10px;border:1px solid var(--border-strong);border-radius:8px" onkeydown="if(event.key==='Enter'){event.preventDefault();Stock.addImei();}">
-                <button type="button" class="btn btn-sm" onclick="Stock.addImei()"><i class="ti ti-plus"></i> Agregar</button>
-              </div>
-              <div class="hint" style="font-size:10.5px;color:var(--text-secondary);margin-top:4px">Es independiente de la cantidad. Podés tener 5 unidades cargadas y solo 2 IMEIs identificados — está bien, vas completando a medida que los tenés.</div>
             </div>
 
             <div style="margin-bottom:12px"><label style="font-size:11px;color:var(--text-secondary);font-weight:600;display:block;margin-bottom:4px">Notas</label>
@@ -1406,10 +1551,48 @@ const Stock = {
       </div>
     `;
     this.pendingImeis = [...(p.imeis || [])];
+    this._destacado = !!p.destacado;
     this.renderImeiChips();
-    this.toggleFields();
     setTimeout(() => this.updatePricePreview(), 0);
     if (mode === 'edit') this.renderHistorialProducto(id);
+  },
+
+  toggleModeloOtro() {
+    const sel = document.getElementById('f-modelo');
+    const otroInput = document.getElementById('f-modelo-otro');
+    if (!sel || !otroInput) return;
+    otroInput.style.display = sel.value === '__otro__' ? 'block' : 'none';
+  },
+
+  selectCat(cat) {
+    document.getElementById('f-cat').value = cat;
+    document.querySelectorAll('.cat-opt').forEach(el => {
+      const isSel = el.dataset.cat === cat;
+      el.style.border = `1.5px solid ${isSel ? 'var(--blue)' : 'var(--border)'}`;
+      el.style.background = isSel ? 'var(--blue-light)' : 'var(--bg)';
+      const icon = el.querySelector('i'), label = el.querySelector('span');
+      icon.style.color = isSel ? 'var(--blue)' : 'var(--text-secondary)';
+      label.style.color = isSel ? 'var(--blue)' : 'var(--text-secondary)';
+      label.style.fontWeight = isSel ? '600' : '400';
+    });
+    document.getElementById('drawer-icon').className = `ti ${this.CAT_ICONS[cat]||'ti-box'}`;
+    this.toggleFields();
+  },
+
+  toggleSection(id) {
+    const body = document.getElementById(id);
+    const arrow = document.getElementById('arr-' + id);
+    const open = body.style.display !== 'none';
+    body.style.display = open ? 'none' : 'block';
+    arrow.className = open ? 'ti ti-chevron-down' : 'ti ti-chevron-up';
+  },
+
+  toggleDestacado() {
+    this._destacado = !this._destacado;
+    const icon = document.getElementById('destacado-icon');
+    const btn = document.getElementById('destacado-btn');
+    icon.className = `ti ti-star${this._destacado ? '-filled' : ''}`;
+    btn.style.color = this._destacado ? '#854F0B' : 'var(--text-secondary)';
   },
 
   toggleAdvancedPrices() {
@@ -1429,8 +1612,8 @@ const Stock = {
         ${imei}
         <button type="button" onclick="Stock.removeImei(${i})" style="background:none;border:none;cursor:pointer;color:var(--red);font-size:13px;line-height:1;padding:0">×</button>
       </span>
-    `).join('') || `<span style="font-size:11px;color:var(--text-secondary)">Sin IMEIs identificados todavía</span>`;
-    if (countEl) countEl.textContent = `(${this.pendingImeis.length})`;
+    `).join('') || `<span style="font-size:11px;color:var(--text-secondary)">Sin IMEIs cargados todavía</span>`;
+    if (countEl) countEl.textContent = `(${this.pendingImeis.length} cargados)`;
   },
 
   addImei() {
@@ -1461,34 +1644,84 @@ const Stock = {
     const precioUSD = parseFloat(document.getElementById('f-precio-usd')?.value) || 0;
     const el = document.getElementById('precio-ars-preview');
     if (!el) return;
-    el.textContent = (cotiz && precioUSD) ? `≈ ${State.fmtARS(precioUSD * cotiz)} a la cotización indicada` : '';
+    el.textContent = (cotiz && precioUSD) ? `≈ ${State.fmtARS(precioUSD * cotiz)} a la cotización indicada — se precarga al crear una venta` : 'Se precargará al crear una venta';
   },
 
   toggleFields() {
-    const catEl = document.getElementById('f-cat');
-    const imeiWrap = document.getElementById('f-imei-wrap');
-    const cantidadHint = document.getElementById('cantidad-hint');
-    if (!catEl) return;
-    const esIMEI = this.CATS_IMEI.includes(catEl.value);
-    if (imeiWrap) imeiWrap.style.display = esIMEI ? 'block' : 'none';
-    if (cantidadHint) {
-      cantidadHint.textContent = esIMEI
-        ? 'Cantidad de unidades que tenés, sepas o no todavía los IMEIs de cada una.'
-        : 'Cantidad de unidades en stock.';
+    const cat = document.getElementById('f-cat')?.value;
+    if (!cat) return;
+    const esIMEI = this.CATS_IMEI.includes(cat);
+    const tieneModeloFijo = ['iphone','android','mac','ipad','watch','audio'].includes(cat);
+    const esLibre = ['perfumeria','accesorio','repuesto','otro'].includes(cat);
+    const tieneStorageColor = ['iphone','android','mac','ipad'].includes(cat);
+    const tieneBateria = ['iphone','android','ipad'].includes(cat);
+    const esMac = cat === 'mac';
+
+    const set = (id, display) => { const el = document.getElementById(id); if (el) el.style.display = display; };
+    set('f-imei-wrap', esIMEI ? 'block' : 'none');
+    set('f-serie-wrap', esMac ? 'block' : 'none');
+    set('f-modelo-wrap', tieneModeloFijo ? 'block' : 'none');
+    set('f-nombre-libre-wrap', esLibre ? 'block' : 'none');
+    set('f-specs-grid', tieneStorageColor ? 'grid' : 'none');
+    set('f-bateria-wrap', tieneBateria ? 'grid' : 'none');
+    set('f-mac-extra-wrap', esMac ? 'block' : 'none');
+    set('f-caracteristicas-wrap', esIMEI ? 'block' : 'none');
+
+    // Refrescar lista de modelos si cambió la categoría
+    const modeloSelect = document.getElementById('f-modelo');
+    if (modeloSelect && tieneModeloFijo) {
+      const actual = modeloSelect.value;
+      modeloSelect.innerHTML = `<option value="">Seleccionar modelo</option>` +
+        (this.MODELOS_POR_CAT[cat]||[]).map(m=>`<option ${actual===m?'selected':''}>${m}</option>`).join('') +
+        `<option value="__otro__">Otro (escribir)</option>`;
     }
+
+    const cantidadHint = document.getElementById('cantidad-hint');
+    if (cantidadHint) cantidadHint.textContent = esIMEI
+      ? 'Cantidad de unidades que tenés, sepas o no todavía los IMEIs de cada una.'
+      : 'Cantidad de unidades en stock.';
   },
 
   async save(id) {
-    const nombre = document.getElementById('f-nombre').value.trim();
+    const cat = document.getElementById('f-cat').value;
+    const esIMEI = this.CATS_IMEI.includes(cat);
+    const tieneModeloFijo = ['iphone','android','mac','ipad','watch','audio'].includes(cat);
+    const esLibre = ['perfumeria','accesorio','repuesto','otro'].includes(cat);
+
+    // Resolver el modelo (de la lista o "otro" escrito a mano)
+    let modelo = '';
+    if (tieneModeloFijo) {
+      const modeloSel = document.getElementById('f-modelo')?.value || '';
+      modelo = modeloSel === '__otro__' ? (document.getElementById('f-modelo-otro')?.value.trim() || '') : modeloSel;
+    }
+    const nombreLibre = esLibre ? (document.getElementById('f-nombre-libre')?.value.trim() || '') : '';
+    const storage = document.getElementById('f-storage')?.value || '';
+    const color = document.getElementById('f-color')?.value || '';
+
+    if (tieneModeloFijo && !modelo) { toast('Seleccioná o escribí el modelo del producto.'); return; }
+    if (esLibre && !nombreLibre) { toast('Completá el nombre del producto.'); return; }
+    if (cat === 'mac' && !document.getElementById('f-numero-serie')?.value.trim()) { toast('Completá el número de serie.'); return; }
+
+    // Armamos el nombre final que se muestra en toda la app
+    const nombre = esLibre ? nombreLibre : [modelo, storage, color].filter(Boolean).join(' ');
+
     const costoUSD = parseFloat(document.getElementById('f-costo').value) || 0;
     const cotiz = parseFloat(document.getElementById('f-cotiz').value) || State.refBlue;
     const precioUSD = parseFloat(document.getElementById('f-precio-usd').value) || 0;
-    if (!nombre || !costoUSD || !precioUSD) { toast('Completá nombre, costo y precio de venta en USD.'); return; }
-    const cat = document.getElementById('f-cat').value;
+    if (!nombre || !costoUSD || !precioUSD) { toast('Completá los campos obligatorios: producto, costo y precio de venta.'); return; }
+
     const cantidadNueva = parseInt(document.getElementById('f-cantidad').value, 10) || 0;
     const precioReventa = parseFloat(document.getElementById('f-precio-reventa')?.value) || null;
     const precioMayorista = parseFloat(document.getElementById('f-precio-mayorista')?.value) || null;
     const costoReparacion = parseFloat(document.getElementById('f-costo-reparacion')?.value) || 0;
+    const bateriaPct = document.getElementById('f-bateria')?.value ? parseInt(document.getElementById('f-bateria').value, 10) : null;
+    const ciclosBateria = document.getElementById('f-ciclos')?.value ? parseInt(document.getElementById('f-ciclos').value, 10) : null;
+    const ram = document.getElementById('f-ram')?.value || '';
+    const estadoProducto = document.getElementById('f-estado')?.value || document.getElementById('f-estado-mac')?.value || '';
+    const grado = document.getElementById('f-grado')?.value || 'Sin grado';
+    const esim = document.getElementById('f-esim')?.checked || false;
+    const tieneCaja = document.getElementById('f-caja')?.checked || false;
+    const numeroSerie = document.getElementById('f-numero-serie')?.value.trim() || '';
 
     const existing = id ? State.stock.find(x => x.id === id) : null;
     const cantidadAntes = existing ? this.stockReal(existing) : 0;
@@ -1501,8 +1734,10 @@ const Stock = {
       notas: document.getElementById('f-notas').value,
       precioReventa, precioMayorista, costoReparacion,
       cantidad: cantidadNueva, cantidadDeclarada: cantidadNueva,
+      modelo, storage, color, bateriaPct, ciclosBateria, ram, estadoProducto, grado,
+      esim, tieneCaja, numeroSerie, destacado: !!this._destacado
     };
-    if (this.CATS_IMEI.includes(cat)) {
+    if (esIMEI) {
       obj.imeis = [...this.pendingImeis];
     }
 

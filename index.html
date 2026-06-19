@@ -580,6 +580,63 @@ const Auth = {
   }
 };
 
+// ============================================================
+// SINCRONIZACIÓN CON GOOGLE SHEETS — respaldo en tiempo real
+// ============================================================
+const SHEETS_URL = 'https://script.google.com/macros/s/AKfycbwT3jI6Jf81EAmRCgA9uRmDfyvYS6kVst9QaqcB6tdaVKCeqwlAnbnk-TBoeWGMLokG/exec';
+
+const Sheets = {
+  // Envía una fila a la pestaña indicada. No bloquea ni interrumpe la app
+  // si falla — el respaldo es "best effort", la fuente de verdad sigue siendo Supabase.
+  async enviar(pestana, fila) {
+    try {
+      await fetch(SHEETS_URL, {
+        method: 'POST',
+        // 'no-cors' evita que el navegador bloquee la respuesta por CORS;
+        // no podemos leer la respuesta, pero el envío sí llega al script.
+        mode: 'no-cors',
+        headers: { 'Content-Type': 'text/plain' },
+        body: JSON.stringify({ pestana, fila })
+      });
+    } catch (err) {
+      console.warn('No se pudo sincronizar con Google Sheets (no afecta el guardado real):', err);
+    }
+  },
+
+  venta(v, totalUSD, costoUSD) {
+    this.enviar('Ventas', [
+      v.fecha || 'Hoy', v.id, v.cliente, v.vendedor || '',
+      (v.items && v.items[0] ? v.items[0].nombre : ''), totalUSD, costoUSD, v.estado
+    ]);
+  },
+  stock(p) {
+    this.enviar('Stock', [
+      'Hoy', p.nombre, p.cat, p.proveedor || '', p.custodio || '',
+      p.costoUSD, p.cotiz ? (p.precioARS / p.cotiz).toFixed(2) : '',
+      p.imeis ? p.imeis.length : (p.cantidad || 0), p.notas || ''
+    ]);
+  },
+  reparacion(o) {
+    this.enviar('Reparaciones', [
+      o.fechaIngreso || 'Hoy', o.id, o.cliente, o.equipo, o.falla || '',
+      o.estado, o.tecnico || '', o.costoMO, o.precioFinal
+    ]);
+  },
+  gasto(g, categoriaNombre) {
+    this.enviar('Gastos', [
+      g.fecha || 'Hoy', g.motivo, categoriaNombre || '', g.responsable, g.caja, g.moneda, g.monto, g.estado
+    ]);
+  },
+  cambio(c) {
+    this.enviar('Cueva', [
+      'Hoy', c.tipo, c.entrega, c.recibe, c.cotiz, c.origenP, c.origenB, c.destinoP, c.destinoB
+    ]);
+  },
+  caja(persona, bolsillo, nuevoSaldo) {
+    this.enviar('Cajas', ['Hoy', persona, bolsillo, nuevoSaldo]);
+  }
+};
+
 </script>
 <script>
 // ============================================================
@@ -1223,6 +1280,7 @@ const Stock = {
       State.stock.push(obj);
       toast('Producto agregado al stock.');
     }
+    Sheets.stock(obj);
     this.closeDrawer();
     this.renderTabs();
     this.renderTable();
@@ -1548,6 +1606,10 @@ const Ventas = {
     };
     State.ventas.unshift(venta);
 
+    // Respaldo en Google Sheets (no bloquea, falla en silencio si hay un problema)
+    const costoTotal = d.items.reduce((s, i) => s + (i.costo || 0), 0);
+    Sheets.venta(venta, total, costoTotal);
+
     this.closeModal();
     this.renderList();
     toast(`Venta #${venta.id} confirmada y guardada. Stock actualizado y pagos acreditados en las cajas correspondientes.`);
@@ -1767,6 +1829,7 @@ const Reparaciones = {
       toast('Equipo marcado como devuelto al cliente automáticamente (sin movimientos que revertir).');
     }
     await DB.actualizarReparacion(o);
+    Sheets.reparacion(o);
     this.renderList(); this.renderDetail();
   },
 
@@ -1834,6 +1897,7 @@ const Reparaciones = {
     o.costoMO = parseFloat(document.getElementById('rep-f-mo').value) || 0;
     o.precioFinal = parseFloat(document.getElementById('rep-f-precio').value) || 0;
     await DB.actualizarReparacion(o);
+    Sheets.reparacion(o);
     this.renderDetail();
     toast('Cambios guardados.');
   },
@@ -1842,6 +1906,7 @@ const Reparaciones = {
     const id = 'R0' + (20 + State.reparaciones.length);
     const o = { id, cliente: 'Nuevo cliente', tel: '', equipo: 'Sin especificar', falla: '', clave: '', estado: 'ingresado', fechaIngreso: 'Hoy', diagnostico: '', presupuestoAprobado: false, repuestos: [], pagos: [], costoMO: 0, precioFinal: 0, tecnico: 'Técnico ext.', custodio: '', notas: '', equipoDevuelto: false };
     await DB.crearReparacion(o);
+    Sheets.reparacion(o);
     State.reparaciones.unshift(o);
     this.currentId = id;
     this.renderList(); this.renderDetail();
@@ -1966,6 +2031,7 @@ const Gastos = {
       moneda, monto, estado: 'pagado'
     });
     State.debitarCaja(persona, bolsillo, monto);
+    Sheets.gasto({ fecha: 'Hoy', motivo, responsable, caja: `${persona}-${bolsillo}`, moneda, monto, estado: 'pagado' }, this.catObj(cat).nombre);
     this.close(); this.renderChips(); this.renderKpis(); this.renderTable();
     toast('Gasto registrado y debitado de la caja correspondiente.');
   },
@@ -2159,6 +2225,7 @@ const Cueva = {
 
     const nuevoOp = { tipo: this.opType, entrega, recibe, cotiz, origenP, origenB, destinoP, destinoB };
     await DB.crearCambio(nuevoOp);
+    Sheets.cambio(nuevoOp);
 
     State.cambios.unshift({ id: Date.now(), fecha: 'Hoy', ...nuevoOp });
     this.close();
@@ -2217,6 +2284,7 @@ const Cajas = {
     if (isNaN(nuevo)) { alert('Ingresá un número válido.'); return; }
     State.cajas[persona][bolsillo] = nuevo;
     await DB.actualizarSaldoCaja(persona, bolsillo, nuevo);
+    Sheets.caja(persona, bolsillo, nuevo);
     App.goTo('cajas');
     toast(`Saldo de ${persona} — ${bolsillo} ajustado a ${nuevo.toLocaleString('es-AR')}.`);
   }
@@ -2401,6 +2469,7 @@ const Panel = {
     if (isNaN(nuevo)) { alert('Ingresá un número válido.'); return; }
     State.cajas[persona][bolsillo] = nuevo;
     await DB.actualizarSaldoCaja(persona, bolsillo, nuevo);
+    Sheets.caja(persona, bolsillo, nuevo);
     this.renderBody();
     toast(`Saldo de ${persona} — ${bolsillo} ajustado a ${nuevo.toLocaleString('es-AR')}.`);
   },

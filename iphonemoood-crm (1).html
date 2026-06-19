@@ -1,0 +1,1992 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>iPhoneMood — CRM</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/tabler-icons/2.47.0/tabler-icons.min.css">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+<style>
+:root{
+  --blue:#185FA5; --blue-light:#E6F1FB; --blue-dark:#0C447C;
+  --green:#3B6D11; --green-light:#EAF3DE; --green-dark:#27500A;
+  --amber:#854F0B; --amber-light:#FAEEDA; --amber-dark:#633806;
+  --red:#791F1F; --red-light:#FCEBEB;
+  --purple:#3C3489; --purple-light:#EEEDFE;
+  --teal:#085041; --teal-light:#E1F5EE;
+  --gray:#444441; --gray-light:#F1EFE8;
+  --border:#E5E2D9; --border-strong:#C9C5B8;
+  --bg:#FFFFFF; --bg-secondary:#F7F6F2; --bg-tertiary:#EFEDE6;
+  --text:#1A1A18; --text-secondary:#6B6862;
+  --radius-md:8px; --radius-lg:12px;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;font-size:13px;color:var(--text);background:var(--bg-secondary);overflow:hidden}
+.app-shell{display:flex;height:100vh;width:100vw}
+
+/* SIDEBAR */
+.sidebar{width:216px;min-width:216px;background:var(--bg);border-right:1px solid var(--border);display:flex;flex-direction:column;overflow:hidden}
+.sb-head{padding:16px 16px 12px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:10px}
+.sb-logo{width:32px;height:32px;border-radius:8px;background:var(--blue);color:#fff;display:flex;align-items:center;justify-content:center;font-weight:600;font-size:14px;flex-shrink:0}
+.sb-head .name{font-size:14px;font-weight:600}
+.sb-head .loc{font-size:11px;color:var(--text-secondary)}
+.sb-nav{flex:1;overflow-y:auto;padding:8px 0}
+.nav-group{margin-bottom:4px}
+.nav-label{font-size:10px;font-weight:600;color:var(--text-secondary);text-transform:uppercase;letter-spacing:.6px;padding:10px 16px 4px}
+.nav-item{display:flex;align-items:center;gap:10px;padding:8px 16px;cursor:pointer;font-size:12.5px;color:var(--text-secondary);border-left:2px solid transparent;transition:all .12s;user-select:none}
+.nav-item:hover{background:var(--bg-secondary);color:var(--text)}
+.nav-item.active{color:var(--blue);border-left-color:var(--blue);background:var(--blue-light);font-weight:600}
+.nav-item i{font-size:16px;width:18px;text-align:center}
+.nav-item .nav-badge{margin-left:auto;font-size:10px;background:var(--red-light);color:var(--red);padding:1px 6px;border-radius:10px;font-weight:600}
+.sb-foot{padding:12px;border-top:1px solid var(--border)}
+.quick-btn{width:100%;justify-content:center;background:var(--blue);color:#fff;border:none;border-radius:var(--radius-md);padding:9px;font-size:12px;font-weight:600;cursor:pointer;display:flex;align-items:center;gap:6px}
+.quick-btn:hover{background:var(--blue-dark)}
+
+/* MAIN */
+.main{flex:1;display:flex;flex-direction:column;overflow:hidden;min-width:0}
+.topbar{padding:12px 22px;border-bottom:1px solid var(--border);background:var(--bg);display:flex;align-items:center;justify-content:space-between;gap:12px;flex-shrink:0;flex-wrap:wrap}
+.topbar h1{font-size:16px;font-weight:600}
+.topbar-right{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.pill{font-size:11px;font-weight:600;padding:4px 10px;border-radius:20px;white-space:nowrap;display:flex;align-items:center;gap:4px}
+.pill-blue{background:var(--blue-light);color:var(--blue-dark)}
+.pill-green{background:var(--green-light);color:var(--green-dark)}
+.pill-purple{background:var(--purple-light);color:var(--purple)}
+
+.btn{font-size:11.5px;padding:6px 13px;border:1px solid var(--border-strong);border-radius:var(--radius-md);background:transparent;cursor:pointer;color:var(--text);display:inline-flex;align-items:center;gap:5px;font-weight:500;transition:background .12s}
+.btn:hover{background:var(--bg-secondary)}
+.btn-primary{background:var(--blue);color:#fff;border-color:var(--blue)}
+.btn-primary:hover{background:var(--blue-dark)}
+.btn-green{background:var(--green);color:#fff;border-color:var(--green)}
+.btn-red{background:var(--red-light);color:var(--red);border-color:#F09595}
+.btn-red:hover{background:#F7C1C1}
+.btn-sm{font-size:10.5px;padding:4px 9px}
+
+.page{display:none;flex:1;overflow-y:auto}
+.page.active{display:flex;flex-direction:column}
+
+/* shared bits */
+.kpi-row{display:grid;gap:10px;padding:14px 22px;border-bottom:1px solid var(--border);flex-shrink:0;background:var(--bg)}
+.kpi{background:var(--bg-secondary);border-radius:var(--radius-md);padding:10px 14px}
+.kpi label{font-size:10.5px;color:var(--text-secondary);display:block;margin-bottom:3px;font-weight:500}
+.kpi .val{font-size:19px;font-weight:600}
+.kpi .sub{font-size:10.5px;color:var(--text-secondary);margin-top:1px}
+
+.card{background:var(--bg);border:1px solid var(--border);border-radius:var(--radius-lg);padding:16px 18px;margin-bottom:14px}
+.card-title{font-size:12px;font-weight:600;color:var(--text-secondary);text-transform:uppercase;letter-spacing:.4px;margin-bottom:12px;display:flex;align-items:center;gap:6px}
+.card-title i{color:var(--blue);font-size:15px}
+
+.body-pad{padding:18px 22px;flex:1;overflow-y:auto}
+
+table{width:100%;border-collapse:collapse;font-size:12.5px}
+th{text-align:left;padding:9px 12px;color:var(--text-secondary);font-weight:600;font-size:11px;border-bottom:1px solid var(--border);background:var(--bg-secondary);position:sticky;top:0}
+td{padding:9px 12px;border-bottom:1px solid var(--border);color:var(--text)}
+tr:last-child td{border-bottom:none}
+tbody tr:hover td{background:var(--bg-secondary)}
+
+.badge{display:inline-block;padding:3px 9px;border-radius:20px;font-size:10.5px;font-weight:600;white-space:nowrap}
+.b-blue{background:var(--blue-light);color:var(--blue-dark)}
+.b-green{background:var(--green-light);color:var(--green-dark)}
+.b-amber{background:var(--amber-light);color:var(--amber-dark)}
+.b-red{background:var(--red-light);color:var(--red)}
+.b-purple{background:var(--purple-light);color:var(--purple)}
+.b-teal{background:var(--teal-light);color:var(--teal)}
+.b-gray{background:var(--gray-light);color:var(--gray)}
+
+.av{width:24px;height:24px;border-radius:50%;background:var(--blue-light);color:var(--blue-dark);display:inline-flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;flex-shrink:0}
+
+.empty-state{text-align:center;padding:50px 20px;color:var(--text-secondary)}
+.empty-state i{font-size:32px;display:block;margin:0 auto 10px;opacity:.5}
+
+.toast{position:fixed;bottom:20px;right:20px;background:var(--text);color:#fff;padding:12px 18px;border-radius:var(--radius-md);font-size:12.5px;box-shadow:0 4px 16px rgba(0,0,0,.2);z-index:999;max-width:340px;line-height:1.5;display:none}
+.toast.show{display:block;animation:slideIn .25s ease}
+@keyframes slideIn{from{transform:translateY(10px);opacity:0}to{transform:translateY(0);opacity:1}}
+
+::-webkit-scrollbar{width:8px;height:8px}
+::-webkit-scrollbar-thumb{background:var(--border-strong);border-radius:4px}
+::-webkit-scrollbar-track{background:transparent}
+
+@media (max-width:900px){
+  .sidebar{position:fixed;left:0;top:0;height:100vh;z-index:50;transform:translateX(-100%);transition:transform .2s}
+  .sidebar.open{transform:translateX(0)}
+  .mobile-menu-btn{display:flex !important}
+}
+.mobile-menu-btn{display:none;background:none;border:none;font-size:20px;cursor:pointer;color:var(--text);margin-right:8px}
+</style>
+</head>
+<body>
+
+<div class="app-shell">
+  <div class="sidebar" id="sidebar">
+    <div class="sb-head">
+      <div class="sb-logo">iM</div>
+      <div><div class="name">iPhoneMood</div><div class="loc">Rosario · CRM</div></div>
+    </div>
+    <div class="sb-nav">
+      <div class="nav-group">
+        <div class="nav-label">Principal</div>
+        <div class="nav-item active" data-page="dashboard"><i class="ti ti-layout-dashboard"></i> Panel general</div>
+      </div>
+      <div class="nav-group">
+        <div class="nav-label">Operaciones</div>
+        <div class="nav-item" data-page="ventas"><i class="ti ti-receipt"></i> Ventas</div>
+        <div class="nav-item" data-page="stock"><i class="ti ti-box"></i> Stock</div>
+        <div class="nav-item" data-page="reparaciones"><i class="ti ti-tool"></i> Reparaciones</div>
+        <div class="nav-item" data-page="gastos"><i class="ti ti-arrow-down-circle"></i> Gastos</div>
+        <div class="nav-item" data-page="cueva"><i class="ti ti-arrows-exchange"></i> Cueva / cambio</div>
+      </div>
+      <div class="nav-group">
+        <div class="nav-label">Finanzas</div>
+        <div class="nav-item" data-page="cajas"><i class="ti ti-wallet"></i> Cajas</div>
+        <div class="nav-item" data-page="cashflow"><i class="ti ti-trending-up"></i> Cash flow</div>
+      </div>
+      <div class="nav-group">
+        <div class="nav-label">Sistema</div>
+        <div class="nav-item" data-page="panel"><i class="ti ti-settings"></i> Panel de control</div>
+      </div>
+    </div>
+    <div class="sb-foot">
+      <button class="quick-btn" onclick="App.goTo('ventas');setTimeout(()=>Ventas.openNew(),50)"><i class="ti ti-plus"></i> Venta rápida</button>
+    </div>
+  </div>
+
+  <div class="main">
+    <div class="topbar">
+      <div style="display:flex;align-items:center">
+        <button class="mobile-menu-btn" onclick="document.getElementById('sidebar').classList.toggle('open')"><i class="ti ti-menu-2"></i></button>
+        <h1 id="page-title">Panel general</h1>
+      </div>
+      <div class="topbar-right">
+        <span class="pill pill-blue"><i class="ti ti-currency-dollar"></i> Blue: $<span id="topbar-blue">1075</span></span>
+        <span class="pill pill-green"><i class="ti ti-currency-bitcoin"></i> USDT: $<span id="topbar-usdt">1061</span></span>
+      </div>
+    </div>
+
+    <div id="pages"></div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+// ============================================================
+// CONEXIÓN A SUPABASE — acá vive la base de datos real
+// ============================================================
+
+const SUPABASE_URL = 'https://oqvmiozafgogfcclwseu.supabase.co';
+const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9xdm1pb3phZmdvZ2ZjY2x3c2V1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODE4MTg4MDQsImV4cCI6MjA5NzM5NDgwNH0.egzH4uyVJ0W1mj0dTJuJGIWTXXnur9B4z_f12Z8V1lQ';
+
+const supa = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+// ============================================================
+// CARGA INICIAL — trae todos los datos reales de Supabase
+// y los acomoda en el formato que ya usa el resto de la app (State)
+// ============================================================
+const DB = {
+  personasMap: {}, // nombre -> id  (para traducir entre lo que ve el usuario y lo que guarda la base)
+  personasIdToNombre: {}, // id -> nombre
+
+  async cargarTodo() {
+    const [personasRes, cajasRes, stockRes, garantiasRes, ventasRes, ventaItemsRes, ventaPagosRes,
+           reparacionesRes, repRepuestosRes, repPagosRes, catGastoRes, gastosRes, cambiosRes] = await Promise.all([
+      supa.from('personas').select('*'),
+      supa.from('cajas').select('*'),
+      supa.from('stock').select('*'),
+      supa.from('garantias').select('*'),
+      supa.from('ventas').select('*').order('id', { ascending: false }),
+      supa.from('venta_items').select('*'),
+      supa.from('venta_pagos').select('*'),
+      supa.from('reparaciones').select('*'),
+      supa.from('reparacion_repuestos').select('*'),
+      supa.from('reparacion_pagos').select('*'),
+      supa.from('categorias_gasto').select('*'),
+      supa.from('gastos').select('*').order('creado_en', { ascending: false }),
+      supa.from('cambios').select('*').order('creado_en', { ascending: false }),
+    ]);
+
+    // mapa de personas (id <-> nombre), lo usamos todo el tiempo para traducir
+    (personasRes.data || []).forEach(p => {
+      this.personasMap[p.nombre] = p.id;
+      this.personasIdToNombre[p.id] = p.nombre;
+    });
+    State.personas = (personasRes.data || []).map(p => p.nombre);
+
+    // cajas: armamos State.cajas[persona][bolsillo] = saldo
+    State.cajas = {};
+    State.personas.forEach(p => State.cajas[p] = {});
+    (cajasRes.data || []).forEach(c => {
+      const nombre = this.personasIdToNombre[c.persona_id];
+      if (nombre) State.cajas[nombre][c.bolsillo] = Number(c.saldo);
+    });
+
+    // stock
+    State.stock = (stockRes.data || []).map(s => ({
+      id: s.id, cat: s.categoria, nombre: s.nombre,
+      imeis: s.imeis && s.imeis.length ? [...s.imeis] : undefined,
+      cantidad: s.imeis && s.imeis.length ? undefined : s.cantidad,
+      costoUSD: Number(s.costo_usd), cotiz: Number(s.cotizacion), precioARS: Number(s.precio_ars),
+      proveedor: s.proveedor, custodio: this.personasIdToNombre[s.custodio_id] || '', notas: s.notas || ''
+    }));
+
+    // garantías
+    State.garantias = (garantiasRes.data || []).map(g => ({ id: g.id, nombre: g.nombre, dias: g.dias, color: g.color }));
+
+    // categorías de gasto
+    State.categoriasGasto = (catGastoRes.data || []).map(c => ({ id: c.id, nombre: c.nombre, color: c.color }));
+
+    // gastos
+    State.gastos = (gastosRes.data || []).map(g => ({
+      id: g.id, fecha: this.fmtFecha(g.creado_en), motivo: g.motivo, cat: g.categoria_id,
+      responsable: this.personasIdToNombre[g.responsable_id] || '',
+      caja: `${this.personasIdToNombre[g.persona_caja_id] || ''}-${g.bolsillo}`,
+      moneda: g.moneda, monto: Number(g.monto), estado: g.estado,
+      _personaCajaId: g.persona_caja_id, _bolsillo: g.bolsillo
+    }));
+
+    // cambios (cueva)
+    State.cambios = (cambiosRes.data || []).map(c => ({
+      id: c.id, fecha: this.fmtFecha(c.creado_en), tipo: c.tipo,
+      entrega: Number(c.entrega), recibe: Number(c.recibe), cotiz: Number(c.cotizacion),
+      origenP: this.personasIdToNombre[c.origen_persona_id] || '', origenB: c.origen_bolsillo,
+      destinoP: this.personasIdToNombre[c.destino_persona_id] || '', destinoB: c.destino_bolsillo
+    }));
+
+    // ventas con sus items y pagos anidados
+    const itemsPorVenta = {}, pagosPorVenta = {};
+    (ventaItemsRes.data || []).forEach(i => {
+      if (!itemsPorVenta[i.venta_id]) itemsPorVenta[i.venta_id] = [];
+      itemsPorVenta[i.venta_id].push({ nombre: i.nombre, precio: Number(i.precio_usd), costo: Number(i.costo_usd), stockId: i.stock_id, imei: i.imei });
+    });
+    (ventaPagosRes.data || []).forEach(p => {
+      if (!pagosPorVenta[p.venta_id]) pagosPorVenta[p.venta_id] = [];
+      const persona = this.personasIdToNombre[p.persona_id] || '';
+      pagosPorVenta[p.venta_id].push({ caja: `${persona}-${p.bolsillo}`, monto: Number(p.monto), persona, bolsillo: p.bolsillo });
+    });
+    State.ventas = (ventasRes.data || []).map(v => ({
+      id: v.id, fecha: this.fmtFecha(v.creado_en), cliente: v.cliente,
+      vendedor: this.personasIdToNombre[v.vendedor_id] || '',
+      items: itemsPorVenta[v.id] || [], pagos: pagosPorVenta[v.id] || [],
+      estado: v.estado, tradeIn: v.trade_in_modelo ? { modelo: v.trade_in_modelo, valor: Number(v.trade_in_valor) } : null
+    }));
+    State.nextVentaId = State.ventas.length ? Math.max(...State.ventas.map(v => v.id)) + 1 : 1;
+
+    // reparaciones con sus repuestos y pagos anidados
+    const repuestosPorRep = {}, pagosPorRep = {};
+    (repRepuestosRes.data || []).forEach(r => {
+      if (!repuestosPorRep[r.reparacion_id]) repuestosPorRep[r.reparacion_id] = [];
+      repuestosPorRep[r.reparacion_id].push({ nombre: r.nombre, costo: Number(r.costo_usd), fromStock: r.de_stock, stockId: r.stock_id });
+    });
+    (repPagosRes.data || []).forEach(p => {
+      if (!pagosPorRep[p.reparacion_id]) pagosPorRep[p.reparacion_id] = [];
+      const persona = this.personasIdToNombre[p.persona_id] || '';
+      pagosPorRep[p.reparacion_id].push({ caja: `${persona}-${p.bolsillo}`, monto: Number(p.monto), persona, bolsillo: p.bolsillo });
+    });
+    State.reparaciones = (reparacionesRes.data || []).map(r => ({
+      id: r.id, cliente: r.cliente, tel: r.telefono || '', equipo: r.equipo, falla: r.falla || '',
+      clave: r.clave_desbloqueo || '', estado: r.estado, fechaIngreso: this.fmtFecha(r.creado_en),
+      diagnostico: r.diagnostico || '', presupuestoAprobado: r.presupuesto_aprobado,
+      repuestos: repuestosPorRep[r.id] || [], pagos: pagosPorRep[r.id] || [],
+      costoMO: Number(r.costo_mano_obra), precioFinal: Number(r.precio_final),
+      tecnico: r.tecnico || '', custodio: this.personasIdToNombre[r.custodio_id] || '',
+      notas: r.notas || '', equipoDevuelto: r.equipo_devuelto
+    }));
+  },
+
+  fmtFecha(iso) {
+    if (!iso) return 'Hoy';
+    const d = new Date(iso);
+    return d.toLocaleDateString('es-AR', { day: '2-digit', month: '2-digit' });
+  },
+
+  personaId(nombre) { return this.personasMap[nombre]; },
+
+  // ===== ESCRITURAS =====
+
+  async actualizarSaldoCaja(persona, bolsillo, nuevoSaldo) {
+    const pid = this.personaId(persona);
+    if (!pid) return;
+    await supa.from('cajas').update({ saldo: nuevoSaldo, actualizado_en: new Date().toISOString() })
+      .eq('persona_id', pid).eq('bolsillo', bolsillo);
+  },
+
+  async guardarProductoStock(obj, idExistente) {
+    const row = {
+      categoria: obj.cat, nombre: obj.nombre, imeis: obj.imeis || [], cantidad: obj.cantidad || 0,
+      costo_usd: obj.costoUSD, cotizacion: obj.cotiz, precio_ars: obj.precioARS,
+      proveedor: obj.proveedor, custodio_id: this.personaId(obj.custodio) || null, notas: obj.notas || ''
+    };
+    if (idExistente) {
+      const { error } = await supa.from('stock').update(row).eq('id', idExistente);
+      return { id: idExistente, error };
+    } else {
+      const { data, error } = await supa.from('stock').insert(row).select().single();
+      return { id: data?.id, error };
+    }
+  },
+
+  async actualizarImeisStock(stockId, imeis) {
+    await supa.from('stock').update({ imeis }).eq('id', stockId);
+  },
+  async actualizarCantidadStock(stockId, cantidad) {
+    await supa.from('stock').update({ cantidad }).eq('id', stockId);
+  },
+
+  async crearVenta(draft, estado) {
+    const { data: ventaRow, error } = await supa.from('ventas').insert({
+      cliente: draft.cliente, vendedor_id: this.personaId(draft.vendedor) || null, estado,
+      trade_in_modelo: draft.tradeIn?.modelo || null, trade_in_valor: draft.tradeIn?.valor || 0
+    }).select().single();
+    if (error || !ventaRow) { console.error(error); return null; }
+
+    const itemsToInsert = draft.items.map(it => ({
+      venta_id: ventaRow.id, stock_id: it.stockId || null, imei: it.imei || null,
+      nombre: it.nombre, costo_usd: it.costo || 0, precio_usd: it.precio
+    }));
+    if (itemsToInsert.length) await supa.from('venta_items').insert(itemsToInsert);
+
+    const pagosToInsert = draft.pagos.map(p => ({
+      venta_id: ventaRow.id, persona_id: this.personaId(p.persona), bolsillo: p.bolsillo, monto: p.monto
+    }));
+    if (pagosToInsert.length) await supa.from('venta_pagos').insert(pagosToInsert);
+
+    return ventaRow.id;
+  },
+
+  async anularVenta(ventaId) {
+    await supa.from('ventas').delete().eq('id', ventaId); // borra en cascada items y pagos
+  },
+
+  async crearReparacion(o) {
+    await supa.from('reparaciones').insert({
+      id: o.id, cliente: o.cliente, telefono: o.tel, equipo: o.equipo, falla: o.falla,
+      clave_desbloqueo: o.clave, estado: o.estado, diagnostico: o.diagnostico,
+      presupuesto_aprobado: o.presupuestoAprobado, tecnico: o.tecnico,
+      custodio_id: this.personaId(o.custodio) || null, costo_mano_obra: o.costoMO,
+      precio_final: o.precioFinal, notas: o.notas, equipo_devuelto: o.equipoDevuelto
+    });
+  },
+  async actualizarReparacion(o) {
+    await supa.from('reparaciones').update({
+      estado: o.estado, diagnostico: o.diagnostico, presupuesto_aprobado: o.presupuestoAprobado,
+      custodio_id: this.personaId(o.custodio) || null, costo_mano_obra: o.costoMO,
+      precio_final: o.precioFinal, notas: o.notas, equipo_devuelto: o.equipoDevuelto
+    }).eq('id', o.id);
+  },
+  async agregarRepuestoReparacion(reparacionId, repuesto) {
+    await supa.from('reparacion_repuestos').insert({
+      reparacion_id: reparacionId, nombre: repuesto.nombre, costo_usd: repuesto.costo,
+      de_stock: repuesto.fromStock, stock_id: repuesto.stockId || null
+    });
+  },
+  async agregarPagoReparacion(reparacionId, pago) {
+    await supa.from('reparacion_pagos').insert({
+      reparacion_id: reparacionId, persona_id: this.personaId(pago.persona), bolsillo: pago.bolsillo, monto: pago.monto
+    });
+  },
+  async limpiarMovimientosReparacion(reparacionId) {
+    await supa.from('reparacion_pagos').delete().eq('reparacion_id', reparacionId);
+    await supa.from('reparacion_repuestos').delete().eq('reparacion_id', reparacionId).eq('de_stock', true);
+  },
+
+  async crearGasto(g) {
+    const { data, error } = await supa.from('gastos').insert({
+      motivo: g.motivo, categoria_id: g.cat, responsable_id: this.personaId(g.responsable),
+      persona_caja_id: this.personaId(g.persona), bolsillo: g.bolsillo, moneda: g.moneda,
+      monto: g.monto, estado: g.estado
+    }).select().single();
+    return data?.id;
+  },
+
+  async crearCambio(c) {
+    await supa.from('cambios').insert({
+      tipo: c.tipo, entrega: c.entrega, recibe: c.recibe, cotizacion: c.cotiz,
+      origen_persona_id: this.personaId(c.origenP), origen_bolsillo: c.origenB,
+      destino_persona_id: this.personaId(c.destinoP), destino_bolsillo: c.destinoB
+    });
+  },
+
+  async agregarPersona(nombre) {
+    const { data } = await supa.from('personas').insert({ nombre }).select().single();
+    if (data) {
+      this.personasMap[nombre] = data.id;
+      this.personasIdToNombre[data.id] = nombre;
+      const bolsillos = ['ARS cash', 'ARS transferencia', 'USD cash', 'USD transferencia', 'USDT'];
+      await supa.from('cajas').insert(bolsillos.map(b => ({ persona_id: data.id, bolsillo: b, saldo: 0 })));
+    }
+  },
+
+  async agregarGarantia(nombre, dias, color) {
+    const { data } = await supa.from('garantias').insert({ nombre, dias, color }).select().single();
+    return data;
+  },
+  async editarGarantia(id, dias) { await supa.from('garantias').update({ dias }).eq('id', id); },
+  async borrarGarantia(id) { await supa.from('garantias').delete().eq('id', id); },
+
+  async agregarCategoriaGasto(nombre, color) {
+    const { data } = await supa.from('categorias_gasto').insert({ nombre, color }).select().single();
+    return data;
+  },
+  async editarCategoriaGasto(id, cambios) { await supa.from('categorias_gasto').update(cambios).eq('id', id); },
+  async borrarCategoriaGasto(id) { await supa.from('categorias_gasto').delete().eq('id', id); },
+};
+
+</script>
+<script>
+// ============================================================
+// ESTADO CENTRAL — fuente única de verdad para toda la maqueta
+// En la versión real esto vive en la base de datos + Sheets.
+// ============================================================
+
+const State = {
+  refBlue: 1075,
+  refUsdt: 1061,
+
+  personas: [], // se carga desde Supabase al iniciar
+
+  // CAJAS: cada persona tiene varios "bolsillos" de saldo — se carga desde Supabase
+  cajas: {},
+
+  // STOCK — se carga desde Supabase
+  stock: [],
+
+  // VENTAS — se carga desde Supabase
+  ventas: [],
+  nextVentaId: 1,
+
+  // REPARACIONES — se carga desde Supabase
+  reparaciones: [],
+
+  // GASTOS — se carga desde Supabase
+  categoriasGasto: [],
+  gastos: [],
+
+  // CUEVA — operaciones de cambio — se carga desde Supabase
+  cambios: [],
+
+  // GARANTÍAS configurables — se carga desde Supabase
+  garantias: [],
+
+  // CASH FLOW — log de movimientos para el módulo de cash flow
+  movimientos: [],
+
+  // ===== HELPERS =====
+  fmtARS(n) { return '$' + Math.round(n).toLocaleString('es-AR'); },
+  fmtUSD(n) { return 'USD ' + Number(n).toLocaleString('es-AR', { maximumFractionDigits: 2 }); },
+
+  getStock(p) { return p.imeis ? p.imeis.length : (p.cantidad || 0); },
+  getStockStatus(p) {
+    const s = this.getStock(p);
+    if (s === 0) return 'out';
+    if (s <= 1) return 'low';
+    return 'ok';
+  },
+
+  // Mueve saldo entre bolsillos (misma o distinta persona)
+  moverCaja(personaOrigen, bolsilloOrigen, montoOrigen, personaDestino, bolsilloDestino, montoDestino) {
+    if (!this.cajas[personaOrigen]) this.cajas[personaOrigen] = {};
+    if (!this.cajas[personaDestino]) this.cajas[personaDestino] = {};
+    this.cajas[personaOrigen][bolsilloOrigen] = (this.cajas[personaOrigen][bolsilloOrigen] || 0) - montoOrigen;
+    this.cajas[personaDestino][bolsilloDestino] = (this.cajas[personaDestino][bolsilloDestino] || 0) + montoDestino;
+    DB.actualizarSaldoCaja(personaOrigen, bolsilloOrigen, this.cajas[personaOrigen][bolsilloOrigen]);
+    DB.actualizarSaldoCaja(personaDestino, bolsilloDestino, this.cajas[personaDestino][bolsilloDestino]);
+  },
+
+  acreditarCaja(persona, bolsillo, monto) {
+    if (!this.cajas[persona]) this.cajas[persona] = {};
+    this.cajas[persona][bolsillo] = (this.cajas[persona][bolsillo] || 0) + monto;
+    DB.actualizarSaldoCaja(persona, bolsillo, this.cajas[persona][bolsillo]);
+  },
+  debitarCaja(persona, bolsillo, monto) {
+    if (!this.cajas[persona]) this.cajas[persona] = {};
+    this.cajas[persona][bolsillo] = (this.cajas[persona][bolsillo] || 0) - monto;
+    DB.actualizarSaldoCaja(persona, bolsillo, this.cajas[persona][bolsillo]);
+  },
+
+  registrarMovimiento(tipo, descripcion, montoARS, signo) {
+    this.movimientos.unshift({
+      fecha: 'Hoy', tipo, descripcion, montoARS, signo, id: Date.now() + Math.random()
+    });
+  },
+
+  // Descuenta del stock cuando se confirma una venta. Devuelve lo removido (para poder revertir si se anula)
+  descontarStock(stockId, imei) {
+    const item = this.stock.find(s => s.id === stockId);
+    if (!item) return null;
+    if (item.imeis && imei) {
+      const idx = item.imeis.indexOf(imei);
+      if (idx >= 0) { item.imeis.splice(idx, 1); return { stockId, imei }; }
+    } else if (item.cantidad !== undefined && item.cantidad > 0) {
+      item.cantidad -= 1;
+      return { stockId, imei: null };
+    }
+    return null;
+  },
+  restaurarStock(stockId, imei) {
+    const item = this.stock.find(s => s.id === stockId);
+    if (!item) return;
+    if (item.imeis && imei) item.imeis.push(imei);
+    else if (item.cantidad !== undefined) item.cantidad += 1;
+  },
+
+  // Spread de una operación de cambio, en ARS
+  calcSpreadARS(op) {
+    if (op.tipo === 'ars-usd') {
+      const refRecibe = op.entrega / this.refBlue;
+      return (op.recibe - refRecibe) * this.refBlue;
+    }
+    if (op.tipo === 'usd-ars') {
+      return op.recibe - (op.entrega * this.refBlue);
+    }
+    if (op.tipo === 'usdt-ars') {
+      return op.recibe - (op.entrega * this.refUsdt);
+    }
+    if (op.tipo === 'usd-usdt') {
+      const refRecibe = op.entrega * (this.refBlue / this.refUsdt);
+      return (op.recibe - refRecibe) * this.refUsdt;
+    }
+    return 0;
+  },
+
+  resultadoFinancieroMes() {
+    return this.cambios.reduce((a, o) => a + this.calcSpreadARS(o), 0);
+  },
+  resultadoComercialMes() {
+    return this.ventas.reduce((a, v) => {
+      const totalVenta = v.items.reduce((s, i) => s + i.precio, 0);
+      const totalCosto = v.items.reduce((s, i) => s + i.costo, 0);
+      return a + (totalVenta - totalCosto) * this.refBlue;
+    }, 0);
+  },
+};
+
+function toast(msg) {
+  const el = document.getElementById('toast');
+  el.innerHTML = msg;
+  el.classList.add('show');
+  clearTimeout(window._toastTimer);
+  window._toastTimer = setTimeout(() => el.classList.remove('show'), 4200);
+}
+
+</script>
+<script>
+const Dashboard = {
+  render() {
+    const container = document.createElement('div');
+    container.className = 'body-pad';
+    const resultComercial = State.resultadoComercialMes();
+    const resultFinanciero = State.resultadoFinancieroMes();
+    const totalResultado = resultComercial + resultFinanciero;
+
+    const totalVentasARS = State.ventas.reduce((a, v) => a + v.items.reduce((s, i) => s + i.precio, 0), 0) * State.refBlue;
+    const totalGastosARS = State.gastos.filter(g => g.moneda === 'ARS').reduce((a, g) => a + g.monto, 0);
+    const repActivas = State.reparaciones.filter(r => !['entregado', 'rechazado', 'no_reparable'].includes(r.estado)).length;
+    const repListas = State.reparaciones.filter(r => r.estado === 'listo').length;
+    const stockCritico = State.stock.filter(s => State.getStockStatus(s) !== 'ok').length;
+
+    let totalARSenCajas = 0, totalUSDenCajas = 0, totalUSDTenCajas = 0;
+    Object.values(State.cajas).forEach(c => {
+      totalARSenCajas += (c['ARS cash'] || 0) + (c['ARS transferencia'] || 0);
+      totalUSDenCajas += (c['USD cash'] || 0) + (c['USD transferencia'] || 0);
+      totalUSDTenCajas += (c['USDT'] || 0);
+    });
+
+    container.innerHTML = `
+      <div class="kpi-row" style="grid-template-columns:repeat(4,1fr);padding:0 0 14px 0;border:none">
+        <div class="kpi"><label>Ventas del mes</label><div class="val">${State.fmtARS(totalVentasARS)}</div><div class="sub">${State.ventas.length} ventas registradas</div></div>
+        <div class="kpi"><label>Resultado comercial</label><div class="val" style="color:${resultComercial>=0?'var(--green-dark)':'var(--red)'}">${resultComercial>=0?'+':''}${State.fmtARS(resultComercial)}</div><div class="sub">margen de ventas</div></div>
+        <div class="kpi"><label>Resultado financiero</label><div class="val" style="color:${resultFinanciero>=0?'var(--green-dark)':'var(--red)'}">${resultFinanciero>=0?'+':''}${State.fmtARS(resultFinanciero)}</div><div class="sub">spread cueva de cambio</div></div>
+        <div class="kpi"><label>Resultado total del mes</label><div class="val" style="color:var(--blue-dark)">${totalResultado>=0?'+':''}${State.fmtARS(totalResultado)}</div><div class="sub">comercial + financiero</div></div>
+      </div>
+
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px">
+        <div class="card">
+          <div class="card-title"><i class="ti ti-wallet"></i> Saldo consolidado de cajas</div>
+          <table>
+            <tr><th>Persona</th><th>ARS</th><th>USD</th><th>USDT</th></tr>
+            ${State.personas.map(p => {
+              const c = State.cajas[p] || {};
+              const ars = (c['ARS cash']||0)+(c['ARS transferencia']||0);
+              const usd = (c['USD cash']||0)+(c['USD transferencia']||0);
+              const usdt = c['USDT']||0;
+              return `<tr><td><div style="display:flex;align-items:center;gap:6px"><div class="av">${p.substring(0,2).toUpperCase()}</div>${p}</div></td><td>${State.fmtARS(ars)}</td><td>${State.fmtUSD(usd)}</td><td>${usdt.toLocaleString('es-AR')}</td></tr>`;
+            }).join('')}
+            <tr style="font-weight:600"><td>Total</td><td>${State.fmtARS(totalARSenCajas)}</td><td>${State.fmtUSD(totalUSDenCajas)}</td><td>${totalUSDTenCajas.toLocaleString('es-AR')}</td></tr>
+          </table>
+        </div>
+
+        <div class="card">
+          <div class="card-title"><i class="ti ti-alert-triangle"></i> Alertas</div>
+          <table>
+            <tr><th>Tipo</th><th>Detalle</th></tr>
+            ${stockCritico > 0 ? `<tr><td><span class="badge b-red">Stock</span></td><td>${stockCritico} producto(s) con stock bajo o agotado</td></tr>` : ''}
+            ${repListas > 0 ? `<tr><td><span class="badge b-green">Reparación</span></td><td>${repListas} equipo(s) listo(s) para entregar</td></tr>` : ''}
+            ${repActivas > 0 ? `<tr><td><span class="badge b-amber">Reparación</span></td><td>${repActivas} orden(es) en curso</td></tr>` : ''}
+            ${State.ventas.filter(v=>v.estado==='abierta').length > 0 ? `<tr><td><span class="badge b-amber">Venta</span></td><td>${State.ventas.filter(v=>v.estado==='abierta').length} venta(s) con saldo pendiente</td></tr>` : ''}
+            ${(stockCritico===0 && repListas===0 && repActivas===0) ? '<tr><td colspan="2" style="color:var(--text-secondary)">Sin alertas por el momento</td></tr>' : ''}
+          </table>
+        </div>
+      </div>
+
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px">
+        <div class="card">
+          <div class="card-title"><i class="ti ti-receipt"></i> Últimas ventas</div>
+          <table>
+            <tr><th>Cliente</th><th>Detalle</th><th>Total</th><th>Estado</th></tr>
+            ${State.ventas.slice(0, 5).map(v => {
+              const total = v.items.reduce((s, i) => s + i.precio, 0);
+              return `<tr><td>${v.cliente}</td><td>${v.items[0]?.nombre.substring(0,28) || '—'}${v.items.length>1?` +${v.items.length-1}`:''}</td><td>${State.fmtUSD(total)}</td><td><span class="badge ${v.estado==='cerrada'?'b-green':'b-amber'}">${v.estado==='cerrada'?'Cerrada':'Abierta'}</span></td></tr>`;
+            }).join('')}
+          </table>
+        </div>
+        <div class="card">
+          <div class="card-title"><i class="ti ti-tool"></i> Reparaciones activas</div>
+          <table>
+            <tr><th>Equipo</th><th>Cliente</th><th>Estado</th></tr>
+            ${State.reparaciones.filter(r=>!['entregado','rechazado','no_reparable'].includes(r.estado)).slice(0,5).map(r => `
+              <tr><td>${r.equipo}</td><td>${r.cliente}</td><td><span class="badge b-blue">${Reparaciones.ESTADO_LABEL[r.estado]}</span></td></tr>
+            `).join('') || '<tr><td colspan="3" style="color:var(--text-secondary)">No hay reparaciones activas</td></tr>'}
+          </table>
+        </div>
+      </div>
+    `;
+    return container;
+  }
+};
+
+</script>
+<script>
+const Stock = {
+  currentTab: 'all',
+  CAT_LABELS: { iphone:'iPhone', android:'Android', mac:'Mac', ipad:'iPad', watch:'Watch', audio:'Audio', perfumeria:'Perfumería', accesorio:'Accesorio', repuesto:'Repuesto', otro:'Otro' },
+  CAT_CLASS: { iphone:'b-blue', android:'b-teal', mac:'b-blue', ipad:'b-blue', watch:'b-blue', audio:'b-purple', perfumeria:'b-green', accesorio:'b-purple', repuesto:'b-amber', otro:'b-gray' },
+  CATS_IMEI: ['iphone','android','mac','ipad'],
+
+  render() {
+    const c = document.createElement('div');
+    c.innerHTML = `
+      <div style="padding:14px 22px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap">
+        <div style="display:flex;gap:4px;flex-wrap:wrap" id="stock-tabs"></div>
+        <button class="btn btn-primary" onclick="Stock.openDrawer('new')"><i class="ti ti-plus"></i> Agregar producto</button>
+      </div>
+      <div style="padding:12px 22px;border-bottom:1px solid var(--border);display:flex;gap:8px;flex-wrap:wrap">
+        <input type="text" id="stock-search" placeholder="Buscar producto..." oninput="Stock.renderTable()" style="font-size:12px;padding:6px 10px;border:1px solid var(--border-strong);border-radius:8px;flex:1;min-width:160px">
+        <select id="stock-filter-prov" onchange="Stock.renderTable()" style="font-size:12px;padding:6px 10px;border:1px solid var(--border-strong);border-radius:8px">
+          <option value="">Todos los proveedores</option>
+          <option>Gonza</option><option>Proveedor perfumería</option><option>Proveedor accesorios</option>
+        </select>
+      </div>
+      <div class="body-pad" style="padding-top:14px">
+        <table><thead><tr>
+          <th>Producto</th><th>Rubro</th><th>Proveedor</th><th>Custodio</th><th>Costo USD</th><th>Precio venta USD</th><th>Margen</th><th>Stock</th><th>Estado</th><th></th>
+        </tr></thead><tbody id="stock-tbody"></tbody></table>
+      </div>
+      <div id="stock-drawer-host"></div>
+    `;
+    setTimeout(() => { this.renderTabs(); this.renderTable(); }, 0);
+    return c;
+  },
+
+  renderTabs() {
+    const cats = ['all', ...new Set(State.stock.map(s => s.cat))];
+    document.getElementById('stock-tabs').innerHTML = cats.map(c => {
+      const count = c === 'all' ? State.stock.length : State.stock.filter(s => s.cat === c).length;
+      const label = c === 'all' ? 'Todos' : (this.CAT_LABELS[c] || c);
+      return `<button class="btn btn-sm ${this.currentTab===c?'btn-primary':''}" onclick="Stock.setTab('${c}')">${label} (${count})</button>`;
+    }).join('');
+  },
+  setTab(c) { this.currentTab = c; this.renderTabs(); this.renderTable(); },
+
+  renderTable() {
+    const q = (document.getElementById('stock-search')?.value || '').toLowerCase();
+    const prov = document.getElementById('stock-filter-prov')?.value || '';
+    let rows = State.stock.filter(s => {
+      if (this.currentTab !== 'all' && s.cat !== this.currentTab) return false;
+      if (q && !s.nombre.toLowerCase().includes(q)) return false;
+      if (prov && s.proveedor !== prov) return false;
+      return true;
+    });
+    const tbody = document.getElementById('stock-tbody');
+    if (!rows.length) { tbody.innerHTML = `<tr><td colspan="10"><div class="empty-state"><i class="ti ti-box"></i>Sin productos que coincidan</div></td></tr>`; return; }
+    tbody.innerHTML = rows.map(p => {
+      const stock = State.getStock(p);
+      const status = State.getStockStatus(p);
+      const costoARS = p.costoUSD * p.cotiz;
+      const margin = Math.round(((p.precioARS - costoARS) / costoARS) * 100);
+      const precioUSD = p.cotiz ? (p.precioARS / p.cotiz) : 0;
+      const statusBadge = status === 'ok' ? `<span class="badge b-green">OK</span>` : status === 'low' ? `<span class="badge b-amber">Bajo</span>` : `<span class="badge b-red">Sin stock</span>`;
+      return `<tr>
+        <td><b>${p.nombre}</b>${p.notas ? `<div style="font-size:10.5px;color:var(--text-secondary)">${p.notas}</div>` : ''}</td>
+        <td><span class="badge ${this.CAT_CLASS[p.cat]||'b-gray'}">${this.CAT_LABELS[p.cat]||p.cat}</span></td>
+        <td style="color:var(--text-secondary);font-size:11.5px">${p.proveedor}</td>
+        <td style="font-size:11.5px">${p.custodio||'—'}</td>
+        <td>USD ${p.costoUSD}</td>
+        <td>${State.fmtUSD(precioUSD)}<div style="font-size:10px;color:var(--text-secondary)">${State.fmtARS(p.precioARS)}</div></td>
+        <td style="color:${margin>=0?'var(--green-dark)':'var(--red)'}">${margin>=0?'+':''}${margin}%</td>
+        <td>${stock}${p.imeis ? ' <span style="font-size:9px;color:var(--text-secondary)">IMEI</span>' : ''}</td>
+        <td>${statusBadge}</td>
+        <td><button class="btn btn-sm" onclick="Stock.openDrawer('edit',${p.id})"><i class="ti ti-edit"></i></button></td>
+      </tr>`;
+    }).join('');
+  },
+
+  openDrawer(mode, id) {
+    const p = mode === 'edit' ? State.stock.find(x => x.id === id) : { cat: 'iphone', nombre: '', costoUSD: '', cotiz: State.refBlue, precioARS: '', proveedor: 'Gonza', custodio: '', notas: '', imeis: [], cantidad: 1 };
+    const host = document.getElementById('stock-drawer-host');
+    host.innerHTML = `
+      <div class="drawer-bg" style="position:fixed;inset:0;background:rgba(0,0,0,.35);display:flex;justify-content:flex-end;z-index:100" onclick="if(event.target===this) Stock.closeDrawer()">
+        <div style="width:380px;max-width:92vw;background:var(--bg);border-left:1px solid var(--border);display:flex;flex-direction:column;height:100%" onclick="event.stopPropagation()">
+          <div style="padding:16px 18px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center">
+            <h3 style="font-size:14px;font-weight:600">${mode==='new'?'Agregar producto':'Editar producto'}</h3>
+            <button class="btn btn-sm" onclick="Stock.closeDrawer()"><i class="ti ti-x"></i></button>
+          </div>
+          <div style="flex:1;overflow-y:auto;padding:16px 18px">
+            <div style="margin-bottom:12px"><label style="font-size:11px;color:var(--text-secondary);font-weight:600;display:block;margin-bottom:6px">Categoría</label>
+              <select id="f-cat" style="width:100%;font-size:12px;padding:7px 10px;border:1px solid var(--border-strong);border-radius:8px" onchange="Stock.toggleFields()">
+                ${Object.entries(this.CAT_LABELS).map(([k,v]) => `<option value="${k}" ${p.cat===k?'selected':''}>${v}</option>`).join('')}
+              </select>
+            </div>
+            <div style="margin-bottom:12px"><label style="font-size:11px;color:var(--text-secondary);font-weight:600;display:block;margin-bottom:4px">Nombre / modelo</label>
+              <input type="text" id="f-nombre" value="${p.nombre||''}" placeholder="ej: iPhone 15 128GB Negro" style="width:100%;font-size:12px;padding:7px 10px;border:1px solid var(--border-strong);border-radius:8px">
+            </div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:12px">
+              <div><label style="font-size:11px;color:var(--text-secondary);font-weight:600;display:block;margin-bottom:4px">Costo USD</label><input type="number" id="f-costo" value="${p.costoUSD||''}" style="width:100%;font-size:12px;padding:7px 10px;border:1px solid var(--border-strong);border-radius:8px"></div>
+              <div><label style="font-size:11px;color:var(--text-secondary);font-weight:600;display:block;margin-bottom:4px">Cotización</label><input type="number" id="f-cotiz" value="${p.cotiz||State.refBlue}" oninput="Stock.updatePricePreview()" style="width:100%;font-size:12px;padding:7px 10px;border:1px solid var(--border-strong);border-radius:8px"></div>
+            </div>
+            <div style="margin-bottom:12px"><label style="font-size:11px;color:var(--text-secondary);font-weight:600;display:block;margin-bottom:4px">Precio de venta (USD)</label>
+              <input type="number" id="f-precio-usd" value="${p.precioARS && p.cotiz ? (p.precioARS / p.cotiz).toFixed(2) : ''}" placeholder="ej: 790" oninput="Stock.updatePricePreview()" style="width:100%;font-size:12px;padding:7px 10px;border:1px solid var(--border-strong);border-radius:8px">
+              <div style="font-size:10.5px;color:var(--text-secondary);margin-top:3px" id="precio-ars-preview">${p.precioARS ? '≈ ' + State.fmtARS(p.precioARS) + ' a la cotización indicada' : ''}</div>
+            </div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:12px">
+              <div><label style="font-size:11px;color:var(--text-secondary);font-weight:600;display:block;margin-bottom:4px">Proveedor</label>
+                <select id="f-prov" style="width:100%;font-size:12px;padding:7px 10px;border:1px solid var(--border-strong);border-radius:8px">
+                  ${['Gonza','Proveedor perfumería','Proveedor accesorios','Otro'].map(x=>`<option ${p.proveedor===x?'selected':''}>${x}</option>`).join('')}
+                </select>
+              </div>
+              <div><label style="font-size:11px;color:var(--text-secondary);font-weight:600;display:block;margin-bottom:4px">Custodio</label>
+                <select id="f-custodio" style="width:100%;font-size:12px;padding:7px 10px;border:1px solid var(--border-strong);border-radius:8px">
+                  <option value="">Sin asignar</option>
+                  ${State.personas.map(x=>`<option ${p.custodio===x?'selected':''}>${x}</option>`).join('')}
+                </select>
+              </div>
+            </div>
+            <div id="f-qty-wrap" style="margin-bottom:12px;display:${this.CATS_IMEI.includes(p.cat)?'none':'block'}">
+              <label style="font-size:11px;color:var(--text-secondary);font-weight:600;display:block;margin-bottom:4px">Cantidad en stock</label>
+              <div style="display:flex;align-items:center;gap:8px">
+                <button type="button" onclick="Stock.bumpQty(-1)" style="width:32px;height:32px;border:1px solid var(--border-strong);border-radius:8px;background:var(--bg-secondary);cursor:pointer;font-size:16px">−</button>
+                <input type="number" id="f-cantidad" value="${p.cantidad ?? 0}" min="0" style="width:100%;text-align:center;font-size:13px;font-weight:600;padding:7px 10px;border:1px solid var(--border-strong);border-radius:8px">
+                <button type="button" onclick="Stock.bumpQty(1)" style="width:32px;height:32px;border:1px solid var(--border-strong);border-radius:8px;background:var(--bg-secondary);cursor:pointer;font-size:16px">+</button>
+              </div>
+            </div>
+            <div style="margin-bottom:12px"><label style="font-size:11px;color:var(--text-secondary);font-weight:600;display:block;margin-bottom:4px">Notas</label>
+              <textarea id="f-notas" style="width:100%;font-size:12px;padding:7px 10px;border:1px solid var(--border-strong);border-radius:8px;height:50px;resize:none">${p.notas||''}</textarea>
+            </div>
+          </div>
+          <div style="padding:13px 18px;border-top:1px solid var(--border);display:flex;gap:8px;justify-content:flex-end">
+            <button class="btn" onclick="Stock.closeDrawer()">Cancelar</button>
+            <button class="btn btn-primary" onclick="Stock.save(${mode==='edit'?id:'null'})"><i class="ti ti-check"></i> Guardar</button>
+          </div>
+        </div>
+      </div>
+    `;
+  },
+
+  bumpQty(delta) {
+    const inp = document.getElementById('f-cantidad');
+    if (!inp) return;
+    const current = parseInt(inp.value) || 0;
+    inp.value = Math.max(0, current + delta);
+  },
+
+  updatePricePreview() {
+    const cotiz = parseFloat(document.getElementById('f-cotiz')?.value) || 0;
+    const precioUSD = parseFloat(document.getElementById('f-precio-usd')?.value) || 0;
+    const el = document.getElementById('precio-ars-preview');
+    if (!el) return;
+    el.textContent = (cotiz && precioUSD) ? `≈ ${State.fmtARS(precioUSD * cotiz)} a la cotización indicada` : '';
+  },
+
+  toggleFields() {
+    const cat = document.getElementById('f-cat').value;
+    document.getElementById('f-qty-wrap').style.display = this.CATS_IMEI.includes(cat) ? 'none' : 'block';
+  },
+
+  async save(id) {
+    const nombre = document.getElementById('f-nombre').value.trim();
+    const costoUSD = parseFloat(document.getElementById('f-costo').value) || 0;
+    const cotiz = parseFloat(document.getElementById('f-cotiz').value) || State.refBlue;
+    const precioUSD = parseFloat(document.getElementById('f-precio-usd').value) || 0;
+    if (!nombre || !costoUSD || !precioUSD) { toast('Completá nombre, costo y precio de venta en USD.'); return; }
+    const cat = document.getElementById('f-cat').value;
+    const obj = {
+      cat, nombre, costoUSD, cotiz,
+      precioARS: Math.round(precioUSD * cotiz),
+      proveedor: document.getElementById('f-prov').value,
+      custodio: document.getElementById('f-custodio').value,
+      notas: document.getElementById('f-notas').value,
+    };
+    if (this.CATS_IMEI.includes(cat)) {
+      const existing = id ? State.stock.find(x => x.id === id) : null;
+      obj.imeis = existing && existing.imeis ? existing.imeis : [];
+    } else {
+      const qtyInput = document.getElementById('f-cantidad');
+      obj.cantidad = qtyInput ? (parseInt(qtyInput.value, 10) || 0) : 0;
+    }
+
+    toast('Guardando producto...');
+    const { id: newId, error } = await DB.guardarProductoStock(obj, id);
+    if (error) { toast('Hubo un problema guardando el producto.'); console.error(error); return; }
+
+    if (id) {
+      const idx = State.stock.findIndex(x => x.id === id);
+      State.stock[idx] = { ...State.stock[idx], ...obj };
+      toast('Producto actualizado.');
+    } else {
+      obj.id = newId;
+      State.stock.push(obj);
+      toast('Producto agregado al stock.');
+    }
+    this.closeDrawer();
+    this.renderTabs();
+    this.renderTable();
+  },
+
+  closeDrawer() { document.getElementById('stock-drawer-host').innerHTML = ''; }
+};
+
+</script>
+<script>
+const Ventas = {
+  step: 0,
+  STEPS: ['Cliente', 'Trade-In', 'Ítems', 'Pagos', 'Confirm.'],
+  draft: null,
+  selectedStockIds: [],
+  invMode: 'manual',
+  manualCat: 'iphone',
+
+  render() {
+    const c = document.createElement('div');
+    c.innerHTML = `
+      <div style="padding:12px 22px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center">
+        <div style="font-size:13px;color:var(--text-secondary)">${State.ventas.length} ventas registradas</div>
+        <button class="btn btn-primary" onclick="Ventas.openNew()"><i class="ti ti-plus"></i> Nueva venta</button>
+      </div>
+      <div class="body-pad">
+        <table><thead><tr><th>#</th><th>Fecha</th><th>Cliente</th><th>Detalle</th><th>Total</th><th>Estado</th><th></th></tr></thead>
+        <tbody id="ventas-tbody"></tbody></table>
+      </div>
+      <div id="venta-modal-host"></div>
+    `;
+    setTimeout(() => this.renderList(), 0);
+    return c;
+  },
+
+  renderList() {
+    const tbody = document.getElementById('ventas-tbody');
+    if (!tbody) return;
+    tbody.innerHTML = State.ventas.map(v => {
+      const total = v.items.reduce((s, i) => s + i.precio, 0);
+      const pagado = v.pagos.reduce((s, p) => s + p.monto, 0);
+      return `<tr>
+        <td>#${v.id}</td><td>${v.fecha}</td><td>${v.cliente}</td>
+        <td>${v.items.map(i=>i.nombre).join(', ').substring(0,40)}</td>
+        <td>${State.fmtUSD(total)}</td>
+        <td><span class="badge ${v.estado==='cerrada'?'b-green':'b-amber'}">${v.estado==='cerrada'?'Cerrada':'Abierta'}</span></td>
+        <td>
+          <button class="btn btn-sm" onclick="Ventas.viewSale(${v.id})"><i class="ti ti-eye"></i></button>
+          <button class="btn btn-sm btn-red" onclick="Ventas.anular(${v.id})"><i class="ti ti-arrow-back-up"></i></button>
+        </td>
+      </tr>`;
+    }).join('');
+  },
+
+  openNew() {
+    this.draft = { cliente: '', vendedor: '', tradeIn: null, items: [], pagos: [] };
+    this.step = 0;
+    this.selectedStockIds = [];
+    this.invMode = 'manual';
+    this.showModal();
+  },
+
+  showModal() {
+    const host = document.getElementById('venta-modal-host');
+    host.innerHTML = `
+      <div style="position:fixed;inset:0;background:rgba(0,0,0,.4);display:flex;align-items:center;justify-content:center;z-index:200">
+        <div style="width:600px;max-width:94vw;max-height:88vh;background:var(--bg);border-radius:14px;display:flex;flex-direction:column;overflow:hidden">
+          <div style="padding:14px 20px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center">
+            <h3 style="font-size:15px;font-weight:600">Nueva venta</h3>
+            <button class="btn btn-sm" onclick="Ventas.closeModal()"><i class="ti ti-x"></i></button>
+          </div>
+          <div style="padding:14px 20px;border-bottom:1px solid var(--border);display:flex;gap:4px" id="venta-stepper"></div>
+          <div style="flex:1;overflow-y:auto;padding:18px 20px" id="venta-step-body"></div>
+          <div style="padding:13px 20px;border-top:1px solid var(--border);display:flex;justify-content:space-between">
+            <button class="btn" id="venta-btn-prev" onclick="Ventas.prevStep()">Anterior</button>
+            <button class="btn btn-primary" id="venta-btn-next" onclick="Ventas.nextStep()">Siguiente</button>
+          </div>
+        </div>
+      </div>
+    `;
+    this.renderStep();
+  },
+  closeModal() { document.getElementById('venta-modal-host').innerHTML = ''; },
+
+  renderStep() {
+    document.getElementById('venta-stepper').innerHTML = this.STEPS.map((s, i) => {
+      const done = i < this.step, active = i === this.step;
+      const color = done || active ? 'var(--blue)' : 'var(--border-strong)';
+      return `<div style="flex:1;text-align:center">
+        <div style="width:24px;height:24px;border-radius:50%;background:${done||active?'var(--blue)':'var(--bg-secondary)'};color:${done||active?'#fff':'var(--text-secondary)'};display:inline-flex;align-items:center;justify-content:center;font-size:11px;font-weight:600">${done?'✓':i+1}</div>
+        <div style="font-size:9.5px;color:${active?'var(--blue)':'var(--text-secondary)'};margin-top:2px;font-weight:${active?'600':'400'}">${s}</div>
+      </div>`;
+    }).join('');
+    document.getElementById('venta-btn-prev').style.opacity = this.step === 0 ? '0.4' : '1';
+    document.getElementById('venta-btn-next').textContent = this.step === 4 ? 'Confirmar venta' : 'Siguiente';
+
+    const body = document.getElementById('venta-step-body');
+    if (this.step === 0) body.innerHTML = this.stepCliente();
+    else if (this.step === 1) body.innerHTML = this.stepTradeIn();
+    else if (this.step === 2) body.innerHTML = this.stepItems();
+    else if (this.step === 3) body.innerHTML = this.stepPagos();
+    else body.innerHTML = this.stepConfirm();
+  },
+
+  stepCliente() {
+    const d = this.draft;
+    return `
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+        <div><label style="font-size:11px;color:var(--text-secondary);font-weight:600;display:block;margin-bottom:4px">Nombre del cliente</label>
+          <input type="text" id="vf-cliente" value="${d.cliente}" placeholder="Consumidor final si se deja vacío" style="width:100%;font-size:12px;padding:7px 10px;border:1px solid var(--border-strong);border-radius:8px"></div>
+        <div><label style="font-size:11px;color:var(--text-secondary);font-weight:600;display:block;margin-bottom:4px">Vendedor</label>
+          <select id="vf-vendedor" style="width:100%;font-size:12px;padding:7px 10px;border:1px solid var(--border-strong);border-radius:8px">
+            <option value="">Seleccionar</option>
+            ${State.personas.map(p=>`<option ${d.vendedor===p?'selected':''}>${p}</option>`).join('')}
+          </select></div>
+      </div>`;
+  },
+
+  stepTradeIn() {
+    const d = this.draft;
+    const active = !!d.tradeIn;
+    return `
+      <label style="display:flex;align-items:center;gap:8px;font-size:13px;cursor:pointer;margin-bottom:12px">
+        <input type="checkbox" id="vf-ti-active" ${active?'checked':''} onchange="Ventas.toggleTI()"> El cliente entrega un producto como parte de pago
+      </label>
+      <div id="vf-ti-form" style="display:${active?'block':'none'}">
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px">
+          <div><label style="font-size:11px;color:var(--text-secondary);font-weight:600;display:block;margin-bottom:4px">Modelo entregado</label>
+            <input type="text" id="vf-ti-modelo" value="${d.tradeIn?.modelo||''}" style="width:100%;font-size:12px;padding:7px 10px;border:1px solid var(--border-strong);border-radius:8px"></div>
+          <div><label style="font-size:11px;color:var(--text-secondary);font-weight:600;display:block;margin-bottom:4px">Valor tomado (USD)</label>
+            <input type="number" id="vf-ti-valor" value="${d.tradeIn?.valor||''}" style="width:100%;font-size:12px;padding:7px 10px;border:1px solid var(--border-strong);border-radius:8px"></div>
+        </div>
+        <div style="font-size:11px;color:var(--text-secondary)">Este valor se restará del total de la venta.</div>
+      </div>`;
+  },
+  toggleTI() {
+    document.getElementById('vf-ti-form').style.display = document.getElementById('vf-ti-active').checked ? 'block' : 'none';
+  },
+
+  stepItems() {
+    const d = this.draft;
+    const total = d.items.reduce((s, i) => s + i.precio, 0) - (d.tradeIn?.valor || 0);
+    return `
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+        <b>Ítems agregados</b><span style="font-size:14px;font-weight:600;color:var(--blue)">${State.fmtUSD(Math.max(0,total))}</span>
+      </div>
+      ${d.items.map((it, idx) => `<div style="display:flex;justify-content:space-between;padding:8px 10px;background:var(--bg-secondary);border-radius:8px;margin-bottom:5px;font-size:12px">
+        <span>${it.nombre} — ${State.fmtUSD(it.precio)}</span>
+        <button onclick="Ventas.removeItem(${idx})" style="background:none;border:none;cursor:pointer;color:var(--text-secondary)"><i class="ti ti-x"></i></button>
+      </div>`).join('')}
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:10px 0">
+        <button class="btn ${this.invMode==='manual'?'btn-primary':''}" onclick="Ventas.setInvMode('manual')">Carga manual</button>
+        <button class="btn ${this.invMode==='inventario'?'btn-primary':''}" onclick="Ventas.setInvMode('inventario')">Desde inventario</button>
+      </div>
+      <div id="vf-item-form">${this.invMode === 'manual' ? this.manualItemForm() : this.inventoryForm()}</div>
+    `;
+  },
+  setInvMode(m) { this.invMode = m; document.getElementById('venta-step-body').innerHTML = this.stepItems(); },
+
+  manualItemForm() {
+    return `
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px">
+        <input type="text" id="vf-m-nombre" placeholder="Nombre del producto" style="font-size:12px;padding:7px 10px;border:1px solid var(--border-strong);border-radius:8px">
+        <input type="number" id="vf-m-costo" placeholder="Costo USD" style="font-size:12px;padding:7px 10px;border:1px solid var(--border-strong);border-radius:8px">
+      </div>
+      <input type="number" id="vf-m-precio" placeholder="Precio de venta (USD)" style="width:100%;font-size:12px;padding:7px 10px;border:1px solid var(--border-strong);border-radius:8px;margin-bottom:8px">
+      <button class="btn btn-primary" style="width:100%;justify-content:center" onclick="Ventas.addManualItem()"><i class="ti ti-plus"></i> Agregar ítem</button>
+    `;
+  },
+  addManualItem() {
+    const nombre = document.getElementById('vf-m-nombre').value.trim();
+    const precio = parseFloat(document.getElementById('vf-m-precio').value) || 0;
+    const costo = parseFloat(document.getElementById('vf-m-costo').value) || 0;
+    if (!nombre || !precio) { toast('Completá nombre y precio.'); return; }
+    this.draft.items.push({ nombre, precio, costo, stockId: null, imei: null });
+    document.getElementById('venta-step-body').innerHTML = this.stepItems();
+  },
+
+  inventoryForm() {
+    const disponibles = State.stock.filter(s => State.getStock(s) > 0);
+    return `
+      <div style="font-size:11px;color:var(--text-secondary);margin-bottom:8px">${disponibles.length} productos con stock disponible</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;max-height:240px;overflow-y:auto">
+        ${disponibles.map(s => {
+          const sel = this.selectedStockIds.includes(s.id);
+          return `<div onclick="Ventas.toggleStockSel(${s.id})" style="border:${sel?'2px solid var(--blue)':'1px solid var(--border)'};background:${sel?'var(--blue-light)':'var(--bg)'};border-radius:8px;padding:9px 11px;cursor:pointer;font-size:11.5px">
+            <b style="font-size:12px">${s.nombre}</b><br>
+            <span style="color:var(--text-secondary)">Costo: USD ${s.costoUSD} · Venta: ${State.fmtARS(s.precioARS)}</span>
+          </div>`;
+        }).join('')}
+      </div>
+      ${this.selectedStockIds.length ? `<button class="btn btn-green" style="width:100%;justify-content:center;margin-top:10px" onclick="Ventas.addStockItems()"><i class="ti ti-check"></i> Agregar ${this.selectedStockIds.length} seleccionado(s)</button>` : ''}
+    `;
+  },
+  toggleStockSel(id) {
+    const i = this.selectedStockIds.indexOf(id);
+    if (i >= 0) this.selectedStockIds.splice(i, 1); else this.selectedStockIds.push(id);
+    document.getElementById('vf-item-form').innerHTML = this.inventoryForm();
+  },
+  addStockItems() {
+    this.selectedStockIds.forEach(id => {
+      const s = State.stock.find(x => x.id === id);
+      if (!s) return;
+      const imei = s.imeis && s.imeis.length ? s.imeis[0] : null;
+      this.draft.items.push({ nombre: s.nombre, precio: s.precioARS / State.refBlue, costo: s.costoUSD, stockId: id, imei });
+    });
+    this.selectedStockIds = [];
+    document.getElementById('venta-step-body').innerHTML = this.stepItems();
+  },
+  removeItem(idx) { this.draft.items.splice(idx, 1); document.getElementById('venta-step-body').innerHTML = this.stepItems(); },
+
+  stepPagos() {
+    const d = this.draft;
+    const total = Math.max(0, d.items.reduce((s, i) => s + i.precio, 0) - (d.tradeIn?.valor || 0));
+    const pagado = d.pagos.reduce((s, p) => s + p.monto, 0);
+    const saldo = Math.max(0, total - pagado);
+    return `
+      <div style="display:flex;gap:16px;padding:10px 0;border-bottom:1px solid var(--border);margin-bottom:12px">
+        <div><div style="font-size:11px;color:var(--text-secondary)">Total venta</div><div style="font-size:16px;font-weight:600">${State.fmtUSD(total)}</div></div>
+        <div><div style="font-size:11px;color:var(--text-secondary)">Saldo restante</div><div style="font-size:16px;font-weight:600;color:${saldo>0?'var(--red)':'var(--green-dark)'}">${State.fmtUSD(saldo)}</div></div>
+      </div>
+      ${d.pagos.map((p, idx) => `<div style="display:flex;justify-content:space-between;padding:7px 10px;background:var(--bg-secondary);border-radius:8px;margin-bottom:5px;font-size:12px">
+        <span>${p.persona} — ${p.bolsillo} — ${State.fmtUSD(p.monto)}</span>
+        <button onclick="Ventas.removePago(${idx})" style="background:none;border:none;cursor:pointer"><i class="ti ti-x"></i></button>
+      </div>`).join('')}
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:10px 0">
+        <select id="vf-pago-persona" style="font-size:12px;padding:7px 10px;border:1px solid var(--border-strong);border-radius:8px">
+          ${State.personas.map(p=>`<option>${p}</option>`).join('')}
+        </select>
+        <select id="vf-pago-bolsillo" style="font-size:12px;padding:7px 10px;border:1px solid var(--border-strong);border-radius:8px">
+          <option>ARS cash</option><option>ARS transferencia</option><option>USD cash</option><option>USD transferencia</option><option>USDT</option>
+        </select>
+      </div>
+      <div style="display:flex;gap:8px">
+        <input type="number" id="vf-pago-monto" value="${saldo.toFixed(2)}" style="flex:1;font-size:12px;padding:7px 10px;border:1px solid var(--border-strong);border-radius:8px">
+        <button class="btn btn-primary" onclick="Ventas.addPago()"><i class="ti ti-plus"></i> Agregar pago</button>
+      </div>
+    `;
+  },
+  addPago() {
+    const persona = document.getElementById('vf-pago-persona').value;
+    const bolsillo = document.getElementById('vf-pago-bolsillo').value;
+    const monto = parseFloat(document.getElementById('vf-pago-monto').value) || 0;
+    if (!monto) { toast('Ingresá un monto.'); return; }
+    this.draft.pagos.push({ persona, bolsillo, monto });
+    document.getElementById('venta-step-body').innerHTML = this.stepPagos();
+  },
+  removePago(idx) { this.draft.pagos.splice(idx, 1); document.getElementById('venta-step-body').innerHTML = this.stepPagos(); },
+
+  stepConfirm() {
+    const d = this.draft;
+    const total = Math.max(0, d.items.reduce((s, i) => s + i.precio, 0) - (d.tradeIn?.valor || 0));
+    const pagado = d.pagos.reduce((s, p) => s + p.monto, 0);
+    const saldo = Math.max(0, total - pagado);
+    return `
+      <div style="margin-bottom:14px"><b>Cliente:</b> ${d.cliente || 'Consumidor final'} ${d.vendedor?`· Vendedor: ${d.vendedor}`:''}</div>
+      <div style="margin-bottom:14px"><b>Ítems (${d.items.length})</b>
+        ${d.items.map(i=>`<div style="display:flex;justify-content:space-between;font-size:12px;padding:3px 0">${i.nombre}<span>${State.fmtUSD(i.precio)}</span></div>`).join('')}
+      </div>
+      <div style="display:flex;justify-content:space-between;padding:8px 0;border-top:1px solid var(--border);font-weight:600">Total<span>${State.fmtUSD(total)}</span></div>
+      <div style="display:flex;justify-content:space-between;padding:4px 0;font-size:12px;color:${saldo>0?'var(--red)':'var(--green-dark)'}">Saldo<span>${State.fmtUSD(saldo)}</span></div>
+      <div style="background:var(--blue-light);border-radius:8px;padding:10px 12px;margin-top:12px;font-size:12px;color:var(--blue-dark)">
+        La venta se guardará como: <b>${saldo > 0 ? 'Abierta' : 'Cerrada'}</b>
+      </div>
+    `;
+  },
+
+  nextStep() {
+    if (this.step === 1 && document.getElementById('vf-ti-active')) {
+      const active = document.getElementById('vf-ti-active').checked;
+      this.draft.tradeIn = active ? { modelo: document.getElementById('vf-ti-modelo').value, valor: parseFloat(document.getElementById('vf-ti-valor').value) || 0 } : null;
+    }
+    if (this.step === 0) {
+      this.draft.cliente = document.getElementById('vf-cliente').value.trim() || 'Consumidor final';
+      this.draft.vendedor = document.getElementById('vf-vendedor').value;
+    }
+    if (this.step === 2 && this.draft.items.length === 0) { toast('Agregá al menos un ítem.'); return; }
+    if (this.step === 4) { this.confirmSale(); return; }
+    this.step++;
+    this.renderStep();
+  },
+  prevStep() { if (this.step > 0) { this.step--; this.renderStep(); } },
+
+  async confirmSale() {
+    const d = this.draft;
+    const total = Math.max(0, d.items.reduce((s, i) => s + i.precio, 0) - (d.tradeIn?.valor || 0));
+    const pagado = d.pagos.reduce((s, p) => s + p.monto, 0);
+    const estado = pagado >= total ? 'cerrada' : 'abierta';
+
+    toast('Guardando venta...');
+
+    // Descontar stock de los ítems que vinieron de inventario (memoria + base de datos)
+    const stockMovs = [];
+    for (const it of d.items) {
+      if (it.stockId) {
+        const removed = State.descontarStock(it.stockId, it.imei);
+        if (removed) {
+          stockMovs.push(removed);
+          const item = State.stock.find(s => s.id === it.stockId);
+          if (item) {
+            if (item.imeis) await DB.actualizarImeisStock(it.stockId, item.imeis);
+            else await DB.actualizarCantidadStock(it.stockId, item.cantidad);
+          }
+        }
+      }
+    }
+
+    // Acreditar pagos en las cajas correspondientes (memoria + base de datos)
+    d.pagos.forEach(p => {
+      let montoEnBolsillo = p.monto;
+      if (p.bolsillo.startsWith('ARS')) montoEnBolsillo = p.monto * State.refBlue;
+      State.acreditarCaja(p.persona, p.bolsillo, montoEnBolsillo);
+    });
+
+    // Guardar la venta en Supabase
+    const ventaId = await DB.crearVenta(d, estado);
+    if (!ventaId) { toast('Hubo un problema guardando la venta. Probá de nuevo.'); return; }
+
+    const venta = {
+      id: ventaId, fecha: 'Hoy', cliente: d.cliente, vendedor: d.vendedor,
+      items: d.items, pagos: d.pagos.map(p => ({ caja: `${p.persona}-${p.bolsillo}`, monto: p.monto, persona: p.persona, bolsillo: p.bolsillo })),
+      estado, tradeIn: d.tradeIn, stockMovs
+    };
+    State.ventas.unshift(venta);
+
+    this.closeModal();
+    this.renderList();
+    toast(`Venta #${venta.id} confirmada y guardada. Stock actualizado y pagos acreditados en las cajas correspondientes.`);
+  },
+
+  viewSale(id) {
+    const v = State.ventas.find(x => x.id === id);
+    if (!v) return;
+    const total = v.items.reduce((s, i) => s + i.precio, 0);
+    const pagado = v.pagos.reduce((s, p) => s + p.monto, 0);
+    const host = document.getElementById('venta-modal-host');
+    host.innerHTML = `
+      <div style="position:fixed;inset:0;background:rgba(0,0,0,.4);display:flex;align-items:center;justify-content:center;z-index:200" onclick="if(event.target===this) Ventas.closeModal()">
+        <div style="width:440px;max-width:92vw;background:var(--bg);border-radius:14px;padding:20px" onclick="event.stopPropagation()">
+          <div style="display:flex;justify-content:space-between;margin-bottom:12px"><h3 style="font-size:15px;font-weight:600">Venta #${v.id}</h3><span class="badge ${v.estado==='cerrada'?'b-green':'b-amber'}">${v.estado==='cerrada'?'Cerrada':'Abierta'}</span></div>
+          <p style="font-size:12px;color:var(--text-secondary);margin-bottom:10px">${v.cliente} · ${v.fecha}${v.vendedor?` · Vendedor: ${v.vendedor}`:''}</p>
+          ${v.items.map(i=>`<div style="display:flex;justify-content:space-between;font-size:12.5px;padding:5px 0;border-bottom:1px solid var(--border)">${i.nombre}<span>${State.fmtUSD(i.precio)}</span></div>`).join('')}
+          <div style="display:flex;justify-content:space-between;padding:8px 0;font-weight:600">Total<span>${State.fmtUSD(total)}</span></div>
+          <div style="display:flex;justify-content:space-between;padding:4px 0;font-size:12px;color:var(--text-secondary)">Pagado<span>${State.fmtUSD(pagado)}</span></div>
+          <div style="text-align:right;margin-top:14px"><button class="btn" onclick="Ventas.closeModal()">Cerrar</button></div>
+        </div>
+      </div>
+    `;
+  },
+
+  async anular(id) {
+    const v = State.ventas.find(x => x.id === id);
+    if (!v) return;
+    if (!confirm(`¿Anular la venta #${v.id}? Esto revertirá el stock y los pagos en las cajas correspondientes.`)) return;
+    // Revertir stock (memoria + base de datos)
+    for (const m of (v.stockMovs || [])) {
+      State.restaurarStock(m.stockId, m.imei);
+      const item = State.stock.find(s => s.id === m.stockId);
+      if (item) {
+        if (item.imeis) await DB.actualizarImeisStock(m.stockId, item.imeis);
+        else await DB.actualizarCantidadStock(m.stockId, item.cantidad);
+      }
+    }
+    // Revertir cajas
+    v.pagos.forEach(p => {
+      let montoEnBolsillo = p.monto;
+      if (p.bolsillo.startsWith('ARS')) montoEnBolsillo = p.monto * State.refBlue;
+      State.debitarCaja(p.persona, p.bolsillo, montoEnBolsillo);
+    });
+    await DB.anularVenta(id);
+    State.ventas = State.ventas.filter(x => x.id !== id);
+    this.renderList();
+    toast(`Venta #${id} anulada. Stock restaurado y pagos revertidos en las cajas de origen.`);
+  }
+};
+
+</script>
+<script>
+const Reparaciones = {
+  currentId: null,
+  ESTADOS: ['ingresado','diagnosticado','en_reparacion','listo','entregado'],
+  ESTADO_LABEL: { ingresado:'Ingresado', diagnosticado:'Diagnosticado', en_reparacion:'En reparación', listo:'Listo', entregado:'Entregado', rechazado:'Rechazado', no_reparable:'No reparable' },
+  ESTADO_CLASS: { ingresado:'b-gray', diagnosticado:'b-purple', en_reparacion:'b-blue', listo:'b-green', entregado:'b-teal', rechazado:'b-red', no_reparable:'b-red' },
+
+  render() {
+    const c = document.createElement('div');
+    c.style.display = 'flex';
+    c.style.flex = '1';
+    c.style.overflow = 'hidden';
+    c.innerHTML = `
+      <div style="width:260px;min-width:260px;border-right:1px solid var(--border);display:flex;flex-direction:column;background:var(--bg-secondary)">
+        <div style="padding:12px 14px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center">
+          <b style="font-size:13px">Órdenes (${State.reparaciones.length})</b>
+          <button class="btn btn-sm btn-primary" onclick="Reparaciones.newOrder()"><i class="ti ti-plus"></i></button>
+        </div>
+        <div style="padding:8px 10px;border-bottom:1px solid var(--border)"><input type="text" id="rep-search" placeholder="Buscar..." oninput="Reparaciones.renderList()" style="width:100%;font-size:12px;padding:5px 9px;border:1px solid var(--border-strong);border-radius:8px"></div>
+        <div style="flex:1;overflow-y:auto" id="rep-list"></div>
+      </div>
+      <div style="flex:1;display:flex;flex-direction:column;overflow:hidden">
+        <div id="rep-detail" style="flex:1;overflow-y:auto;padding:18px 20px"></div>
+      </div>
+    `;
+    setTimeout(() => {
+      if (!this.currentId && State.reparaciones.length) this.currentId = State.reparaciones[0].id;
+      this.renderList();
+      this.renderDetail();
+    }, 0);
+    return c;
+  },
+
+  hasMovimientos(o) { return (o.pagos && o.pagos.length > 0) || (o.repuestos && o.repuestos.length > 0); },
+
+  renderList() {
+    const q = (document.getElementById('rep-search')?.value || '').toLowerCase();
+    const filtered = State.reparaciones.filter(o => !q || o.cliente.toLowerCase().includes(q) || o.equipo.toLowerCase().includes(q) || o.id.toLowerCase().includes(q));
+    document.getElementById('rep-list').innerHTML = filtered.map(o => {
+      const flags = [];
+      if (o.pagos?.length) flags.push(`<span class="badge b-green" style="font-size:9px">$ pago</span>`);
+      if (o.repuestos?.length) flags.push(`<span class="badge b-amber" style="font-size:9px">repuesto</span>`);
+      return `<div onclick="Reparaciones.select('${o.id}')" style="padding:10px 14px;border-bottom:1px solid var(--border);cursor:pointer;${this.currentId===o.id?'background:var(--bg);border-left:2px solid var(--blue)':''}">
+        <div style="display:flex;justify-content:space-between;font-size:12px;font-weight:600">${o.id} — ${o.equipo}<span style="font-size:10px;color:var(--text-secondary);font-weight:400">${o.fechaIngreso}</span></div>
+        <div style="font-size:11px;color:var(--text-secondary)">${o.cliente}</div>
+        <div style="margin-top:5px;display:flex;gap:4px"><span class="badge ${this.ESTADO_CLASS[o.estado]}" style="font-size:9.5px">${this.ESTADO_LABEL[o.estado]}</span>${flags.join('')}</div>
+      </div>`;
+    }).join('');
+  },
+  select(id) { this.currentId = id; this.renderList(); this.renderDetail(); },
+
+  renderDetail() {
+    const o = State.reparaciones.find(x => x.id === this.currentId);
+    const detail = document.getElementById('rep-detail');
+    if (!o) { detail.innerHTML = `<div class="empty-state"><i class="ti ti-tool"></i>Seleccioná una orden</div>`; return; }
+
+    const totalCosto = o.costoMO + o.repuestos.reduce((a, r) => a + r.costo, 0);
+    const margen = o.precioFinal - totalCosto;
+    const tieneMov = this.hasMovimientos(o);
+    const isTerminal = ['rechazado', 'no_reparable'].includes(o.estado);
+
+    let movInfo = '';
+    if (isTerminal) {
+      movInfo = tieneMov
+        ? `<div style="background:var(--red-light);border:1px solid #F09595;border-radius:8px;padding:10px 12px;margin-bottom:12px;font-size:11.5px;color:var(--red)"><b style="display:block;margin-bottom:3px">⚠ Esta orden tiene movimientos asociados</b>Usá "Cancelar orden" para revertir pagos y repuestos de stock.</div>`
+        : `<div style="background:var(--green-light);border:1px solid #97C459;border-radius:8px;padding:10px 12px;margin-bottom:12px;font-size:11.5px;color:var(--green-dark)"><b style="display:block;margin-bottom:3px">✓ Sin movimientos asociados</b>Equipo marcado automáticamente como devuelto al cliente.</div>`;
+    }
+
+    detail.innerHTML = `
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">
+        <h2 style="font-size:15px;font-weight:600">${o.id} — ${o.equipo}, ${o.cliente}</h2>
+        <span class="badge ${this.ESTADO_CLASS[o.estado]}">${this.ESTADO_LABEL[o.estado]}</span>
+      </div>
+      <div style="display:flex;gap:4px;flex-wrap:wrap;margin-bottom:14px">
+        ${this.ESTADOS.map(s => `<span onclick="Reparaciones.setEstado('${s}')" style="font-size:11px;padding:5px 11px;border-radius:20px;border:1.5px solid ${o.estado===s?'var(--blue)':'var(--border-strong)'};background:${o.estado===s?'var(--blue-light)':'var(--bg)'};color:${o.estado===s?'var(--blue-dark)':'var(--text-secondary)'};cursor:pointer">${this.ESTADO_LABEL[s]}</span>`).join('')}
+        <span onclick="Reparaciones.setEstado('rechazado')" style="font-size:11px;padding:5px 11px;border-radius:20px;border:1.5px solid #F09595;background:${o.estado==='rechazado'?'var(--red-light)':'var(--bg)'};color:${o.estado==='rechazado'?'var(--red)':'var(--text-secondary)'};cursor:pointer">Rechazado</span>
+        <span onclick="Reparaciones.setEstado('no_reparable')" style="font-size:11px;padding:5px 11px;border-radius:20px;border:1.5px solid #F09595;background:${o.estado==='no_reparable'?'var(--red-light)':'var(--bg)'};color:${o.estado==='no_reparable'?'var(--red)':'var(--text-secondary)'};cursor:pointer">No reparable</span>
+      </div>
+      ${movInfo}
+      <div style="background:var(--red-light);border:1px solid #F09595;border-radius:8px;padding:10px 12px;margin-bottom:14px;display:flex;align-items:center;gap:10px">
+        <i class="ti ti-lock" style="font-size:18px;color:var(--red)"></i>
+        <div style="flex:1"><div style="font-size:12px;font-weight:600;color:var(--red)">Clave de desbloqueo</div></div>
+        <div style="font-family:monospace;font-size:14px;font-weight:600;background:#fff;padding:4px 10px;border-radius:6px;color:var(--red)">${o.clave||'—'}</div>
+      </div>
+      <div class="card"><div class="card-title"><i class="ti ti-stethoscope"></i> Diagnóstico</div>
+        <p style="font-size:12.5px;background:var(--purple-light);padding:10px;border-radius:8px;color:var(--purple)">${o.diagnostico || 'Pendiente de diagnóstico'}</p>
+      </div>
+      <div class="card"><div class="card-title"><i class="ti ti-tool"></i> Repuestos utilizados</div>
+        ${o.repuestos.length ? o.repuestos.map(r => `<div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid var(--border);font-size:12px"><span>${r.nombre} ${r.fromStock?'<span style="color:var(--text-secondary);font-size:10px">(de stock)</span>':'<span style="color:var(--text-secondary);font-size:10px">(compra externa)</span>'}</span><b>USD ${r.costo}</b></div>`).join('') : '<p style="font-size:12px;color:var(--text-secondary)">Sin repuestos cargados</p>'}
+        <button class="btn btn-sm" style="margin-top:8px" onclick="Reparaciones.addRepuesto()"><i class="ti ti-plus"></i> Agregar repuesto</button>
+      </div>
+      <div class="card"><div class="card-title"><i class="ti ti-credit-card"></i> Pagos / señas</div>
+        ${o.pagos.length ? o.pagos.map(p => `<div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid var(--border);font-size:12px">${p.caja}<b>${State.fmtARS(p.monto)}</b></div>`).join('') : '<p style="font-size:12px;color:var(--text-secondary)">Sin pagos registrados</p>'}
+        <button class="btn btn-sm" style="margin-top:8px" onclick="Reparaciones.addPago()"><i class="ti ti-plus"></i> Registrar seña</button>
+      </div>
+      <div class="card"><div class="card-title"><i class="ti ti-currency-dollar"></i> Costos y precio</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px">
+          <div><label style="font-size:11px;color:var(--text-secondary)">Mano de obra</label><input type="number" id="rep-f-mo" value="${o.costoMO}" style="width:100%;font-size:12px;padding:6px 9px;border:1px solid var(--border-strong);border-radius:8px"></div>
+          <div><label style="font-size:11px;color:var(--text-secondary)">Precio cobrado</label><input type="number" id="rep-f-precio" value="${o.precioFinal}" style="width:100%;font-size:12px;padding:6px 9px;border:1px solid var(--border-strong);border-radius:8px"></div>
+        </div>
+        <div style="background:var(--blue-light);border-radius:8px;padding:10px;display:flex;justify-content:space-around;text-align:center">
+          <div><label style="font-size:10px;color:var(--blue-dark)">Costo</label><div style="font-weight:600;color:var(--blue-dark)">${State.fmtARS(totalCosto)}</div></div>
+          <div><label style="font-size:10px;color:var(--blue-dark)">Precio</label><div style="font-weight:600;color:var(--blue-dark)">${State.fmtARS(o.precioFinal)}</div></div>
+          <div><label style="font-size:10px;color:var(--blue-dark)">Margen</label><div style="font-weight:600;color:${margen>=0?'var(--green-dark)':'var(--red)'}">${margen>=0?'+':''}${State.fmtARS(margen)}</div></div>
+        </div>
+      </div>
+      <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:6px">
+        ${isTerminal && tieneMov ? `<button class="btn btn-red" onclick="Reparaciones.cancelarConReversion()"><i class="ti ti-arrow-back-up"></i> Cancelar orden (revertir)</button>` : ''}
+        ${o.estado === 'listo' ? `<button class="btn btn-green" onclick="Reparaciones.entregarYCobrar()"><i class="ti ti-check"></i> Entregar y cobrar</button>` : `<button class="btn btn-primary" onclick="Reparaciones.saveOrder()"><i class="ti ti-check"></i> Guardar cambios</button>`}
+      </div>
+    `;
+  },
+
+  async setEstado(estado) {
+    const o = State.reparaciones.find(x => x.id === this.currentId);
+    if (!o) return;
+    o.estado = estado;
+    if (['rechazado', 'no_reparable'].includes(estado) && !this.hasMovimientos(o)) {
+      o.equipoDevuelto = true; o.custodio = '';
+      toast('Equipo marcado como devuelto al cliente automáticamente (sin movimientos que revertir).');
+    }
+    await DB.actualizarReparacion(o);
+    this.renderList(); this.renderDetail();
+  },
+
+  async addRepuesto() {
+    const fromStockChoice = confirm('¿Es un repuesto que sale de tu stock? Aceptar = sí, de stock. Cancelar = compra externa.');
+    const nombre = prompt('Nombre del repuesto:');
+    if (!nombre) return;
+    const costo = parseFloat(prompt('Costo en USD:', '0')) || 0;
+    const o = State.reparaciones.find(x => x.id === this.currentId);
+    const repuesto = { nombre, costo, fromStock: fromStockChoice };
+    o.repuestos.push(repuesto);
+    await DB.agregarRepuestoReparacion(o.id, repuesto);
+    this.renderList(); this.renderDetail();
+  },
+
+  async addPago() {
+    const monto = parseFloat(prompt('Monto de la seña (ARS):', '0')) || 0;
+    if (!monto) return;
+    const persona = prompt('¿Qué persona recibe el pago?', 'Valen') || 'Valen';
+    const o = State.reparaciones.find(x => x.id === this.currentId);
+    const pago = { caja: `${persona}-ARS cash`, monto, persona, bolsillo: 'ARS cash' };
+    o.pagos.push(pago);
+    State.acreditarCaja(persona, 'ARS cash', monto);
+    await DB.agregarPagoReparacion(o.id, pago);
+    this.renderList(); this.renderDetail();
+    toast(`Seña de ${State.fmtARS(monto)} acreditada en la caja de ${persona}.`);
+  },
+
+  async cancelarConReversion() {
+    const o = State.reparaciones.find(x => x.id === this.currentId);
+    if (!confirm('¿Cancelar esta orden? Se revertirán los pagos en sus cajas y los repuestos de stock volverán al inventario.')) return;
+
+    toast('Revirtiendo movimientos...');
+    // Revertir pagos
+    o.pagos.forEach(p => State.debitarCaja(p.persona, p.bolsillo, p.monto));
+    // Revertir repuestos que salieron de stock (sumarlos de nuevo al inventario)
+    for (const r of o.repuestos.filter(r => r.fromStock && r.stockId)) {
+      const item = State.stock.find(s => s.id === r.stockId);
+      if (item) {
+        if (item.imeis) { /* repuestos no manejan IMEI individual en esta maqueta */ }
+        else { item.cantidad = (item.cantidad || 0) + 1; await DB.actualizarCantidadStock(r.stockId, item.cantidad); }
+      }
+    }
+    await DB.limpiarMovimientosReparacion(o.id);
+    o.pagos = [];
+    o.repuestos = o.repuestos.filter(r => !r.fromStock);
+    o.equipoDevuelto = true; o.custodio = '';
+    await DB.actualizarReparacion(o);
+    this.renderList(); this.renderDetail();
+    toast('Orden cancelada. Pagos revertidos a sus cajas de origen y repuestos de stock restaurados.');
+  },
+
+  async entregarYCobrar() {
+    const o = State.reparaciones.find(x => x.id === this.currentId);
+    const persona = o.custodio || prompt('¿En qué caja se acredita el cobro?', 'Valen') || 'Valen';
+    State.acreditarCaja(persona, 'ARS cash', o.precioFinal);
+    o.estado = 'entregado';
+    await DB.actualizarReparacion(o);
+    this.renderList(); this.renderDetail();
+    toast(`Equipo entregado. ${State.fmtARS(o.precioFinal)} acreditado en la caja de ${persona}.`);
+  },
+
+  async saveOrder() {
+    const o = State.reparaciones.find(x => x.id === this.currentId);
+    o.costoMO = parseFloat(document.getElementById('rep-f-mo').value) || 0;
+    o.precioFinal = parseFloat(document.getElementById('rep-f-precio').value) || 0;
+    await DB.actualizarReparacion(o);
+    this.renderDetail();
+    toast('Cambios guardados.');
+  },
+
+  async newOrder() {
+    const id = 'R0' + (20 + State.reparaciones.length);
+    const o = { id, cliente: 'Nuevo cliente', tel: '', equipo: 'Sin especificar', falla: '', clave: '', estado: 'ingresado', fechaIngreso: 'Hoy', diagnostico: '', presupuestoAprobado: false, repuestos: [], pagos: [], costoMO: 0, precioFinal: 0, tecnico: 'Técnico ext.', custodio: '', notas: '', equipoDevuelto: false };
+    await DB.crearReparacion(o);
+    State.reparaciones.unshift(o);
+    this.currentId = id;
+    this.renderList(); this.renderDetail();
+  }
+};
+
+</script>
+<script>
+const Gastos = {
+  activeCat: 'all',
+
+  render() {
+    const c = document.createElement('div');
+    c.innerHTML = `
+      <div class="kpi-row" style="grid-template-columns:repeat(4,1fr)">
+        <div class="kpi"><label>Gastos ARS</label><div class="val" id="g-kpi-ars">—</div></div>
+        <div class="kpi"><label>Gastos USD</label><div class="val" id="g-kpi-usd">—</div></div>
+        <div class="kpi"><label>Pendientes</label><div class="val" id="g-kpi-pend">—</div></div>
+        <div class="kpi"><label>Categoría top</label><div class="val" id="g-kpi-cat" style="font-size:13px">—</div></div>
+      </div>
+      <div style="padding:10px 22px;border-bottom:1px solid var(--border);display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+        <div id="gastos-chips" style="display:flex;gap:6px;flex-wrap:wrap"></div>
+        <button class="btn btn-sm" style="margin-left:auto" onclick="Gastos.manageCats()"><i class="ti ti-settings"></i> Categorías</button>
+        <button class="btn btn-primary btn-sm" onclick="Gastos.openNew()"><i class="ti ti-plus"></i> Registrar gasto</button>
+      </div>
+      <div class="body-pad">
+        <table><thead><tr><th>Fecha</th><th>Motivo</th><th>Categoría</th><th>Responsable</th><th>Caja</th><th>Monto</th><th>Estado</th></tr></thead>
+        <tbody id="gastos-tbody"></tbody></table>
+      </div>
+      <div id="gastos-modal-host"></div>
+    `;
+    setTimeout(() => { this.renderChips(); this.renderKpis(); this.renderTable(); }, 0);
+    return c;
+  },
+
+  catObj(id) { return State.categoriasGasto.find(c => c.id === id) || { nombre: id, color: '#888' }; },
+
+  renderChips() {
+    const html = [`<button class="btn btn-sm ${this.activeCat==='all'?'btn-primary':''}" onclick="Gastos.setCat('all')">Todos</button>`]
+      .concat(State.categoriasGasto.map(c => `<button class="btn btn-sm ${this.activeCat===c.id?'btn-primary':''}" onclick="Gastos.setCat('${c.id}')" style="${this.activeCat!==c.id?`border-color:${c.color}55`:''}">${c.nombre}</button>`));
+    document.getElementById('gastos-chips').innerHTML = html.join('');
+  },
+  setCat(c) { this.activeCat = c; this.renderChips(); this.renderTable(); },
+
+  renderKpis() {
+    const ars = State.gastos.filter(g => g.moneda === 'ARS').reduce((a, g) => a + g.monto, 0);
+    const usd = State.gastos.filter(g => g.moneda === 'USD').reduce((a, g) => a + g.monto, 0);
+    const pend = State.gastos.filter(g => g.estado === 'pendiente').length;
+    const counts = {};
+    State.gastos.forEach(g => counts[g.cat] = (counts[g.cat]||0)+1);
+    const top = Object.entries(counts).sort((a,b)=>b[1]-a[1])[0];
+    document.getElementById('g-kpi-ars').textContent = State.fmtARS(ars);
+    document.getElementById('g-kpi-usd').textContent = State.fmtUSD(usd);
+    document.getElementById('g-kpi-pend').textContent = pend;
+    document.getElementById('g-kpi-cat').textContent = top ? this.catObj(top[0]).nombre : '—';
+  },
+
+  renderTable() {
+    const rows = this.activeCat === 'all' ? State.gastos : State.gastos.filter(g => g.cat === this.activeCat);
+    document.getElementById('gastos-tbody').innerHTML = rows.map(g => {
+      const c = this.catObj(g.cat);
+      return `<tr>
+        <td>${g.fecha}</td><td>${g.motivo}</td>
+        <td><span class="badge" style="background:${c.color}22;color:${c.color}">${c.nombre}</span></td>
+        <td>${g.responsable}</td><td style="font-size:11px;color:var(--text-secondary)">${g.caja}</td>
+        <td><b>${g.moneda==='USD'?State.fmtUSD(g.monto):State.fmtARS(g.monto)}</b></td>
+        <td><span class="badge ${g.estado==='pagado'?'b-green':'b-amber'}">${g.estado==='pagado'?'Pagado':'Pendiente'}</span></td>
+      </tr>`;
+    }).join('');
+  },
+
+  openNew() {
+    const host = document.getElementById('gastos-modal-host');
+    host.innerHTML = `
+      <div style="position:fixed;inset:0;background:rgba(0,0,0,.4);display:flex;align-items:center;justify-content:center;z-index:200" onclick="if(event.target===this) Gastos.close()">
+        <div style="width:380px;max-width:92vw;background:var(--bg);border-radius:14px;padding:18px" onclick="event.stopPropagation()">
+          <h3 style="font-size:15px;font-weight:600;margin-bottom:14px">Registrar gasto</h3>
+          <div style="margin-bottom:10px"><label style="font-size:11px;color:var(--text-secondary);font-weight:600;display:block;margin-bottom:4px">Motivo</label><input type="text" id="gf-motivo" style="width:100%;font-size:12px;padding:7px 10px;border:1px solid var(--border-strong);border-radius:8px"></div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:9px;margin-bottom:10px">
+            <div><label style="font-size:11px;color:var(--text-secondary);font-weight:600;display:block;margin-bottom:4px">Categoría</label>
+              <select id="gf-cat" style="width:100%;font-size:12px;padding:7px 10px;border:1px solid var(--border-strong);border-radius:8px">${State.categoriasGasto.map(c=>`<option value="${c.id}">${c.nombre}</option>`).join('')}</select></div>
+            <div><label style="font-size:11px;color:var(--text-secondary);font-weight:600;display:block;margin-bottom:4px">Responsable</label>
+              <select id="gf-resp" style="width:100%;font-size:12px;padding:7px 10px;border:1px solid var(--border-strong);border-radius:8px">${State.personas.map(p=>`<option>${p}</option>`).join('')}</select></div>
+          </div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:9px;margin-bottom:10px">
+            <div><label style="font-size:11px;color:var(--text-secondary);font-weight:600;display:block;margin-bottom:4px">Moneda</label>
+              <select id="gf-moneda" style="width:100%;font-size:12px;padding:7px 10px;border:1px solid var(--border-strong);border-radius:8px"><option value="ARS">ARS</option><option value="USD">USD</option></select></div>
+            <div><label style="font-size:11px;color:var(--text-secondary);font-weight:600;display:block;margin-bottom:4px">Monto</label>
+              <input type="number" id="gf-monto" style="width:100%;font-size:12px;padding:7px 10px;border:1px solid var(--border-strong);border-radius:8px"></div>
+          </div>
+          <div style="margin-bottom:14px"><label style="font-size:11px;color:var(--text-secondary);font-weight:600;display:block;margin-bottom:4px">Caja que paga</label>
+            <select id="gf-caja-persona" style="width:48%;font-size:12px;padding:7px 10px;border:1px solid var(--border-strong);border-radius:8px">${State.personas.map(p=>`<option>${p}</option>`).join('')}</select>
+            <select id="gf-caja-bolsillo" style="width:48%;font-size:12px;padding:7px 10px;border:1px solid var(--border-strong);border-radius:8px;margin-left:4%"><option>ARS cash</option><option>ARS transferencia</option><option>USD cash</option><option>USD transferencia</option></select>
+          </div>
+          <div style="display:flex;gap:8px;justify-content:flex-end">
+            <button class="btn" onclick="Gastos.close()">Cancelar</button>
+            <button class="btn btn-primary" onclick="Gastos.save()"><i class="ti ti-check"></i> Guardar</button>
+          </div>
+        </div>
+      </div>
+    `;
+  },
+  close() { document.getElementById('gastos-modal-host').innerHTML = ''; },
+
+  async save() {
+    const motivo = document.getElementById('gf-motivo').value.trim();
+    const monto = parseFloat(document.getElementById('gf-monto').value) || 0;
+    if (!motivo || !monto) { toast('Completá motivo y monto.'); return; }
+    const persona = document.getElementById('gf-caja-persona').value;
+    const bolsillo = document.getElementById('gf-caja-bolsillo').value;
+    const moneda = document.getElementById('gf-moneda').value;
+    const cat = document.getElementById('gf-cat').value;
+    const responsable = document.getElementById('gf-resp').value;
+
+    toast('Guardando gasto...');
+    const newId = await DB.crearGasto({ motivo, cat, responsable, persona, bolsillo, moneda, monto, estado: 'pagado' });
+
+    State.gastos.unshift({
+      id: newId || Date.now(), fecha: 'Hoy', motivo, cat,
+      responsable, caja: `${persona}-${bolsillo}`,
+      moneda, monto, estado: 'pagado'
+    });
+    State.debitarCaja(persona, bolsillo, monto);
+    this.close(); this.renderChips(); this.renderKpis(); this.renderTable();
+    toast('Gasto registrado y debitado de la caja correspondiente.');
+  },
+
+  manageCats() {
+    const host = document.getElementById('gastos-modal-host');
+    host.innerHTML = `
+      <div style="position:fixed;inset:0;background:rgba(0,0,0,.4);display:flex;align-items:center;justify-content:center;z-index:200" onclick="if(event.target===this) Gastos.close()">
+        <div style="width:340px;max-width:92vw;background:var(--bg);border-radius:14px;padding:18px" onclick="event.stopPropagation()">
+          <h3 style="font-size:15px;font-weight:600;margin-bottom:14px">Editar categorías</h3>
+          <div id="cat-manage-list"></div>
+          <button class="btn btn-primary" style="width:100%;justify-content:center;margin-top:8px" onclick="Gastos.addCat()"><i class="ti ti-plus"></i> Nueva categoría</button>
+          <div style="text-align:right;margin-top:14px"><button class="btn" onclick="Gastos.close();Gastos.renderChips();Gastos.renderTable()">Listo</button></div>
+        </div>
+      </div>
+    `;
+    this.renderCatList();
+  },
+  renderCatList() {
+    document.getElementById('cat-manage-list').innerHTML = State.categoriasGasto.map((c, i) => `
+      <div style="display:flex;align-items:center;gap:8px;padding:7px 0;border-bottom:1px solid var(--border)">
+        <input type="color" value="${c.color}" onchange="Gastos.updateCatColor(${i}, this.value)">
+        <input type="text" value="${c.nombre}" onchange="Gastos.updateCatNombre(${i}, this.value)" style="flex:1;font-size:12px;padding:5px 8px;border:1px solid var(--border-strong);border-radius:8px">
+        <button onclick="Gastos.delCat(${i})" style="background:none;border:none;cursor:pointer;color:var(--red)"><i class="ti ti-trash"></i></button>
+      </div>`).join('');
+  },
+  async updateCatColor(i, color) {
+    State.categoriasGasto[i].color = color;
+    await DB.editarCategoriaGasto(State.categoriasGasto[i].id, { color });
+  },
+  async updateCatNombre(i, nombre) {
+    State.categoriasGasto[i].nombre = nombre;
+    await DB.editarCategoriaGasto(State.categoriasGasto[i].id, { nombre });
+  },
+  async addCat() {
+    const nombre = prompt('Nombre de la categoría:');
+    if (!nombre) return;
+    const nueva = await DB.agregarCategoriaGasto(nombre, '#185FA5');
+    State.categoriasGasto.push({ id: nueva?.id || ('cat-' + Date.now()), nombre, color: '#185FA5' });
+    this.renderCatList();
+  },
+  async delCat(i) {
+    if (!confirm('¿Eliminar esta categoría?')) return;
+    await DB.borrarCategoriaGasto(State.categoriasGasto[i].id);
+    State.categoriasGasto.splice(i, 1);
+    this.renderCatList();
+  }
+};
+
+</script>
+<script>
+const Cueva = {
+  opType: 'ars-usd',
+  OP_TYPES: [
+    { id: 'ars-usd', label: 'ARS → USD', monedaO: 'ARS', monedaD: 'USD' },
+    { id: 'usd-usdt', label: 'USD → USDT', monedaO: 'USD', monedaD: 'USDT' },
+    { id: 'usdt-ars', label: 'USDT → ARS', monedaO: 'USDT', monedaD: 'ARS' },
+    { id: 'usd-ars', label: 'USD → ARS', monedaO: 'USD', monedaD: 'ARS' },
+  ],
+  BOLSILLOS: { ARS: ['ARS cash', 'ARS transferencia'], USD: ['USD cash', 'USD transferencia'], USDT: ['USDT'] },
+
+  render() {
+    const c = document.createElement('div');
+    c.innerHTML = `
+      <div style="padding:10px 22px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center">
+        <div style="font-size:12px;color:var(--text-secondary)">${State.cambios.length} operaciones registradas</div>
+        <button class="btn btn-primary" onclick="Cueva.openNew()"><i class="ti ti-plus"></i> Nueva operación</button>
+      </div>
+      <div style="background:var(--purple-light);padding:10px 22px;font-size:12px;color:var(--purple);display:flex;gap:16px;align-items:center;flex-wrap:wrap">
+        <i class="ti ti-info-circle"></i>
+        <div><b id="cueva-resultado-financiero">—</b> resultado financiero del mes (spread de cambios — separado de las ventas)</div>
+      </div>
+      <div class="body-pad">
+        <table><thead><tr><th>Fecha</th><th>Operación</th><th>Sale (origen)</th><th>Entra (destino)</th><th>Cotización</th><th>Spread</th></tr></thead>
+        <tbody id="cueva-tbody"></tbody></table>
+      </div>
+      <div id="cueva-modal-host"></div>
+    `;
+    setTimeout(() => this.renderTable(), 0);
+    return c;
+  },
+
+  typeObj(id) { return this.OP_TYPES.find(t => t.id === id); },
+  fmtByMoneda(v, m) { return m === 'ARS' ? State.fmtARS(v) : m === 'USDT' ? v.toLocaleString('es-AR') + ' USDT' : State.fmtUSD(v); },
+
+  renderTable() {
+    const spreadTotal = State.resultadoFinancieroMes();
+    document.getElementById('cueva-resultado-financiero').textContent = (spreadTotal>=0?'+':'') + State.fmtARS(spreadTotal);
+    document.getElementById('cueva-tbody').innerHTML = State.cambios.map(o => {
+      const t = this.typeObj(o.tipo);
+      const spread = State.calcSpreadARS(o);
+      return `<tr>
+        <td>${o.fecha}</td><td><span class="badge b-purple">${t.label}</span></td>
+        <td>${o.origenP} (${o.origenB})<br><b>${this.fmtByMoneda(o.entrega, t.monedaO)}</b></td>
+        <td>${o.destinoP} (${o.destinoB})<br><b>${this.fmtByMoneda(o.recibe, t.monedaD)}</b></td>
+        <td>$${o.cotiz.toLocaleString('es-AR')}</td>
+        <td style="color:${spread>=0?'var(--green-dark)':'var(--red)'};font-weight:600">${spread>=0?'+':''}${State.fmtARS(spread)}</td>
+      </tr>`;
+    }).join('');
+  },
+
+  openNew() {
+    const host = document.getElementById('cueva-modal-host');
+    host.innerHTML = `
+      <div style="position:fixed;inset:0;background:rgba(0,0,0,.4);display:flex;align-items:center;justify-content:center;z-index:200" onclick="if(event.target===this) Cueva.close()">
+        <div style="width:400px;max-width:92vw;max-height:88vh;overflow-y:auto;background:var(--bg);border-radius:14px;padding:18px" onclick="event.stopPropagation()">
+          <h3 style="font-size:15px;font-weight:600;margin-bottom:14px">Nueva operación de cambio</h3>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:12px" id="cueva-type-grid"></div>
+
+          <div style="background:var(--red-light);border-radius:8px;padding:10px 12px;margin-bottom:8px">
+            <b style="font-size:11px;color:var(--red)">Sale de (origen)</b>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:6px">
+              <select id="cf-origen-p" style="font-size:12px;padding:6px 8px;border:1px solid var(--border-strong);border-radius:8px">${State.personas.map(p=>`<option>${p}</option>`).join('')}</select>
+              <select id="cf-origen-b" style="font-size:12px;padding:6px 8px;border:1px solid var(--border-strong);border-radius:8px"></select>
+            </div>
+            <input type="number" id="cf-entrega" placeholder="Monto que sale" oninput="Cueva.calcPreview()" style="width:100%;font-size:12px;padding:7px 9px;border:1px solid var(--border-strong);border-radius:8px;margin-top:6px">
+          </div>
+
+          <div style="text-align:center;font-size:11px;color:var(--text-secondary);margin:4px 0">cotización <input type="number" id="cf-cotiz" value="1075" oninput="Cueva.calcPreview()" style="width:65px;text-align:center;border:1px solid var(--border-strong);border-radius:6px;padding:3px"></div>
+
+          <div style="background:var(--green-light);border-radius:8px;padding:10px 12px;margin-bottom:8px">
+            <b style="font-size:11px;color:var(--green-dark)">Entra a (destino)</b>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:6px">
+              <select id="cf-destino-p" style="font-size:12px;padding:6px 8px;border:1px solid var(--border-strong);border-radius:8px">${State.personas.map(p=>`<option>${p}</option>`).join('')}</select>
+              <select id="cf-destino-b" style="font-size:12px;padding:6px 8px;border:1px solid var(--border-strong);border-radius:8px"></select>
+            </div>
+            <input type="number" id="cf-recibe" readonly placeholder="Monto que entra (calculado)" style="width:100%;font-size:12px;padding:7px 9px;border:1px solid var(--border-strong);border-radius:8px;margin-top:6px;opacity:.8">
+          </div>
+
+          <div id="cueva-preview" style="display:none;background:var(--purple-light);border-radius:8px;padding:10px 12px;margin-bottom:12px">
+            <p style="font-size:11px;color:var(--purple)">Spread vs. referencia (va al resultado financiero)</p>
+            <div id="cueva-preview-val" style="font-size:16px;font-weight:600"></div>
+          </div>
+
+          <div style="display:flex;gap:8px;justify-content:flex-end">
+            <button class="btn" onclick="Cueva.close()">Cancelar</button>
+            <button class="btn btn-primary" onclick="Cueva.save()"><i class="ti ti-check"></i> Guardar</button>
+          </div>
+        </div>
+      </div>
+    `;
+    this.renderTypeGrid();
+  },
+  close() { document.getElementById('cueva-modal-host').innerHTML = ''; },
+
+  renderTypeGrid() {
+    document.getElementById('cueva-type-grid').innerHTML = this.OP_TYPES.map(t =>
+      `<button class="btn btn-sm ${this.opType===t.id?'btn-primary':''}" onclick="Cueva.setType('${t.id}')">${t.label}</button>`
+    ).join('');
+    this.updateBolsillos();
+  },
+  updateBolsillos() {
+    const t = this.typeObj(this.opType);
+    document.getElementById('cf-origen-b').innerHTML = this.BOLSILLOS[t.monedaO].map(b => `<option>${b}</option>`).join('');
+    document.getElementById('cf-destino-b').innerHTML = this.BOLSILLOS[t.monedaD].map(b => `<option>${b}</option>`).join('');
+    document.getElementById('cf-cotiz').value = t.id === 'usd-usdt' ? State.refUsdt : State.refBlue;
+  },
+  setType(id) { this.opType = id; this.renderTypeGrid(); this.calcPreview(); },
+
+  calcPreview() {
+    const entrega = parseFloat(document.getElementById('cf-entrega').value) || 0;
+    const cotiz = parseFloat(document.getElementById('cf-cotiz').value) || 0;
+    let recibe = 0;
+    if (this.opType === 'ars-usd') recibe = cotiz ? entrega / cotiz : 0;
+    if (this.opType === 'usd-ars') recibe = entrega * cotiz;
+    if (this.opType === 'usdt-ars') recibe = entrega * cotiz;
+    if (this.opType === 'usd-usdt') recibe = entrega;
+    document.getElementById('cf-recibe').value = recibe.toFixed(2);
+    const spread = State.calcSpreadARS({ tipo: this.opType, entrega, recibe, cotiz });
+    const prev = document.getElementById('cueva-preview');
+    if (entrega > 0) {
+      prev.style.display = 'block';
+      document.getElementById('cueva-preview-val').textContent = (spread>=0?'+':'') + State.fmtARS(spread);
+      document.getElementById('cueva-preview-val').style.color = spread >= 0 ? 'var(--green-dark)' : 'var(--red)';
+    } else prev.style.display = 'none';
+  },
+
+  async save() {
+    const entrega = parseFloat(document.getElementById('cf-entrega').value) || 0;
+    const recibe = parseFloat(document.getElementById('cf-recibe').value) || 0;
+    const cotiz = parseFloat(document.getElementById('cf-cotiz').value) || 0;
+    if (!entrega || !recibe) { toast('Completá los montos.'); return; }
+    const origenP = document.getElementById('cf-origen-p').value, origenB = document.getElementById('cf-origen-b').value;
+    const destinoP = document.getElementById('cf-destino-p').value, destinoB = document.getElementById('cf-destino-b').value;
+
+    toast('Guardando operación...');
+
+    // Mover la plata de verdad entre cajas (memoria + base de datos)
+    State.debitarCaja(origenP, origenB, entrega);
+    State.acreditarCaja(destinoP, destinoB, recibe);
+
+    const nuevoOp = { tipo: this.opType, entrega, recibe, cotiz, origenP, origenB, destinoP, destinoB };
+    await DB.crearCambio(nuevoOp);
+
+    State.cambios.unshift({ id: Date.now(), fecha: 'Hoy', ...nuevoOp });
+    this.close();
+    this.renderTable();
+    toast(`Operación guardada. Se debitó de la caja de ${origenP} y se acreditó en la de ${destinoP}. El spread quedó reflejado en el resultado financiero del mes.`);
+  }
+};
+
+</script>
+<script>
+const Cajas = {
+  render() {
+    const c = document.createElement('div');
+    c.className = 'body-pad';
+    let totalARS = 0, totalUSD = 0, totalUSDT = 0;
+    Object.values(State.cajas).forEach(caja => {
+      totalARS += (caja['ARS cash']||0) + (caja['ARS transferencia']||0);
+      totalUSD += (caja['USD cash']||0) + (caja['USD transferencia']||0);
+      totalUSDT += caja['USDT']||0;
+    });
+
+    c.innerHTML = `
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:14px">
+        ${State.personas.map(p => {
+          const caja = State.cajas[p] || {};
+          const arsEquiv = (caja['ARS cash']||0) + (caja['ARS transferencia']||0) + ((caja['USD cash']||0)+(caja['USD transferencia']||0))*State.refBlue + (caja['USDT']||0)*State.refUsdt;
+          return `<div class="card">
+            <div class="card-title"><div class="av">${p.substring(0,2).toUpperCase()}</div> ${p}</div>
+            ${['ARS cash','ARS transferencia','USD cash','USD transferencia','USDT'].map(b => `
+              <div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid var(--border);font-size:12.5px">
+                <span style="color:var(--text-secondary)">${b}</span><b>${b==='USDT' ? (caja[b]||0).toLocaleString('es-AR')+' USDT' : b.startsWith('ARS') ? State.fmtARS(caja[b]||0) : State.fmtUSD(caja[b]||0)}</b>
+              </div>`).join('')}
+            <div style="display:flex;justify-content:space-between;padding-top:8px;font-weight:600">Total ARS equiv.<span style="color:var(--blue)">${State.fmtARS(arsEquiv)}</span></div>
+          </div>`;
+        }).join('')}
+      </div>
+      <div class="card">
+        <div class="card-title"><i class="ti ti-sum"></i> Consolidado total</div>
+        <div style="display:flex;gap:24px;flex-wrap:wrap">
+          <div><label style="font-size:11px;color:var(--text-secondary)">ARS total</label><div style="font-size:19px;font-weight:600">${State.fmtARS(totalARS)}</div></div>
+          <div><label style="font-size:11px;color:var(--text-secondary)">USD total</label><div style="font-size:19px;font-weight:600">${State.fmtUSD(totalUSD)}</div></div>
+          <div><label style="font-size:11px;color:var(--text-secondary)">USDT total</label><div style="font-size:19px;font-weight:600">${totalUSDT.toLocaleString('es-AR')}</div></div>
+          <div style="margin-left:auto;text-align:right"><label style="font-size:11px;color:var(--text-secondary)">Equivalente ARS (blue)</label><div style="font-size:19px;font-weight:600;color:var(--blue)">${State.fmtARS(totalARS + totalUSD*State.refBlue + totalUSDT*State.refUsdt)}</div></div>
+        </div>
+      </div>
+    `;
+    return c;
+  }
+};
+
+</script>
+<script>
+const CashFlow = {
+  render() {
+    const c = document.createElement('div');
+    c.className = 'body-pad';
+    const ventasIngresos = State.ventas.reduce((a, v) => a + v.pagos.reduce((s, p) => s + p.monto, 0), 0) * State.refBlue;
+    const gastosEgresos = State.gastos.filter(g => g.moneda === 'ARS').reduce((a, g) => a + g.monto, 0);
+    const resultComercial = State.resultadoComercialMes();
+    const resultFinanciero = State.resultadoFinancieroMes();
+
+    c.innerHTML = `
+      <div class="kpi-row" style="grid-template-columns:repeat(4,1fr);padding:0 0 14px 0;border:none">
+        <div class="kpi"><label>Ingresos por ventas</label><div class="val" style="color:var(--green-dark)">${State.fmtARS(ventasIngresos)}</div></div>
+        <div class="kpi"><label>Egresos (gastos)</label><div class="val" style="color:var(--red)">${State.fmtARS(gastosEgresos)}</div></div>
+        <div class="kpi"><label>Resultado comercial</label><div class="val">${resultComercial>=0?'+':''}${State.fmtARS(resultComercial)}</div></div>
+        <div class="kpi"><label>Resultado financiero</label><div class="val" style="color:var(--purple)">${resultFinanciero>=0?'+':''}${State.fmtARS(resultFinanciero)}</div></div>
+      </div>
+      <div class="card">
+        <div class="card-title"><i class="ti ti-list"></i> Movimientos del período</div>
+        <table><thead><tr><th>Fecha</th><th>Concepto</th><th>Tipo</th><th>Monto</th></tr></thead>
+        <tbody>
+          ${State.ventas.map(v => `<tr><td>${v.fecha}</td><td>Venta #${v.id} — ${v.cliente}</td><td><span class="badge b-blue">Venta</span></td><td style="color:var(--green-dark)">+${State.fmtUSD(v.items.reduce((s,i)=>s+i.precio,0))}</td></tr>`).join('')}
+          ${State.gastos.map(g => `<tr><td>${g.fecha}</td><td>${g.motivo}</td><td><span class="badge b-amber">Gasto</span></td><td style="color:var(--red)">-${g.moneda==='USD'?State.fmtUSD(g.monto):State.fmtARS(g.monto)}</td></tr>`).join('')}
+          ${State.cambios.map(c => `<tr><td>${c.fecha}</td><td>Cambio ${Cueva.typeObj(c.tipo).label}</td><td><span class="badge b-purple">Cambio</span></td><td style="color:${State.calcSpreadARS(c)>=0?'var(--green-dark)':'var(--red)'}">${State.calcSpreadARS(c)>=0?'+':''}${State.fmtARS(State.calcSpreadARS(c))} (spread)</td></tr>`).join('')}
+        </tbody></table>
+      </div>
+    `;
+    return c;
+  }
+};
+
+</script>
+<script>
+const Panel = {
+  activeTab: 'garantias',
+
+  render() {
+    const c = document.createElement('div');
+    c.style.display = 'flex';
+    c.style.flex = '1';
+    c.style.overflow = 'hidden';
+    c.innerHTML = `
+      <div style="width:200px;min-width:200px;border-right:1px solid var(--border);background:var(--bg-secondary);padding:8px 0" id="panel-nav"></div>
+      <div style="flex:1;overflow-y:auto;padding:18px 22px" id="panel-body"></div>
+    `;
+    setTimeout(() => { this.renderNav(); this.renderBody(); }, 0);
+    return c;
+  },
+
+  renderNav() {
+    const items = [
+      ['garantias', 'ti ti-shield', 'Garantías'],
+      ['personas', 'ti ti-users', 'Cajas y personas'],
+      ['negocio', 'ti ti-building-store', 'Datos del negocio'],
+    ];
+    document.getElementById('panel-nav').innerHTML = items.map(([k, ic, l]) =>
+      `<div onclick="Panel.setTab('${k}')" style="display:flex;align-items:center;gap:9px;padding:8px 16px;cursor:pointer;font-size:12.5px;color:${this.activeTab===k?'var(--blue)':'var(--text-secondary)'};border-left:2px solid ${this.activeTab===k?'var(--blue)':'transparent'};background:${this.activeTab===k?'var(--bg)':'transparent'};font-weight:${this.activeTab===k?'600':'400'}"><i class="${ic}"></i> ${l}</div>`
+    ).join('');
+  },
+  setTab(t) { this.activeTab = t; this.renderNav(); this.renderBody(); },
+
+  renderBody() {
+    const body = document.getElementById('panel-body');
+    if (this.activeTab === 'garantias') body.innerHTML = this.garantiasView();
+    else if (this.activeTab === 'personas') body.innerHTML = this.personasView();
+    else body.innerHTML = this.negocioView();
+  },
+
+  garantiasView() {
+    return `
+      <h3 style="font-size:13px;font-weight:600;color:var(--text-secondary);text-transform:uppercase;letter-spacing:.4px;margin-bottom:12px;border-bottom:1px solid var(--border);padding-bottom:8px">Categorías de garantía</h3>
+      <div id="garantias-list">${State.garantias.map(g => `
+        <div style="display:flex;align-items:center;gap:10px;background:var(--bg);border:1px solid var(--border);border-radius:10px;padding:12px 14px;margin-bottom:8px">
+          <span style="width:12px;height:12px;border-radius:50%;background:${g.color}"></span>
+          <div style="flex:1"><b style="font-size:13px">${g.nombre}</b></div>
+          <div style="font-size:18px;font-weight:600;color:var(--blue)">${g.dias}<span style="font-size:10px;color:var(--text-secondary);display:block;font-weight:400">días</span></div>
+          <button class="btn btn-sm" onclick="Panel.editGarantia(${g.id})"><i class="ti ti-edit"></i></button>
+          <button class="btn btn-sm" onclick="Panel.delGarantia(${g.id})" style="color:var(--red)"><i class="ti ti-trash"></i></button>
+        </div>`).join('')}</div>
+      <button class="btn btn-primary" onclick="Panel.addGarantia()"><i class="ti ti-plus"></i> Nueva categoría</button>
+    `;
+  },
+  async addGarantia() {
+    const nombre = prompt('Nombre de la categoría:'); if (!nombre) return;
+    const dias = parseInt(prompt('Días de garantía:', '30')); if (!dias) return;
+    const nueva = await DB.agregarGarantia(nombre, dias, '#185FA5');
+    State.garantias.push({ id: nueva?.id || Date.now(), nombre, dias, color: '#185FA5' });
+    this.renderBody();
+  },
+  async editGarantia(id) {
+    const g = State.garantias.find(x => x.id === id);
+    const dias = parseInt(prompt(`Días de garantía para "${g.nombre}":`, g.dias));
+    if (dias) { g.dias = dias; await DB.editarGarantia(id, dias); this.renderBody(); }
+  },
+  async delGarantia(id) {
+    if (!confirm('¿Eliminar esta categoría?')) return;
+    await DB.borrarGarantia(id);
+    State.garantias = State.garantias.filter(x => x.id !== id);
+    this.renderBody();
+  },
+
+  personasView() {
+    return `
+      <h3 style="font-size:13px;font-weight:600;color:var(--text-secondary);text-transform:uppercase;letter-spacing:.4px;margin-bottom:12px;border-bottom:1px solid var(--border);padding-bottom:8px">Personas y sus cajas</h3>
+      ${State.personas.map(p => `
+        <div style="background:var(--bg);border:1px solid var(--border);border-radius:10px;padding:12px 14px;margin-bottom:8px">
+          <b style="font-size:13px">${p}</b>
+          <div style="display:flex;flex-wrap:wrap;gap:5px;margin-top:8px">
+            ${Object.keys(State.cajas[p] || {}).map(b => `<span class="badge b-blue">${b}</span>`).join('')}
+          </div>
+        </div>`).join('')}
+      <button class="btn btn-primary" onclick="Panel.addPersona()"><i class="ti ti-plus"></i> Agregar persona</button>
+    `;
+  },
+  async addPersona() {
+    const nombre = prompt('Nombre de la nueva persona:'); if (!nombre) return;
+    await DB.agregarPersona(nombre);
+    State.personas.push(nombre);
+    State.cajas[nombre] = { 'ARS cash': 0, 'ARS transferencia': 0, 'USD cash': 0, 'USD transferencia': 0, 'USDT': 0 };
+    this.renderBody();
+  },
+
+  negocioView() {
+    return `
+      <h3 style="font-size:13px;font-weight:600;color:var(--text-secondary);text-transform:uppercase;letter-spacing:.4px;margin-bottom:12px;border-bottom:1px solid var(--border);padding-bottom:8px">Datos del negocio</h3>
+      <div class="card">
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px">
+          <div><label style="font-size:11px;color:var(--text-secondary);font-weight:600">Nombre</label><input type="text" value="iPhoneMood" style="width:100%;font-size:12px;padding:7px 10px;border:1px solid var(--border-strong);border-radius:8px;margin-top:4px"></div>
+          <div><label style="font-size:11px;color:var(--text-secondary);font-weight:600">Email</label><input type="text" value="iphonemood.ar@gmail.com" style="width:100%;font-size:12px;padding:7px 10px;border:1px solid var(--border-strong);border-radius:8px;margin-top:4px"></div>
+        </div>
+        <div><label style="font-size:11px;color:var(--text-secondary);font-weight:600">Dirección</label><input type="text" value="Julio Argentino Roca 700, Granadero Baigorria, Santa Fe" style="width:100%;font-size:12px;padding:7px 10px;border:1px solid var(--border-strong);border-radius:8px;margin-top:4px"></div>
+      </div>
+    `;
+  }
+};
+
+</script>
+<script>
+const App = {
+  PAGES: {
+    dashboard: { title: 'Panel general', module: Dashboard },
+    ventas: { title: 'Ventas', module: Ventas },
+    stock: { title: 'Stock', module: Stock },
+    reparaciones: { title: 'Reparaciones', module: Reparaciones },
+    gastos: { title: 'Gastos', module: Gastos },
+    cueva: { title: 'Cueva / cambio de divisas', module: Cueva },
+    cajas: { title: 'Cajas', module: Cajas },
+    cashflow: { title: 'Cash flow', module: CashFlow },
+    panel: { title: 'Panel de control', module: Panel },
+  },
+
+  async init() {
+    document.querySelectorAll('.nav-item').forEach(item => {
+      item.addEventListener('click', () => this.goTo(item.dataset.page));
+    });
+
+    const container = document.getElementById('pages');
+    container.innerHTML = `<div class="empty-state" style="margin:auto"><i class="ti ti-loader-2" style="font-size:32px"></i><div style="margin-top:8px">Cargando datos desde la base...</div></div>`;
+    container.style.display = 'flex';
+    container.style.alignItems = 'center';
+    container.style.justifyContent = 'center';
+    container.style.flex = '1';
+
+    try {
+      await DB.cargarTodo();
+    } catch (err) {
+      console.error('Error cargando datos de Supabase', err);
+      container.innerHTML = `<div class="empty-state" style="margin:auto"><i class="ti ti-alert-triangle"></i>No se pudo conectar con la base de datos. Revisá tu conexión a internet y recargá la página.</div>`;
+      return;
+    }
+
+    document.getElementById('topbar-blue').textContent = State.refBlue;
+    document.getElementById('topbar-usdt').textContent = State.refUsdt;
+    this.goTo('dashboard');
+  },
+
+  goTo(pageKey) {
+    const page = this.PAGES[pageKey];
+    if (!page) return;
+    document.getElementById('page-title').textContent = page.title;
+    document.querySelectorAll('.nav-item').forEach(n => n.classList.toggle('active', n.dataset.page === pageKey));
+    const container = document.getElementById('pages');
+    container.innerHTML = '';
+    container.className = '';
+    const pageEl = document.createElement('div');
+    pageEl.style.flex = '1';
+    pageEl.style.display = 'flex';
+    pageEl.style.flexDirection = 'column';
+    pageEl.style.overflow = 'hidden';
+    pageEl.appendChild(page.module.render());
+    container.appendChild(pageEl);
+    container.style.display = 'flex';
+    container.style.flex = '1';
+    container.style.flexDirection = 'column';
+    container.style.overflow = 'hidden';
+    // cerrar sidebar en mobile al navegar
+    document.getElementById('sidebar').classList.remove('open');
+  }
+};
+
+document.addEventListener('DOMContentLoaded', () => App.init());
+
+</script>
+</body>
+</html>

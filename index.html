@@ -589,17 +589,31 @@ const Sheets = {
   // Envía una fila a la pestaña indicada. No bloquea ni interrumpe la app
   // si falla — el respaldo es "best effort", la fuente de verdad sigue siendo Supabase.
   async enviar(pestana, fila) {
+    const payload = JSON.stringify({ pestana, fila });
+    try {
+      const res = await fetch(SHEETS_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+        body: payload,
+        redirect: 'follow'
+      });
+      const data = await res.json().catch(() => null);
+      if (data && data.ok === true) return; // éxito confirmado
+      console.warn('Sheets respondió sin confirmar éxito, reintentando en modo alternativo:', data);
+    } catch (err) {
+      console.warn('Primer intento de sincronizar con Sheets falló, reintentando en modo alternativo:', err);
+    }
+    // Reintento de respaldo: algunos navegadores bloquean la lectura de la respuesta
+    // de Apps Script por la redirección a googleusercontent.com. Con no-cors el
+    // envío igual llega al servidor aunque no podamos leer la confirmación.
     try {
       await fetch(SHEETS_URL, {
-        method: 'POST',
-        // 'no-cors' evita que el navegador bloquee la respuesta por CORS;
-        // no podemos leer la respuesta, pero el envío sí llega al script.
-        mode: 'no-cors',
-        headers: { 'Content-Type': 'text/plain' },
-        body: JSON.stringify({ pestana, fila })
+        method: 'POST', mode: 'no-cors',
+        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+        body: payload
       });
-    } catch (err) {
-      console.warn('No se pudo sincronizar con Google Sheets (no afecta el guardado real):', err);
+    } catch (err2) {
+      console.warn('No se pudo sincronizar con Google Sheets (no afecta el guardado real):', err2);
     }
   },
 

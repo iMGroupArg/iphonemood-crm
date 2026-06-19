@@ -292,13 +292,21 @@ const DB = {
     });
 
     // stock
-    State.stock = (stockRes.data || []).map(s => ({
-      id: s.id, cat: s.categoria, nombre: s.nombre,
-      imeis: s.imeis && s.imeis.length ? [...s.imeis] : undefined,
-      cantidad: s.imeis && s.imeis.length ? undefined : s.cantidad,
-      costoUSD: Number(s.costo_usd), cotiz: Number(s.cotizacion), precioARS: Number(s.precio_ars),
-      proveedor: s.proveedor, custodio: this.personasIdToNombre[s.custodio_id] || '', notas: s.notas || ''
-    }));
+    const CATS_IMEI = ['iphone', 'android', 'mac', 'ipad'];
+    State.stock = (stockRes.data || []).map(s => {
+      const esIMEI = CATS_IMEI.includes(s.categoria);
+      return {
+        id: s.id, cat: s.categoria, nombre: s.nombre,
+        imeis: esIMEI ? [...(s.imeis || [])] : undefined,
+        cantidad: Number(s.cantidad) || 0,
+        cantidadDeclarada: Number(s.cantidad) || 0,
+        costoUSD: Number(s.costo_usd), cotiz: Number(s.cotizacion), precioARS: Number(s.precio_ars),
+        proveedor: s.proveedor, custodio: this.personasIdToNombre[s.custodio_id] || '', notas: s.notas || '',
+        precioReventa: s.precio_reventa ? Number(s.precio_reventa) : null,
+        precioMayorista: s.precio_mayorista ? Number(s.precio_mayorista) : null,
+        costoReparacion: Number(s.costo_reparacion) || 0
+      };
+    });
 
     // garantías
     State.garantias = (garantiasRes.data || []).map(g => ({ id: g.id, nombre: g.nombre, dias: g.dias, color: g.color }));
@@ -385,7 +393,9 @@ const DB = {
     const row = {
       categoria: obj.cat, nombre: obj.nombre, imeis: obj.imeis || [], cantidad: obj.cantidad || 0,
       costo_usd: obj.costoUSD, cotizacion: obj.cotiz, precio_ars: obj.precioARS,
-      proveedor: obj.proveedor, custodio_id: this.personaId(obj.custodio) || null, notas: obj.notas || ''
+      proveedor: obj.proveedor, custodio_id: this.personaId(obj.custodio) || null, notas: obj.notas || '',
+      precio_reventa: obj.precioReventa || null, precio_mayorista: obj.precioMayorista || null,
+      costo_reparacion: obj.costoReparacion || 0
     };
     if (idExistente) {
       const { error } = await supa.from('stock').update(row).eq('id', idExistente);
@@ -396,11 +406,34 @@ const DB = {
     }
   },
 
+  async registrarMovimientoStock(stockId, tipo, detalle, cantidadAntes, cantidadDespues) {
+    // Guardamos quién hizo el cambio usando el usuario logueado en la app (no necesariamente
+    // coincide con las "personas" de cajas del negocio — son dos conceptos distintos).
+    const usuarioNombre = Auth.usuario?.nombre || Auth.usuario?.email || 'Desconocido';
+    await supa.from('stock_movimientos').insert({
+      stock_id: stockId, tipo, detalle,
+      cantidad_antes: cantidadAntes, cantidad_despues: cantidadDespues,
+      usuario_nombre: usuarioNombre
+    });
+  },
+
+  async listarMovimientosStock(stockId) {
+    let query = supa.from('stock_movimientos').select('*').order('creado_en', { ascending: false });
+    if (stockId) query = query.eq('stock_id', stockId);
+    else query = query.limit(200);
+    const { data, error } = await query;
+    return data || [];
+  },
+
   async actualizarImeisStock(stockId, imeis) {
     await supa.from('stock').update({ imeis }).eq('id', stockId);
   },
   async actualizarCantidadStock(stockId, cantidad) {
     await supa.from('stock').update({ cantidad }).eq('id', stockId);
+  },
+
+  async eliminarProductoStock(stockId) {
+    await supa.from('stock').delete().eq('id', stockId);
   },
 
   async crearVenta(draft, estado) {
@@ -694,7 +727,17 @@ const State = {
   fmtARS(n) { return '$' + Math.round(n).toLocaleString('es-AR'); },
   fmtUSD(n) { return 'USD ' + Number(n).toLocaleString('es-AR', { maximumFractionDigits: 2 }); },
 
-  getStock(p) { return p.imeis ? p.imeis.length : (p.cantidad || 0); },
+  // El stock real es el MÁXIMO entre la cantidad declarada y la cantidad de IMEIs
+  // cargados (para productos que usan IMEI) — así nunca subestima lo que hay
+  // físicamente aunque todavía no se hayan identificado todos los IMEIs uno por uno.
+  getStock(p) {
+    if (p.imeis) {
+      const porIMEI = p.imeis.length;
+      const declarada = p.cantidadDeclarada ?? p.cantidad ?? 0;
+      return Math.max(porIMEI, declarada);
+    }
+    return p.cantidad || 0;
+  },
   getStockStatus(p) {
     const s = this.getStock(p);
     if (s === 0) return 'out';
@@ -1065,37 +1108,68 @@ const Dashboard = {
 <script>
 const Stock = {
   currentTab: 'all',
+  currentView: 'productos', // 'productos' | 'historial'
   CAT_LABELS: { iphone:'iPhone', android:'Android', mac:'Mac', ipad:'iPad', watch:'Watch', audio:'Audio', perfumeria:'Perfumería', accesorio:'Accesorio', repuesto:'Repuesto', otro:'Otro' },
   CAT_CLASS: { iphone:'b-blue', android:'b-teal', mac:'b-blue', ipad:'b-blue', watch:'b-blue', audio:'b-purple', perfumeria:'b-green', accesorio:'b-purple', repuesto:'b-amber', otro:'b-gray' },
   CATS_IMEI: ['iphone','android','mac','ipad'],
+  TIPO_MOV_LABEL: { alta:'Alta', baja_venta:'Baja por venta', ajuste_cantidad:'Ajuste de cantidad', imei_agregado:'IMEI agregado', imei_quitado:'IMEI quitado', edicion:'Edición' },
+  TIPO_MOV_CLASS: { alta:'b-green', baja_venta:'b-red', ajuste_cantidad:'b-amber', imei_agregado:'b-blue', imei_quitado:'b-gray', edicion:'b-purple' },
+  pendingImeis: [],
+
+  // El stock real de un producto se calcula en State.getStock (compartido con
+  // Ventas, Dashboard y Reparaciones, para que todos los módulos coincidan).
+  stockReal(p) { return State.getStock(p); },
 
   render() {
     const c = document.createElement('div');
     c.innerHTML = `
       <div style="padding:14px 22px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap">
-        <div style="display:flex;gap:4px;flex-wrap:wrap" id="stock-tabs"></div>
+        <div style="display:flex;gap:4px" id="stock-view-tabs"></div>
         <button class="btn btn-primary" onclick="Stock.openDrawer('new')"><i class="ti ti-plus"></i> Agregar producto</button>
       </div>
-      <div style="padding:12px 22px;border-bottom:1px solid var(--border);display:flex;gap:8px;flex-wrap:wrap">
-        <input type="text" id="stock-search" placeholder="Buscar producto..." oninput="Stock.renderTable()" style="font-size:12px;padding:6px 10px;border:1px solid var(--border-strong);border-radius:8px;flex:1;min-width:160px">
-        <select id="stock-filter-prov" onchange="Stock.renderTable()" style="font-size:12px;padding:6px 10px;border:1px solid var(--border-strong);border-radius:8px">
-          <option value="">Todos los proveedores</option>
-          <option>Gonza</option><option>Proveedor perfumería</option><option>Proveedor accesorios</option>
-        </select>
-      </div>
-      <div class="body-pad" style="padding-top:14px">
-        <table class="stock-table-desktop"><thead><tr>
-          <th>Producto</th><th>Rubro</th><th>Proveedor</th><th>Custodio</th><th>Costo USD</th><th>Precio venta USD</th><th>Margen</th><th>Stock</th><th>Estado</th><th></th>
-        </tr></thead><tbody id="stock-tbody"></tbody></table>
-        <div class="stock-cards-mobile" id="stock-cards"></div>
-      </div>
+      <div id="stock-view-host"></div>
       <div id="stock-drawer-host"></div>
     `;
-    setTimeout(() => { this.renderTabs(); this.renderTable(); }, 0);
+    setTimeout(() => this.renderView(), 0);
     return c;
   },
 
   isMobile() { return window.innerWidth <= 900; },
+
+  renderView() {
+    document.getElementById('stock-view-tabs').innerHTML = `
+      <button class="btn btn-sm ${this.currentView==='productos'?'btn-primary':''}" onclick="Stock.setView('productos')"><i class="ti ti-box"></i> Productos</button>
+      <button class="btn btn-sm ${this.currentView==='historial'?'btn-primary':''}" onclick="Stock.setView('historial')"><i class="ti ti-history"></i> Historial de movimientos</button>
+    `;
+    const host = document.getElementById('stock-view-host');
+    if (this.currentView === 'productos') {
+      host.innerHTML = `
+        <div style="padding:12px 22px;border-bottom:1px solid var(--border);display:flex;gap:8px;flex-wrap:wrap" id="stock-tabs-wrap">
+          <div style="display:flex;gap:4px;flex-wrap:wrap" id="stock-tabs"></div>
+        </div>
+        <div style="padding:0 22px 12px;border-bottom:1px solid var(--border);display:flex;gap:8px;flex-wrap:wrap">
+          <input type="text" id="stock-search" placeholder="Buscar producto..." oninput="Stock.renderTable()" style="font-size:12px;padding:6px 10px;border:1px solid var(--border-strong);border-radius:8px;flex:1;min-width:160px">
+          <select id="stock-filter-prov" onchange="Stock.renderTable()" style="font-size:12px;padding:6px 10px;border:1px solid var(--border-strong);border-radius:8px">
+            <option value="">Todos los proveedores</option>
+            <option>Gonza</option><option>Proveedor perfumería</option><option>Proveedor accesorios</option>
+          </select>
+        </div>
+        <div class="body-pad" style="padding-top:14px">
+          <table class="stock-table-desktop"><thead><tr>
+            <th>Producto</th><th>Rubro</th><th>Proveedor</th><th>Custodio</th><th>Costo USD</th><th>Precio venta USD</th><th>Margen</th><th>Stock</th><th>Estado</th><th></th>
+          </tr></thead><tbody id="stock-tbody"></tbody></table>
+          <div class="stock-cards-mobile" id="stock-cards"></div>
+        </div>
+      `;
+      this.renderTabs();
+      this.renderTable();
+    } else {
+      host.innerHTML = `<div class="body-pad" id="historial-general-host"></div>`;
+      this.renderHistorialGeneral();
+    }
+  },
+
+  setView(v) { this.currentView = v; this.renderView(); },
 
   renderTabs() {
     const cats = ['all', ...new Set(State.stock.map(s => s.cat))];
@@ -1118,6 +1192,7 @@ const Stock = {
     });
     const tbody = document.getElementById('stock-tbody');
     const cardsHost = document.getElementById('stock-cards');
+    if (!tbody) return;
 
     if (!rows.length) {
       tbody.innerHTML = `<tr><td colspan="10"><div class="empty-state"><i class="ti ti-box"></i>Sin productos que coincidan</div></td></tr>`;
@@ -1125,13 +1200,20 @@ const Stock = {
       return;
     }
 
-    tbody.innerHTML = rows.map(p => {
-      const stock = State.getStock(p);
-      const status = State.getStockStatus(p);
+    const filaTabla = (p) => {
+      const stock = this.stockReal(p);
+      const status = stock === 0 ? 'out' : stock <= 1 ? 'low' : 'ok';
       const costoARS = p.costoUSD * p.cotiz;
       const margin = Math.round(((p.precioARS - costoARS) / costoARS) * 100);
       const precioUSD = p.cotiz ? (p.precioARS / p.cotiz) : 0;
+      const esIMEI = this.CATS_IMEI.includes(p.cat);
+      const detalleStock = esIMEI ? `${stock} <span style="font-size:9px;color:var(--text-secondary)">(${(p.imeis||[]).length} IMEI)</span>` : `${stock}`;
       const statusBadge = status === 'ok' ? `<span class="badge b-green">OK</span>` : status === 'low' ? `<span class="badge b-amber">Bajo</span>` : `<span class="badge b-red">Sin stock</span>`;
+      return { stock, status, margin, precioUSD, esIMEI, detalleStock, statusBadge };
+    };
+
+    tbody.innerHTML = rows.map(p => {
+      const { margin, precioUSD, detalleStock, statusBadge } = filaTabla(p);
       return `<tr>
         <td><b>${p.nombre}</b>${p.notas ? `<div style="font-size:10.5px;color:var(--text-secondary)">${p.notas}</div>` : ''}</td>
         <td><span class="badge ${this.CAT_CLASS[p.cat]||'b-gray'}">${this.CAT_LABELS[p.cat]||p.cat}</span></td>
@@ -1140,7 +1222,7 @@ const Stock = {
         <td>USD ${p.costoUSD}</td>
         <td>${State.fmtUSD(precioUSD)}<div style="font-size:10px;color:var(--text-secondary)">${State.fmtARS(p.precioARS)}</div></td>
         <td style="color:${margin>=0?'var(--green-dark)':'var(--red)'}">${margin>=0?'+':''}${margin}%</td>
-        <td>${stock}${p.imeis ? ' <span style="font-size:9px;color:var(--text-secondary)">IMEI</span>' : ''}</td>
+        <td>${detalleStock}</td>
         <td>${statusBadge}</td>
         <td><button class="btn btn-sm" onclick="Stock.openDrawer('edit',${p.id})"><i class="ti ti-edit"></i></button></td>
       </tr>`;
@@ -1148,12 +1230,7 @@ const Stock = {
 
     if (cardsHost) {
       cardsHost.innerHTML = rows.map(p => {
-        const stock = State.getStock(p);
-        const status = State.getStockStatus(p);
-        const costoARS = p.costoUSD * p.cotiz;
-        const margin = Math.round(((p.precioARS - costoARS) / costoARS) * 100);
-        const precioUSD = p.cotiz ? (p.precioARS / p.cotiz) : 0;
-        const statusBadge = status === 'ok' ? `<span class="badge b-green">OK</span>` : status === 'low' ? `<span class="badge b-amber">Bajo</span>` : `<span class="badge b-red">Sin stock</span>`;
+        const { margin, precioUSD, detalleStock, statusBadge } = filaTabla(p);
         return `<div class="stock-card" onclick="Stock.openDrawer('edit',${p.id})">
           <div class="stock-card-top">
             <div style="min-width:0;flex:1">
@@ -1166,7 +1243,7 @@ const Stock = {
             <div><label>Costo</label><span>USD ${p.costoUSD}</span></div>
             <div><label>Venta</label><span>${State.fmtUSD(precioUSD)}</span></div>
             <div><label>Margen</label><span style="color:${margin>=0?'var(--green-dark)':'var(--red)'}">${margin>=0?'+':''}${margin}%</span></div>
-            <div><label>Stock</label><span>${stock}${p.imeis ? ' IMEI' : ''}</span></div>
+            <div><label>Stock</label><span>${detalleStock}</span></div>
           </div>
           <div class="stock-card-bottom">
             <span><i class="ti ti-truck"></i> ${p.proveedor}</span>
@@ -1178,35 +1255,102 @@ const Stock = {
     }
   },
 
+  // ===== HISTORIAL =====
+
+  async renderHistorialGeneral() {
+    const host = document.getElementById('historial-general-host');
+    host.innerHTML = `<div class="empty-state"><i class="ti ti-loader-2"></i>Cargando historial...</div>`;
+    const movs = await DB.listarMovimientosStock(null);
+    if (!movs.length) { host.innerHTML = `<div class="empty-state"><i class="ti ti-history"></i>Todavía no hay movimientos registrados</div>`; return; }
+    const nombrePorId = {};
+    State.stock.forEach(p => nombrePorId[p.id] = p.nombre);
+    host.innerHTML = `
+      <table><thead><tr><th>Fecha</th><th>Producto</th><th>Tipo</th><th>Detalle</th><th>Cantidad</th><th>Usuario</th></tr></thead>
+      <tbody>
+        ${movs.map(m => `<tr>
+          <td style="white-space:nowrap;font-size:11.5px">${this.fmtFechaHora(m.creado_en)}</td>
+          <td>${nombrePorId[m.stock_id] || '(producto eliminado)'}</td>
+          <td><span class="badge ${this.TIPO_MOV_CLASS[m.tipo]||'b-gray'}">${this.TIPO_MOV_LABEL[m.tipo]||m.tipo}</span></td>
+          <td style="font-size:11.5px;color:var(--text-secondary)">${m.detalle || '—'}</td>
+          <td style="font-size:11.5px">${m.cantidad_antes ?? '—'} → ${m.cantidad_despues ?? '—'}</td>
+          <td style="font-size:11.5px">${m.usuario_nombre || '—'}</td>
+        </tr>`).join('')}
+      </tbody></table>
+    `;
+  },
+
+  async renderHistorialProducto(stockId) {
+    const host = document.getElementById('historial-producto-host');
+    if (!host) return;
+    host.innerHTML = `<div class="empty-state" style="padding:20px"><i class="ti ti-loader-2"></i>Cargando...</div>`;
+    const movs = await DB.listarMovimientosStock(stockId);
+    if (!movs.length) { host.innerHTML = `<div class="hint" style="font-size:11.5px;color:var(--text-secondary);padding:8px 0">Sin movimientos registrados todavía para este producto.</div>`; return; }
+    host.innerHTML = movs.map(m => `
+      <div style="display:flex;justify-content:space-between;align-items:center;padding:7px 0;border-bottom:1px solid var(--border);font-size:11.5px">
+        <div>
+          <span class="badge ${this.TIPO_MOV_CLASS[m.tipo]||'b-gray'}">${this.TIPO_MOV_LABEL[m.tipo]||m.tipo}</span>
+          <span style="color:var(--text-secondary);margin-left:6px">${m.detalle || ''}</span>
+        </div>
+        <div style="text-align:right;color:var(--text-secondary)">
+          <div>${this.fmtFechaHora(m.creado_en)}</div>
+          <div>${m.usuario_nombre || ''}</div>
+        </div>
+      </div>
+    `).join('');
+  },
+
+  fmtFechaHora(iso) {
+    if (!iso) return '—';
+    const d = new Date(iso);
+    return d.toLocaleDateString('es-AR', { day:'2-digit', month:'2-digit' }) + ' ' + d.toLocaleTimeString('es-AR', { hour:'2-digit', minute:'2-digit' });
+  },
+
+  // ===== FORMULARIO =====
+
   openDrawer(mode, id) {
-    const p = mode === 'edit' ? State.stock.find(x => x.id === id) : { cat: 'iphone', nombre: '', costoUSD: '', cotiz: State.refBlue, precioARS: '', proveedor: 'Gonza', custodio: '', notas: '', imeis: [], cantidad: 1 };
+    const existing = mode === 'edit' ? State.stock.find(x => x.id === id) : null;
+    const p = existing || { cat: 'iphone', nombre: '', costoUSD: '', cotiz: State.refBlue, precioARS: '', proveedor: 'Gonza', custodio: '', notas: '', imeis: [], cantidad: 0, cantidadDeclarada: 1, precioReventa: null, precioMayorista: null, costoReparacion: 0 };
     const host = document.getElementById('stock-drawer-host');
     const esIMEI = this.CATS_IMEI.includes(p.cat);
+    const cantidadDeclarada = p.cantidadDeclarada ?? p.cantidad ?? (esIMEI ? 0 : 1);
     host.innerHTML = `
       <div class="drawer-bg" style="position:fixed;inset:0;background:rgba(0,0,0,.35);display:flex;justify-content:flex-end;z-index:100" onclick="if(event.target===this) Stock.closeDrawer()">
-        <div style="width:380px;max-width:92vw;background:var(--bg);border-left:1px solid var(--border);display:flex;flex-direction:column;height:100%" onclick="event.stopPropagation()">
+        <div style="width:400px;max-width:92vw;background:var(--bg);border-left:1px solid var(--border);display:flex;flex-direction:column;height:100%" onclick="event.stopPropagation()">
           <div style="padding:16px 18px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center">
             <h3 style="font-size:14px;font-weight:600">${mode==='new'?'Agregar producto':'Editar producto'}</h3>
             <button class="btn btn-sm" onclick="Stock.closeDrawer()"><i class="ti ti-x"></i></button>
           </div>
           <div style="flex:1;overflow-y:auto;padding:16px 18px">
+
             <div style="margin-bottom:12px"><label style="font-size:11px;color:var(--text-secondary);font-weight:600;display:block;margin-bottom:6px">Categoría</label>
               <select id="f-cat" style="width:100%;font-size:12px;padding:7px 10px;border:1px solid var(--border-strong);border-radius:8px" onchange="Stock.toggleFields()" onclick="Stock.toggleFields()">
                 ${Object.entries(this.CAT_LABELS).map(([k,v]) => `<option value="${k}" ${p.cat===k?'selected':''}>${v}</option>`).join('')}
               </select>
-              <div class="hint" style="font-size:10.5px;color:var(--text-secondary);margin-top:4px">iPhone, Android, Mac e iPad usan IMEI. El resto de las categorías usan cantidad.</div>
             </div>
+
             <div style="margin-bottom:12px"><label style="font-size:11px;color:var(--text-secondary);font-weight:600;display:block;margin-bottom:4px">Nombre / modelo</label>
               <input type="text" id="f-nombre" value="${p.nombre||''}" placeholder="ej: iPhone 15 128GB Negro" style="width:100%;font-size:12px;padding:7px 10px;border:1px solid var(--border-strong);border-radius:8px">
             </div>
+
             <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:12px">
               <div><label style="font-size:11px;color:var(--text-secondary);font-weight:600;display:block;margin-bottom:4px">Costo USD</label><input type="number" id="f-costo" value="${p.costoUSD||''}" style="width:100%;font-size:12px;padding:7px 10px;border:1px solid var(--border-strong);border-radius:8px"></div>
               <div><label style="font-size:11px;color:var(--text-secondary);font-weight:600;display:block;margin-bottom:4px">Cotización</label><input type="number" id="f-cotiz" value="${p.cotiz||State.refBlue}" oninput="Stock.updatePricePreview()" style="width:100%;font-size:12px;padding:7px 10px;border:1px solid var(--border-strong);border-radius:8px"></div>
             </div>
+
             <div style="margin-bottom:12px"><label style="font-size:11px;color:var(--text-secondary);font-weight:600;display:block;margin-bottom:4px">Precio de venta (USD)</label>
               <input type="number" id="f-precio-usd" value="${p.precioARS && p.cotiz ? (p.precioARS / p.cotiz).toFixed(2) : ''}" placeholder="ej: 790" oninput="Stock.updatePricePreview()" style="width:100%;font-size:12px;padding:7px 10px;border:1px solid var(--border-strong);border-radius:8px">
-              <div style="font-size:10.5px;color:var(--text-secondary);margin-top:3px" id="precio-ars-preview">${p.precioARS ? '≈ ' + State.fmtARS(p.precioARS) + ' a la cotización indicada' : ''}</div>
+              <div class="hint" style="font-size:10.5px;color:var(--text-secondary);margin-top:3px" id="precio-ars-preview">${p.precioARS ? '≈ ' + State.fmtARS(p.precioARS) + ' a la cotización indicada' : ''}</div>
             </div>
+
+            <button type="button" onclick="Stock.toggleAdvancedPrices()" style="background:none;border:none;color:var(--blue);font-size:11.5px;cursor:pointer;display:flex;align-items:center;gap:4px;padding:0;margin-bottom:12px"><i class="ti ti-chevron-down" id="adv-prices-arrow"></i> Precios avanzados (opcional)</button>
+            <div id="adv-prices-wrap" style="display:none;margin-bottom:6px">
+              <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:12px">
+                <div><label style="font-size:11px;color:var(--text-secondary);font-weight:600;display:block;margin-bottom:4px">Precio reventa (USD)</label><input type="number" id="f-precio-reventa" value="${p.precioReventa||''}" placeholder="opcional" style="width:100%;font-size:12px;padding:7px 10px;border:1px solid var(--border-strong);border-radius:8px"><div class="hint" style="font-size:10px;color:var(--text-secondary);margin-top:3px">Catálogo de revendedores</div></div>
+                <div><label style="font-size:11px;color:var(--text-secondary);font-weight:600;display:block;margin-bottom:4px">Precio mayorista (USD)</label><input type="number" id="f-precio-mayorista" value="${p.precioMayorista||''}" placeholder="opcional" style="width:100%;font-size:12px;padding:7px 10px;border:1px solid var(--border-strong);border-radius:8px"><div class="hint" style="font-size:10px;color:var(--text-secondary);margin-top:3px">Venta por volumen</div></div>
+              </div>
+              <div style="margin-bottom:12px"><label style="font-size:11px;color:var(--text-secondary);font-weight:600;display:block;margin-bottom:4px">Costo de reparación previa (USD)</label><input type="number" id="f-costo-reparacion" value="${p.costoReparacion||0}" style="width:100%;font-size:12px;padding:7px 10px;border:1px solid var(--border-strong);border-radius:8px"><div class="hint" style="font-size:10px;color:var(--text-secondary);margin-top:3px">Si el equipo se reparó antes de ponerlo a la venta</div></div>
+            </div>
+
             <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:12px">
               <div><label style="font-size:11px;color:var(--text-secondary);font-weight:600;display:block;margin-bottom:4px">Proveedor</label>
                 <select id="f-prov" style="width:100%;font-size:12px;padding:7px 10px;border:1px solid var(--border-strong);border-radius:8px">
@@ -1220,45 +1364,61 @@ const Stock = {
                 </select>
               </div>
             </div>
-            <div id="f-qty-wrap" style="margin-bottom:12px;display:${esIMEI?'none':'block'}">
-              <label style="font-size:11px;color:var(--text-secondary);font-weight:600;display:block;margin-bottom:4px">Cantidad en stock</label>
+
+            <div style="margin-bottom:12px;background:var(--bg-secondary);border-radius:8px;padding:12px">
+              <label style="font-size:11px;color:var(--text-secondary);font-weight:600;display:block;margin-bottom:4px">Cantidad de unidades</label>
               <div style="display:flex;align-items:center;gap:8px">
-                <button type="button" onclick="Stock.bumpQty(-1)" style="width:32px;height:32px;border:1px solid var(--border-strong);border-radius:8px;background:var(--bg-secondary);cursor:pointer;font-size:16px">−</button>
-                <input type="number" id="f-cantidad" value="${p.cantidad !== undefined && p.cantidad !== null ? p.cantidad : 1}" min="0" style="width:100%;text-align:center;font-size:13px;font-weight:600;padding:7px 10px;border:1px solid var(--border-strong);border-radius:8px">
-                <button type="button" onclick="Stock.bumpQty(1)" style="width:32px;height:32px;border:1px solid var(--border-strong);border-radius:8px;background:var(--bg-secondary);cursor:pointer;font-size:16px">+</button>
+                <button type="button" onclick="Stock.bumpQty(-1)" style="width:32px;height:32px;border:1px solid var(--border-strong);border-radius:8px;background:var(--bg);cursor:pointer;font-size:16px">−</button>
+                <input type="number" id="f-cantidad" value="${cantidadDeclarada}" min="0" style="width:100%;text-align:center;font-size:13px;font-weight:600;padding:7px 10px;border:1px solid var(--border-strong);border-radius:8px">
+                <button type="button" onclick="Stock.bumpQty(1)" style="width:32px;height:32px;border:1px solid var(--border-strong);border-radius:8px;background:var(--bg);cursor:pointer;font-size:16px">+</button>
               </div>
-              <div class="hint" style="font-size:10.5px;color:var(--text-secondary);margin-top:4px">Usá los botones − / + o escribí la cantidad directamente.</div>
+              <div class="hint" style="font-size:10.5px;color:var(--text-secondary);margin-top:4px" id="cantidad-hint">Cantidad de unidades que tenés, sepas o no todavía los IMEIs de cada una.</div>
             </div>
+
             <div id="f-imei-wrap" style="margin-bottom:12px;display:${esIMEI?'block':'none'}">
-              <label style="font-size:11px;color:var(--text-secondary);font-weight:600;display:block;margin-bottom:4px">IMEIs en stock <span style="font-weight:400" id="imei-count">(${(p.imeis||[]).length})</span></label>
+              <label style="font-size:11px;color:var(--text-secondary);font-weight:600;display:block;margin-bottom:4px">IMEIs identificados <span style="font-weight:400" id="imei-count">(${(p.imeis||[]).length})</span></label>
               <div id="imei-chips-wrap" style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:8px"></div>
               <div style="display:flex;gap:6px">
                 <input type="text" id="f-imei-input" placeholder="Ingresá un IMEI y tocá Agregar" style="flex:1;font-size:12px;padding:7px 10px;border:1px solid var(--border-strong);border-radius:8px" onkeydown="if(event.key==='Enter'){event.preventDefault();Stock.addImei();}">
                 <button type="button" class="btn btn-sm" onclick="Stock.addImei()"><i class="ti ti-plus"></i> Agregar</button>
               </div>
-              <div class="hint" style="font-size:10.5px;color:var(--text-secondary);margin-top:4px">El stock de este producto es la cantidad de IMEIs cargados acá. Sin IMEIs, el producto queda sin stock.</div>
+              <div class="hint" style="font-size:10.5px;color:var(--text-secondary);margin-top:4px">Es independiente de la cantidad. Podés tener 5 unidades cargadas y solo 2 IMEIs identificados — está bien, vas completando a medida que los tenés.</div>
             </div>
+
             <div style="margin-bottom:12px"><label style="font-size:11px;color:var(--text-secondary);font-weight:600;display:block;margin-bottom:4px">Notas</label>
               <textarea id="f-notas" style="width:100%;font-size:12px;padding:7px 10px;border:1px solid var(--border-strong);border-radius:8px;height:50px;resize:none">${p.notas||''}</textarea>
             </div>
+
+            ${mode === 'edit' ? `
+              <div style="margin-top:6px">
+                <div class="card-title" style="margin-bottom:8px"><i class="ti ti-history"></i> Historial de este producto</div>
+                <div id="historial-producto-host" style="max-height:180px;overflow-y:auto"></div>
+              </div>
+            ` : ''}
+
           </div>
           <div style="padding:13px 18px;border-top:1px solid var(--border);display:flex;gap:8px;justify-content:flex-end">
+            ${mode === 'edit' ? `<button class="btn" style="color:var(--red);margin-right:auto" onclick="Stock.deleteProduct(${id})"><i class="ti ti-trash"></i> Eliminar</button>` : ''}
             <button class="btn" onclick="Stock.closeDrawer()">Cancelar</button>
             <button class="btn btn-primary" onclick="Stock.save(${mode==='edit'?id:'null'})"><i class="ti ti-check"></i> Guardar</button>
           </div>
         </div>
       </div>
     `;
-    // Estado interno de IMEIs en edición — se resetea cada vez que se abre el drawer
     this.pendingImeis = [...(p.imeis || [])];
     this.renderImeiChips();
-    // Forzamos la sincronización de visibilidad de los campos justo después
-    // de insertar el HTML, sin depender de que el navegador dispare el evento onchange.
     this.toggleFields();
     setTimeout(() => this.updatePricePreview(), 0);
+    if (mode === 'edit') this.renderHistorialProducto(id);
   },
 
-  pendingImeis: [],
+  toggleAdvancedPrices() {
+    const wrap = document.getElementById('adv-prices-wrap');
+    const arrow = document.getElementById('adv-prices-arrow');
+    const open = wrap.style.display === 'none';
+    wrap.style.display = open ? 'block' : 'none';
+    arrow.className = open ? 'ti ti-chevron-up' : 'ti ti-chevron-down';
+  },
 
   renderImeiChips() {
     const host = document.getElementById('imei-chips-wrap');
@@ -1269,7 +1429,7 @@ const Stock = {
         ${imei}
         <button type="button" onclick="Stock.removeImei(${i})" style="background:none;border:none;cursor:pointer;color:var(--red);font-size:13px;line-height:1;padding:0">×</button>
       </span>
-    `).join('') || `<span style="font-size:11px;color:var(--text-secondary)">Sin IMEIs cargados todavía</span>`;
+    `).join('') || `<span style="font-size:11px;color:var(--text-secondary)">Sin IMEIs identificados todavía</span>`;
     if (countEl) countEl.textContent = `(${this.pendingImeis.length})`;
   },
 
@@ -1292,7 +1452,6 @@ const Stock = {
   bumpQty(delta) {
     const inp = document.getElementById('f-cantidad');
     if (!inp) return;
-    inp.dataset.touched = '1';
     const current = parseInt(inp.value, 10) || 0;
     inp.value = Math.max(0, current + delta);
   },
@@ -1307,19 +1466,15 @@ const Stock = {
 
   toggleFields() {
     const catEl = document.getElementById('f-cat');
-    const wrap = document.getElementById('f-qty-wrap');
     const imeiWrap = document.getElementById('f-imei-wrap');
-    if (!catEl || !wrap) return;
+    const cantidadHint = document.getElementById('cantidad-hint');
+    if (!catEl) return;
     const esIMEI = this.CATS_IMEI.includes(catEl.value);
-    wrap.style.display = esIMEI ? 'none' : 'block';
     if (imeiWrap) imeiWrap.style.display = esIMEI ? 'block' : 'none';
-    // Si pasamos a una categoría sin IMEI y el campo está en 0 o vacío,
-    // le ponemos 1 por defecto para que no se guarde "sin stock" sin querer.
-    if (!esIMEI) {
-      const qtyInput = document.getElementById('f-cantidad');
-      if (qtyInput && (qtyInput.value === '' || qtyInput.value === '0') && !qtyInput.dataset.touched) {
-        qtyInput.value = 1;
-      }
+    if (cantidadHint) {
+      cantidadHint.textContent = esIMEI
+        ? 'Cantidad de unidades que tenés, sepas o no todavía los IMEIs de cada una.'
+        : 'Cantidad de unidades en stock.';
     }
   },
 
@@ -1330,41 +1485,59 @@ const Stock = {
     const precioUSD = parseFloat(document.getElementById('f-precio-usd').value) || 0;
     if (!nombre || !costoUSD || !precioUSD) { toast('Completá nombre, costo y precio de venta en USD.'); return; }
     const cat = document.getElementById('f-cat').value;
+    const cantidadNueva = parseInt(document.getElementById('f-cantidad').value, 10) || 0;
+    const precioReventa = parseFloat(document.getElementById('f-precio-reventa')?.value) || null;
+    const precioMayorista = parseFloat(document.getElementById('f-precio-mayorista')?.value) || null;
+    const costoReparacion = parseFloat(document.getElementById('f-costo-reparacion')?.value) || 0;
+
+    const existing = id ? State.stock.find(x => x.id === id) : null;
+    const cantidadAntes = existing ? this.stockReal(existing) : 0;
+
     const obj = {
       cat, nombre, costoUSD, cotiz,
       precioARS: Math.round(precioUSD * cotiz),
       proveedor: document.getElementById('f-prov').value,
       custodio: document.getElementById('f-custodio').value,
       notas: document.getElementById('f-notas').value,
+      precioReventa, precioMayorista, costoReparacion,
+      cantidad: cantidadNueva, cantidadDeclarada: cantidadNueva,
     };
     if (this.CATS_IMEI.includes(cat)) {
       obj.imeis = [...this.pendingImeis];
-      if (obj.imeis.length === 0) {
-        const continuar = confirm('No cargaste ningún IMEI para este producto, así que va a quedar sin stock (0 unidades). ¿Querés guardarlo igual? Después podés editarlo y agregar los IMEIs cuando los tengas.');
-        if (!continuar) return;
-      }
-    } else {
-      const qtyInput = document.getElementById('f-cantidad');
-      obj.cantidad = qtyInput ? (parseInt(qtyInput.value, 10) || 0) : 0;
     }
 
     toast('Guardando producto...');
     const { id: newId, error } = await DB.guardarProductoStock(obj, id);
     if (error) { toast('Hubo un problema guardando el producto.'); console.error(error); return; }
 
+    const finalId = id || newId;
+    const cantidadDespues = this.stockReal(obj);
+
     if (id) {
       const idx = State.stock.findIndex(x => x.id === id);
       State.stock[idx] = { ...State.stock[idx], ...obj };
+      await DB.registrarMovimientoStock(finalId, 'edicion', `Producto editado: ${nombre}`, cantidadAntes, cantidadDespues);
       toast('Producto actualizado.');
     } else {
       obj.id = newId;
       State.stock.push(obj);
+      await DB.registrarMovimientoStock(finalId, 'alta', `Producto agregado: ${nombre}`, 0, cantidadDespues);
       toast('Producto agregado al stock.');
     }
     Sheets.stock(obj);
     this.closeDrawer();
-    this.renderTabs();
-    this.renderTable();
+    this.renderView();
+  },
+
+  async deleteProduct(id) {
+    const p = State.stock.find(x => x.id === id);
+    if (!p) return;
+    if (!confirm(`¿Eliminar "${p.nombre}" del stock? Esta acción no se puede deshacer.`)) return;
+    await DB.eliminarProductoStock(id);
+    State.stock = State.stock.filter(x => x.id !== id);
+    this.closeDrawer();
+    this.renderView();
+    toast('Producto eliminado del stock.');
   },
 
   closeDrawer() { document.getElementById('stock-drawer-host').innerHTML = ''; }

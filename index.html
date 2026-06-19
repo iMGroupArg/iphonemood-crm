@@ -98,6 +98,20 @@ tbody tr:hover td{background:var(--bg-secondary)}
 .empty-state{text-align:center;padding:50px 20px;color:var(--text-secondary)}
 .empty-state i{font-size:32px;display:block;margin:0 auto 10px;opacity:.5}
 
+/* Tarjetas de Stock para mobile — ocultas por defecto, visibles solo bajo el media query */
+.stock-cards-mobile{display:none}
+.stock-card{background:var(--bg);border:1px solid var(--border);border-radius:12px;padding:12px 14px;margin-bottom:10px;cursor:pointer}
+.stock-card:active{background:var(--bg-secondary)}
+.stock-card-top{display:flex;justify-content:space-between;align-items:flex-start;gap:8px;margin-bottom:10px}
+.stock-card-name{font-size:13.5px;font-weight:600;line-height:1.3}
+.stock-card-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;background:var(--bg-secondary);border-radius:8px;padding:8px 6px;margin-bottom:8px}
+.stock-card-grid div{text-align:center}
+.stock-card-grid label{font-size:9px;color:var(--text-secondary);display:block;margin-bottom:2px}
+.stock-card-grid span{font-size:12px;font-weight:600}
+.stock-card-bottom{display:flex;justify-content:space-between;font-size:11px;color:var(--text-secondary);gap:8px}
+.stock-card-bottom span{display:flex;align-items:center;gap:4px;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.stock-card-notas{font-size:10.5px;color:var(--amber-dark);background:var(--amber-light);border-radius:6px;padding:5px 8px;margin-top:8px}
+
 .toast{position:fixed;bottom:20px;right:20px;background:var(--text);color:#fff;padding:12px 18px;border-radius:var(--radius-md);font-size:12.5px;box-shadow:0 4px 16px rgba(0,0,0,.2);z-index:999;max-width:340px;line-height:1.5;display:none}
 .toast.show{display:block;animation:slideIn .25s ease}
 @keyframes slideIn{from{transform:translateY(10px);opacity:0}to{transform:translateY(0);opacity:1}}
@@ -127,15 +141,18 @@ tbody tr:hover td{background:var(--bg-secondary)}
   th,td{padding:7px 6px}
   .dash-grid-2{grid-template-columns:1fr !important}
 
-  /* Reparaciones: patrón lista/detalle a pantalla completa */
+  /* Reparaciones: patrón lista/detalle a pantalla completa, controlado por JS */
   .rep-list-panel{width:100% !important;min-width:0 !important;border-right:none !important}
-  .rep-detail-panel{display:none}
 
   /* Panel de control: menú lateral pasa a tabs horizontales scrolleables */
   .panel-shell{flex-direction:column}
   .panel-nav-side{width:100% !important;min-width:0 !important;border-right:none !important;border-bottom:1px solid var(--border);display:flex;overflow-x:auto;padding:6px 8px !important;gap:4px}
   .panel-nav-item{border-left:none !important;border-bottom:2px solid transparent;border-radius:8px}
   .panel-nav-item[style*="border-left: 2px solid var(--blue)"]{border-bottom:2px solid var(--blue) !important}
+
+  /* Stock: tabla se oculta, tarjetas se muestran */
+  .stock-table-desktop{display:none !important}
+  .stock-cards-mobile{display:block !important}
 
   /* Formularios de dos/tres columnas con grid inline pasan a una sola columna */
   [style*="grid-template-columns:1fr 1fr 1fr"]{grid-template-columns:1fr 1fr !important}
@@ -444,6 +461,31 @@ const DB = {
       const bolsillos = ['ARS cash', 'ARS transferencia', 'USD cash', 'USD transferencia', 'USDT'];
       await supa.from('cajas').insert(bolsillos.map(b => ({ persona_id: data.id, bolsillo: b, saldo: 0 })));
     }
+  },
+
+  async renombrarPersona(nombreViejo, nombreNuevo) {
+    const pid = this.personaId(nombreViejo);
+    if (!pid) return { error: 'No se encontró la persona' };
+    const { error } = await supa.from('personas').update({ nombre: nombreNuevo }).eq('id', pid);
+    if (!error) {
+      delete this.personasMap[nombreViejo];
+      this.personasMap[nombreNuevo] = pid;
+      this.personasIdToNombre[pid] = nombreNuevo;
+    }
+    return { error };
+  },
+
+  async borrarPersona(nombre) {
+    const pid = this.personaId(nombre);
+    if (!pid) return { error: 'No se encontró la persona' };
+    // Las cajas se borran en cascada por la referencia de la tabla.
+    // Ventas, reparaciones y gastos asociados quedan con la referencia en null (no se borran).
+    const { error } = await supa.from('personas').delete().eq('id', pid);
+    if (!error) {
+      delete this.personasMap[nombre];
+      delete this.personasIdToNombre[pid];
+    }
+    return { error };
   },
 
   async agregarGarantia(nombre, dias, color) {
@@ -894,15 +936,18 @@ const Stock = {
         </select>
       </div>
       <div class="body-pad" style="padding-top:14px">
-        <table><thead><tr>
+        <table class="stock-table-desktop"><thead><tr>
           <th>Producto</th><th>Rubro</th><th>Proveedor</th><th>Custodio</th><th>Costo USD</th><th>Precio venta USD</th><th>Margen</th><th>Stock</th><th>Estado</th><th></th>
         </tr></thead><tbody id="stock-tbody"></tbody></table>
+        <div class="stock-cards-mobile" id="stock-cards"></div>
       </div>
       <div id="stock-drawer-host"></div>
     `;
     setTimeout(() => { this.renderTabs(); this.renderTable(); }, 0);
     return c;
   },
+
+  isMobile() { return window.innerWidth <= 900; },
 
   renderTabs() {
     const cats = ['all', ...new Set(State.stock.map(s => s.cat))];
@@ -924,7 +969,14 @@ const Stock = {
       return true;
     });
     const tbody = document.getElementById('stock-tbody');
-    if (!rows.length) { tbody.innerHTML = `<tr><td colspan="10"><div class="empty-state"><i class="ti ti-box"></i>Sin productos que coincidan</div></td></tr>`; return; }
+    const cardsHost = document.getElementById('stock-cards');
+
+    if (!rows.length) {
+      tbody.innerHTML = `<tr><td colspan="10"><div class="empty-state"><i class="ti ti-box"></i>Sin productos que coincidan</div></td></tr>`;
+      if (cardsHost) cardsHost.innerHTML = `<div class="empty-state"><i class="ti ti-box"></i>Sin productos que coincidan</div>`;
+      return;
+    }
+
     tbody.innerHTML = rows.map(p => {
       const stock = State.getStock(p);
       const status = State.getStockStatus(p);
@@ -945,6 +997,37 @@ const Stock = {
         <td><button class="btn btn-sm" onclick="Stock.openDrawer('edit',${p.id})"><i class="ti ti-edit"></i></button></td>
       </tr>`;
     }).join('');
+
+    if (cardsHost) {
+      cardsHost.innerHTML = rows.map(p => {
+        const stock = State.getStock(p);
+        const status = State.getStockStatus(p);
+        const costoARS = p.costoUSD * p.cotiz;
+        const margin = Math.round(((p.precioARS - costoARS) / costoARS) * 100);
+        const precioUSD = p.cotiz ? (p.precioARS / p.cotiz) : 0;
+        const statusBadge = status === 'ok' ? `<span class="badge b-green">OK</span>` : status === 'low' ? `<span class="badge b-amber">Bajo</span>` : `<span class="badge b-red">Sin stock</span>`;
+        return `<div class="stock-card" onclick="Stock.openDrawer('edit',${p.id})">
+          <div class="stock-card-top">
+            <div style="min-width:0;flex:1">
+              <div class="stock-card-name">${p.nombre}</div>
+              <span class="badge ${this.CAT_CLASS[p.cat]||'b-gray'}" style="margin-top:4px">${this.CAT_LABELS[p.cat]||p.cat}</span>
+            </div>
+            ${statusBadge}
+          </div>
+          <div class="stock-card-grid">
+            <div><label>Costo</label><span>USD ${p.costoUSD}</span></div>
+            <div><label>Venta</label><span>${State.fmtUSD(precioUSD)}</span></div>
+            <div><label>Margen</label><span style="color:${margin>=0?'var(--green-dark)':'var(--red)'}">${margin>=0?'+':''}${margin}%</span></div>
+            <div><label>Stock</label><span>${stock}${p.imeis ? ' IMEI' : ''}</span></div>
+          </div>
+          <div class="stock-card-bottom">
+            <span><i class="ti ti-truck"></i> ${p.proveedor}</span>
+            <span><i class="ti ti-user"></i> ${p.custodio||'Sin asignar'}</span>
+          </div>
+          ${p.notas ? `<div class="stock-card-notas">${p.notas}</div>` : ''}
+        </div>`;
+      }).join('');
+    }
   },
 
   openDrawer(mode, id) {
@@ -1462,7 +1545,7 @@ const Reparaciones = {
         <div style="padding:8px 10px;border-bottom:1px solid var(--border)"><input type="text" id="rep-search" placeholder="Buscar..." oninput="Reparaciones.renderList()" style="width:100%;font-size:12px;padding:5px 9px;border:1px solid var(--border-strong);border-radius:8px"></div>
         <div style="flex:1;overflow-y:auto" id="rep-list"></div>
       </div>
-      <div class="rep-detail-panel" style="flex:1;display:flex;flex-direction:column;overflow:hidden;min-width:0">
+      <div class="rep-detail-panel" style="flex:1;flex-direction:column;overflow:hidden;min-width:0">
         <button class="btn btn-sm rep-back-btn" onclick="Reparaciones.backToList()" style="display:none;margin:10px 14px 0"><i class="ti ti-arrow-left"></i> Ver órdenes</button>
         <div id="rep-detail" style="flex:1;overflow-y:auto;padding:18px 20px"></div>
       </div>
@@ -1471,7 +1554,8 @@ const Reparaciones = {
       if (!this.currentId && State.reparaciones.length) this.currentId = State.reparaciones[0].id;
       this.renderList();
       this.renderDetail();
-      this.syncMobileView();
+      this.syncMobileView(false);
+      this.bindResizeListener();
     }, 0);
     return c;
   },
@@ -1497,26 +1581,42 @@ const Reparaciones = {
   isMobile() { return window.innerWidth <= 900; },
 
   syncMobileView(showDetail) {
-    if (!this.isMobile()) return;
     const listPanel = document.querySelector('.rep-list-panel');
     const detailPanel = document.querySelector('.rep-detail-panel');
     const backBtn = document.querySelector('.rep-back-btn');
     if (!listPanel || !detailPanel) return;
+
+    if (!this.isMobile()) {
+      // Desktop: siempre las dos columnas visibles, sin botón de volver
+      listPanel.style.display = 'flex';
+      detailPanel.style.display = 'flex';
+      if (backBtn) backBtn.style.display = 'none';
+      return;
+    }
+
+    // Mobile: una sola columna visible por vez
     if (showDetail) {
       listPanel.style.display = 'none';
       detailPanel.style.display = 'flex';
-      backBtn.style.display = 'inline-flex';
+      if (backBtn) backBtn.style.display = 'inline-flex';
     } else {
       listPanel.style.display = 'flex';
       detailPanel.style.display = 'none';
+      if (backBtn) backBtn.style.display = 'none';
     }
   },
 
   backToList() {
-    const listPanel = document.querySelector('.rep-list-panel');
-    const detailPanel = document.querySelector('.rep-detail-panel');
-    listPanel.style.display = 'flex';
-    detailPanel.style.display = 'none';
+    this.syncMobileView(false);
+  },
+
+  _resizeBound: false,
+  bindResizeListener() {
+    if (this._resizeBound) return;
+    this._resizeBound = true;
+    window.addEventListener('resize', () => {
+      if (document.querySelector('.rep-list-panel')) this.syncMobileView(this.isMobile() && !!this.currentId && document.querySelector('.rep-detail-panel')?.style.display === 'flex');
+    });
   },
 
   renderDetail() {
@@ -1537,9 +1637,9 @@ const Reparaciones = {
     }
 
     detail.innerHTML = `
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">
-        <h2 style="font-size:15px;font-weight:600">${o.id} — ${o.equipo}, ${o.cliente}</h2>
-        <span class="badge ${this.ESTADO_CLASS[o.estado]}">${this.ESTADO_LABEL[o.estado]}</span>
+      <div class="rep-detail-header" style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px;margin-bottom:14px;flex-wrap:wrap">
+        <h2 style="font-size:15px;font-weight:600;flex:1;min-width:0">${o.id} — ${o.equipo}<br><span style="font-size:12px;color:var(--text-secondary);font-weight:400">${o.cliente}</span></h2>
+        <span class="badge ${this.ESTADO_CLASS[o.estado]}" style="flex-shrink:0">${this.ESTADO_LABEL[o.estado]}</span>
       </div>
       <div style="display:flex;gap:4px;flex-wrap:wrap;margin-bottom:14px">
         ${this.ESTADOS.map(s => `<span onclick="Reparaciones.setEstado('${s}')" style="font-size:11px;padding:5px 11px;border-radius:20px;border:1.5px solid ${o.estado===s?'var(--blue)':'var(--border-strong)'};background:${o.estado===s?'var(--blue-light)':'var(--bg)'};color:${o.estado===s?'var(--blue-dark)':'var(--text-secondary)'};cursor:pointer">${this.ESTADO_LABEL[s]}</span>`).join('')}
@@ -2004,14 +2104,14 @@ const Cajas = {
     });
 
     c.innerHTML = `
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:14px">
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:14px" class="dash-grid-2">
         ${State.personas.map(p => {
           const caja = State.cajas[p] || {};
           const arsEquiv = (caja['ARS cash']||0) + (caja['ARS transferencia']||0) + ((caja['USD cash']||0)+(caja['USD transferencia']||0))*State.refBlue + (caja['USDT']||0)*State.refUsdt;
           return `<div class="card">
             <div class="card-title"><div class="av">${p.substring(0,2).toUpperCase()}</div> ${p}</div>
             ${['ARS cash','ARS transferencia','USD cash','USD transferencia','USDT'].map(b => `
-              <div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid var(--border);font-size:12.5px">
+              <div onclick="Cajas.editarSaldo('${p}','${b}')" style="display:flex;justify-content:space-between;padding:8px 4px;border-bottom:1px solid var(--border);font-size:12.5px;cursor:pointer;border-radius:6px" onmouseover="this.style.background='var(--bg-secondary)'" onmouseout="this.style.background='transparent'">
                 <span style="color:var(--text-secondary)">${b}</span><b>${b==='USDT' ? (caja[b]||0).toLocaleString('es-AR')+' USDT' : b.startsWith('ARS') ? State.fmtARS(caja[b]||0) : State.fmtUSD(caja[b]||0)}</b>
               </div>`).join('')}
             <div style="display:flex;justify-content:space-between;padding-top:8px;font-weight:600">Total ARS equiv.<span style="color:var(--blue)">${State.fmtARS(arsEquiv)}</span></div>
@@ -2027,8 +2127,21 @@ const Cajas = {
           <div style="margin-left:auto;text-align:right"><label style="font-size:11px;color:var(--text-secondary)">Equivalente ARS (blue)</label><div style="font-size:19px;font-weight:600;color:var(--blue)">${State.fmtARS(totalARS + totalUSD*State.refBlue + totalUSDT*State.refUsdt)}</div></div>
         </div>
       </div>
+      <div style="font-size:11px;color:var(--text-secondary);margin-top:10px"><i class="ti ti-info-circle"></i> Tocá cualquier saldo para ajustarlo manualmente. Para administrar personas (renombrar o eliminar), andá a Panel de control → Cajas y personas.</div>
     `;
     return c;
+  },
+
+  async editarSaldo(persona, bolsillo) {
+    const actual = (State.cajas[persona] && State.cajas[persona][bolsillo]) || 0;
+    const nuevoStr = prompt(`Ajustar saldo de ${persona} — ${bolsillo}:`, actual);
+    if (nuevoStr === null) return;
+    const nuevo = parseFloat(nuevoStr);
+    if (isNaN(nuevo)) { alert('Ingresá un número válido.'); return; }
+    State.cajas[persona][bolsillo] = nuevo;
+    await DB.actualizarSaldoCaja(persona, bolsillo, nuevo);
+    App.goTo('cajas');
+    toast(`Saldo de ${persona} — ${bolsillo} ajustado a ${nuevo.toLocaleString('es-AR')}.`);
   }
 };
 
@@ -2138,15 +2251,79 @@ const Panel = {
   personasView() {
     return `
       <h3 style="font-size:13px;font-weight:600;color:var(--text-secondary);text-transform:uppercase;letter-spacing:.4px;margin-bottom:12px;border-bottom:1px solid var(--border);padding-bottom:8px">Personas y sus cajas</h3>
-      ${State.personas.map(p => `
+      ${State.personas.map(p => {
+        const saldoTotal = this.saldoTotalPersona(p);
+        return `
         <div style="background:var(--bg);border:1px solid var(--border);border-radius:10px;padding:12px 14px;margin-bottom:8px">
-          <b style="font-size:13px">${p}</b>
-          <div style="display:flex;flex-wrap:wrap;gap:5px;margin-top:8px">
-            ${Object.keys(State.cajas[p] || {}).map(b => `<span class="badge b-blue">${b}</span>`).join('')}
+          <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap">
+            <div>
+              <b style="font-size:13px">${p}</b>
+              <div style="font-size:11px;color:var(--text-secondary);margin-top:2px">Equivalente en caja: ${State.fmtARS(saldoTotal)}</div>
+            </div>
+            <div style="display:flex;gap:6px">
+              <button class="btn btn-sm" onclick="Panel.renombrarPersona('${p}')"><i class="ti ti-edit"></i> Renombrar</button>
+              <button class="btn btn-sm" style="color:var(--red)" onclick="Panel.eliminarPersona('${p}')"><i class="ti ti-trash"></i> Eliminar</button>
+            </div>
           </div>
-        </div>`).join('')}
+          <div style="display:flex;flex-wrap:wrap;gap:5px;margin-top:10px">
+            ${Object.entries(State.cajas[p] || {}).map(([b, saldo]) => `
+              <span class="badge b-blue" style="cursor:pointer" onclick="Panel.editarSaldoCaja('${p}','${b}')" title="Tocar para editar el saldo">${b}: ${b==='USDT' ? saldo.toLocaleString('es-AR') : (b.startsWith('ARS')?State.fmtARS(saldo):State.fmtUSD(saldo))}</span>
+            `).join('')}
+          </div>
+        </div>`;
+      }).join('')}
       <button class="btn btn-primary" onclick="Panel.addPersona()"><i class="ti ti-plus"></i> Agregar persona</button>
     `;
+  },
+
+  saldoTotalPersona(p) {
+    const c = State.cajas[p] || {};
+    return (c['ARS cash']||0) + (c['ARS transferencia']||0) + ((c['USD cash']||0)+(c['USD transferencia']||0))*State.refBlue + (c['USDT']||0)*State.refUsdt;
+  },
+
+  async renombrarPersona(nombreViejo) {
+    const nombreNuevo = prompt(`Nuevo nombre para "${nombreViejo}":`, nombreViejo);
+    if (!nombreNuevo || nombreNuevo.trim() === '' || nombreNuevo === nombreViejo) return;
+    if (State.personas.includes(nombreNuevo)) { alert('Ya existe una persona con ese nombre.'); return; }
+
+    const { error } = await DB.renombrarPersona(nombreViejo, nombreNuevo);
+    if (error) { alert('Hubo un problema renombrando. Probá de nuevo.'); console.error(error); return; }
+
+    // Actualizar en memoria: lista de personas y el objeto de cajas
+    State.personas = State.personas.map(p => p === nombreViejo ? nombreNuevo : p);
+    State.cajas[nombreNuevo] = State.cajas[nombreViejo];
+    delete State.cajas[nombreViejo];
+
+    this.renderBody();
+    toast(`"${nombreViejo}" ahora se llama "${nombreNuevo}". Las cajas y el historial quedaron asociados al nuevo nombre.`);
+  },
+
+  async eliminarPersona(nombre) {
+    const saldo = this.saldoTotalPersona(nombre);
+    if (saldo !== 0) {
+      alert(`No se puede eliminar a "${nombre}" porque todavía tiene saldo en sus cajas (equivalente a ${State.fmtARS(saldo)}). Mové ese saldo a otra persona antes de eliminarla, usando el módulo de Cueva / cambio o ajustando el saldo manualmente.`);
+      return;
+    }
+    if (!confirm(`¿Eliminar a "${nombre}"? Sus cajas (en $0) se van a borrar. Las ventas, reparaciones y gastos donde haya participado se conservan en el historial, solo se desvincula su nombre de la persona.`)) return;
+
+    const { error } = await DB.borrarPersona(nombre);
+    if (error) { alert('Hubo un problema eliminando. Probá de nuevo.'); console.error(error); return; }
+
+    State.personas = State.personas.filter(p => p !== nombre);
+    delete State.cajas[nombre];
+    this.renderBody();
+  },
+
+  async editarSaldoCaja(persona, bolsillo) {
+    const actual = (State.cajas[persona] && State.cajas[persona][bolsillo]) || 0;
+    const nuevoStr = prompt(`Ajustar saldo de ${persona} — ${bolsillo}:`, actual);
+    if (nuevoStr === null) return;
+    const nuevo = parseFloat(nuevoStr);
+    if (isNaN(nuevo)) { alert('Ingresá un número válido.'); return; }
+    State.cajas[persona][bolsillo] = nuevo;
+    await DB.actualizarSaldoCaja(persona, bolsillo, nuevo);
+    this.renderBody();
+    toast(`Saldo de ${persona} — ${bolsillo} ajustado a ${nuevo.toLocaleString('es-AR')}.`);
   },
   async addPersona() {
     const nombre = prompt('Nombre de la nueva persona:'); if (!nombre) return;

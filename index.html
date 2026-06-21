@@ -7,6 +7,7 @@
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/tabler-icons/2.47.0/tabler-icons.min.css">
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 <style>
 :root{
   --blue:#185FA5; --blue-light:#E6F1FB; --blue-dark:#0C447C;
@@ -153,6 +154,7 @@ tbody tr:hover td{background:var(--bg-secondary)}
   /* Stock: tabla se oculta, tarjetas se muestran */
   .stock-table-desktop{display:none !important}
   .stock-cards-mobile{display:block !important}
+  .stock-kpi-grid{grid-template-columns:repeat(2,1fr) !important}
 
   /* Formularios de dos/tres columnas con grid inline pasan a una sola columna */
   [style*="grid-template-columns:1fr 1fr 1fr"]{grid-template-columns:1fr 1fr !important}
@@ -309,7 +311,7 @@ const DB = {
         bateriaPct: s.bateria_pct ?? null, ciclosBateria: s.ciclos_bateria ?? null, ram: s.ram || '',
         estadoProducto: s.estado_producto || '', grado: s.grado || 'Sin grado',
         esim: !!s.esim, tieneCaja: !!s.tiene_caja, numeroSerie: s.numero_serie || '',
-        destacado: !!s.destacado
+        destacado: !!s.destacado, estadoInventario: s.estado_inventario || 'disponible'
       };
     });
 
@@ -405,7 +407,7 @@ const DB = {
       bateria_pct: obj.bateriaPct || null, ciclos_bateria: obj.ciclosBateria || null, ram: obj.ram || null,
       estado_producto: obj.estadoProducto || null, grado: obj.grado || 'Sin grado',
       esim: !!obj.esim, tiene_caja: !!obj.tieneCaja, numero_serie: obj.numeroSerie || null,
-      destacado: !!obj.destacado
+      destacado: !!obj.destacado, estado_inventario: obj.estadoInventario || 'disponible'
     };
     if (idExistente) {
       const { error } = await supa.from('stock').update(row).eq('id', idExistente);
@@ -444,6 +446,10 @@ const DB = {
 
   async eliminarProductoStock(stockId) {
     await supa.from('stock').delete().eq('id', stockId);
+  },
+
+  async actualizarEstadoInventario(stockId, estado) {
+    await supa.from('stock').update({ estado_inventario: estado }).eq('id', stockId);
   },
 
   async crearVenta(draft, estado) {
@@ -512,12 +518,25 @@ const DB = {
     return data?.id;
   },
 
+  async actualizarEstadoGasto(gastoId, estado) {
+    await supa.from('gastos').update({ estado }).eq('id', gastoId);
+  },
+
+  async eliminarGasto(gastoId) {
+    await supa.from('gastos').delete().eq('id', gastoId);
+  },
+
   async crearCambio(c) {
-    await supa.from('cambios').insert({
+    const { data } = await supa.from('cambios').insert({
       tipo: c.tipo, entrega: c.entrega, recibe: c.recibe, cotizacion: c.cotiz,
       origen_persona_id: this.personaId(c.origenP), origen_bolsillo: c.origenB,
       destino_persona_id: this.personaId(c.destinoP), destino_bolsillo: c.destinoB
-    });
+    }).select().single();
+    return data?.id;
+  },
+
+  async eliminarCambio(cambioId) {
+    await supa.from('cambios').delete().eq('id', cambioId);
   },
 
   async agregarPersona(nombre) {
@@ -782,24 +801,39 @@ const State = {
     });
   },
 
-  // Descuenta del stock cuando se confirma una venta. Devuelve lo removido (para poder revertir si se anula)
+  // Descuenta del stock cuando se confirma una venta. Devuelve lo removido (para poder revertir si se anula).
+  // Si el producto llega a 0 unidades, se marca automáticamente como 'vendido'.
   descontarStock(stockId, imei) {
     const item = this.stock.find(s => s.id === stockId);
     if (!item) return null;
+    let removed = null;
     if (item.imeis && imei) {
       const idx = item.imeis.indexOf(imei);
-      if (idx >= 0) { item.imeis.splice(idx, 1); return { stockId, imei }; }
+      if (idx >= 0) { item.imeis.splice(idx, 1); removed = { stockId, imei }; }
     } else if (item.cantidad !== undefined && item.cantidad > 0) {
       item.cantidad -= 1;
-      return { stockId, imei: null };
+      if (item.cantidadDeclarada !== undefined) item.cantidadDeclarada = Math.max(0, item.cantidadDeclarada - 1);
+      removed = { stockId, imei: null };
     }
-    return null;
+    if (removed && this.getStock(item) === 0 && item.estadoInventario !== 'vendido') {
+      item.estadoInventario = 'vendido';
+      DB.actualizarEstadoInventario(stockId, 'vendido');
+    }
+    return removed;
   },
   restaurarStock(stockId, imei) {
     const item = this.stock.find(s => s.id === stockId);
     if (!item) return;
     if (item.imeis && imei) item.imeis.push(imei);
-    else if (item.cantidad !== undefined) item.cantidad += 1;
+    else if (item.cantidad !== undefined) {
+      item.cantidad += 1;
+      if (item.cantidadDeclarada !== undefined) item.cantidadDeclarada += 1;
+    }
+    // Si vuelve a tener stock y estaba marcado como vendido, lo regresamos a disponible
+    if (this.getStock(item) > 0 && item.estadoInventario === 'vendido') {
+      item.estadoInventario = 'disponible';
+      DB.actualizarEstadoInventario(stockId, 'disponible');
+    }
   },
 
   // Spread de una operación de cambio, en ARS
@@ -1119,9 +1153,19 @@ const Dashboard = {
 const Stock = {
   currentTab: 'all',
   currentView: 'productos', // 'productos' | 'historial'
+  currentGroup: 'dispositivos', // 'dispositivos' | 'accesorios' | 'perfumeria'
+  currentEstado: 'todos', // 'todos' | 'disponible' | 'vendido' | 'reservado' | 'en_reparacion'
   CAT_LABELS: { iphone:'iPhone', android:'Android', mac:'Mac', ipad:'iPad', watch:'Watch', audio:'Audio', perfumeria:'Perfumería', accesorio:'Accesorio', repuesto:'Repuesto', otro:'Otro' },
   CAT_CLASS: { iphone:'b-blue', android:'b-teal', mac:'b-blue', ipad:'b-blue', watch:'b-blue', audio:'b-purple', perfumeria:'b-green', accesorio:'b-purple', repuesto:'b-amber', otro:'b-gray' },
   CATS_IMEI: ['iphone','android','mac','ipad'],
+  // Agrupación de rubros para las pestañas grandes del panel
+  GRUPOS: {
+    dispositivos: { label: 'Dispositivos', icon: 'ti-device-mobile', cats: ['iphone','android','mac','ipad','watch','audio'] },
+    accesorios: { label: 'Accesorios', icon: 'ti-plug', cats: ['accesorio','repuesto'] },
+    perfumeria: { label: 'Perfumería', icon: 'ti-droplet', cats: ['perfumeria'] },
+  },
+  ESTADO_INV_LABEL: { disponible:'Disponible', vendido:'Vendido', reservado:'Reservado', en_reparacion:'En reparación' },
+  ESTADO_INV_CLASS: { disponible:'b-green', vendido:'b-gray', reservado:'b-amber', en_reparacion:'b-purple' },
   TIPO_MOV_LABEL: { alta:'Alta', baja_venta:'Baja por venta', ajuste_cantidad:'Ajuste de cantidad', imei_agregado:'IMEI agregado', imei_quitado:'IMEI quitado', edicion:'Edición' },
   TIPO_MOV_CLASS: { alta:'b-green', baja_venta:'b-red', ajuste_cantidad:'b-amber', imei_agregado:'b-blue', imei_quitado:'b-gray', edicion:'b-purple' },
   pendingImeis: [],
@@ -1130,13 +1174,30 @@ const Stock = {
   // Ventas, Dashboard y Reparaciones, para que todos los módulos coincidan).
   stockReal(p) { return State.getStock(p); },
 
+  // Productos del grupo actualmente seleccionado (Dispositivos / Accesorios / Perfumería)
+  productosDelGrupo(grupo) {
+    const cats = this.GRUPOS[grupo]?.cats || [];
+    return State.stock.filter(p => cats.includes(p.cat));
+  },
+
   render() {
     const c = document.createElement('div');
     c.innerHTML = `
-      <div style="padding:14px 22px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap">
-        <div style="display:flex;gap:4px" id="stock-view-tabs"></div>
-        <button class="btn btn-primary" onclick="Stock.openDrawer('new')"><i class="ti ti-plus"></i> Agregar producto</button>
+      <div style="padding:16px 22px;border-bottom:1px solid var(--border)">
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px;flex-wrap:wrap;margin-bottom:14px">
+          <div>
+            <h2 style="font-size:19px;font-weight:700;display:flex;align-items:center;gap:8px"><i class="ti ti-box" style="color:var(--blue)"></i> Inventario</h2>
+            <p style="font-size:12px;color:var(--text-secondary);margin-top:2px">Gestión de stock de dispositivos, accesorios y perfumería</p>
+          </div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap">
+            <button class="btn" onclick="Stock.exportarExcel()"><i class="ti ti-file-spreadsheet"></i> Exportar a Excel</button>
+            <button class="btn btn-primary" onclick="Stock.openDrawer('new')"><i class="ti ti-plus"></i> Agregar producto</button>
+          </div>
+        </div>
+        <div id="stock-kpis" style="display:grid;grid-template-columns:repeat(5,1fr);gap:10px" class="stock-kpi-grid"></div>
       </div>
+
+      <div style="padding:10px 22px;border-bottom:1px solid var(--border);display:flex;gap:4px" id="stock-view-tabs"></div>
       <div id="stock-view-host"></div>
       <div id="stock-drawer-host"></div>
     `;
@@ -1146,7 +1207,34 @@ const Stock = {
 
   isMobile() { return window.innerWidth <= 900; },
 
+  renderKpis() {
+    const grupo = this.productosDelGrupo(this.currentGroup);
+    const total = grupo.length;
+    const disponibles = grupo.filter(p => (p.estadoInventario||'disponible') === 'disponible' && this.stockReal(p) > 0).length;
+    const vendidos = grupo.filter(p => p.estadoInventario === 'vendido' || this.stockReal(p) === 0).length;
+    const valorDisponible = grupo.filter(p => (p.estadoInventario||'disponible')!=='vendido').reduce((a,p)=>a + p.costoUSD * this.stockReal(p), 0);
+    const valorVendidoPotencial = grupo.reduce((a,p)=>{
+      const precioUSD = p.cotiz ? p.precioARS / p.cotiz : 0;
+      return a + precioUSD * Math.max(this.stockReal(p), p.estadoInventario==='vendido'?1:0);
+    }, 0);
+
+    const kpis = [
+      ['Total', total, 'ti-box', 'var(--blue)', 'var(--blue-light)'],
+      ['Disponibles', disponibles, 'ti-circle-check', 'var(--green-dark)', 'var(--green-light)'],
+      ['Vendidos', vendidos, 'ti-trending-up', 'var(--text)', 'var(--bg-secondary)'],
+      ['Valor Disponible', State.fmtUSD(valorDisponible), 'ti-currency-dollar', 'var(--blue-dark)', 'var(--blue-light)'],
+      ['Valor de Venta', State.fmtUSD(valorVendidoPotencial), 'ti-cash', 'var(--green-dark)', 'var(--green-light)'],
+    ];
+    document.getElementById('stock-kpis').innerHTML = kpis.map(([label,val,icon,color,bg]) => `
+      <div class="card" style="padding:12px 14px;margin-bottom:0;display:flex;justify-content:space-between;align-items:flex-start">
+        <div><label style="font-size:11px;color:var(--text-secondary);display:block;margin-bottom:4px">${label}</label><div style="font-size:19px;font-weight:700;color:${color}">${val}</div></div>
+        <div style="width:34px;height:34px;border-radius:8px;background:${bg};display:flex;align-items:center;justify-content:center;flex-shrink:0"><i class="ti ${icon}" style="color:${color};font-size:17px"></i></div>
+      </div>
+    `).join('');
+  },
+
   renderView() {
+    this.renderKpis();
     document.getElementById('stock-view-tabs').innerHTML = `
       <button class="btn btn-sm ${this.currentView==='productos'?'btn-primary':''}" onclick="Stock.setView('productos')"><i class="ti ti-box"></i> Productos</button>
       <button class="btn btn-sm ${this.currentView==='historial'?'btn-primary':''}" onclick="Stock.setView('historial')"><i class="ti ti-history"></i> Historial de movimientos</button>
@@ -1154,23 +1242,27 @@ const Stock = {
     const host = document.getElementById('stock-view-host');
     if (this.currentView === 'productos') {
       host.innerHTML = `
+        <div style="padding:10px 22px;border-bottom:1px solid var(--border);display:flex;gap:4px;flex-wrap:wrap" id="stock-grupo-tabs"></div>
+        <div style="padding:10px 22px;border-bottom:1px solid var(--border);display:flex;gap:6px;flex-wrap:wrap;align-items:center" id="stock-estado-tabs"></div>
         <div style="padding:12px 22px;border-bottom:1px solid var(--border);display:flex;gap:8px;flex-wrap:wrap" id="stock-tabs-wrap">
           <div style="display:flex;gap:4px;flex-wrap:wrap" id="stock-tabs"></div>
         </div>
-        <div style="padding:0 22px 12px;border-bottom:1px solid var(--border);display:flex;gap:8px;flex-wrap:wrap">
+        <div style="padding:0 22px 12px;display:flex;gap:8px;flex-wrap:wrap">
           <input type="text" id="stock-search" placeholder="Buscar producto..." oninput="Stock.renderTable()" style="font-size:12px;padding:6px 10px;border:1px solid var(--border-strong);border-radius:8px;flex:1;min-width:160px">
           <select id="stock-filter-prov" onchange="Stock.renderTable()" style="font-size:12px;padding:6px 10px;border:1px solid var(--border-strong);border-radius:8px">
             <option value="">Todos los proveedores</option>
             <option>Gonza</option><option>Proveedor perfumería</option><option>Proveedor accesorios</option>
           </select>
         </div>
-        <div class="body-pad" style="padding-top:14px">
+        <div class="body-pad" style="padding-top:0">
           <table class="stock-table-desktop"><thead><tr>
             <th>Producto</th><th>Rubro</th><th>Proveedor</th><th>Custodio</th><th>Costo USD</th><th>Precio venta USD</th><th>Margen</th><th>Stock</th><th>Estado</th><th></th>
           </tr></thead><tbody id="stock-tbody"></tbody></table>
           <div class="stock-cards-mobile" id="stock-cards"></div>
         </div>
       `;
+      this.renderGrupoTabs();
+      this.renderEstadoTabs();
       this.renderTabs();
       this.renderTable();
     } else {
@@ -1181,10 +1273,35 @@ const Stock = {
 
   setView(v) { this.currentView = v; this.renderView(); },
 
+  renderGrupoTabs() {
+    document.getElementById('stock-grupo-tabs').innerHTML = Object.entries(this.GRUPOS).map(([k,g]) => {
+      const count = this.productosDelGrupo(k).length;
+      const active = this.currentGroup === k;
+      return `<button onclick="Stock.setGrupo('${k}')" style="display:flex;align-items:center;gap:6px;padding:8px 14px;border-radius:8px;border:1.5px solid ${active?'var(--blue)':'var(--border)'};background:${active?'var(--blue-light)':'var(--bg)'};color:${active?'var(--blue-dark)':'var(--text-secondary)'};font-size:12.5px;font-weight:${active?'600':'400'};cursor:pointer">
+        <i class="ti ${g.icon}"></i> ${g.label} <span style="background:${active?'#fff':'var(--bg-secondary)'};padding:1px 6px;border-radius:10px;font-size:10.5px">${count}</span>
+      </button>`;
+    }).join('');
+  },
+  setGrupo(g) { this.currentGroup = g; this.currentTab = 'all'; this.currentEstado = 'todos'; this.renderKpis(); this.renderGrupoTabs(); this.renderEstadoTabs(); this.renderTabs(); this.renderTable(); },
+
+  renderEstadoTabs() {
+    const grupo = this.productosDelGrupo(this.currentGroup);
+    const estados = ['todos', 'disponible', 'reservado', 'en_reparacion', 'vendido'];
+    document.getElementById('stock-estado-tabs').innerHTML = estados.map(e => {
+      const count = e === 'todos' ? grupo.length : grupo.filter(p => (p.estadoInventario||'disponible') === e).length;
+      const label = e === 'todos' ? 'Todos' : this.ESTADO_INV_LABEL[e];
+      const active = this.currentEstado === e;
+      return `<span onclick="Stock.setEstadoFiltro('${e}')" style="cursor:pointer;font-size:12px;padding:5px 11px;border-radius:20px;border-bottom:2px solid ${active?'var(--blue)':'transparent'};color:${active?'var(--blue-dark)':'var(--text-secondary)'};font-weight:${active?'600':'400'};display:inline-flex;align-items:center;gap:5px">${label} <span style="background:var(--bg-secondary);padding:1px 6px;border-radius:10px;font-size:10px">${count}</span></span>`;
+    }).join('');
+  },
+  setEstadoFiltro(e) { this.currentEstado = e; this.renderEstadoTabs(); this.renderTable(); },
+  setEstadoFiltro(e) { this.currentEstado = e; this.renderEstadoTabs(); this.renderTable(); },
+
   renderTabs() {
-    const cats = ['all', ...new Set(State.stock.map(s => s.cat))];
+    const catsDelGrupo = this.GRUPOS[this.currentGroup]?.cats || [];
+    const cats = ['all', ...catsDelGrupo.filter(c => State.stock.some(s => s.cat === c))];
     document.getElementById('stock-tabs').innerHTML = cats.map(c => {
-      const count = c === 'all' ? State.stock.length : State.stock.filter(s => s.cat === c).length;
+      const count = c === 'all' ? this.productosDelGrupo(this.currentGroup).length : State.stock.filter(s => s.cat === c).length;
       const label = c === 'all' ? 'Todos' : (this.CAT_LABELS[c] || c);
       return `<button class="btn btn-sm ${this.currentTab===c?'btn-primary':''}" onclick="Stock.setTab('${c}')">${label} (${count})</button>`;
     }).join('');
@@ -1194,8 +1311,11 @@ const Stock = {
   renderTable() {
     const q = (document.getElementById('stock-search')?.value || '').toLowerCase();
     const prov = document.getElementById('stock-filter-prov')?.value || '';
+    const catsDelGrupo = this.GRUPOS[this.currentGroup]?.cats || [];
     let rows = State.stock.filter(s => {
+      if (!catsDelGrupo.includes(s.cat)) return false;
       if (this.currentTab !== 'all' && s.cat !== this.currentTab) return false;
+      if (this.currentEstado !== 'todos' && (s.estadoInventario||'disponible') !== this.currentEstado) return false;
       if (q && !s.nombre.toLowerCase().includes(q)) return false;
       if (prov && s.proveedor !== prov) return false;
       return true;
@@ -1212,14 +1332,14 @@ const Stock = {
 
     const filaTabla = (p) => {
       const stock = this.stockReal(p);
-      const status = stock === 0 ? 'out' : stock <= 1 ? 'low' : 'ok';
       const costoARS = p.costoUSD * p.cotiz;
       const margin = Math.round(((p.precioARS - costoARS) / costoARS) * 100);
       const precioUSD = p.cotiz ? (p.precioARS / p.cotiz) : 0;
       const esIMEI = this.CATS_IMEI.includes(p.cat);
       const detalleStock = esIMEI ? `${stock} <span style="font-size:9px;color:var(--text-secondary)">(${(p.imeis||[]).length} IMEI)</span>` : `${stock}`;
-      const statusBadge = status === 'ok' ? `<span class="badge b-green">OK</span>` : status === 'low' ? `<span class="badge b-amber">Bajo</span>` : `<span class="badge b-red">Sin stock</span>`;
-      return { stock, status, margin, precioUSD, esIMEI, detalleStock, statusBadge };
+      const estadoInv = p.estadoInventario || 'disponible';
+      const statusBadge = `<span class="badge ${this.ESTADO_INV_CLASS[estadoInv]}">${this.ESTADO_INV_LABEL[estadoInv]}</span>`;
+      return { stock, margin, precioUSD, esIMEI, detalleStock, statusBadge };
     };
 
     tbody.innerHTML = rows.map(p => {
@@ -1386,6 +1506,16 @@ const Stock = {
                     <button type="button" onclick="Stock.bumpQty(1)" style="width:32px;height:32px;border:1px solid var(--border-strong);border-radius:8px;background:var(--bg);cursor:pointer;font-size:16px">+</button>
                   </div>
                   <div class="hint" style="font-size:10px;color:var(--text-secondary);margin-top:4px" id="cantidad-hint">Cantidad de unidades que tenés, sepas o no todavía los IMEIs de cada una.</div>
+                </div>
+
+                <div style="margin-bottom:12px"><label style="font-size:11px;color:var(--text-secondary);font-weight:600;display:block;margin-bottom:4px">Estado de inventario</label>
+                  <select id="f-estado-inventario" style="width:100%;font-size:12px;padding:7px 10px;border:1px solid var(--border-strong);border-radius:8px">
+                    <option value="disponible" ${(p.estadoInventario||'disponible')==='disponible'?'selected':''}>Disponible</option>
+                    <option value="reservado" ${p.estadoInventario==='reservado'?'selected':''}>Reservado</option>
+                    <option value="en_reparacion" ${p.estadoInventario==='en_reparacion'?'selected':''}>En reparación</option>
+                    <option value="vendido" ${p.estadoInventario==='vendido'?'selected':''}>Vendido</option>
+                  </select>
+                  <div class="hint" style="font-size:10px;color:var(--text-secondary);margin-top:3px">Se marca "Vendido" automáticamente cuando una venta agota el stock. Podés ajustarlo manualmente si lo necesitás (ej: marcar como Reservado).</div>
                 </div>
 
                 <div id="f-imei-wrap" style="margin-bottom:12px;display:${esIMEI?'block':'none'}">
@@ -1719,6 +1849,7 @@ const Stock = {
     const ram = document.getElementById('f-ram')?.value || '';
     const estadoProducto = document.getElementById('f-estado')?.value || document.getElementById('f-estado-mac')?.value || '';
     const grado = document.getElementById('f-grado')?.value || 'Sin grado';
+    const estadoInventario = document.getElementById('f-estado-inventario')?.value || 'disponible';
     const esim = document.getElementById('f-esim')?.checked || false;
     const tieneCaja = document.getElementById('f-caja')?.checked || false;
     const numeroSerie = document.getElementById('f-numero-serie')?.value.trim() || '';
@@ -1735,7 +1866,7 @@ const Stock = {
       precioReventa, precioMayorista, costoReparacion,
       cantidad: cantidadNueva, cantidadDeclarada: cantidadNueva,
       modelo, storage, color, bateriaPct, ciclosBateria, ram, estadoProducto, grado,
-      esim, tieneCaja, numeroSerie, destacado: !!this._destacado
+      esim, tieneCaja, numeroSerie, destacado: !!this._destacado, estadoInventario
     };
     if (esIMEI) {
       obj.imeis = [...this.pendingImeis];
@@ -1775,7 +1906,51 @@ const Stock = {
     toast('Producto eliminado del stock.');
   },
 
-  closeDrawer() { document.getElementById('stock-drawer-host').innerHTML = ''; }
+  closeDrawer() { document.getElementById('stock-drawer-host').innerHTML = ''; },
+
+  exportarExcel() {
+    if (typeof XLSX === 'undefined') { toast('No se pudo cargar el módulo de exportación. Revisá tu conexión a internet.'); return; }
+
+    const filas = State.stock.map(p => {
+      const stock = this.stockReal(p);
+      const costoARS = p.costoUSD * p.cotiz;
+      const margin = costoARS ? Math.round(((p.precioARS - costoARS) / costoARS) * 100) : 0;
+      const precioUSD = p.cotiz ? +(p.precioARS / p.cotiz).toFixed(2) : 0;
+      return {
+        'Producto': p.nombre,
+        'Rubro': this.CAT_LABELS[p.cat] || p.cat,
+        'Modelo': p.modelo || '',
+        'Storage': p.storage || '',
+        'Color': p.color || '',
+        'IMEIs': p.imeis ? p.imeis.join(', ') : '',
+        'Cantidad': stock,
+        'Estado inventario': this.ESTADO_INV_LABEL[p.estadoInventario || 'disponible'],
+        'Costo USD': p.costoUSD,
+        'Cotización': p.cotiz,
+        'Precio venta USD': precioUSD,
+        'Precio venta ARS': p.precioARS,
+        'Precio reventa USD': p.precioReventa || '',
+        'Precio mayorista USD': p.precioMayorista || '',
+        'Margen %': margin,
+        'Proveedor': p.proveedor || '',
+        'Custodio': p.custodio || '',
+        'Notas': p.notas || ''
+      };
+    });
+
+    const ws = XLSX.utils.json_to_sheet(filas);
+    ws['!cols'] = [
+      { wch: 32 }, { wch: 12 }, { wch: 18 }, { wch: 10 }, { wch: 14 }, { wch: 40 },
+      { wch: 10 }, { wch: 16 }, { wch: 11 }, { wch: 11 }, { wch: 14 }, { wch: 14 },
+      { wch: 14 }, { wch: 16 }, { wch: 10 }, { wch: 18 }, { wch: 14 }, { wch: 30 }
+    ];
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Inventario');
+
+    const fecha = new Date().toISOString().split('T')[0];
+    XLSX.writeFile(wb, `iPhoneMood-Inventario-${fecha}.xlsx`);
+    toast('Inventario exportado a Excel.');
+  }
 };
 
 </script>
@@ -1810,18 +1985,27 @@ const Ventas = {
     if (!tbody) return;
     tbody.innerHTML = State.ventas.map(v => {
       const total = v.items.reduce((s, i) => s + i.precio, 0);
-      const pagado = v.pagos.reduce((s, p) => s + p.monto, 0);
+      const cerrada = v.estado === 'cerrada';
       return `<tr>
         <td>#${v.id}</td><td>${v.fecha}</td><td>${v.cliente}</td>
         <td>${v.items.map(i=>i.nombre).join(', ').substring(0,40)}</td>
         <td>${State.fmtUSD(total)}</td>
-        <td><span class="badge ${v.estado==='cerrada'?'b-green':'b-amber'}">${v.estado==='cerrada'?'Cerrada':'Abierta'}</span></td>
+        <td>${this.estadoToggle(cerrada)}</td>
         <td>
-          <button class="btn btn-sm" onclick="Ventas.viewSale(${v.id})"><i class="ti ti-eye"></i></button>
-          <button class="btn btn-sm btn-red" onclick="Ventas.anular(${v.id})"><i class="ti ti-arrow-back-up"></i></button>
+          <button class="btn btn-sm" onclick="Ventas.viewSale(${v.id})"><i class="ti ti-edit"></i> Editar</button>
         </td>
       </tr>`;
     }).join('');
+  },
+
+  // Toggle visual de estado, como el de CocosCRM: dos píldoras, una resaltada según el estado actual.
+  // Es informativo (no clickeable para cambiar estado directo) — el cambio de estado real
+  // ocurre por el flujo normal de pagos/anulación, no tocando el toggle.
+  estadoToggle(cerrada) {
+    return `
+      <span class="badge ${cerrada?'b-gray':'b-amber'}" style="opacity:${cerrada?'0.45':'1'}">Abierta</span>
+      <span class="badge ${cerrada?'b-green':'b-gray'}" style="opacity:${cerrada?'1':'0.45'}">Cerrada</span>
+    `;
   },
 
   openNew() {
@@ -2109,16 +2293,20 @@ const Ventas = {
     if (!v) return;
     const total = v.items.reduce((s, i) => s + i.precio, 0);
     const pagado = v.pagos.reduce((s, p) => s + p.monto, 0);
+    const cerrada = v.estado === 'cerrada';
     const host = document.getElementById('venta-modal-host');
     host.innerHTML = `
       <div style="position:fixed;inset:0;background:rgba(0,0,0,.4);display:flex;align-items:center;justify-content:center;z-index:200" onclick="if(event.target===this) Ventas.closeModal()">
         <div style="width:440px;max-width:92vw;background:var(--bg);border-radius:14px;padding:20px" onclick="event.stopPropagation()">
-          <div style="display:flex;justify-content:space-between;margin-bottom:12px"><h3 style="font-size:15px;font-weight:600">Venta #${v.id}</h3><span class="badge ${v.estado==='cerrada'?'b-green':'b-amber'}">${v.estado==='cerrada'?'Cerrada':'Abierta'}</span></div>
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px"><h3 style="font-size:15px;font-weight:600">Venta #${v.id}</h3>${this.estadoToggle(cerrada)}</div>
           <p style="font-size:12px;color:var(--text-secondary);margin-bottom:10px">${v.cliente} · ${v.fecha}${v.vendedor?` · Vendedor: ${v.vendedor}`:''}</p>
           ${v.items.map(i=>`<div style="display:flex;justify-content:space-between;font-size:12.5px;padding:5px 0;border-bottom:1px solid var(--border)">${i.nombre}<span>${State.fmtUSD(i.precio)}</span></div>`).join('')}
           <div style="display:flex;justify-content:space-between;padding:8px 0;font-weight:600">Total<span>${State.fmtUSD(total)}</span></div>
           <div style="display:flex;justify-content:space-between;padding:4px 0;font-size:12px;color:var(--text-secondary)">Pagado<span>${State.fmtUSD(pagado)}</span></div>
-          <div style="text-align:right;margin-top:14px"><button class="btn" onclick="Ventas.closeModal()">Cerrar</button></div>
+          <div style="display:flex;justify-content:space-between;margin-top:16px;padding-top:14px;border-top:1px solid var(--border)">
+            <button class="btn" style="color:var(--red)" onclick="Ventas.anular(${v.id})"><i class="ti ti-trash"></i> Anular venta</button>
+            <button class="btn" onclick="Ventas.closeModal()">Cerrar</button>
+          </div>
         </div>
       </div>
     `;
@@ -2145,6 +2333,7 @@ const Ventas = {
     });
     await DB.anularVenta(id);
     State.ventas = State.ventas.filter(x => x.id !== id);
+    this.closeModal();
     this.renderList();
     toast(`Venta #${id} anulada. Stock restaurado y pagos revertidos en las cajas de origen.`);
   }
@@ -2423,7 +2612,7 @@ const Gastos = {
         <button class="btn btn-primary btn-sm" onclick="Gastos.openNew()"><i class="ti ti-plus"></i> Registrar gasto</button>
       </div>
       <div class="body-pad">
-        <table><thead><tr><th>Fecha</th><th>Motivo</th><th>Categoría</th><th>Responsable</th><th>Caja</th><th>Monto</th><th>Estado</th></tr></thead>
+        <table><thead><tr><th>Fecha</th><th>Motivo</th><th>Categoría</th><th>Responsable</th><th>Caja</th><th>Monto</th><th>Estado</th><th></th></tr></thead>
         <tbody id="gastos-tbody"></tbody></table>
       </div>
       <div id="gastos-modal-host"></div>
@@ -2458,14 +2647,73 @@ const Gastos = {
     const rows = this.activeCat === 'all' ? State.gastos : State.gastos.filter(g => g.cat === this.activeCat);
     document.getElementById('gastos-tbody').innerHTML = rows.map(g => {
       const c = this.catObj(g.cat);
+      const pagado = g.estado === 'pagado';
       return `<tr>
         <td>${g.fecha}</td><td>${g.motivo}</td>
         <td><span class="badge" style="background:${c.color}22;color:${c.color}">${c.nombre}</span></td>
         <td>${g.responsable}</td><td style="font-size:11px;color:var(--text-secondary)">${g.caja}</td>
         <td><b>${g.moneda==='USD'?State.fmtUSD(g.monto):State.fmtARS(g.monto)}</b></td>
-        <td><span class="badge ${g.estado==='pagado'?'b-green':'b-amber'}">${g.estado==='pagado'?'Pagado':'Pendiente'}</span></td>
+        <td><span class="badge ${pagado?'b-gray':'b-amber'}" style="opacity:${pagado?'0.45':'1'}">Pendiente</span> <span class="badge ${pagado?'b-green':'b-gray'}" style="opacity:${pagado?'1':'0.45'}">Pagado</span></td>
+        <td><button class="btn btn-sm" onclick="Gastos.openEdit('${g.id}')"><i class="ti ti-edit"></i> Editar</button></td>
       </tr>`;
     }).join('');
+  },
+
+  openEdit(id) {
+    const g = State.gastos.find(x => x.id === id);
+    if (!g) return;
+    const c = this.catObj(g.cat);
+    const host = document.getElementById('gastos-modal-host');
+    host.innerHTML = `
+      <div style="position:fixed;inset:0;background:rgba(0,0,0,.4);display:flex;align-items:center;justify-content:center;z-index:200" onclick="if(event.target===this) Gastos.close()">
+        <div style="width:380px;max-width:92vw;background:var(--bg);border-radius:14px;padding:18px" onclick="event.stopPropagation()">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+            <h3 style="font-size:15px;font-weight:600">${g.motivo}</h3>
+            <span class="badge" style="background:${c.color}22;color:${c.color}">${c.nombre}</span>
+          </div>
+          <p style="font-size:12px;color:var(--text-secondary);margin-bottom:14px">${g.fecha} · ${g.responsable} · ${g.caja}</p>
+          <div style="display:flex;justify-content:space-between;padding:8px 0;font-weight:600;border-top:1px solid var(--border);border-bottom:1px solid var(--border);margin-bottom:14px">
+            Monto<span>${g.moneda==='USD'?State.fmtUSD(g.monto):State.fmtARS(g.monto)}</span>
+          </div>
+          <div style="margin-bottom:14px">
+            <label style="font-size:11px;color:var(--text-secondary);font-weight:600;display:block;margin-bottom:4px">Estado</label>
+            <select id="ef-estado" style="width:100%;font-size:12px;padding:7px 10px;border:1px solid var(--border-strong);border-radius:8px">
+              <option value="pagado" ${g.estado==='pagado'?'selected':''}>Pagado</option>
+              <option value="pendiente" ${g.estado==='pendiente'?'selected':''}>Pendiente</option>
+            </select>
+          </div>
+          <div style="display:flex;justify-content:space-between;margin-top:6px">
+            <button class="btn" style="color:var(--red)" onclick="Gastos.deleteGasto('${g.id}')"><i class="ti ti-trash"></i> Eliminar</button>
+            <div style="display:flex;gap:8px">
+              <button class="btn" onclick="Gastos.close()">Cancelar</button>
+              <button class="btn btn-primary" onclick="Gastos.saveEdit('${g.id}')"><i class="ti ti-check"></i> Guardar</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    `;
+  },
+
+  async saveEdit(id) {
+    const g = State.gastos.find(x => x.id === id);
+    if (!g) return;
+    const nuevoEstado = document.getElementById('ef-estado').value;
+    g.estado = nuevoEstado;
+    await DB.actualizarEstadoGasto(id, nuevoEstado);
+    this.close();
+    this.renderTable();
+    toast('Gasto actualizado.');
+  },
+
+  async deleteGasto(id) {
+    if (!confirm('¿Eliminar este gasto? Esta acción no revierte el monto en la caja automáticamente.')) return;
+    await DB.eliminarGasto(id);
+    State.gastos = State.gastos.filter(x => x.id !== id);
+    this.close();
+    this.renderChips();
+    this.renderKpis();
+    this.renderTable();
+    toast('Gasto eliminado.');
   },
 
   openNew() {
@@ -2594,7 +2842,7 @@ const Cueva = {
         <div><b id="cueva-resultado-financiero">—</b> resultado financiero del mes (spread de cambios — separado de las ventas)</div>
       </div>
       <div class="body-pad">
-        <table><thead><tr><th>Fecha</th><th>Operación</th><th>Sale (origen)</th><th>Entra (destino)</th><th>Cotización</th><th>Spread</th></tr></thead>
+        <table><thead><tr><th>Fecha</th><th>Operación</th><th>Sale (origen)</th><th>Entra (destino)</th><th>Cotización</th><th>Spread</th><th></th></tr></thead>
         <tbody id="cueva-tbody"></tbody></table>
       </div>
       <div id="cueva-modal-host"></div>
@@ -2618,8 +2866,55 @@ const Cueva = {
         <td>${o.destinoP} (${o.destinoB})<br><b>${this.fmtByMoneda(o.recibe, t.monedaD)}</b></td>
         <td>$${o.cotiz.toLocaleString('es-AR')}</td>
         <td style="color:${spread>=0?'var(--green-dark)':'var(--red)'};font-weight:600">${spread>=0?'+':''}${State.fmtARS(spread)}</td>
+        <td><button class="btn btn-sm" onclick="Cueva.openView('${o.id}')"><i class="ti ti-edit"></i> Ver</button></td>
       </tr>`;
     }).join('');
+  },
+
+  openView(id) {
+    const o = State.cambios.find(x => x.id == id);
+    if (!o) return;
+    const t = this.typeObj(o.tipo);
+    const spread = State.calcSpreadARS(o);
+    const host = document.getElementById('cueva-modal-host');
+    host.innerHTML = `
+      <div style="position:fixed;inset:0;background:rgba(0,0,0,.4);display:flex;align-items:center;justify-content:center;z-index:200" onclick="if(event.target===this) Cueva.close()">
+        <div style="width:380px;max-width:92vw;background:var(--bg);border-radius:14px;padding:18px" onclick="event.stopPropagation()">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+            <h3 style="font-size:15px;font-weight:600">${t.label}</h3>
+            <span class="badge b-purple">${o.fecha}</span>
+          </div>
+          <div style="background:var(--red-light);border-radius:8px;padding:10px 12px;margin-bottom:8px">
+            <div style="font-size:11px;color:var(--red);font-weight:600;margin-bottom:2px">Sale de</div>
+            <div style="font-size:13px">${o.origenP} — ${o.origenB}: <b>${this.fmtByMoneda(o.entrega, t.monedaO)}</b></div>
+          </div>
+          <div style="background:var(--green-light);border-radius:8px;padding:10px 12px;margin-bottom:12px">
+            <div style="font-size:11px;color:var(--green-dark);font-weight:600;margin-bottom:2px">Entra a</div>
+            <div style="font-size:13px">${o.destinoP} — ${o.destinoB}: <b>${this.fmtByMoneda(o.recibe, t.monedaD)}</b></div>
+          </div>
+          <div style="display:flex;justify-content:space-between;padding:8px 0;border-top:1px solid var(--border);font-size:12.5px"><span>Cotización usada</span><b>$${o.cotiz.toLocaleString('es-AR')}</b></div>
+          <div style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--border);font-size:12.5px"><span>Spread</span><b style="color:${spread>=0?'var(--green-dark)':'var(--red)'}">${spread>=0?'+':''}${State.fmtARS(spread)}</b></div>
+          <div style="display:flex;justify-content:space-between;margin-top:14px">
+            <button class="btn" style="color:var(--red)" onclick="Cueva.deleteOp('${o.id}')"><i class="ti ti-trash"></i> Eliminar</button>
+            <button class="btn" onclick="Cueva.close()">Cerrar</button>
+          </div>
+        </div>
+      </div>
+    `;
+  },
+
+  async deleteOp(id) {
+    const o = State.cambios.find(x => x.id == id);
+    if (!o) return;
+    if (!confirm('¿Eliminar esta operación de cambio? Esto revertirá el movimiento en las cajas de origen y destino.')) return;
+    // Revertir el movimiento de plata entre cajas
+    State.acreditarCaja(o.origenP, o.origenB, o.entrega);
+    State.debitarCaja(o.destinoP, o.destinoB, o.recibe);
+    await DB.eliminarCambio(id);
+    State.cambios = State.cambios.filter(x => x.id != id);
+    this.close();
+    this.renderTable();
+    toast('Operación eliminada. El movimiento se revirtió en ambas cajas.');
   },
 
   openNew() {
@@ -2713,10 +3008,10 @@ const Cueva = {
     State.acreditarCaja(destinoP, destinoB, recibe);
 
     const nuevoOp = { tipo: this.opType, entrega, recibe, cotiz, origenP, origenB, destinoP, destinoB };
-    await DB.crearCambio(nuevoOp);
+    const cambioId = await DB.crearCambio(nuevoOp);
     Sheets.cambio(nuevoOp);
 
-    State.cambios.unshift({ id: Date.now(), fecha: 'Hoy', ...nuevoOp });
+    State.cambios.unshift({ id: cambioId || Date.now(), fecha: 'Hoy', ...nuevoOp });
     this.close();
     this.renderTable();
     toast(`Operación guardada. Se debitó de la caja de ${origenP} y se acreditó en la de ${destinoP}. El spread quedó reflejado en el resultado financiero del mes.`);

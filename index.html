@@ -2107,7 +2107,7 @@ const Ventas = {
   showModal() {
     const host = document.getElementById('venta-modal-host');
     host.innerHTML = `
-      <div style="position:fixed;inset:0;background:rgba(0,0,0,.4);display:flex;align-items:center;justify-content:center;z-index:200">
+      <div style="position:fixed;inset:0;background:rgba(0,0,0,.4);display:flex;align-items:center;justify-content:center;z-index:200" onkeydown="if(event.key==='Enter'){event.preventDefault();}">
         <div style="width:600px;max-width:94vw;max-height:88vh;background:var(--bg);border-radius:14px;display:flex;flex-direction:column;overflow:hidden">
           <div style="padding:14px 20px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center">
             <h3 style="font-size:15px;font-weight:600">Nueva venta</h3>
@@ -2380,12 +2380,29 @@ const Ventas = {
     const total = Math.max(0, d.items.reduce((s, i) => s + i.precio, 0) - (d.tradeIn?.valor || 0));
     const pagado = d.pagos.reduce((s, p) => s + Ventas.montoSinDiferencial(p), 0);
     const saldo = Math.max(0, total - pagado);
-    const totalDiferencialArs = d.pagos.filter(p => p.esTarjeta).reduce((s, p) => s + (p.diferencialArs || 0), 0);
+    const pagosTarjeta = d.pagos.filter(p => p.esTarjeta);
+    const totalDiferencialArs = pagosTarjeta.reduce((s, p) => s + (p.diferencialArs || 0), 0);
     return `
       <div style="margin-bottom:14px"><b>Cliente:</b> ${d.cliente || 'Consumidor final'} ${d.vendedor?`· Vendedor: ${d.vendedor}`:''}</div>
       <div style="margin-bottom:14px"><b>Ítems (${d.items.length})</b>
         ${d.items.map(i=>`<div style="display:flex;justify-content:space-between;font-size:12px;padding:3px 0">${i.nombre}<span>${State.fmtUSD(i.precio)}</span></div>`).join('')}
       </div>
+      <div style="margin-bottom:14px"><b>Pagos (${d.pagos.length})</b>
+        ${d.pagos.map(p=>`<div style="display:flex;justify-content:space-between;font-size:12px;padding:3px 0">${p.persona} — ${p.bolsillo}${p.esTarjeta?' <span class="badge b-purple" style="font-size:9px">Tarjeta</span>':''}<span>${State.fmtUSD(p.monto)}</span></div>`).join('')}
+      </div>
+      ${pagosTarjeta.length ? `
+      <div style="background:var(--purple-light);border-radius:8px;padding:10px 12px;margin-bottom:14px">
+        <div style="font-size:11px;color:var(--purple);font-weight:600;margin-bottom:6px"><i class="ti ti-credit-card"></i> Detalle del cálculo de tarjeta</div>
+        ${pagosTarjeta.map(p => {
+          const cotiz = p.cotizacionDiferencial || State.refBlue;
+          const precioVentaRealUSD = p.monto;
+          return `
+            <div style="font-size:11px;color:var(--purple);padding:2px 0;display:flex;justify-content:space-between"><span>Cotización usada</span><b>$${cotiz.toLocaleString('es-AR')}</b></div>
+            <div style="font-size:11px;color:var(--purple);padding:2px 0;display:flex;justify-content:space-between"><span>Precio de venta real</span><b>${State.fmtUSD(precioVentaRealUSD)}</b></div>
+            <div style="font-size:12px;color:var(--green-dark);font-weight:600;padding-top:4px;display:flex;justify-content:space-between"><span>Diferencial ganado</span><span>+$${(p.diferencialArs||0).toLocaleString('es-AR')} (${State.fmtUSD((p.diferencialArs||0)/cotiz)})</span></div>
+          `;
+        }).join('<div style="height:1px;background:#fff;margin:6px 0"></div>')}
+      </div>` : ''}
       <div style="display:flex;justify-content:space-between;padding:8px 0;border-top:1px solid var(--border);font-weight:600">Total<span>${State.fmtUSD(total)}</span></div>
       <div style="display:flex;justify-content:space-between;padding:4px 0;font-size:12px;color:${saldo>0?'var(--red)':'var(--green-dark)'}">Saldo<span>${State.fmtUSD(saldo)}</span></div>
       ${totalDiferencialArs > 0 ? `<div style="display:flex;justify-content:space-between;padding:4px 0;font-size:12px;color:var(--purple)">Diferencial de tarjeta<span>+$${totalDiferencialArs.toLocaleString('es-AR')}</span></div>` : ''}
@@ -2396,18 +2413,23 @@ const Ventas = {
   },
 
   nextStep() {
-    if (this.step === 1 && document.getElementById('vf-ti-active')) {
-      const active = document.getElementById('vf-ti-active').checked;
-      this.draft.tradeIn = active ? { modelo: document.getElementById('vf-ti-modelo').value, valor: parseFloat(document.getElementById('vf-ti-valor').value) || 0 } : null;
+    try {
+      if (this.step === 1 && document.getElementById('vf-ti-active')) {
+        const active = document.getElementById('vf-ti-active').checked;
+        this.draft.tradeIn = active ? { modelo: document.getElementById('vf-ti-modelo').value, valor: parseFloat(document.getElementById('vf-ti-valor').value) || 0 } : null;
+      }
+      if (this.step === 0) {
+        this.draft.cliente = document.getElementById('vf-cliente').value.trim() || 'Consumidor final';
+        this.draft.vendedor = document.getElementById('vf-vendedor').value;
+      }
+      if (this.step === 2 && this.draft.items.length === 0) { toast('Agregá al menos un ítem.'); return; }
+      if (this.step === 4) { this.confirmSale(); return; }
+      this.step++;
+      this.renderStep();
+    } catch (err) {
+      console.error('Error al avanzar de paso en el formulario de venta:', err);
+      toast('Hubo un problema al avanzar. Revisá la consola (F12) para más detalle, o avisame el error.');
     }
-    if (this.step === 0) {
-      this.draft.cliente = document.getElementById('vf-cliente').value.trim() || 'Consumidor final';
-      this.draft.vendedor = document.getElementById('vf-vendedor').value;
-    }
-    if (this.step === 2 && this.draft.items.length === 0) { toast('Agregá al menos un ítem.'); return; }
-    if (this.step === 4) { this.confirmSale(); return; }
-    this.step++;
-    this.renderStep();
   },
   prevStep() { if (this.step > 0) { this.step--; this.renderStep(); } },
 

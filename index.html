@@ -262,7 +262,8 @@ const DB = {
 
   async cargarTodo() {
     const [personasRes, cajasRes, stockRes, garantiasRes, ventasRes, ventaItemsRes, ventaPagosRes,
-           reparacionesRes, repRepuestosRes, repPagosRes, catGastoRes, gastosRes, cambiosRes] = await Promise.all([
+           reparacionesRes, repRepuestosRes, repPagosRes, catGastoRes, gastosRes, cambiosRes,
+           gastosFijosRes, cierresRes] = await Promise.all([
       supa.from('personas').select('*'),
       supa.from('cajas').select('*'),
       supa.from('stock').select('*'),
@@ -276,6 +277,8 @@ const DB = {
       supa.from('categorias_gasto').select('*'),
       supa.from('gastos').select('*').order('creado_en', { ascending: false }),
       supa.from('cambios').select('*').order('creado_en', { ascending: false }),
+      supa.from('gastos_fijos_plantilla').select('*').order('orden', { ascending: true }),
+      supa.from('cierres_mensuales').select('*').order('mes', { ascending: false }),
     ]);
 
     // mapa de personas (id <-> nombre), lo usamos todo el tiempo para traducir
@@ -323,11 +326,23 @@ const DB = {
 
     // gastos
     State.gastos = (gastosRes.data || []).map(g => ({
-      id: g.id, fecha: this.fmtFecha(g.creado_en), motivo: g.motivo, cat: g.categoria_id,
+      id: g.id, fecha: this.fmtFecha(g.creado_en), fechaISO: g.creado_en, motivo: g.motivo, cat: g.categoria_id,
       responsable: this.personasIdToNombre[g.responsable_id] || '',
       caja: `${this.personasIdToNombre[g.persona_caja_id] || ''}-${g.bolsillo}`,
       moneda: g.moneda, monto: Number(g.monto), estado: g.estado,
-      _personaCajaId: g.persona_caja_id, _bolsillo: g.bolsillo
+      _personaCajaId: g.persona_caja_id, _bolsillo: g.bolsillo,
+      esFijo: !!g.es_fijo, mesCierre: g.mes_cierre || null,
+      esSueldoSocio: !!g.es_sueldo_socio, socioNombre: g.socio_nombre || null
+    }));
+
+    State.gastosFijosPlantilla = (gastosFijosRes.data || []).map(g => ({
+      id: g.id, motivo: g.motivo, cat: g.categoria_id, montoSugerido: Number(g.monto_sugerido) || 0,
+      moneda: g.moneda || 'ARS', orden: g.orden || 0, activo: g.activo !== false
+    }));
+
+    State.cierresMensuales = (cierresRes.data || []).map(c => ({
+      id: c.id, mes: c.mes, totalIngresos: Number(c.total_ingresos), totalGastos: Number(c.total_gastos),
+      balance: Number(c.balance), reparto: c.reparto || {}, cerradoEn: c.cerrado_en, cerradoPor: c.cerrado_por
     }));
 
     // cambios (cueva)
@@ -513,7 +528,9 @@ const DB = {
     const { data, error } = await supa.from('gastos').insert({
       motivo: g.motivo, categoria_id: g.cat, responsable_id: this.personaId(g.responsable),
       persona_caja_id: this.personaId(g.persona), bolsillo: g.bolsillo, moneda: g.moneda,
-      monto: g.monto, estado: g.estado
+      monto: g.monto, estado: g.estado,
+      es_fijo: !!g.esFijo, mes_cierre: g.mesCierre || null,
+      es_sueldo_socio: !!g.esSueldoSocio, socio_nombre: g.socioNombre || null
     }).select().single();
     return data?.id;
   },
@@ -524,6 +541,34 @@ const DB = {
 
   async eliminarGasto(gastoId) {
     await supa.from('gastos').delete().eq('id', gastoId);
+  },
+
+  // ===== GASTOS FIJOS (plantilla) =====
+  async agregarGastoFijo(motivo, cat, montoSugerido, moneda) {
+    const orden = (State.gastosFijosPlantilla?.length || 0) + 1;
+    const { data } = await supa.from('gastos_fijos_plantilla').insert({
+      motivo, categoria_id: cat || null, monto_sugerido: montoSugerido || 0, moneda: moneda || 'ARS', orden
+    }).select().single();
+    return data;
+  },
+  async editarGastoFijo(id, cambios) {
+    const row = {};
+    if (cambios.motivo !== undefined) row.motivo = cambios.motivo;
+    if (cambios.montoSugerido !== undefined) row.monto_sugerido = cambios.montoSugerido;
+    if (cambios.moneda !== undefined) row.moneda = cambios.moneda;
+    if (cambios.activo !== undefined) row.activo = cambios.activo;
+    await supa.from('gastos_fijos_plantilla').update(row).eq('id', id);
+  },
+  async borrarGastoFijo(id) {
+    await supa.from('gastos_fijos_plantilla').delete().eq('id', id);
+  },
+
+  // ===== CIERRES MENSUALES =====
+  async guardarCierreMensual(mes, totalIngresos, totalGastos, balance, reparto) {
+    const { data, error } = await supa.from('cierres_mensuales')
+      .upsert({ mes, total_ingresos: totalIngresos, total_gastos: totalGastos, balance, reparto, cerrado_por: Auth.usuario?.nombre || Auth.usuario?.email || '' }, { onConflict: 'mes' })
+      .select().single();
+    return { data, error };
   },
 
   async crearCambio(c) {
@@ -742,6 +787,8 @@ const State = {
   // GASTOS — se carga desde Supabase
   categoriasGasto: [],
   gastos: [],
+  gastosFijosPlantilla: [],
+  cierresMensuales: [],
 
   // CUEVA — operaciones de cambio — se carga desde Supabase
   cambios: [],
@@ -2596,10 +2643,35 @@ const Reparaciones = {
 <script>
 const Gastos = {
   activeCat: 'all',
+  currentView: 'mes', // 'mes' | 'fijos' | 'cierre'
+  mesActual: new Date().toISOString().slice(0, 7), // 'YYYY-MM'
 
   render() {
     const c = document.createElement('div');
     c.innerHTML = `
+      <div style="padding:12px 22px;border-bottom:1px solid var(--border);display:flex;gap:4px;flex-wrap:wrap" id="gastos-view-tabs"></div>
+      <div id="gastos-view-host"></div>
+      <div id="gastos-modal-host"></div>
+    `;
+    setTimeout(() => this.renderView(), 0);
+    return c;
+  },
+
+  renderView() {
+    document.getElementById('gastos-view-tabs').innerHTML = `
+      <button class="btn btn-sm ${this.currentView==='mes'?'btn-primary':''}" onclick="Gastos.setView('mes')"><i class="ti ti-receipt"></i> Gastos del mes</button>
+      <button class="btn btn-sm ${this.currentView==='fijos'?'btn-primary':''}" onclick="Gastos.setView('fijos')"><i class="ti ti-repeat"></i> Gastos fijos</button>
+      <button class="btn btn-sm ${this.currentView==='cierre'?'btn-primary':''}" onclick="Gastos.setView('cierre')"><i class="ti ti-calculator"></i> Cierre de mes</button>
+    `;
+    const host = document.getElementById('gastos-view-host');
+    if (this.currentView === 'mes') { host.innerHTML = this.viewGastosMes(); setTimeout(() => { this.renderChips(); this.renderKpis(); this.renderTable(); }, 0); }
+    else if (this.currentView === 'fijos') { host.innerHTML = this.viewGastosFijos(); setTimeout(() => this.renderFijosList(), 0); }
+    else { host.innerHTML = this.viewCierre(); setTimeout(() => this.renderCierre(), 0); }
+  },
+  setView(v) { this.currentView = v; this.renderView(); },
+
+  viewGastosMes() {
+    return `
       <div class="kpi-row" style="grid-template-columns:repeat(4,1fr)">
         <div class="kpi"><label>Gastos ARS</label><div class="val" id="g-kpi-ars">—</div></div>
         <div class="kpi"><label>Gastos USD</label><div class="val" id="g-kpi-usd">—</div></div>
@@ -2615,10 +2687,7 @@ const Gastos = {
         <table><thead><tr><th>Fecha</th><th>Motivo</th><th>Categoría</th><th>Responsable</th><th>Caja</th><th>Monto</th><th>Estado</th><th></th></tr></thead>
         <tbody id="gastos-tbody"></tbody></table>
       </div>
-      <div id="gastos-modal-host"></div>
     `;
-    setTimeout(() => { this.renderChips(); this.renderKpis(); this.renderTable(); }, 0);
-    return c;
   },
 
   catObj(id) { return State.categoriasGasto.find(c => c.id === id) || { nombre: id, color: '#888' }; },
@@ -2626,30 +2695,36 @@ const Gastos = {
   renderChips() {
     const html = [`<button class="btn btn-sm ${this.activeCat==='all'?'btn-primary':''}" onclick="Gastos.setCat('all')">Todos</button>`]
       .concat(State.categoriasGasto.map(c => `<button class="btn btn-sm ${this.activeCat===c.id?'btn-primary':''}" onclick="Gastos.setCat('${c.id}')" style="${this.activeCat!==c.id?`border-color:${c.color}55`:''}">${c.nombre}</button>`));
-    document.getElementById('gastos-chips').innerHTML = html.join('');
+    const el = document.getElementById('gastos-chips');
+    if (el) el.innerHTML = html.join('');
   },
   setCat(c) { this.activeCat = c; this.renderChips(); this.renderTable(); },
 
   renderKpis() {
-    const ars = State.gastos.filter(g => g.moneda === 'ARS').reduce((a, g) => a + g.monto, 0);
-    const usd = State.gastos.filter(g => g.moneda === 'USD').reduce((a, g) => a + g.monto, 0);
-    const pend = State.gastos.filter(g => g.estado === 'pendiente').length;
+    const delMes = State.gastos.filter(g => !g.mesCierre || g.mesCierre === this.mesActual);
+    const ars = delMes.filter(g => g.moneda === 'ARS').reduce((a, g) => a + g.monto, 0);
+    const usd = delMes.filter(g => g.moneda === 'USD').reduce((a, g) => a + g.monto, 0);
+    const pend = delMes.filter(g => g.estado === 'pendiente').length;
     const counts = {};
-    State.gastos.forEach(g => counts[g.cat] = (counts[g.cat]||0)+1);
+    delMes.forEach(g => counts[g.cat] = (counts[g.cat]||0)+1);
     const top = Object.entries(counts).sort((a,b)=>b[1]-a[1])[0];
-    document.getElementById('g-kpi-ars').textContent = State.fmtARS(ars);
-    document.getElementById('g-kpi-usd').textContent = State.fmtUSD(usd);
-    document.getElementById('g-kpi-pend').textContent = pend;
-    document.getElementById('g-kpi-cat').textContent = top ? this.catObj(top[0]).nombre : '—';
+    const set = (id, val) => { const el = document.getElementById(id); if (el) el.textContent = val; };
+    set('g-kpi-ars', State.fmtARS(ars));
+    set('g-kpi-usd', State.fmtUSD(usd));
+    set('g-kpi-pend', pend);
+    set('g-kpi-cat', top ? this.catObj(top[0]).nombre : '—');
   },
 
   renderTable() {
-    const rows = this.activeCat === 'all' ? State.gastos : State.gastos.filter(g => g.cat === this.activeCat);
-    document.getElementById('gastos-tbody').innerHTML = rows.map(g => {
+    const rows = (this.activeCat === 'all' ? State.gastos : State.gastos.filter(g => g.cat === this.activeCat));
+    const tbody = document.getElementById('gastos-tbody');
+    if (!tbody) return;
+    tbody.innerHTML = rows.map(g => {
       const c = this.catObj(g.cat);
       const pagado = g.estado === 'pagado';
       return `<tr>
-        <td>${g.fecha}</td><td>${g.motivo}</td>
+        <td>${g.fecha}${g.esFijo?' <span class="badge b-blue" style="font-size:9px">Fijo</span>':''}${g.esSueldoSocio?` <span class="badge b-purple" style="font-size:9px">Sueldo ${g.socioNombre||''}</span>`:''}</td>
+        <td>${g.motivo}</td>
         <td><span class="badge" style="background:${c.color}22;color:${c.color}">${c.nombre}</span></td>
         <td>${g.responsable}</td><td style="font-size:11px;color:var(--text-secondary)">${g.caja}</td>
         <td><b>${g.moneda==='USD'?State.fmtUSD(g.monto):State.fmtARS(g.monto)}</b></td>
@@ -2657,6 +2732,60 @@ const Gastos = {
         <td><button class="btn btn-sm" onclick="Gastos.openEdit('${g.id}')"><i class="ti ti-edit"></i> Editar</button></td>
       </tr>`;
     }).join('');
+  },
+
+  openNew() {
+    const host = document.getElementById('gastos-modal-host');
+    host.innerHTML = `
+      <div style="position:fixed;inset:0;background:rgba(0,0,0,.4);display:flex;align-items:center;justify-content:center;z-index:200" onclick="if(event.target===this) Gastos.close()">
+        <div style="width:380px;max-width:92vw;background:var(--bg);border-radius:14px;padding:18px" onclick="event.stopPropagation()">
+          <h3 style="font-size:15px;font-weight:600;margin-bottom:14px">Registrar gasto</h3>
+          <div style="margin-bottom:10px"><label style="font-size:11px;color:var(--text-secondary);font-weight:600;display:block;margin-bottom:4px">Motivo</label><input type="text" id="gf-motivo" style="width:100%;font-size:12px;padding:7px 10px;border:1px solid var(--border-strong);border-radius:8px"></div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:9px;margin-bottom:10px">
+            <div><label style="font-size:11px;color:var(--text-secondary);font-weight:600;display:block;margin-bottom:4px">Categoría</label>
+              <select id="gf-cat" style="width:100%;font-size:12px;padding:7px 10px;border:1px solid var(--border-strong);border-radius:8px">${State.categoriasGasto.map(c=>`<option value="${c.id}">${c.nombre}</option>`).join('')}</select></div>
+            <div><label style="font-size:11px;color:var(--text-secondary);font-weight:600;display:block;margin-bottom:4px">Responsable</label>
+              <select id="gf-resp" style="width:100%;font-size:12px;padding:7px 10px;border:1px solid var(--border-strong);border-radius:8px">${State.personas.map(p=>`<option>${p}</option>`).join('')}</select></div>
+          </div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:9px;margin-bottom:10px">
+            <div><label style="font-size:11px;color:var(--text-secondary);font-weight:600;display:block;margin-bottom:4px">Moneda</label>
+              <select id="gf-moneda" style="width:100%;font-size:12px;padding:7px 10px;border:1px solid var(--border-strong);border-radius:8px"><option value="ARS">ARS</option><option value="USD">USD</option></select></div>
+            <div><label style="font-size:11px;color:var(--text-secondary);font-weight:600;display:block;margin-bottom:4px">Monto</label>
+              <input type="number" id="gf-monto" style="width:100%;font-size:12px;padding:7px 10px;border:1px solid var(--border-strong);border-radius:8px"></div>
+          </div>
+          <div style="margin-bottom:14px"><label style="font-size:11px;color:var(--text-secondary);font-weight:600;display:block;margin-bottom:4px">Caja que paga</label>
+            <select id="gf-caja-persona" style="width:48%;font-size:12px;padding:7px 10px;border:1px solid var(--border-strong);border-radius:8px">${State.personas.map(p=>`<option>${p}</option>`).join('')}</select>
+            <select id="gf-caja-bolsillo" style="width:48%;font-size:12px;padding:7px 10px;border:1px solid var(--border-strong);border-radius:8px;margin-left:4%"><option>ARS cash</option><option>ARS transferencia</option><option>USD cash</option><option>USD transferencia</option></select>
+          </div>
+          <div style="display:flex;gap:8px;justify-content:flex-end">
+            <button class="btn" onclick="Gastos.close()">Cancelar</button>
+            <button class="btn btn-primary" onclick="Gastos.save()"><i class="ti ti-check"></i> Guardar</button>
+          </div>
+        </div>
+      </div>
+    `;
+  },
+  close() { document.getElementById('gastos-modal-host').innerHTML = ''; },
+
+  async save() {
+    const motivo = document.getElementById('gf-motivo').value.trim();
+    const monto = parseFloat(document.getElementById('gf-monto').value) || 0;
+    if (!motivo || !monto) { toast('Completá motivo y monto.'); return; }
+    const persona = document.getElementById('gf-caja-persona').value;
+    const bolsillo = document.getElementById('gf-caja-bolsillo').value;
+    const moneda = document.getElementById('gf-moneda').value;
+    const cat = document.getElementById('gf-cat').value;
+    const responsable = document.getElementById('gf-resp').value;
+
+    toast('Guardando gasto...');
+    const mesCierre = this.mesActual;
+    const newId = await DB.crearGasto({ motivo, cat, responsable, persona, bolsillo, moneda, monto, estado: 'pagado', mesCierre });
+
+    State.gastos.unshift({ id: newId || Date.now(), fecha: 'Hoy', motivo, cat, responsable, caja: `${persona}-${bolsillo}`, moneda, monto, estado: 'pagado', mesCierre, esFijo: false, esSueldoSocio: false });
+    State.debitarCaja(persona, bolsillo, monto);
+    Sheets.gasto({ fecha: 'Hoy', motivo, responsable, caja: `${persona}-${bolsillo}`, moneda, monto, estado: 'pagado' }, this.catObj(cat).nombre);
+    this.close(); this.renderChips(); this.renderKpis(); this.renderTable();
+    toast('Gasto registrado y debitado de la caja correspondiente.');
   },
 
   openEdit(id) {
@@ -2716,63 +2845,6 @@ const Gastos = {
     toast('Gasto eliminado.');
   },
 
-  openNew() {
-    const host = document.getElementById('gastos-modal-host');
-    host.innerHTML = `
-      <div style="position:fixed;inset:0;background:rgba(0,0,0,.4);display:flex;align-items:center;justify-content:center;z-index:200" onclick="if(event.target===this) Gastos.close()">
-        <div style="width:380px;max-width:92vw;background:var(--bg);border-radius:14px;padding:18px" onclick="event.stopPropagation()">
-          <h3 style="font-size:15px;font-weight:600;margin-bottom:14px">Registrar gasto</h3>
-          <div style="margin-bottom:10px"><label style="font-size:11px;color:var(--text-secondary);font-weight:600;display:block;margin-bottom:4px">Motivo</label><input type="text" id="gf-motivo" style="width:100%;font-size:12px;padding:7px 10px;border:1px solid var(--border-strong);border-radius:8px"></div>
-          <div style="display:grid;grid-template-columns:1fr 1fr;gap:9px;margin-bottom:10px">
-            <div><label style="font-size:11px;color:var(--text-secondary);font-weight:600;display:block;margin-bottom:4px">Categoría</label>
-              <select id="gf-cat" style="width:100%;font-size:12px;padding:7px 10px;border:1px solid var(--border-strong);border-radius:8px">${State.categoriasGasto.map(c=>`<option value="${c.id}">${c.nombre}</option>`).join('')}</select></div>
-            <div><label style="font-size:11px;color:var(--text-secondary);font-weight:600;display:block;margin-bottom:4px">Responsable</label>
-              <select id="gf-resp" style="width:100%;font-size:12px;padding:7px 10px;border:1px solid var(--border-strong);border-radius:8px">${State.personas.map(p=>`<option>${p}</option>`).join('')}</select></div>
-          </div>
-          <div style="display:grid;grid-template-columns:1fr 1fr;gap:9px;margin-bottom:10px">
-            <div><label style="font-size:11px;color:var(--text-secondary);font-weight:600;display:block;margin-bottom:4px">Moneda</label>
-              <select id="gf-moneda" style="width:100%;font-size:12px;padding:7px 10px;border:1px solid var(--border-strong);border-radius:8px"><option value="ARS">ARS</option><option value="USD">USD</option></select></div>
-            <div><label style="font-size:11px;color:var(--text-secondary);font-weight:600;display:block;margin-bottom:4px">Monto</label>
-              <input type="number" id="gf-monto" style="width:100%;font-size:12px;padding:7px 10px;border:1px solid var(--border-strong);border-radius:8px"></div>
-          </div>
-          <div style="margin-bottom:14px"><label style="font-size:11px;color:var(--text-secondary);font-weight:600;display:block;margin-bottom:4px">Caja que paga</label>
-            <select id="gf-caja-persona" style="width:48%;font-size:12px;padding:7px 10px;border:1px solid var(--border-strong);border-radius:8px">${State.personas.map(p=>`<option>${p}</option>`).join('')}</select>
-            <select id="gf-caja-bolsillo" style="width:48%;font-size:12px;padding:7px 10px;border:1px solid var(--border-strong);border-radius:8px;margin-left:4%"><option>ARS cash</option><option>ARS transferencia</option><option>USD cash</option><option>USD transferencia</option></select>
-          </div>
-          <div style="display:flex;gap:8px;justify-content:flex-end">
-            <button class="btn" onclick="Gastos.close()">Cancelar</button>
-            <button class="btn btn-primary" onclick="Gastos.save()"><i class="ti ti-check"></i> Guardar</button>
-          </div>
-        </div>
-      </div>
-    `;
-  },
-  close() { document.getElementById('gastos-modal-host').innerHTML = ''; },
-
-  async save() {
-    const motivo = document.getElementById('gf-motivo').value.trim();
-    const monto = parseFloat(document.getElementById('gf-monto').value) || 0;
-    if (!motivo || !monto) { toast('Completá motivo y monto.'); return; }
-    const persona = document.getElementById('gf-caja-persona').value;
-    const bolsillo = document.getElementById('gf-caja-bolsillo').value;
-    const moneda = document.getElementById('gf-moneda').value;
-    const cat = document.getElementById('gf-cat').value;
-    const responsable = document.getElementById('gf-resp').value;
-
-    toast('Guardando gasto...');
-    const newId = await DB.crearGasto({ motivo, cat, responsable, persona, bolsillo, moneda, monto, estado: 'pagado' });
-
-    State.gastos.unshift({
-      id: newId || Date.now(), fecha: 'Hoy', motivo, cat,
-      responsable, caja: `${persona}-${bolsillo}`,
-      moneda, monto, estado: 'pagado'
-    });
-    State.debitarCaja(persona, bolsillo, monto);
-    Sheets.gasto({ fecha: 'Hoy', motivo, responsable, caja: `${persona}-${bolsillo}`, moneda, monto, estado: 'pagado' }, this.catObj(cat).nombre);
-    this.close(); this.renderChips(); this.renderKpis(); this.renderTable();
-    toast('Gasto registrado y debitado de la caja correspondiente.');
-  },
-
   manageCats() {
     const host = document.getElementById('gastos-modal-host');
     host.innerHTML = `
@@ -2815,6 +2887,243 @@ const Gastos = {
     await DB.borrarCategoriaGasto(State.categoriasGasto[i].id);
     State.categoriasGasto.splice(i, 1);
     this.renderCatList();
+  },
+
+  viewGastosFijos() {
+    return `
+      <div style="padding:12px 22px;background:var(--blue-light);font-size:12px;color:var(--blue-dark)">
+        <i class="ti ti-info-circle"></i> Esta es tu plantilla de gastos fijos (Alquiler, Monotributos, CRM, etc). Editá los conceptos y montos sugeridos acá una vez, y cada mes los "cargás" con un clic en Cierre de mes — sin tener que escribirlos de nuevo.
+      </div>
+      <div style="padding:12px 22px;display:flex;justify-content:flex-end">
+        <button class="btn btn-primary btn-sm" onclick="Gastos.addFijo()"><i class="ti ti-plus"></i> Agregar gasto fijo</button>
+      </div>
+      <div class="body-pad" style="padding-top:0" id="fijos-list"></div>
+    `;
+  },
+
+  renderFijosList() {
+    const host = document.getElementById('fijos-list');
+    if (!host) return;
+    if (!State.gastosFijosPlantilla.length) { host.innerHTML = `<div class="empty-state"><i class="ti ti-repeat"></i>Todavía no tenés gastos fijos cargados</div>`; return; }
+    host.innerHTML = `
+      <table><thead><tr><th>Concepto</th><th>Categoría</th><th>Monto sugerido</th><th>Moneda</th><th></th></tr></thead>
+      <tbody>
+        ${State.gastosFijosPlantilla.map((g,i) => `
+          <tr>
+            <td><input type="text" value="${g.motivo}" onchange="Gastos.editarFijoMotivo(${i}, this.value)" style="font-size:12px;padding:5px 8px;border:1px solid var(--border-strong);border-radius:6px;width:100%"></td>
+            <td>
+              <select onchange="Gastos.editarFijoCat(${i}, this.value)" style="font-size:12px;padding:5px 8px;border:1px solid var(--border-strong);border-radius:6px">
+                <option value="">Sin categoría</option>
+                ${State.categoriasGasto.map(c=>`<option value="${c.id}" ${g.cat===c.id?'selected':''}>${c.nombre}</option>`).join('')}
+              </select>
+            </td>
+            <td><input type="number" value="${g.montoSugerido}" onchange="Gastos.editarFijoMonto(${i}, this.value)" style="font-size:12px;padding:5px 8px;border:1px solid var(--border-strong);border-radius:6px;width:110px"></td>
+            <td>
+              <select onchange="Gastos.editarFijoMoneda(${i}, this.value)" style="font-size:12px;padding:5px 8px;border:1px solid var(--border-strong);border-radius:6px">
+                <option value="ARS" ${g.moneda==='ARS'?'selected':''}>ARS</option>
+                <option value="USD" ${g.moneda==='USD'?'selected':''}>USD</option>
+              </select>
+            </td>
+            <td><button class="btn btn-sm" style="color:var(--red)" onclick="Gastos.delFijo(${i})"><i class="ti ti-trash"></i></button></td>
+          </tr>
+        `).join('')}
+      </tbody></table>
+    `;
+  },
+
+  async addFijo() {
+    const motivo = prompt('Nombre del gasto fijo (ej: Alquiler, Seguro, etc):');
+    if (!motivo) return;
+    const nuevo = await DB.agregarGastoFijo(motivo, null, 0, 'ARS');
+    State.gastosFijosPlantilla.push({ id: nuevo?.id || ('fijo-'+Date.now()), motivo, cat: null, montoSugerido: 0, moneda: 'ARS', orden: State.gastosFijosPlantilla.length+1, activo: true });
+    this.renderFijosList();
+  },
+  async editarFijoMotivo(i, val) { State.gastosFijosPlantilla[i].motivo = val; await DB.editarGastoFijo(State.gastosFijosPlantilla[i].id, { motivo: val }); },
+  async editarFijoCat(i, val) { State.gastosFijosPlantilla[i].cat = val || null; },
+  async editarFijoMonto(i, val) { State.gastosFijosPlantilla[i].montoSugerido = parseFloat(val)||0; await DB.editarGastoFijo(State.gastosFijosPlantilla[i].id, { montoSugerido: parseFloat(val)||0 }); },
+  async editarFijoMoneda(i, val) { State.gastosFijosPlantilla[i].moneda = val; await DB.editarGastoFijo(State.gastosFijosPlantilla[i].id, { moneda: val }); },
+  async delFijo(i) {
+    if (!confirm(`¿Eliminar "${State.gastosFijosPlantilla[i].motivo}" de la plantilla?`)) return;
+    await DB.borrarGastoFijo(State.gastosFijosPlantilla[i].id);
+    State.gastosFijosPlantilla.splice(i, 1);
+    this.renderFijosList();
+  },
+
+  viewCierre() {
+    const meses = this.ultimosMeses(6);
+    return `
+      <div style="padding:14px 22px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px">
+        <div style="display:flex;align-items:center;gap:8px">
+          <label style="font-size:12px;color:var(--text-secondary);font-weight:600">Mes:</label>
+          <select id="cierre-mes-selector" onchange="Gastos.cambiarMes(this.value)" style="font-size:12px;padding:6px 10px;border:1px solid var(--border-strong);border-radius:8px">
+            ${meses.map(m => `<option value="${m.value}" ${m.value===this.mesActual?'selected':''}>${m.label}</option>`).join('')}
+          </select>
+        </div>
+        <button class="btn btn-sm" onclick="Gastos.clonarFijos()"><i class="ti ti-copy"></i> Cargar gastos fijos del mes</button>
+      </div>
+      <div class="body-pad" id="cierre-body"></div>
+    `;
+  },
+
+  ultimosMeses(n) {
+    const arr = [];
+    const hoy = new Date();
+    for (let i = 0; i < n; i++) {
+      const d = new Date(hoy.getFullYear(), hoy.getMonth() - i, 1);
+      const value = d.toISOString().slice(0, 7);
+      const label = d.toLocaleDateString('es-AR', { month: 'long', year: 'numeric' });
+      arr.push({ value, label: label.charAt(0).toUpperCase() + label.slice(1) });
+    }
+    return arr;
+  },
+
+  cambiarMes(m) { this.mesActual = m; this.renderCierre(); },
+
+  gastosDelMes(mes) { return State.gastos.filter(g => g.mesCierre === mes); },
+
+  ventasDelMes(mes) {
+    // En esta maqueta las ventas no tienen mes_cierre explícito; se contemplan
+    // todas las ventas registradas hasta que el volumen de datos requiera
+    // un filtro de fecha más granular.
+    return State.ventas;
+  },
+
+  renderCierre() {
+    const host = document.getElementById('cierre-body');
+    if (!host) return;
+    const mes = this.mesActual;
+    const gastosMes = this.gastosDelMes(mes);
+    const totalGastosARS = gastosMes.reduce((a, g) => a + (g.moneda === 'USD' ? g.monto * State.refBlue : g.monto), 0);
+    const totalVentasARS = this.ventasDelMes(mes).reduce((a, v) => a + v.items.reduce((s, i) => s + i.precio, 0), 0) * State.refBlue;
+    const spreadCueva = State.resultadoFinancieroMes();
+    const totalIngresos = totalVentasARS + spreadCueva;
+    const balance = totalIngresos - totalGastosARS;
+
+    const cierreExistente = State.cierresMensuales.find(c => c.mes === mes);
+    const yaCerrado = !!cierreExistente;
+    const repartoGuardado = cierreExistente?.reparto || {};
+    const socios = ['Franco', 'Angel', 'Lautaro', 'iPhoneMood'];
+
+    host.innerHTML = `
+      ${yaCerrado ? `<div style="background:var(--green-light);color:var(--green-dark);border-radius:8px;padding:10px 14px;margin-bottom:14px;font-size:12.5px"><i class="ti ti-circle-check"></i> Este mes ya fue cerrado el ${new Date(cierreExistente.cerradoEn).toLocaleDateString('es-AR')}${cierreExistente.cerradoPor?` por ${cierreExistente.cerradoPor}`:''}.</div>` : ''}
+
+      <div class="kpi-row" style="grid-template-columns:repeat(4,1fr);padding:0 0 14px 0;border:none">
+        <div class="kpi"><label>Ingresos del mes</label><div class="val" style="color:var(--green-dark)">${State.fmtARS(totalIngresos)}</div><div class="sub">ventas + spread cueva</div></div>
+        <div class="kpi"><label>Gastos del mes</label><div class="val" style="color:var(--red)">${State.fmtARS(totalGastosARS)}</div><div class="sub">${gastosMes.length} gasto(s) cargados</div></div>
+        <div class="kpi"><label>Balance</label><div class="val" style="color:var(--blue-dark)">${State.fmtARS(balance)}</div><div class="sub">antes de repartir</div></div>
+        <div class="kpi"><label>Balance en USD</label><div class="val">${State.fmtUSD(balance / State.refBlue)}</div><div class="sub">a cotización blue actual</div></div>
+      </div>
+
+      <div class="card">
+        <div class="card-title"><i class="ti ti-list"></i> Gastos cargados este mes</div>
+        ${gastosMes.length ? `
+          <table><thead><tr><th>Motivo</th><th>Categoría</th><th>Monto</th></tr></thead>
+          <tbody>${gastosMes.map(g => `<tr><td>${g.motivo}${g.esSueldoSocio?` <span class="badge b-purple" style="font-size:9px">Sueldo</span>`:''}</td><td>${this.catObj(g.cat).nombre}</td><td>${g.moneda==='USD'?State.fmtUSD(g.monto):State.fmtARS(g.monto)}</td></tr>`).join('')}</tbody></table>
+        ` : `<div class="empty-state"><i class="ti ti-receipt-off"></i>Todavía no cargaste gastos para este mes. Usá "Cargar gastos fijos del mes" o registrá uno nuevo desde la pestaña "Gastos del mes".</div>`}
+      </div>
+
+      <div class="card">
+        <div class="card-title"><i class="ti ti-users"></i> Reparto del balance — sueldos de socios</div>
+        <p style="font-size:11.5px;color:var(--text-secondary);margin-bottom:12px">Asigná cuánto le corresponde a cada uno este mes. Al confirmar, cada monto se carga como un gasto (categoría "Sueldo socio"), y se descuenta del balance.</p>
+        <div id="reparto-inputs">
+          ${socios.map(s => `
+            <div style="display:flex;align-items:center;gap:10px;padding:6px 0">
+              <div style="width:90px;font-size:12.5px;font-weight:600">${s}</div>
+              <input type="number" id="reparto-${s}" value="${repartoGuardado[s] ?? ''}" placeholder="0" oninput="Gastos.actualizarRepartoPreview()" style="flex:1;font-size:12px;padding:6px 10px;border:1px solid var(--border-strong);border-radius:8px" ${yaCerrado?'disabled':''}>
+              <span style="font-size:11px;color:var(--text-secondary)">USD</span>
+            </div>
+          `).join('')}
+        </div>
+        <div style="display:flex;justify-content:space-between;padding:10px 0;border-top:1px solid var(--border);margin-top:8px;font-size:12.5px">
+          <span>Repartido</span><b id="reparto-total">USD 0.00</b>
+        </div>
+        <div style="display:flex;justify-content:space-between;padding:4px 0;font-size:12.5px;color:var(--text-secondary)">
+          <span>Balance disponible</span><b>${State.fmtUSD(balance / State.refBlue)}</b>
+        </div>
+        ${!yaCerrado ? `<button class="btn btn-primary" style="width:100%;justify-content:center;margin-top:12px" onclick="Gastos.confirmarCierre('${mes}')"><i class="ti ti-lock"></i> Confirmar y cerrar el mes</button>` : `<button class="btn" style="width:100%;justify-content:center;margin-top:12px" onclick="Gastos.reabrirMes('${mes}')"><i class="ti ti-lock-open"></i> Reabrir este mes</button>`}
+      </div>
+
+      <div class="card">
+        <div class="card-title"><i class="ti ti-history"></i> Historial de cierres</div>
+        ${State.cierresMensuales.length ? `
+          <table><thead><tr><th>Mes</th><th>Ingresos</th><th>Gastos</th><th>Balance</th><th>Franco</th><th>Angel</th><th>Lautaro</th><th>iPhoneMood</th></tr></thead>
+          <tbody>${State.cierresMensuales.map(c => `<tr>
+            <td>${c.mes}</td><td>${State.fmtARS(c.totalIngresos)}</td><td>${State.fmtARS(c.totalGastos)}</td><td><b>${State.fmtARS(c.balance)}</b></td>
+            <td>USD ${(c.reparto?.Franco||0).toLocaleString('es-AR')}</td><td>USD ${(c.reparto?.Angel||0).toLocaleString('es-AR')}</td><td>USD ${(c.reparto?.Lautaro||0).toLocaleString('es-AR')}</td><td>USD ${(c.reparto?.iPhoneMood||0).toLocaleString('es-AR')}</td>
+          </tr>`).join('')}</tbody></table>
+        ` : `<div class="empty-state"><i class="ti ti-calendar-off"></i>Todavía no cerraste ningún mes</div>`}
+      </div>
+    `;
+    this.actualizarRepartoPreview();
+  },
+
+  actualizarRepartoPreview() {
+    const socios = ['Franco', 'Angel', 'Lautaro', 'iPhoneMood'];
+    let total = 0;
+    socios.forEach(s => { const el = document.getElementById(`reparto-${s}`); if (el) total += parseFloat(el.value) || 0; });
+    const el = document.getElementById('reparto-total');
+    if (el) el.textContent = State.fmtUSD(total);
+  },
+
+  async clonarFijos() {
+    if (!State.gastosFijosPlantilla.length) { toast('Todavía no tenés gastos fijos cargados en la plantilla. Andá a "Gastos fijos" para crearlos.'); return; }
+    if (!confirm(`Se van a cargar ${State.gastosFijosPlantilla.length} gasto(s) fijo(s) para el mes ${this.mesActual}, usando los montos sugeridos de la plantilla. Podés editarlos después. ¿Continuar?`)) return;
+    toast('Cargando gastos fijos...');
+    for (const fijo of State.gastosFijosPlantilla.filter(f => f.activo !== false)) {
+      const newId = await DB.crearGasto({
+        motivo: fijo.motivo, cat: fijo.cat, responsable: State.personas[0] || '', persona: State.personas[0] || '',
+        bolsillo: 'ARS cash', moneda: fijo.moneda, monto: fijo.montoSugerido, estado: 'pendiente',
+        esFijo: true, mesCierre: this.mesActual
+      });
+      State.gastos.unshift({ id: newId || Date.now()+Math.random(), fecha: 'Hoy', motivo: fijo.motivo, cat: fijo.cat, responsable: State.personas[0]||'', caja: `${State.personas[0]||''}-ARS cash`, moneda: fijo.moneda, monto: fijo.montoSugerido, estado: 'pendiente', esFijo: true, mesCierre: this.mesActual, esSueldoSocio: false });
+    }
+    this.renderCierre();
+    toast('Gastos fijos cargados para este mes. Ajustá los montos y marcalos como pagados desde "Gastos del mes" a medida que los abonás.');
+  },
+
+  async confirmarCierre(mes) {
+    const socios = ['Franco', 'Angel', 'Lautaro', 'iPhoneMood'];
+    const reparto = {};
+    socios.forEach(s => { const el = document.getElementById(`reparto-${s}`); reparto[s] = parseFloat(el?.value) || 0; });
+
+    const gastosMes = this.gastosDelMes(mes);
+    const totalGastosARS = gastosMes.reduce((a, g) => a + (g.moneda === 'USD' ? g.monto * State.refBlue : g.monto), 0);
+    const totalVentasARS = this.ventasDelMes(mes).reduce((a, v) => a + v.items.reduce((s, i) => s + i.precio, 0), 0) * State.refBlue;
+    const spreadCueva = State.resultadoFinancieroMes();
+    const totalIngresos = totalVentasARS + spreadCueva;
+    const balanceAntes = totalIngresos - totalGastosARS;
+
+    if (!confirm(`¿Confirmar el cierre de ${mes}? Se va a registrar un gasto "Sueldo socio" por cada persona con monto asignado, y el mes va a quedar cerrado.`)) return;
+
+    toast('Cerrando el mes...');
+    const catSueldo = State.categoriasGasto.find(c => c.nombre === 'Sueldo socio');
+    for (const socio of socios) {
+      const monto = reparto[socio];
+      if (!monto) continue;
+      const newId = await DB.crearGasto({
+        motivo: `Sueldo / reparto — ${socio}`, cat: catSueldo?.id || null, responsable: socio === 'iPhoneMood' ? (State.personas[0]||'') : socio,
+        persona: State.personas[0] || '', bolsillo: 'USD cash', moneda: 'USD', monto, estado: 'pagado',
+        esFijo: false, mesCierre: mes, esSueldoSocio: true, socioNombre: socio
+      });
+      State.gastos.unshift({ id: newId || Date.now()+Math.random(), fecha: 'Hoy', motivo: `Sueldo / reparto — ${socio}`, cat: catSueldo?.id||null, responsable: socio, caja: '', moneda: 'USD', monto, estado: 'pagado', esFijo: false, mesCierre: mes, esSueldoSocio: true, socioNombre: socio });
+    }
+
+    const balanceFinal = balanceAntes - (Object.values(reparto).reduce((a,v)=>a+v,0) * State.refBlue);
+    const { error } = await DB.guardarCierreMensual(mes, totalIngresos, totalGastosARS, balanceFinal, reparto);
+    if (error) { toast('Hubo un problema guardando el cierre.'); console.error(error); return; }
+
+    const idx = State.cierresMensuales.findIndex(c => c.mes === mes);
+    const nuevoCierre = { id: Date.now(), mes, totalIngresos, totalGastos: totalGastosARS, balance: balanceFinal, reparto, cerradoEn: new Date().toISOString(), cerradoPor: Auth.usuario?.nombre || '' };
+    if (idx >= 0) State.cierresMensuales[idx] = nuevoCierre; else State.cierresMensuales.unshift(nuevoCierre);
+
+    this.renderCierre();
+    toast(`Mes ${mes} cerrado correctamente.`);
+  },
+
+  reabrirMes(mes) {
+    if (!confirm('¿Reabrir este mes? Vas a poder editar el reparto de nuevo. Los gastos de sueldo ya cargados no se eliminan automáticamente — si necesitás corregirlos, hacelo desde "Gastos del mes".')) return;
+    State.cierresMensuales = State.cierresMensuales.filter(c => c.mes !== mes);
+    this.renderCierre();
   }
 };
 

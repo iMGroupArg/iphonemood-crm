@@ -1234,14 +1234,14 @@ const Stock = {
         <td style="color:${margin>=0?'var(--green-dark)':'var(--red)'}">${margin>=0?'+':''}${margin}%</td>
         <td>${detalleStock}</td>
         <td>${statusBadge}</td>
-        <td><button class="btn btn-sm" onclick="Stock.openDrawer('edit',${p.id})"><i class="ti ti-edit"></i></button></td>
+        <td><button class="btn btn-sm" onclick="Stock.openDrawer('edit','${p.id}')"><i class="ti ti-edit"></i></button></td>
       </tr>`;
     }).join('');
 
     if (cardsHost) {
       cardsHost.innerHTML = rows.map(p => {
         const { margin, precioUSD, detalleStock, statusBadge } = filaTabla(p);
-        return `<div class="stock-card" onclick="Stock.openDrawer('edit',${p.id})">
+        return `<div class="stock-card" onclick="Stock.openDrawer('edit','${p.id}')">
           <div class="stock-card-top">
             <div style="min-width:0;flex:1">
               <div class="stock-card-name">${p.nombre}</div>
@@ -1543,9 +1543,9 @@ const Stock = {
 
           </div>
           <div style="padding:13px 18px;border-top:1px solid var(--border);display:flex;gap:8px;justify-content:flex-end">
-            ${mode === 'edit' ? `<button class="btn" style="color:var(--red);margin-right:auto" onclick="Stock.deleteProduct(${id})"><i class="ti ti-trash"></i> Eliminar</button>` : ''}
+            ${mode === 'edit' ? `<button class="btn" style="color:var(--red);margin-right:auto" onclick="Stock.deleteProduct('${id}')"><i class="ti ti-trash"></i> Eliminar</button>` : ''}
             <button class="btn" onclick="Stock.closeDrawer()">Cancelar</button>
-            <button class="btn btn-primary" onclick="Stock.save(${mode==='edit'?id:'null'})"><i class="ti ti-check"></i> Guardar</button>
+            <button class="btn btn-primary" onclick="Stock.save(${mode==='edit'?`'${id}'`:'null'})"><i class="ti ti-check"></i> Guardar</button>
           </div>
         </div>
       </div>
@@ -1955,7 +1955,7 @@ const Ventas = {
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;max-height:240px;overflow-y:auto">
         ${disponibles.map(s => {
           const sel = this.selectedStockIds.includes(s.id);
-          return `<div onclick="Ventas.toggleStockSel(${s.id})" style="border:${sel?'2px solid var(--blue)':'1px solid var(--border)'};background:${sel?'var(--blue-light)':'var(--bg)'};border-radius:8px;padding:9px 11px;cursor:pointer;font-size:11.5px">
+          return `<div onclick="Ventas.toggleStockSel('${s.id}')" style="border:${sel?'2px solid var(--blue)':'1px solid var(--border)'};background:${sel?'var(--blue-light)':'var(--bg)'};border-radius:8px;padding:9px 11px;cursor:pointer;font-size:11.5px">
             <b style="font-size:12px">${s.nombre}</b><br>
             <span style="color:var(--text-secondary)">Costo: USD ${s.costoUSD} · Venta: ${State.fmtARS(s.precioARS)}</span>
           </div>`;
@@ -2859,8 +2859,8 @@ const Panel = {
           <span style="width:12px;height:12px;border-radius:50%;background:${g.color}"></span>
           <div style="flex:1"><b style="font-size:13px">${g.nombre}</b></div>
           <div style="font-size:18px;font-weight:600;color:var(--blue)">${g.dias}<span style="font-size:10px;color:var(--text-secondary);display:block;font-weight:400">días</span></div>
-          <button class="btn btn-sm" onclick="Panel.editGarantia(${g.id})"><i class="ti ti-edit"></i></button>
-          <button class="btn btn-sm" onclick="Panel.delGarantia(${g.id})" style="color:var(--red)"><i class="ti ti-trash"></i></button>
+          <button class="btn btn-sm" onclick="Panel.editGarantia('${g.id}')"><i class="ti ti-edit"></i></button>
+          <button class="btn btn-sm" onclick="Panel.delGarantia('${g.id}')" style="color:var(--red)"><i class="ti ti-trash"></i></button>
         </div>`).join('')}</div>
       <button class="btn btn-primary" onclick="Panel.addGarantia()"><i class="ti ti-plus"></i> Nueva categoría</button>
     `;

@@ -332,7 +332,8 @@ const DB = {
       moneda: g.moneda, monto: Number(g.monto), estado: g.estado,
       _personaCajaId: g.persona_caja_id, _bolsillo: g.bolsillo,
       esFijo: !!g.es_fijo, mesCierre: g.mes_cierre || null,
-      esSueldoSocio: !!g.es_sueldo_socio, socioNombre: g.socio_nombre || null
+      esSueldoSocio: !!g.es_sueldo_socio, socioNombre: g.socio_nombre || null,
+      cotizacionUsada: g.cotizacion_usada ? Number(g.cotizacion_usada) : null
     }));
 
     State.gastosFijosPlantilla = (gastosFijosRes.data || []).map(g => ({
@@ -530,7 +531,8 @@ const DB = {
       persona_caja_id: this.personaId(g.persona), bolsillo: g.bolsillo, moneda: g.moneda,
       monto: g.monto, estado: g.estado,
       es_fijo: !!g.esFijo, mes_cierre: g.mesCierre || null,
-      es_sueldo_socio: !!g.esSueldoSocio, socio_nombre: g.socioNombre || null
+      es_sueldo_socio: !!g.esSueldoSocio, socio_nombre: g.socioNombre || null,
+      cotizacion_usada: g.moneda === 'ARS' ? (g.cotizacionUsada || State.refBlue) : null
     }).select().single();
     return data?.id;
   },
@@ -881,6 +883,14 @@ const State = {
       item.estadoInventario = 'disponible';
       DB.actualizarEstadoInventario(stockId, 'disponible');
     }
+  },
+
+  // Convierte un gasto a USD usando la cotización que tenía vigente al momento de pagarlo
+  // (guardada en cotizacionUsada). Si no la tiene (gastos viejos o ya en USD), usa la cotización actual.
+  gastoEnUSD(g) {
+    if (g.moneda === 'USD') return g.monto;
+    const cotiz = g.cotizacionUsada || this.refBlue;
+    return g.monto / cotiz;
   },
 
   // Spread de una operación de cambio, en ARS
@@ -2779,9 +2789,10 @@ const Gastos = {
 
     toast('Guardando gasto...');
     const mesCierre = this.mesActual;
-    const newId = await DB.crearGasto({ motivo, cat, responsable, persona, bolsillo, moneda, monto, estado: 'pagado', mesCierre });
+    const cotizacionUsada = moneda === 'ARS' ? State.refBlue : null;
+    const newId = await DB.crearGasto({ motivo, cat, responsable, persona, bolsillo, moneda, monto, estado: 'pagado', mesCierre, cotizacionUsada });
 
-    State.gastos.unshift({ id: newId || Date.now(), fecha: 'Hoy', motivo, cat, responsable, caja: `${persona}-${bolsillo}`, moneda, monto, estado: 'pagado', mesCierre, esFijo: false, esSueldoSocio: false });
+    State.gastos.unshift({ id: newId || Date.now(), fecha: 'Hoy', motivo, cat, responsable, caja: `${persona}-${bolsillo}`, moneda, monto, estado: 'pagado', mesCierre, esFijo: false, esSueldoSocio: false, cotizacionUsada });
     State.debitarCaja(persona, bolsillo, monto);
     Sheets.gasto({ fecha: 'Hoy', motivo, responsable, caja: `${persona}-${bolsillo}`, moneda, monto, estado: 'pagado' }, this.catObj(cat).nombre);
     this.close(); this.renderChips(); this.renderKpis(); this.renderTable();
@@ -2993,7 +3004,10 @@ const Gastos = {
     if (!host) return;
     const mes = this.mesActual;
     const gastosMes = this.gastosDelMes(mes);
-    const totalGastosARS = gastosMes.reduce((a, g) => a + (g.moneda === 'USD' ? g.monto * State.refBlue : g.monto), 0);
+    // Cada gasto se convierte a USD usando SU PROPIA cotización (la del día que se pagó),
+    // y de ahí pasamos a ARS con la cotización actual solo para mostrar el equivalente.
+    const totalGastosUSD = gastosMes.reduce((a, g) => a + State.gastoEnUSD(g), 0);
+    const totalGastosARS = totalGastosUSD * State.refBlue;
     const totalVentasARS = this.ventasDelMes(mes).reduce((a, v) => a + v.items.reduce((s, i) => s + i.precio, 0), 0) * State.refBlue;
     const spreadCueva = State.resultadoFinancieroMes();
     const totalIngresos = totalVentasARS + spreadCueva;
@@ -3044,6 +3058,19 @@ const Gastos = {
       </div>
 
       <div class="card">
+        <div class="card-title"><i class="ti ti-chart-line"></i> Variación de gastos — últimos 6 meses (en USD)</div>
+        <div style="display:flex;gap:8px;margin-bottom:10px;flex-wrap:wrap">
+          <select id="grafico-concepto-selector" onchange="Gastos.renderGraficoVariacion()" style="font-size:12px;padding:6px 10px;border:1px solid var(--border-strong);border-radius:8px">
+            <option value="__categorias__">Ver por categoría</option>
+            ${this.conceptosUnicos().map(m => `<option value="${m}">${m}</option>`).join('')}
+          </select>
+        </div>
+        <div style="position:relative;height:240px"><canvas id="chart-gastos-variacion"></canvas></div>
+      </div>
+
+      <div class="card" id="analisis-optimizacion"></div>
+
+      <div class="card">
         <div class="card-title"><i class="ti ti-history"></i> Historial de cierres</div>
         ${State.cierresMensuales.length ? `
           <table><thead><tr><th>Mes</th><th>Ingresos</th><th>Gastos</th><th>Balance</th><th>Franco</th><th>Angel</th><th>Lautaro</th><th>iPhoneMood</th></tr></thead>
@@ -3055,6 +3082,8 @@ const Gastos = {
       </div>
     `;
     this.actualizarRepartoPreview();
+    this.renderGraficoVariacion();
+    this.renderAnalisisOptimizacion();
   },
 
   actualizarRepartoPreview() {
@@ -3070,12 +3099,13 @@ const Gastos = {
     if (!confirm(`Se van a cargar ${State.gastosFijosPlantilla.length} gasto(s) fijo(s) para el mes ${this.mesActual}, usando los montos sugeridos de la plantilla. Podés editarlos después. ¿Continuar?`)) return;
     toast('Cargando gastos fijos...');
     for (const fijo of State.gastosFijosPlantilla.filter(f => f.activo !== false)) {
+      const cotizacionUsada = fijo.moneda === 'ARS' ? State.refBlue : null;
       const newId = await DB.crearGasto({
         motivo: fijo.motivo, cat: fijo.cat, responsable: State.personas[0] || '', persona: State.personas[0] || '',
         bolsillo: 'ARS cash', moneda: fijo.moneda, monto: fijo.montoSugerido, estado: 'pendiente',
-        esFijo: true, mesCierre: this.mesActual
+        esFijo: true, mesCierre: this.mesActual, cotizacionUsada
       });
-      State.gastos.unshift({ id: newId || Date.now()+Math.random(), fecha: 'Hoy', motivo: fijo.motivo, cat: fijo.cat, responsable: State.personas[0]||'', caja: `${State.personas[0]||''}-ARS cash`, moneda: fijo.moneda, monto: fijo.montoSugerido, estado: 'pendiente', esFijo: true, mesCierre: this.mesActual, esSueldoSocio: false });
+      State.gastos.unshift({ id: newId || Date.now()+Math.random(), fecha: 'Hoy', motivo: fijo.motivo, cat: fijo.cat, responsable: State.personas[0]||'', caja: `${State.personas[0]||''}-ARS cash`, moneda: fijo.moneda, monto: fijo.montoSugerido, estado: 'pendiente', esFijo: true, mesCierre: this.mesActual, esSueldoSocio: false, cotizacionUsada });
     }
     this.renderCierre();
     toast('Gastos fijos cargados para este mes. Ajustá los montos y marcalos como pagados desde "Gastos del mes" a medida que los abonás.');
@@ -3087,7 +3117,8 @@ const Gastos = {
     socios.forEach(s => { const el = document.getElementById(`reparto-${s}`); reparto[s] = parseFloat(el?.value) || 0; });
 
     const gastosMes = this.gastosDelMes(mes);
-    const totalGastosARS = gastosMes.reduce((a, g) => a + (g.moneda === 'USD' ? g.monto * State.refBlue : g.monto), 0);
+    const totalGastosUSD = gastosMes.reduce((a, g) => a + State.gastoEnUSD(g), 0);
+    const totalGastosARS = totalGastosUSD * State.refBlue;
     const totalVentasARS = this.ventasDelMes(mes).reduce((a, v) => a + v.items.reduce((s, i) => s + i.precio, 0), 0) * State.refBlue;
     const spreadCueva = State.resultadoFinancieroMes();
     const totalIngresos = totalVentasARS + spreadCueva;
@@ -3124,6 +3155,169 @@ const Gastos = {
     if (!confirm('¿Reabrir este mes? Vas a poder editar el reparto de nuevo. Los gastos de sueldo ya cargados no se eliminan automáticamente — si necesitás corregirlos, hacelo desde "Gastos del mes".')) return;
     State.cierresMensuales = State.cierresMensuales.filter(c => c.mes !== mes);
     this.renderCierre();
+  },
+
+  // ============================================================
+  // GRÁFICO DE VARIACIÓN — por concepto individual o por categoría
+  // ============================================================
+  conceptosUnicos() {
+    // Conceptos que vienen de la plantilla de fijos (los más relevantes para comparar mes a mes),
+    // más cualquier otro motivo que se repita en al menos 2 meses distintos.
+    const motivos = new Set(State.gastosFijosPlantilla.map(f => f.motivo));
+    const porMotivo = {};
+    State.gastos.forEach(g => {
+      if (!g.mesCierre) return;
+      if (!porMotivo[g.motivo]) porMotivo[g.motivo] = new Set();
+      porMotivo[g.motivo].add(g.mesCierre);
+    });
+    Object.entries(porMotivo).forEach(([motivo, meses]) => { if (meses.size >= 2) motivos.add(motivo); });
+    return Array.from(motivos).sort();
+  },
+
+  _chartVariacion: null,
+
+  renderGraficoVariacion() {
+    const ctx = document.getElementById('chart-gastos-variacion');
+    if (!ctx) return;
+    if (this._chartVariacion) { this._chartVariacion.destroy(); this._chartVariacion = null; }
+
+    const meses = this.ultimosMeses(6).reverse(); // orden cronológico para el gráfico
+    const selector = document.getElementById('grafico-concepto-selector');
+    const modo = selector ? selector.value : '__categorias__';
+
+    let datasets = [];
+    const colores = ['#185FA5', '#3B6D11', '#854F0B', '#3C3489', '#085041', '#791F1F'];
+
+    if (modo === '__categorias__') {
+      State.categoriasGasto.forEach((cat, i) => {
+        const data = meses.map(m => {
+          const gastosDelMesYCat = State.gastos.filter(g => g.mesCierre === m.value && g.cat === cat.id);
+          return +gastosDelMesYCat.reduce((a, g) => a + State.gastoEnUSD(g), 0).toFixed(2);
+        });
+        if (data.some(v => v > 0)) datasets.push({ label: cat.nombre, data, borderColor: cat.color, backgroundColor: cat.color + '22', tension: 0.3 });
+      });
+    } else {
+      const data = meses.map(m => {
+        const gastosDelMesYConcepto = State.gastos.filter(g => g.mesCierre === m.value && g.motivo === modo);
+        return +gastosDelMesYConcepto.reduce((a, g) => a + State.gastoEnUSD(g), 0).toFixed(2);
+      });
+      datasets.push({ label: modo, data, borderColor: colores[0], backgroundColor: colores[0] + '22', fill: true, tension: 0.3 });
+    }
+
+    if (!datasets.length) {
+      ctx.parentElement.innerHTML = `<div class="empty-state"><i class="ti ti-chart-line"></i>Todavía no hay suficientes datos cargados para graficar esta serie</div>`;
+      return;
+    }
+
+    this._chartVariacion = new Chart(ctx, {
+      type: 'line',
+      data: { labels: meses.map(m => m.label.split(' ')[0].substring(0,3)), datasets },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        plugins: { legend: { position: 'bottom', labels: { boxWidth: 10, font: { size: 10.5 } } } },
+        scales: {
+          y: { ticks: { callback: v => 'USD ' + v, font: { size: 10 } }, grid: { color: '#EFEDE6' } },
+          x: { grid: { display: false }, ticks: { font: { size: 10.5 } } }
+        }
+      }
+    });
+  },
+
+  // ============================================================
+  // ANÁLISIS DE OPTIMIZACIÓN — compara el mes actual contra el promedio histórico
+  // ============================================================
+  renderAnalisisOptimizacion() {
+    const host = document.getElementById('analisis-optimizacion');
+    if (!host) return;
+
+    const meses = this.ultimosMeses(6);
+    const mesActualData = this.gastosDelMes(this.mesActual);
+    const mesesAnteriores = meses.filter(m => m.value !== this.mesActual);
+
+    if (mesActualData.length === 0 || mesesAnteriores.length === 0) {
+      host.innerHTML = `
+        <div class="card-title"><i class="ti ti-bulb"></i> Análisis de optimización</div>
+        <div class="empty-state"><i class="ti ti-chart-bar-off"></i>Necesitamos al menos 2 meses con gastos cargados para poder comparar tendencias.</div>
+      `;
+      return;
+    }
+
+    const hallazgos = [];
+
+    // 1. Comparar cada concepto del mes actual contra su promedio en meses anteriores
+    const conceptosDelMes = [...new Set(mesActualData.map(g => g.motivo))];
+    conceptosDelMes.forEach(motivo => {
+      const montoActual = mesActualData.filter(g => g.motivo === motivo).reduce((a, g) => a + State.gastoEnUSD(g), 0);
+      const historico = [];
+      mesesAnteriores.forEach(m => {
+        const monto = State.gastos.filter(g => g.mesCierre === m.value && g.motivo === motivo).reduce((a, g) => a + State.gastoEnUSD(g), 0);
+        if (monto > 0) historico.push(monto);
+      });
+      if (historico.length === 0) return;
+      const promedio = historico.reduce((a, v) => a + v, 0) / historico.length;
+      if (promedio === 0) return;
+      const variacion = ((montoActual - promedio) / promedio) * 100;
+      if (variacion >= 20) {
+        hallazgos.push({ tipo: 'alerta', texto: `"${motivo}" subió ${variacion.toFixed(0)}% respecto a su promedio de los últimos meses (USD ${promedio.toFixed(0)} → USD ${montoActual.toFixed(0)}). Vale la pena revisar si hay forma de bajarlo.` });
+      } else if (variacion <= -20) {
+        hallazgos.push({ tipo: 'positivo', texto: `"${motivo}" bajó ${Math.abs(variacion).toFixed(0)}% respecto a su promedio (USD ${promedio.toFixed(0)} → USD ${montoActual.toFixed(0)}). Buena señal.` });
+      }
+    });
+
+    // 2. Identificar el gasto más grande del mes (fuera de sueldos)
+    const sinSueldos = mesActualData.filter(g => !g.esSueldoSocio);
+    if (sinSueldos.length) {
+      const mayor = sinSueldos.reduce((max, g) => State.gastoEnUSD(g) > State.gastoEnUSD(max) ? g : max);
+      const montoMayor = State.gastoEnUSD(mayor);
+      const totalSinSueldos = sinSueldos.reduce((a, g) => a + State.gastoEnUSD(g), 0);
+      const pctDelTotal = totalSinSueldos ? (montoMayor / totalSinSueldos) * 100 : 0;
+      if (pctDelTotal >= 30) {
+        hallazgos.push({ tipo: 'info', texto: `"${mayor.motivo}" representa el ${pctDelTotal.toFixed(0)}% de los gastos operativos del mes (USD ${montoMayor.toFixed(0)} de USD ${totalSinSueldos.toFixed(0)}). Es tu gasto más concentrado — cualquier ajuste ahí tiene impacto grande.`});
+      }
+    }
+
+    // 3. Gastos fijos pendientes de pago acumulados (riesgo de mora)
+    const fijosPendientes = mesActualData.filter(g => g.esFijo && g.estado === 'pendiente');
+    if (fijosPendientes.length > 0) {
+      const totalPendiente = fijosPendientes.reduce((a, g) => a + State.gastoEnUSD(g), 0);
+      hallazgos.push({ tipo: 'alerta', texto: `Tenés ${fijosPendientes.length} gasto(s) fijo(s) de este mes todavía sin marcar como pagados, por USD ${totalPendiente.toFixed(0)} en total (${fijosPendientes.map(g=>g.motivo).join(', ')}). Convendría regularizarlos antes de fin de mes.` });
+    }
+
+    // 4. Tendencia general de gastos totales (excluyendo sueldos) en los últimos meses
+    const totalesPorMes = meses.map(m => {
+      const total = State.gastos.filter(g => g.mesCierre === m.value && !g.esSueldoSocio).reduce((a, g) => a + State.gastoEnUSD(g), 0);
+      return { mes: m.label, total };
+    }).filter(x => x.total > 0).reverse();
+    if (totalesPorMes.length >= 3) {
+      const primero = totalesPorMes[0].total;
+      const ultimo = totalesPorMes[totalesPorMes.length - 1].total;
+      if (primero > 0) {
+        const variacionGeneral = ((ultimo - primero) / primero) * 100;
+        if (variacionGeneral >= 15) {
+          hallazgos.push({ tipo: 'alerta', texto: `Los gastos operativos totales vienen en alza: subieron ${variacionGeneral.toFixed(0)}% desde ${totalesPorMes[0].mes} hasta ahora. Conviene revisar la estructura de costos general.` });
+        } else if (variacionGeneral <= -15) {
+          hallazgos.push({ tipo: 'positivo', texto: `Los gastos operativos totales vienen bajando: ${Math.abs(variacionGeneral).toFixed(0)}% menos desde ${totalesPorMes[0].mes}. Buen control de costos.` });
+        }
+      }
+    }
+
+    if (hallazgos.length === 0) {
+      hallazgos.push({ tipo: 'info', texto: 'No se detectaron variaciones significativas este mes. Los gastos se mantuvieron dentro de los rangos habituales.' });
+    }
+
+    const iconPorTipo = { alerta: 'ti-alert-triangle', positivo: 'ti-trending-down', info: 'ti-info-circle' };
+    const colorPorTipo = { alerta: 'var(--amber-dark)', positivo: 'var(--green-dark)', info: 'var(--blue-dark)' };
+    const bgPorTipo = { alerta: 'var(--amber-light)', positivo: 'var(--green-light)', info: 'var(--blue-light)' };
+
+    host.innerHTML = `
+      <div class="card-title"><i class="ti ti-bulb"></i> Análisis de optimización — a tener en cuenta para el próximo mes</div>
+      ${hallazgos.map(h => `
+        <div style="display:flex;gap:10px;align-items:flex-start;background:${bgPorTipo[h.tipo]};border-radius:8px;padding:10px 12px;margin-bottom:8px">
+          <i class="ti ${iconPorTipo[h.tipo]}" style="color:${colorPorTipo[h.tipo]};font-size:16px;flex-shrink:0;margin-top:1px"></i>
+          <span style="font-size:12px;color:${colorPorTipo[h.tipo]};line-height:1.5">${h.texto}</span>
+        </div>
+      `).join('')}
+    `;
   }
 };
 

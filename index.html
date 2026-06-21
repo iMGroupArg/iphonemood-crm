@@ -363,7 +363,11 @@ const DB = {
     (ventaPagosRes.data || []).forEach(p => {
       if (!pagosPorVenta[p.venta_id]) pagosPorVenta[p.venta_id] = [];
       const persona = this.personasIdToNombre[p.persona_id] || '';
-      pagosPorVenta[p.venta_id].push({ caja: `${persona}-${p.bolsillo}`, monto: Number(p.monto), persona, bolsillo: p.bolsillo });
+      pagosPorVenta[p.venta_id].push({
+        caja: `${persona}-${p.bolsillo}`, monto: Number(p.monto), persona, bolsillo: p.bolsillo,
+        esTarjeta: !!p.es_tarjeta, diferencialArs: Number(p.diferencial_ars) || 0,
+        cotizacionDiferencial: p.cotizacion_diferencial ? Number(p.cotizacion_diferencial) : null
+      });
     });
     State.ventas = (ventasRes.data || []).map(v => ({
       id: v.id, fecha: this.fmtFecha(v.creado_en), cliente: v.cliente,
@@ -482,7 +486,9 @@ const DB = {
     if (itemsToInsert.length) await supa.from('venta_items').insert(itemsToInsert);
 
     const pagosToInsert = draft.pagos.map(p => ({
-      venta_id: ventaRow.id, persona_id: this.personaId(p.persona), bolsillo: p.bolsillo, monto: p.monto
+      venta_id: ventaRow.id, persona_id: this.personaId(p.persona), bolsillo: p.bolsillo, monto: p.monto,
+      es_tarjeta: !!p.esTarjeta, diferencial_ars: p.diferencialArs || 0,
+      cotizacion_diferencial: p.esTarjeta ? (p.cotizacionDiferencial || State.refBlue) : null
     }));
     if (pagosToInsert.length) await supa.from('venta_pagos').insert(pagosToInsert);
 
@@ -791,6 +797,7 @@ const State = {
   gastos: [],
   gastosFijosPlantilla: [],
   cierresMensuales: [],
+  formasPago: ['Efectivo', 'Transferencia', 'Tarjeta de crédito', 'Tarjeta de débito', 'USDT'],
 
   // CUEVA — operaciones de cambio — se carga desde Supabase
   cambios: [],
@@ -915,6 +922,20 @@ const State = {
   resultadoFinancieroMes() {
     return this.cambios.reduce((a, o) => a + this.calcSpreadARS(o), 0);
   },
+  // Suma de diferenciales de tarjeta cobrados, convertidos a USD con la cotización
+  // que tenía cada pago al momento de cobrarse (igual criterio que los gastos en ARS).
+  resultadoDiferencialTarjetaMes() {
+    let totalUSD = 0;
+    this.ventas.forEach(v => {
+      (v.pagos || []).forEach(p => {
+        if (p.esTarjeta && p.diferencialArs) {
+          const cotiz = p.cotizacionDiferencial || this.refBlue;
+          totalUSD += p.diferencialArs / cotiz;
+        }
+      });
+    });
+    return totalUSD;
+  },
   resultadoComercialMes() {
     return this.ventas.reduce((a, v) => {
       const totalVenta = v.items.reduce((s, i) => s + i.precio, 0);
@@ -960,7 +981,10 @@ const Dashboard = {
     container.className = 'body-pad';
 
     const resultComercial = State.resultadoComercialMes();
-    const resultFinanciero = State.resultadoFinancieroMes();
+    const spreadCueva = State.resultadoFinancieroMes();
+    const diferencialTarjetaUSD = State.resultadoDiferencialTarjetaMes();
+    const diferencialTarjetaARS = diferencialTarjetaUSD * State.refBlue;
+    const resultFinanciero = spreadCueva + diferencialTarjetaARS;
     const totalResultado = resultComercial + resultFinanciero;
 
     const totalVentasARS = State.ventas.reduce((a, v) => a + v.items.reduce((s, i) => s + i.precio, 0), 0) * State.refBlue;
@@ -992,7 +1016,7 @@ const Dashboard = {
       <div class="kpi-row" style="grid-template-columns:repeat(4,1fr);padding:0 0 14px 0;border:none">
         <div class="kpi"><label>Ventas del período</label><div class="val">${State.fmtARS(totalVentasARS)}</div><div class="sub">${State.ventas.length} ventas · ticket prom. ${State.fmtARS(ticketPromedio)}</div></div>
         <div class="kpi"><label>Resultado comercial</label><div class="val" style="color:${resultComercial>=0?'var(--green-dark)':'var(--red)'}">${resultComercial>=0?'+':''}${State.fmtARS(resultComercial)}</div><div class="sub">margen de ventas</div></div>
-        <div class="kpi"><label>Resultado financiero</label><div class="val" style="color:${resultFinanciero>=0?'var(--green-dark)':'var(--red)'}">${resultFinanciero>=0?'+':''}${State.fmtARS(resultFinanciero)}</div><div class="sub">spread cueva de cambio</div></div>
+        <div class="kpi"><label>Resultado financiero</label><div class="val" style="color:${resultFinanciero>=0?'var(--green-dark)':'var(--red)'}">${resultFinanciero>=0?'+':''}${State.fmtARS(resultFinanciero)}</div><div class="sub">spread cueva + diferencial tarjeta</div></div>
         <div class="kpi"><label>Resultado total</label><div class="val" style="color:var(--blue-dark)">${totalResultado>=0?'+':''}${State.fmtARS(totalResultado)}</div><div class="sub">comercial + financiero</div></div>
       </div>
 
@@ -2232,30 +2256,57 @@ const Ventas = {
         <div><div style="font-size:11px;color:var(--text-secondary)">Total venta</div><div style="font-size:16px;font-weight:600">${State.fmtUSD(total)}</div></div>
         <div><div style="font-size:11px;color:var(--text-secondary)">Saldo restante</div><div style="font-size:16px;font-weight:600;color:${saldo>0?'var(--red)':'var(--green-dark)'}">${State.fmtUSD(saldo)}</div></div>
       </div>
-      ${d.pagos.map((p, idx) => `<div style="display:flex;justify-content:space-between;padding:7px 10px;background:var(--bg-secondary);border-radius:8px;margin-bottom:5px;font-size:12px">
-        <span>${p.persona} — ${p.bolsillo} — ${State.fmtUSD(p.monto)}</span>
+      ${d.pagos.map((p, idx) => `<div style="display:flex;justify-content:space-between;align-items:center;padding:7px 10px;background:var(--bg-secondary);border-radius:8px;margin-bottom:5px;font-size:12px">
+        <span>${p.persona} — ${p.bolsillo} — ${State.fmtUSD(p.monto)}${p.esTarjeta?` <span class="badge b-purple" style="font-size:9px">Tarjeta +$${(p.diferencialArs||0).toLocaleString('es-AR')}</span>`:''}</span>
         <button onclick="Ventas.removePago(${idx})" style="background:none;border:none;cursor:pointer"><i class="ti ti-x"></i></button>
       </div>`).join('')}
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:10px 0">
         <select id="vf-pago-persona" style="font-size:12px;padding:7px 10px;border:1px solid var(--border-strong);border-radius:8px">
           ${State.personas.map(p=>`<option>${p}</option>`).join('')}
         </select>
-        <select id="vf-pago-bolsillo" style="font-size:12px;padding:7px 10px;border:1px solid var(--border-strong);border-radius:8px">
+        <select id="vf-pago-bolsillo" onchange="Ventas.toggleTarjetaWrap()" style="font-size:12px;padding:7px 10px;border:1px solid var(--border-strong);border-radius:8px">
           <option>ARS cash</option><option>ARS transferencia</option><option>USD cash</option><option>USD transferencia</option><option>USDT</option>
         </select>
       </div>
-      <div style="display:flex;gap:8px">
+      <div style="display:flex;gap:8px;margin-bottom:8px">
         <input type="number" id="vf-pago-monto" value="${saldo.toFixed(2)}" style="flex:1;font-size:12px;padding:7px 10px;border:1px solid var(--border-strong);border-radius:8px">
         <button class="btn btn-primary" onclick="Ventas.addPago()"><i class="ti ti-plus"></i> Agregar pago</button>
       </div>
+      <label style="display:flex;align-items:center;gap:7px;font-size:12.5px;cursor:pointer;margin-bottom:8px" id="vf-tarjeta-check-wrap">
+        <input type="checkbox" id="vf-es-tarjeta" onchange="Ventas.toggleDiferencialWrap()"> Pago con tarjeta de crédito
+      </label>
+      <div id="vf-diferencial-wrap" style="display:none;background:var(--purple-light);border-radius:8px;padding:10px 12px;margin-bottom:8px">
+        <label style="font-size:11px;color:var(--purple);font-weight:600;display:block;margin-bottom:4px">Diferencial cobrado (ARS)</label>
+        <input type="number" id="vf-diferencial-ars" placeholder="ej: 34000" style="width:100%;font-size:12px;padding:7px 10px;border:1px solid var(--border-strong);border-radius:8px">
+        <div class="hint" style="font-size:10px;color:var(--purple);margin-top:4px">El extra que le cobraste al cliente por pagar con tarjeta. Se convierte a USD y queda separado como ganancia financiera, igual que el spread de la cueva.</div>
+      </div>
     `;
+  },
+  toggleTarjetaWrap() {
+    const bolsillo = document.getElementById('vf-pago-bolsillo')?.value || '';
+    const wrap = document.getElementById('vf-tarjeta-check-wrap');
+    if (!wrap) return;
+    const esTransferencia = bolsillo.includes('transferencia');
+    wrap.style.display = esTransferencia ? 'flex' : 'none';
+    if (!esTransferencia) {
+      const chk = document.getElementById('vf-es-tarjeta');
+      if (chk) chk.checked = false;
+      this.toggleDiferencialWrap();
+    }
+  },
+  toggleDiferencialWrap() {
+    const chk = document.getElementById('vf-es-tarjeta');
+    const wrap = document.getElementById('vf-diferencial-wrap');
+    if (wrap) wrap.style.display = chk?.checked ? 'block' : 'none';
   },
   addPago() {
     const persona = document.getElementById('vf-pago-persona').value;
     const bolsillo = document.getElementById('vf-pago-bolsillo').value;
     const monto = parseFloat(document.getElementById('vf-pago-monto').value) || 0;
     if (!monto) { toast('Ingresá un monto.'); return; }
-    this.draft.pagos.push({ persona, bolsillo, monto });
+    const esTarjeta = document.getElementById('vf-es-tarjeta')?.checked || false;
+    const diferencialArs = esTarjeta ? (parseFloat(document.getElementById('vf-diferencial-ars')?.value) || 0) : 0;
+    this.draft.pagos.push({ persona, bolsillo, monto, esTarjeta, diferencialArs, cotizacionDiferencial: esTarjeta ? State.refBlue : null });
     document.getElementById('venta-step-body').innerHTML = this.stepPagos();
   },
   removePago(idx) { this.draft.pagos.splice(idx, 1); document.getElementById('venta-step-body').innerHTML = this.stepPagos(); },
@@ -2265,6 +2316,7 @@ const Ventas = {
     const total = Math.max(0, d.items.reduce((s, i) => s + i.precio, 0) - (d.tradeIn?.valor || 0));
     const pagado = d.pagos.reduce((s, p) => s + p.monto, 0);
     const saldo = Math.max(0, total - pagado);
+    const totalDiferencialArs = d.pagos.filter(p => p.esTarjeta).reduce((s, p) => s + (p.diferencialArs || 0), 0);
     return `
       <div style="margin-bottom:14px"><b>Cliente:</b> ${d.cliente || 'Consumidor final'} ${d.vendedor?`· Vendedor: ${d.vendedor}`:''}</div>
       <div style="margin-bottom:14px"><b>Ítems (${d.items.length})</b>
@@ -2272,6 +2324,7 @@ const Ventas = {
       </div>
       <div style="display:flex;justify-content:space-between;padding:8px 0;border-top:1px solid var(--border);font-weight:600">Total<span>${State.fmtUSD(total)}</span></div>
       <div style="display:flex;justify-content:space-between;padding:4px 0;font-size:12px;color:${saldo>0?'var(--red)':'var(--green-dark)'}">Saldo<span>${State.fmtUSD(saldo)}</span></div>
+      ${totalDiferencialArs > 0 ? `<div style="display:flex;justify-content:space-between;padding:4px 0;font-size:12px;color:var(--purple)">Diferencial de tarjeta<span>+$${totalDiferencialArs.toLocaleString('es-AR')}</span></div>` : ''}
       <div style="background:var(--blue-light);border-radius:8px;padding:10px 12px;margin-top:12px;font-size:12px;color:var(--blue-dark)">
         La venta se guardará como: <b>${saldo > 0 ? 'Abierta' : 'Cerrada'}</b>
       </div>
@@ -2331,7 +2384,7 @@ const Ventas = {
 
     const venta = {
       id: ventaId, fecha: 'Hoy', cliente: d.cliente, vendedor: d.vendedor,
-      items: d.items, pagos: d.pagos.map(p => ({ caja: `${p.persona}-${p.bolsillo}`, monto: p.monto, persona: p.persona, bolsillo: p.bolsillo })),
+      items: d.items, pagos: d.pagos.map(p => ({ caja: `${p.persona}-${p.bolsillo}`, monto: p.monto, persona: p.persona, bolsillo: p.bolsillo, esTarjeta: !!p.esTarjeta, diferencialArs: p.diferencialArs || 0, cotizacionDiferencial: p.cotizacionDiferencial || null })),
       estado, tradeIn: d.tradeIn, stockMovs
     };
     State.ventas.unshift(venta);
@@ -2360,6 +2413,7 @@ const Ventas = {
           ${v.items.map(i=>`<div style="display:flex;justify-content:space-between;font-size:12.5px;padding:5px 0;border-bottom:1px solid var(--border)">${i.nombre}<span>${State.fmtUSD(i.precio)}</span></div>`).join('')}
           <div style="display:flex;justify-content:space-between;padding:8px 0;font-weight:600">Total<span>${State.fmtUSD(total)}</span></div>
           <div style="display:flex;justify-content:space-between;padding:4px 0;font-size:12px;color:var(--text-secondary)">Pagado<span>${State.fmtUSD(pagado)}</span></div>
+          ${(v.pagos||[]).filter(p=>p.esTarjeta).map(p => `<div style="display:flex;justify-content:space-between;padding:4px 0;font-size:12px;color:var(--purple)"><span><i class="ti ti-credit-card"></i> Diferencial tarjeta (${p.persona})</span><span>+$${(p.diferencialArs||0).toLocaleString('es-AR')}</span></div>`).join('')}
           <div style="display:flex;justify-content:space-between;margin-top:16px;padding-top:14px;border-top:1px solid var(--border)">
             <button class="btn" style="color:var(--red)" onclick="Ventas.anular(${v.id})"><i class="ti ti-trash"></i> Anular venta</button>
             <button class="btn" onclick="Ventas.closeModal()">Cerrar</button>
@@ -3010,7 +3064,8 @@ const Gastos = {
     const totalGastosARS = totalGastosUSD * State.refBlue;
     const totalVentasARS = this.ventasDelMes(mes).reduce((a, v) => a + v.items.reduce((s, i) => s + i.precio, 0), 0) * State.refBlue;
     const spreadCueva = State.resultadoFinancieroMes();
-    const totalIngresos = totalVentasARS + spreadCueva;
+    const diferencialTarjetaARS = State.resultadoDiferencialTarjetaMes() * State.refBlue;
+    const totalIngresos = totalVentasARS + spreadCueva + diferencialTarjetaARS;
     const balance = totalIngresos - totalGastosARS;
 
     const cierreExistente = State.cierresMensuales.find(c => c.mes === mes);
@@ -3121,7 +3176,8 @@ const Gastos = {
     const totalGastosARS = totalGastosUSD * State.refBlue;
     const totalVentasARS = this.ventasDelMes(mes).reduce((a, v) => a + v.items.reduce((s, i) => s + i.precio, 0), 0) * State.refBlue;
     const spreadCueva = State.resultadoFinancieroMes();
-    const totalIngresos = totalVentasARS + spreadCueva;
+    const diferencialTarjetaARS = State.resultadoDiferencialTarjetaMes() * State.refBlue;
+    const totalIngresos = totalVentasARS + spreadCueva + diferencialTarjetaARS;
     const balanceAntes = totalIngresos - totalGastosARS;
 
     if (!confirm(`¿Confirmar el cierre de ${mes}? Se va a registrar un gasto "Sueldo socio" por cada persona con monto asignado, y el mes va a quedar cerrado.`)) return;
@@ -3630,10 +3686,13 @@ const Panel = {
 
   renderNav() {
     const items = [
+      ['cotizaciones', 'ti ti-currency-dollar', 'Cotizaciones'],
+      ['formas-pago', 'ti ti-credit-card', 'Formas de pago'],
       ['garantias', 'ti ti-shield', 'Garantías'],
       ['personas', 'ti ti-users', 'Cajas y personas'],
       ['usuarios', 'ti ti-lock', 'Usuarios y accesos'],
       ['negocio', 'ti ti-building-store', 'Datos del negocio'],
+      ['exportar', 'ti ti-file-spreadsheet', 'Exportar todo'],
     ];
     document.getElementById('panel-nav').innerHTML = items.map(([k, ic, l]) =>
       `<div class="panel-nav-item" onclick="Panel.setTab('${k}')" style="display:flex;align-items:center;gap:9px;padding:8px 16px;cursor:pointer;font-size:12.5px;white-space:nowrap;color:${this.activeTab===k?'var(--blue)':'var(--text-secondary)'};border-left:2px solid ${this.activeTab===k?'var(--blue)':'transparent'};background:${this.activeTab===k?'var(--bg)':'transparent'};font-weight:${this.activeTab===k?'600':'400'}"><i class="${ic}"></i> ${l}</div>`
@@ -3643,9 +3702,12 @@ const Panel = {
 
   renderBody() {
     const body = document.getElementById('panel-body');
-    if (this.activeTab === 'garantias') body.innerHTML = this.garantiasView();
+    if (this.activeTab === 'cotizaciones') body.innerHTML = this.cotizacionesView();
+    else if (this.activeTab === 'formas-pago') { body.innerHTML = this.formasPagoView(); this.renderFormasPagoList(); }
+    else if (this.activeTab === 'garantias') body.innerHTML = this.garantiasView();
     else if (this.activeTab === 'personas') body.innerHTML = this.personasView();
     else if (this.activeTab === 'usuarios') { body.innerHTML = this.usuariosView(); this.cargarUsuarios(); }
+    else if (this.activeTab === 'exportar') body.innerHTML = this.exportarView();
     else body.innerHTML = this.negocioView();
   },
 
@@ -3766,6 +3828,130 @@ const Panel = {
     State.personas.push(nombre);
     State.cajas[nombre] = { 'ARS cash': 0, 'ARS transferencia': 0, 'USD cash': 0, 'USD transferencia': 0, 'USDT': 0 };
     this.renderBody();
+  },
+
+  cotizacionesView() {
+    return `
+      <h3 style="font-size:13px;font-weight:600;color:var(--text-secondary);text-transform:uppercase;letter-spacing:.4px;margin-bottom:12px;border-bottom:1px solid var(--border);padding-bottom:8px">Cotizaciones del día</h3>
+      <div style="background:var(--blue-light);border-radius:8px;padding:10px 12px;margin-bottom:14px;font-size:11.5px;color:var(--blue-dark)">
+        <i class="ti ti-info-circle"></i> Estos valores se usan en toda la app: precios de venta, conversiones de gastos, cierres de mes, etc. Actualizalos al empezar el día.
+      </div>
+      <div class="card">
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px">
+          <div>
+            <label style="font-size:11px;color:var(--text-secondary);font-weight:600;display:block;margin-bottom:4px">Dólar Blue</label>
+            <input type="number" id="cf-blue" value="${State.refBlue}" style="width:100%;font-size:16px;font-weight:600;padding:9px 12px;border:1px solid var(--border-strong);border-radius:8px">
+          </div>
+          <div>
+            <label style="font-size:11px;color:var(--text-secondary);font-weight:600;display:block;margin-bottom:4px">USDT</label>
+            <input type="number" id="cf-usdt" value="${State.refUsdt}" style="width:100%;font-size:16px;font-weight:600;padding:9px 12px;border:1px solid var(--border-strong);border-radius:8px">
+          </div>
+        </div>
+        <button class="btn btn-primary" style="width:100%;justify-content:center;margin-top:14px" onclick="Panel.guardarCotizaciones()"><i class="ti ti-check"></i> Actualizar cotizaciones</button>
+      </div>
+    `;
+  },
+
+  guardarCotizaciones() {
+    const blue = parseFloat(document.getElementById('cf-blue').value) || State.refBlue;
+    const usdt = parseFloat(document.getElementById('cf-usdt').value) || State.refUsdt;
+    State.refBlue = blue;
+    State.refUsdt = usdt;
+    const topbarBlue = document.getElementById('topbar-blue');
+    const topbarUsdt = document.getElementById('topbar-usdt');
+    if (topbarBlue) topbarBlue.textContent = blue;
+    if (topbarUsdt) topbarUsdt.textContent = usdt;
+    toast(`Cotizaciones actualizadas: Blue $${blue} · USDT $${usdt}.`);
+  },
+
+  formasPagoView() {
+    if (!State.formasPago) State.formasPago = ['Efectivo', 'Transferencia', 'Tarjeta de crédito', 'Tarjeta de débito', 'USDT'];
+    return `
+      <h3 style="font-size:13px;font-weight:600;color:var(--text-secondary);text-transform:uppercase;letter-spacing:.4px;margin-bottom:12px;border-bottom:1px solid var(--border);padding-bottom:8px">Formas de pago</h3>
+      <p style="font-size:11.5px;color:var(--text-secondary);margin-bottom:14px">Lista de referencia de los medios de cobro que usás. El pago con tarjeta se carga desde Ventas marcando la opción correspondiente sobre una transferencia, e incluye el diferencial cobrado.</p>
+      <div id="formas-pago-list"></div>
+      <button class="btn btn-primary" style="margin-top:8px" onclick="Panel.addFormaPago()"><i class="ti ti-plus"></i> Agregar forma de pago</button>
+    `;
+  },
+  renderFormasPagoList() {
+    document.getElementById('formas-pago-list').innerHTML = State.formasPago.map((f, i) => `
+      <div style="display:flex;align-items:center;gap:8px;padding:7px 0;border-bottom:1px solid var(--border)">
+        <i class="ti ti-grip-vertical" style="color:var(--text-secondary)"></i>
+        <input type="text" value="${f}" onchange="Panel.editFormaPago(${i}, this.value)" style="flex:1;font-size:12.5px;padding:6px 10px;border:1px solid var(--border-strong);border-radius:8px">
+        <button onclick="Panel.delFormaPago(${i})" style="background:none;border:none;cursor:pointer;color:var(--red)"><i class="ti ti-trash"></i></button>
+      </div>
+    `).join('');
+  },
+  editFormaPago(i, val) { State.formasPago[i] = val; },
+  addFormaPago() {
+    const nombre = prompt('Nueva forma de pago:');
+    if (!nombre) return;
+    State.formasPago.push(nombre);
+    this.renderFormasPagoList();
+  },
+  delFormaPago(i) {
+    if (!confirm('¿Eliminar esta forma de pago de la lista?')) return;
+    State.formasPago.splice(i, 1);
+    this.renderFormasPagoList();
+  },
+
+  exportarView() {
+    return `
+      <h3 style="font-size:13px;font-weight:600;color:var(--text-secondary);text-transform:uppercase;letter-spacing:.4px;margin-bottom:12px;border-bottom:1px solid var(--border);padding-bottom:8px">Exportar todo a Excel</h3>
+      <p style="font-size:11.5px;color:var(--text-secondary);margin-bottom:14px">Descargá un archivo Excel con una pestaña por cada módulo: Ventas, Stock, Reparaciones, Gastos y Cueva. Útil para análisis externos o respaldos puntuales.</p>
+      <div class="card">
+        <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid var(--border)"><span style="font-size:12.5px"><i class="ti ti-receipt"></i> Ventas</span><span style="font-size:11px;color:var(--text-secondary)">${State.ventas.length} registros</span></div>
+        <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid var(--border)"><span style="font-size:12.5px"><i class="ti ti-box"></i> Stock</span><span style="font-size:11px;color:var(--text-secondary)">${State.stock.length} registros</span></div>
+        <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid var(--border)"><span style="font-size:12.5px"><i class="ti ti-tool"></i> Reparaciones</span><span style="font-size:11px;color:var(--text-secondary)">${State.reparaciones.length} registros</span></div>
+        <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid var(--border)"><span style="font-size:12.5px"><i class="ti ti-arrow-down-circle"></i> Gastos</span><span style="font-size:11px;color:var(--text-secondary)">${State.gastos.length} registros</span></div>
+        <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0"><span style="font-size:12.5px"><i class="ti ti-arrows-exchange"></i> Cueva / cambio</span><span style="font-size:11px;color:var(--text-secondary)">${State.cambios.length} registros</span></div>
+        <button class="btn btn-primary" style="width:100%;justify-content:center;margin-top:14px" onclick="Panel.exportarTodoExcel()"><i class="ti ti-file-spreadsheet"></i> Descargar Excel completo</button>
+      </div>
+    `;
+  },
+
+  exportarTodoExcel() {
+    if (typeof XLSX === 'undefined') { toast('No se pudo cargar el módulo de exportación. Revisá tu conexión a internet.'); return; }
+    const wb = XLSX.utils.book_new();
+
+    const wsVentas = XLSX.utils.json_to_sheet(State.ventas.map(v => ({
+      'ID': v.id, 'Fecha': v.fecha, 'Cliente': v.cliente, 'Vendedor': v.vendedor || '',
+      'Ítems': v.items.map(i=>i.nombre).join(', '), 'Total USD': v.items.reduce((s,i)=>s+i.precio,0),
+      'Estado': v.estado, 'Diferencial tarjeta ARS': (v.pagos||[]).filter(p=>p.esTarjeta).reduce((s,p)=>s+(p.diferencialArs||0),0)
+    })));
+    XLSX.utils.book_append_sheet(wb, wsVentas, 'Ventas');
+
+    const wsStock = XLSX.utils.json_to_sheet(State.stock.map(p => ({
+      'Producto': p.nombre, 'Rubro': Stock.CAT_LABELS[p.cat]||p.cat, 'Stock': State.getStock(p),
+      'Costo USD': p.costoUSD, 'Precio USD': p.cotiz ? +(p.precioARS/p.cotiz).toFixed(2) : 0,
+      'Proveedor': p.proveedor||'', 'Custodio': p.custodio||'', 'Estado': p.estadoInventario||'disponible'
+    })));
+    XLSX.utils.book_append_sheet(wb, wsStock, 'Stock');
+
+    const wsRep = XLSX.utils.json_to_sheet(State.reparaciones.map(r => ({
+      'ID': r.id, 'Fecha': r.fechaIngreso, 'Cliente': r.cliente, 'Equipo': r.equipo,
+      'Estado': Reparaciones.ESTADO_LABEL[r.estado]||r.estado, 'Técnico': r.tecnico||'',
+      'Costo MO': r.costoMO||0, 'Precio final': r.precioFinal||0
+    })));
+    XLSX.utils.book_append_sheet(wb, wsRep, 'Reparaciones');
+
+    const wsGastos = XLSX.utils.json_to_sheet(State.gastos.map(g => ({
+      'Fecha': g.fecha, 'Motivo': g.motivo, 'Categoría': Gastos.catObj(g.cat).nombre,
+      'Responsable': g.responsable, 'Moneda': g.moneda, 'Monto': g.monto, 'Estado': g.estado,
+      'Mes cierre': g.mesCierre||'', 'Es sueldo socio': g.esSueldoSocio?'Sí':'No'
+    })));
+    XLSX.utils.book_append_sheet(wb, wsGastos, 'Gastos');
+
+    const wsCueva = XLSX.utils.json_to_sheet(State.cambios.map(c => ({
+      'Fecha': c.fecha, 'Tipo': Cueva.typeObj(c.tipo)?.label||c.tipo,
+      'Origen': `${c.origenP} (${c.origenB})`, 'Entrega': c.entrega,
+      'Destino': `${c.destinoP} (${c.destinoB})`, 'Recibe': c.recibe, 'Cotización': c.cotiz
+    })));
+    XLSX.utils.book_append_sheet(wb, wsCueva, 'Cueva');
+
+    const fecha = new Date().toISOString().split('T')[0];
+    XLSX.writeFile(wb, `iPhoneMood-Completo-${fecha}.xlsx`);
+    toast('Excel completo descargado.');
   },
 
   negocioView() {

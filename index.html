@@ -2096,7 +2096,76 @@ const Ventas = {
     `;
   },
 
+  DRAFT_KEY: 'iphonemood_venta_draft',
+
+  // Guarda el borrador actual en localStorage — sobrevive a recargas de página,
+  // a diferencia de la memoria de JavaScript que se pierde si el navegador
+  // descarga la pestaña por inactividad.
+  guardarBorrador() {
+    if (!this.draft) return;
+    try {
+      localStorage.setItem(this.DRAFT_KEY, JSON.stringify({ draft: this.draft, step: this.step, guardadoEn: Date.now() }));
+    } catch (e) { /* si falla el guardado local, no interrumpimos el flujo de venta */ }
+  },
+  borrarBorrador() {
+    try { localStorage.removeItem(this.DRAFT_KEY); } catch (e) {}
+  },
+  hayBorradorPendiente() {
+    try {
+      const raw = localStorage.getItem(this.DRAFT_KEY);
+      if (!raw) return null;
+      const data = JSON.parse(raw);
+      // Ignoramos borradores de más de 24hs, para no resucitar algo muy viejo por error
+      if (Date.now() - (data.guardadoEn || 0) > 24 * 60 * 60 * 1000) { this.borrarBorrador(); return null; }
+      return data;
+    } catch (e) { return null; }
+  },
+
   openNew() {
+    const pendiente = this.hayBorradorPendiente();
+    if (pendiente && pendiente.draft && (pendiente.draft.items?.length || pendiente.draft.cliente)) {
+      this.mostrarRecuperarBorrador(pendiente);
+      return;
+    }
+    this.draft = { cliente: '', vendedor: '', tradeIn: null, items: [], pagos: [] };
+    this.step = 0;
+    this.selectedStockIds = [];
+    this.invMode = 'manual';
+    this.showModal();
+  },
+
+  mostrarRecuperarBorrador(pendiente) {
+    const host = document.getElementById('venta-modal-host');
+    const minsAtras = Math.round((Date.now() - pendiente.guardadoEn) / 60000);
+    host.innerHTML = `
+      <div style="position:fixed;inset:0;background:rgba(0,0,0,.4);display:flex;align-items:center;justify-content:center;z-index:200">
+        <div style="width:380px;max-width:92vw;background:var(--bg);border-radius:14px;padding:20px" onclick="event.stopPropagation()">
+          <h3 style="font-size:15px;font-weight:600;margin-bottom:8px"><i class="ti ti-alert-circle" style="color:var(--amber-dark)"></i> Encontramos una venta sin terminar</h3>
+          <p style="font-size:12.5px;color:var(--text-secondary);margin-bottom:14px">
+            Parece que la página se recargó mientras estabas cargando una venta para <b>${pendiente.draft.cliente || 'un cliente'}</b>
+            (${pendiente.draft.items?.length || 0} ítem(s)), hace ${minsAtras < 1 ? 'menos de un minuto' : minsAtras + ' min'}.
+            ¿Querés continuarla donde la dejaste, o empezar una venta nueva?
+          </p>
+          <div style="display:flex;gap:8px;justify-content:flex-end">
+            <button class="btn" onclick="Ventas.descartarBorradorYEmpezarNueva()">Empezar de cero</button>
+            <button class="btn btn-primary" onclick="Ventas.recuperarBorrador()"><i class="ti ti-history"></i> Continuar venta</button>
+          </div>
+        </div>
+      </div>
+    `;
+  },
+  recuperarBorrador() {
+    const pendiente = this.hayBorradorPendiente();
+    if (!pendiente) { this.openNew(); return; }
+    this.draft = pendiente.draft;
+    this.step = pendiente.step || 0;
+    this.selectedStockIds = [];
+    this.invMode = 'manual';
+    this.showModal();
+    toast('Venta recuperada. Revisá los datos antes de continuar.');
+  },
+  descartarBorradorYEmpezarNueva() {
+    this.borrarBorrador();
     this.draft = { cliente: '', vendedor: '', tradeIn: null, items: [], pagos: [] };
     this.step = 0;
     this.selectedStockIds = [];
@@ -2124,7 +2193,10 @@ const Ventas = {
     `;
     this.renderStep();
   },
-  closeModal() { document.getElementById('venta-modal-host').innerHTML = ''; },
+  closeModal() {
+    document.getElementById('venta-modal-host').innerHTML = '';
+    this.borrarBorrador();
+  },
 
   renderStep() {
     document.getElementById('venta-stepper').innerHTML = this.STEPS.map((s, i) => {
@@ -2218,6 +2290,7 @@ const Ventas = {
     if (!nombre || !precio) { toast('Completá nombre y precio.'); return; }
     this.draft.items.push({ nombre, precio, costo, stockId: null, imei: null });
     document.getElementById('venta-step-body').innerHTML = this.stepItems();
+    this.guardarBorrador();
   },
 
   inventoryForm() {
@@ -2250,8 +2323,9 @@ const Ventas = {
     });
     this.selectedStockIds = [];
     document.getElementById('venta-step-body').innerHTML = this.stepItems();
+    this.guardarBorrador();
   },
-  removeItem(idx) { this.draft.items.splice(idx, 1); document.getElementById('venta-step-body').innerHTML = this.stepItems(); },
+  removeItem(idx) { this.draft.items.splice(idx, 1); document.getElementById('venta-step-body').innerHTML = this.stepItems(); this.guardarBorrador(); },
 
   stepPagos() {
     const d = this.draft;
@@ -2372,8 +2446,9 @@ const Ventas = {
     if (!monto) { toast('Ingresá un monto.'); return; }
     this.draft.pagos.push({ persona, bolsillo, monto, esTarjeta, diferencialArs, cotizacionDiferencial });
     document.getElementById('venta-step-body').innerHTML = this.stepPagos();
+    this.guardarBorrador();
   },
-  removePago(idx) { this.draft.pagos.splice(idx, 1); document.getElementById('venta-step-body').innerHTML = this.stepPagos(); },
+  removePago(idx) { this.draft.pagos.splice(idx, 1); document.getElementById('venta-step-body').innerHTML = this.stepPagos(); this.guardarBorrador(); },
 
   stepConfirm() {
     const d = this.draft;
@@ -2426,6 +2501,7 @@ const Ventas = {
       if (this.step === 4) { this.confirmSale(); return; }
       this.step++;
       this.renderStep();
+      this.guardarBorrador();
     } catch (err) {
       console.error('Error al avanzar de paso en el formulario de venta:', err);
       toast('Hubo un problema al avanzar. Revisá la consola (F12) para más detalle, o avisame el error.');
@@ -4207,6 +4283,15 @@ const App = {
     document.getElementById('topbar-blue').textContent = State.refBlue;
     document.getElementById('topbar-usdt').textContent = State.refUsdt;
     this.goTo('dashboard');
+
+    // Si la página se recargó sola mientras había una venta a medio cargar
+    // (por ejemplo, el navegador descargó la pestaña por inactividad), avisamos.
+    const borradorPendiente = Ventas.hayBorradorPendiente();
+    if (borradorPendiente && borradorPendiente.draft && (borradorPendiente.draft.items?.length || borradorPendiente.draft.cliente)) {
+      setTimeout(() => {
+        toast('Encontramos una venta sin terminar. Andá a Ventas → Nueva venta para continuarla.');
+      }, 600);
+    }
   },
 
   toggleUserMenu() {

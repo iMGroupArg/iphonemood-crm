@@ -2280,15 +2280,27 @@ const Ventas = {
         <button class="btn btn-primary" onclick="Ventas.addPago()"><i class="ti ti-plus"></i> Agregar pago</button>
       </div>
       <label style="display:flex;align-items:center;gap:7px;font-size:12.5px;cursor:pointer;margin-bottom:8px" id="vf-tarjeta-check-wrap">
-        <input type="checkbox" id="vf-es-tarjeta" onchange="Ventas.toggleDiferencialWrap()"> Pago con tarjeta de crédito
+        <input type="checkbox" id="vf-es-tarjeta" onchange="Ventas.toggleDiferencialWrap()"> Pago con tarjeta de crédito (posnet)
       </label>
       <div id="vf-diferencial-wrap" style="display:none;background:var(--purple-light);border-radius:8px;padding:10px 12px;margin-bottom:8px">
-        <div style="display:flex;justify-content:space-between;font-size:11.5px;color:var(--purple);margin-bottom:6px">
-          <span>Precio de lista (sin tarjeta)</span><b>${State.fmtUSD(total)}</b>
+        <div style="display:flex;justify-content:space-between;font-size:11.5px;color:var(--purple);margin-bottom:8px">
+          <span>Precio de lista (a cubrir)</span><b>${State.fmtUSD(total)}</b>
         </div>
-        <label style="font-size:11px;color:var(--purple);font-weight:600;display:block;margin-bottom:4px">Precio final con tarjeta (USD)</label>
-        <input type="number" id="vf-precio-final-tarjeta" placeholder="ej: 1050" oninput="Ventas.actualizarDiferencialPreview()" style="width:100%;font-size:13px;font-weight:600;padding:8px 10px;border:1px solid var(--border-strong);border-radius:8px">
-        <div class="hint" style="font-size:10.5px;color:var(--purple);margin-top:6px" id="vf-diferencial-preview">El diferencial se calcula solo: precio final menos precio de lista, convertido a ARS con la cotización actual.</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px">
+          <div>
+            <label style="font-size:11px;color:var(--purple);font-weight:600;display:block;margin-bottom:4px">Monto cargado en posnet (ARS)</label>
+            <input type="number" id="vf-monto-posnet" placeholder="ej: 1420000" oninput="Ventas.actualizarDiferencialPreview()" style="width:100%;font-size:13px;font-weight:600;padding:8px 10px;border:1px solid var(--border-strong);border-radius:8px">
+          </div>
+          <div>
+            <label style="font-size:11px;color:var(--purple);font-weight:600;display:block;margin-bottom:4px">Comisión banco (coef.)</label>
+            <input type="number" id="vf-coef-comision" placeholder="ej: 0.29" step="0.01" oninput="Ventas.actualizarDiferencialPreview()" style="width:100%;font-size:13px;font-weight:600;padding:8px 10px;border:1px solid var(--border-strong);border-radius:8px">
+          </div>
+        </div>
+        <div>
+          <label style="font-size:11px;color:var(--purple);font-weight:600;display:block;margin-bottom:4px">Cotización del momento</label>
+          <input type="number" id="vf-cotiz-tarjeta" value="${State.refBlue}" oninput="Ventas.actualizarDiferencialPreview()" style="width:100%;font-size:13px;font-weight:600;padding:8px 10px;border:1px solid var(--border-strong);border-radius:8px">
+        </div>
+        <div id="vf-diferencial-preview" style="margin-top:10px;padding-top:10px;border-top:1px solid #C9C5B855"></div>
       </div>
     `;
   },
@@ -2308,30 +2320,38 @@ const Ventas = {
     const chk = document.getElementById('vf-es-tarjeta');
     const wrap = document.getElementById('vf-diferencial-wrap');
     if (wrap) wrap.style.display = chk?.checked ? 'block' : 'none';
-    if (chk?.checked) {
-      // Al activar tarjeta, prellenamos el monto del pago con el total de la venta
-      // (el precio final con tarjeta reemplaza al pago de lista, no se suman ambos).
-      const total = Math.max(0, this.draft.items.reduce((s, i) => s + i.precio, 0) - (this.draft.tradeIn?.valor || 0));
-      const montoInput = document.getElementById('vf-pago-monto');
-      const precioFinalInput = document.getElementById('vf-precio-final-tarjeta');
-      if (precioFinalInput && !precioFinalInput.value) precioFinalInput.value = total.toFixed(2);
-      this.actualizarDiferencialPreview();
-    }
+    if (chk?.checked) this.actualizarDiferencialPreview();
+  },
+  // Calcula: Neto ARS = Monto posnet − (Monto posnet × coeficiente) → Precio venta real USD = Neto ARS / Cotización
+  calcularVentaTarjeta() {
+    const total = Math.max(0, this.draft.items.reduce((s, i) => s + i.precio, 0) - (this.draft.tradeIn?.valor || 0));
+    const montoPosnet = parseFloat(document.getElementById('vf-monto-posnet')?.value) || 0;
+    const coef = parseFloat(document.getElementById('vf-coef-comision')?.value) || 0;
+    const cotiz = parseFloat(document.getElementById('vf-cotiz-tarjeta')?.value) || State.refBlue;
+    const netoArs = montoPosnet - (montoPosnet * coef);
+    const precioVentaRealUSD = cotiz ? netoArs / cotiz : 0;
+    const diferencialUSD = precioVentaRealUSD - total;
+    return { total, montoPosnet, coef, cotiz, netoArs, precioVentaRealUSD, diferencialUSD };
   },
   actualizarDiferencialPreview() {
-    const total = Math.max(0, this.draft.items.reduce((s, i) => s + i.precio, 0) - (this.draft.tradeIn?.valor || 0));
-    const precioFinal = parseFloat(document.getElementById('vf-precio-final-tarjeta')?.value) || 0;
-    const diferencialUSD = Math.max(0, precioFinal - total);
-    const diferencialARS = diferencialUSD * State.refBlue;
+    const { total, montoPosnet, netoArs, precioVentaRealUSD, diferencialUSD } = this.calcularVentaTarjeta();
     const preview = document.getElementById('vf-diferencial-preview');
-    if (preview) {
-      preview.textContent = diferencialUSD > 0
-        ? `Diferencial: USD ${diferencialUSD.toFixed(2)} (≈ $${diferencialARS.toLocaleString('es-AR', {maximumFractionDigits:0})}) a la cotización actual.`
-        : 'El precio final con tarjeta debe ser mayor al precio de lista para calcular un diferencial.';
+    if (!preview) return;
+    if (!montoPosnet) {
+      preview.innerHTML = `<span style="font-size:10.5px;color:var(--purple)">Completá el monto del posnet para calcular el precio de venta real.</span>`;
+      return;
     }
-    // El monto del pago se actualiza al precio final con tarjeta automáticamente
-    const montoInput = document.getElementById('vf-pago-monto');
-    if (montoInput && precioFinal > 0) montoInput.value = precioFinal.toFixed(2);
+    const filas = `
+      <div style="display:flex;justify-content:space-between;font-size:11px;color:var(--purple);padding:2px 0"><span>Neto después de comisión</span><b>$${netoArs.toLocaleString('es-AR', {maximumFractionDigits:0})}</b></div>
+      <div style="display:flex;justify-content:space-between;font-size:11px;color:var(--purple);padding:2px 0"><span>Precio de venta real</span><b>${State.fmtUSD(precioVentaRealUSD)}</b></div>
+    `;
+    if (diferencialUSD > 0.005) {
+      preview.innerHTML = filas + `<div style="display:flex;justify-content:space-between;font-size:12px;color:var(--green-dark);font-weight:600;padding-top:4px">Diferencial ganado<span>+${State.fmtUSD(diferencialUSD)}</span></div>`;
+    } else if (diferencialUSD < -0.005) {
+      preview.innerHTML = filas + `<div style="display:flex;justify-content:space-between;font-size:12px;color:var(--red);font-weight:600;padding-top:4px"><span><i class="ti ti-alert-triangle"></i> Falta cubrir</span><span>${State.fmtUSD(diferencialUSD)}</span></div>`;
+    } else {
+      preview.innerHTML = filas + `<div style="font-size:11px;color:var(--purple);padding-top:4px">Cubre exacto el precio de lista, sin diferencial.</div>`;
+    }
   },
   addPago() {
     const persona = document.getElementById('vf-pago-persona').value;
@@ -2339,18 +2359,18 @@ const Ventas = {
     const esTarjeta = document.getElementById('vf-es-tarjeta')?.checked || false;
     let monto = parseFloat(document.getElementById('vf-pago-monto').value) || 0;
     let diferencialArs = 0;
+    let cotizacionDiferencial = null;
 
     if (esTarjeta) {
-      const total = Math.max(0, this.draft.items.reduce((s, i) => s + i.precio, 0) - (this.draft.tradeIn?.valor || 0));
-      const precioFinal = parseFloat(document.getElementById('vf-precio-final-tarjeta')?.value) || 0;
-      if (!precioFinal) { toast('Ingresá el precio final con tarjeta.'); return; }
-      const diferencialUSD = Math.max(0, precioFinal - total);
-      diferencialArs = diferencialUSD * State.refBlue;
-      monto = precioFinal; // el pago pasa a ser el precio final con tarjeta, no el de lista
+      const { montoPosnet, netoArs, precioVentaRealUSD, diferencialUSD, cotiz } = this.calcularVentaTarjeta();
+      if (!montoPosnet) { toast('Ingresá el monto cargado en el posnet.'); return; }
+      monto = precioVentaRealUSD; // lo que efectivamente cubre del precio de la venta
+      diferencialArs = diferencialUSD > 0 ? diferencialUSD * cotiz : 0;
+      cotizacionDiferencial = cotiz;
     }
 
     if (!monto) { toast('Ingresá un monto.'); return; }
-    this.draft.pagos.push({ persona, bolsillo, monto, esTarjeta, diferencialArs, cotizacionDiferencial: esTarjeta ? State.refBlue : null });
+    this.draft.pagos.push({ persona, bolsillo, monto, esTarjeta, diferencialArs, cotizacionDiferencial });
     document.getElementById('venta-step-body').innerHTML = this.stepPagos();
   },
   removePago(idx) { this.draft.pagos.splice(idx, 1); document.getElementById('venta-step-body').innerHTML = this.stepPagos(); },

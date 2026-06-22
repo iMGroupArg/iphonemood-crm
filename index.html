@@ -2,181 +2,484 @@
 <html lang="es">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>iPhoneMood — CRM</title>
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/tabler-icons/2.47.0/tabler-icons.min.css">
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 <style>
-:root{
-  --blue:#185FA5; --blue-light:#E6F1FB; --blue-dark:#0C447C;
-  --green:#3B6D11; --green-light:#EAF3DE; --green-dark:#27500A;
-  --amber:#854F0B; --amber-light:#FAEEDA; --amber-dark:#633806;
-  --red:#791F1F; --red-light:#FCEBEB;
-  --purple:#3C3489; --purple-light:#EEEDFE;
-  --teal:#085041; --teal-light:#E1F5EE;
-  --gray:#444441; --gray-light:#F1EFE8;
-  --border:#E5E2D9; --border-strong:#C9C5B8;
-  --bg:#FFFFFF; --bg-secondary:#F7F6F2; --bg-tertiary:#EFEDE6;
-  --text:#1A1A18; --text-secondary:#6B6862;
-  --radius-md:8px; --radius-lg:12px;
+/* ═══════════════════════════════════════════════════════
+   iPhoneMood CRM — Apple Dark Design System
+   Inspired by apple.com dark interfaces
+   Mobile-first: base styles are for ~390px (iPhone 14)
+   Desktop enhancements at 768px+
+═══════════════════════════════════════════════════════ */
+
+:root {
+  /* Apple Dark palette */
+  --bg:          #000000;
+  --bg-elevated: #1C1C1E;
+  --bg-secondary:#2C2C2E;
+  --bg-tertiary: #3A3A3C;
+  --bg-card:     #1C1C1E;
+
+  --text:        #FFFFFF;
+  --text-secondary: #AEAEB2;
+  --text-tertiary:  #636366;
+
+  --border:       #38383A;
+  --border-strong:#48484A;
+  --separator:    rgba(255,255,255,.08);
+
+  /* Accent — Apple Blue */
+  --blue:       #0A84FF;
+  --blue-light: rgba(10,132,255,.15);
+  --blue-dark:  #0066CC;
+
+  /* Semantic */
+  --green:       #30D158;
+  --green-light: rgba(48,209,88,.15);
+  --green-dark:  #248A3D;
+
+  --amber:       #FF9F0A;
+  --amber-light: rgba(255,159,10,.15);
+  --amber-dark:  #B36800;
+
+  --red:         #FF453A;
+  --red-light:   rgba(255,69,58,.15);
+
+  --purple:      #BF5AF2;
+  --purple-light:rgba(191,90,242,.15);
+
+  --teal:        #5AC8FA;
+  --teal-light:  rgba(90,200,250,.15);
+
+  --gray:        #8E8E93;
+  --gray-light:  rgba(142,142,147,.15);
+
+  /* Typography — SF Pro */
+  --font: -apple-system, "SF Pro Display", "SF Pro Text", BlinkMacSystemFont, "Helvetica Neue", sans-serif;
+
+  /* Radii — Apple's rounded corners */
+  --radius-sm:  6px;
+  --radius-md:  10px;
+  --radius-lg:  14px;
+  --radius-xl:  18px;
+
+  /* Shadows */
+  --shadow-sm:  0 1px 3px rgba(0,0,0,.6);
+  --shadow-md:  0 4px 16px rgba(0,0,0,.5);
+  --shadow-lg:  0 8px 32px rgba(0,0,0,.6);
 }
-*{box-sizing:border-box;margin:0;padding:0}
-body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;font-size:13px;color:var(--text);background:var(--bg-secondary);overflow:hidden}
-.app-shell{display:flex;height:100vh;width:100vw}
 
-/* SIDEBAR */
-.sidebar{width:216px;min-width:216px;background:var(--bg);border-right:1px solid var(--border);display:flex;flex-direction:column;overflow:hidden}
-.sb-head{padding:16px 16px 12px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:10px}
-.sb-logo{width:32px;height:32px;border-radius:8px;background:var(--blue);color:#fff;display:flex;align-items:center;justify-content:center;font-weight:600;font-size:14px;flex-shrink:0}
-.sb-head .name{font-size:14px;font-weight:600}
-.sb-head .loc{font-size:11px;color:var(--text-secondary)}
-.sb-nav{flex:1;overflow-y:auto;padding:8px 0}
-.nav-group{margin-bottom:4px}
-.nav-label{font-size:10px;font-weight:600;color:var(--text-secondary);text-transform:uppercase;letter-spacing:.6px;padding:10px 16px 4px}
-.nav-item{display:flex;align-items:center;gap:10px;padding:8px 16px;cursor:pointer;font-size:12.5px;color:var(--text-secondary);border-left:2px solid transparent;transition:all .12s;user-select:none}
-.nav-item:hover{background:var(--bg-secondary);color:var(--text)}
-.nav-item.active{color:var(--blue);border-left-color:var(--blue);background:var(--blue-light);font-weight:600}
-.nav-item i{font-size:16px;width:18px;text-align:center}
-.nav-item .nav-badge{margin-left:auto;font-size:10px;background:var(--red-light);color:var(--red);padding:1px 6px;border-radius:10px;font-weight:600}
-.sb-foot{padding:12px;border-top:1px solid var(--border)}
-.quick-btn{width:100%;justify-content:center;background:var(--blue);color:#fff;border:none;border-radius:var(--radius-md);padding:9px;font-size:12px;font-weight:600;cursor:pointer;display:flex;align-items:center;gap:6px}
-.quick-btn:hover{background:var(--blue-dark)}
+/* ── Reset ────────────────────────────────────────────── */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
-/* MAIN */
-.main{flex:1;display:flex;flex-direction:column;overflow:hidden;min-width:0}
-.topbar{padding:12px 22px;border-bottom:1px solid var(--border);background:var(--bg);display:flex;align-items:center;justify-content:space-between;gap:12px;flex-shrink:0;flex-wrap:wrap}
-.topbar h1{font-size:16px;font-weight:600}
-.topbar-right{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
-.pill{font-size:11px;font-weight:600;padding:4px 10px;border-radius:20px;white-space:nowrap;display:flex;align-items:center;gap:4px}
-.pill-blue{background:var(--blue-light);color:var(--blue-dark)}
-.pill-green{background:var(--green-light);color:var(--green-dark)}
-.pill-purple{background:var(--purple-light);color:var(--purple)}
+body {
+  font-family: var(--font);
+  font-size: 15px;
+  font-weight: 400;
+  line-height: 1.47;
+  color: var(--text);
+  background: var(--bg);
+  overflow: hidden;
+  -webkit-font-smoothing: antialiased;
+  -webkit-text-size-adjust: 100%;
+}
 
-.btn{font-size:11.5px;padding:6px 13px;border:1px solid var(--border-strong);border-radius:var(--radius-md);background:transparent;cursor:pointer;color:var(--text);display:inline-flex;align-items:center;gap:5px;font-weight:500;transition:background .12s}
-.btn:hover{background:var(--bg-secondary)}
-.btn-primary{background:var(--blue);color:#fff;border-color:var(--blue)}
-.btn-primary:hover{background:var(--blue-dark)}
-.btn-green{background:var(--green);color:#fff;border-color:var(--green)}
-.btn-red{background:var(--red-light);color:var(--red);border-color:#F09595}
-.btn-red:hover{background:#F7C1C1}
-.btn-sm{font-size:10.5px;padding:4px 9px}
+/* ── App Shell ───────────────────────────────────────── */
+.app-shell { display: flex; height: 100dvh; width: 100vw; }
 
-.page{display:none;flex:1;overflow-y:auto}
-.page.active{display:flex;flex-direction:column}
+/* ── Sidebar ─────────────────────────────────────────── */
+.sidebar {
+  width: 220px; min-width: 220px;
+  background: var(--bg-elevated);
+  border-right: 1px solid var(--border);
+  display: flex; flex-direction: column; overflow: hidden;
+  /* Mobile: slides in from left */
+  position: fixed; left: 0; top: 0; height: 100dvh;
+  z-index: 400;
+  transform: translateX(-100%);
+  transition: transform .3s cubic-bezier(.25,.46,.45,.94);
+}
+.sidebar.open { transform: translateX(0); box-shadow: var(--shadow-lg); }
+.sidebar-overlay {
+  display: none; position: fixed; inset: 0;
+  background: rgba(0,0,0,.6); z-index: 350;
+  backdrop-filter: blur(4px); -webkit-backdrop-filter: blur(4px);
+}
+.sidebar-overlay.show { display: block; }
 
-/* shared bits */
-.kpi-row{display:grid;gap:10px;padding:14px 22px;border-bottom:1px solid var(--border);flex-shrink:0;background:var(--bg)}
-.kpi{background:var(--bg-secondary);border-radius:var(--radius-md);padding:10px 14px}
-.kpi label{font-size:10.5px;color:var(--text-secondary);display:block;margin-bottom:3px;font-weight:500}
-.kpi .val{font-size:19px;font-weight:600}
-.kpi .sub{font-size:10.5px;color:var(--text-secondary);margin-top:1px}
+.sb-head {
+  padding: 20px 16px 14px;
+  border-bottom: 1px solid var(--border);
+  display: flex; align-items: center; gap: 10px;
+  padding-top: calc(20px + env(safe-area-inset-top));
+}
+.sb-logo {
+  width: 36px; height: 36px; border-radius: 9px;
+  background: var(--blue);
+  display: flex; align-items: center; justify-content: center;
+  font-weight: 700; font-size: 14px; color: #fff; flex-shrink: 0;
+}
+.sb-head .name { font-size: 15px; font-weight: 600; letter-spacing: -.3px; }
+.sb-head .loc  { font-size: 11px; color: var(--text-secondary); }
 
-.card{background:var(--bg);border:1px solid var(--border);border-radius:var(--radius-lg);padding:16px 18px;margin-bottom:14px}
-.card-title{font-size:12px;font-weight:600;color:var(--text-secondary);text-transform:uppercase;letter-spacing:.4px;margin-bottom:12px;display:flex;align-items:center;gap:6px}
-.card-title i{color:var(--blue);font-size:15px}
+.sb-nav { flex: 1; overflow-y: auto; padding: 10px 0; }
+.nav-group { margin-bottom: 6px; }
+.nav-label {
+  font-size: 11px; font-weight: 600;
+  color: var(--text-tertiary);
+  text-transform: uppercase; letter-spacing: .7px;
+  padding: 12px 16px 4px;
+}
+.nav-item {
+  display: flex; align-items: center; gap: 10px;
+  padding: 10px 16px;
+  cursor: pointer;
+  font-size: 15px; font-weight: 400;
+  color: var(--text-secondary);
+  border-radius: 0;
+  transition: background .15s;
+  user-select: none;
+}
+.nav-item:hover  { background: var(--bg-secondary); color: var(--text); }
+.nav-item.active { color: var(--blue); background: var(--blue-light); font-weight: 600; }
+.nav-item i { font-size: 17px; width: 20px; text-align: center; flex-shrink: 0; }
+.nav-item .nav-badge {
+  margin-left: auto; font-size: 10px;
+  background: var(--red); color: #fff;
+  padding: 1px 6px; border-radius: 10px; font-weight: 700;
+}
 
-.body-pad{padding:18px 22px;flex:1;overflow-y:auto}
+.sb-foot {
+  padding: 12px 12px calc(12px + env(safe-area-inset-bottom));
+  border-top: 1px solid var(--border);
+}
+.quick-btn {
+  width: 100%; display: flex; align-items: center; justify-content: center; gap: 6px;
+  background: var(--blue); color: #fff; border: none;
+  border-radius: var(--radius-md); padding: 11px;
+  font-size: 15px; font-weight: 600; font-family: var(--font);
+  cursor: pointer; transition: background .15s;
+}
+.quick-btn:hover { background: var(--blue-dark); }
+.quick-btn:active { transform: scale(.98); }
 
-table{width:100%;border-collapse:collapse;font-size:12.5px}
-th{text-align:left;padding:9px 12px;color:var(--text-secondary);font-weight:600;font-size:11px;border-bottom:1px solid var(--border);background:var(--bg-secondary);position:sticky;top:0}
-td{padding:9px 12px;border-bottom:1px solid var(--border);color:var(--text)}
-tr:last-child td{border-bottom:none}
-tbody tr:hover td{background:var(--bg-secondary)}
+/* ── Main ────────────────────────────────────────────── */
+.main { flex: 1; display: flex; flex-direction: column; overflow: hidden; min-width: 0; }
 
-.badge{display:inline-block;padding:3px 9px;border-radius:20px;font-size:10.5px;font-weight:600;white-space:nowrap}
-.b-blue{background:var(--blue-light);color:var(--blue-dark)}
-.b-green{background:var(--green-light);color:var(--green-dark)}
-.b-amber{background:var(--amber-light);color:var(--amber-dark)}
-.b-red{background:var(--red-light);color:var(--red)}
-.b-purple{background:var(--purple-light);color:var(--purple)}
-.b-teal{background:var(--teal-light);color:var(--teal)}
-.b-gray{background:var(--gray-light);color:var(--gray)}
+/* ── Top bar ─────────────────────────────────────────── */
+.topbar {
+  padding: 12px 16px;
+  padding-top: calc(12px + env(safe-area-inset-top));
+  background: rgba(28,28,30,.85);
+  backdrop-filter: blur(20px) saturate(180%);
+  -webkit-backdrop-filter: blur(20px) saturate(180%);
+  border-bottom: 1px solid var(--border);
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 10px; flex-shrink: 0; flex-wrap: wrap;
+  position: sticky; top: 0; z-index: 100;
+}
+.topbar h1 { font-size: 17px; font-weight: 600; letter-spacing: -.4px; }
+.topbar-right { display: flex; gap: 6px; align-items: center; }
 
-.av{width:24px;height:24px;border-radius:50%;background:var(--blue-light);color:var(--blue-dark);display:inline-flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;flex-shrink:0}
+/* Menu button — mobile */
+.mobile-menu-btn {
+  display: flex; align-items: center; justify-content: center;
+  background: var(--bg-secondary); border: none;
+  border-radius: var(--radius-sm); padding: 6px;
+  cursor: pointer; color: var(--blue); font-size: 20px;
+  width: 36px; height: 36px; flex-shrink: 0; margin-right: 8px;
+}
+.mobile-menu-btn:active { background: var(--bg-tertiary); }
 
-.empty-state{text-align:center;padding:50px 20px;color:var(--text-secondary)}
-.empty-state i{font-size:32px;display:block;margin:0 auto 10px;opacity:.5}
+/* Pill chips (Blue / USDT) */
+.pill {
+  font-size: 11px; font-weight: 600; padding: 4px 9px;
+  border-radius: 20px; white-space: nowrap;
+  display: flex; align-items: center; gap: 4px;
+}
+.pill-blue   { background: var(--blue-light);   color: var(--blue);   }
+.pill-green  { background: var(--green-light);  color: var(--green);  }
+.pill-purple { background: var(--purple-light); color: var(--purple); }
 
-/* Tarjetas de Stock para mobile — ocultas por defecto, visibles solo bajo el media query */
-.stock-cards-mobile{display:none}
-.stock-card{background:var(--bg);border:1px solid var(--border);border-radius:12px;padding:12px 14px;margin-bottom:10px;cursor:pointer}
-.stock-card:active{background:var(--bg-secondary)}
-.stock-card-top{display:flex;justify-content:space-between;align-items:flex-start;gap:8px;margin-bottom:10px}
-.stock-card-name{font-size:13.5px;font-weight:600;line-height:1.3}
-.stock-card-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;background:var(--bg-secondary);border-radius:8px;padding:8px 6px;margin-bottom:8px}
-.stock-card-grid div{text-align:center}
-.stock-card-grid label{font-size:9px;color:var(--text-secondary);display:block;margin-bottom:2px}
-.stock-card-grid span{font-size:12px;font-weight:600}
-.stock-card-bottom{display:flex;justify-content:space-between;font-size:11px;color:var(--text-secondary);gap:8px}
-.stock-card-bottom span{display:flex;align-items:center;gap:4px;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.stock-card-notas{font-size:10.5px;color:var(--amber-dark);background:var(--amber-light);border-radius:6px;padding:5px 8px;margin-top:8px}
+/* ── Buttons ─────────────────────────────────────────── */
+.btn {
+  font-size: 13px; padding: 7px 14px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-md);
+  background: var(--bg-secondary);
+  cursor: pointer; color: var(--text);
+  display: inline-flex; align-items: center; gap: 6px;
+  font-weight: 500; font-family: var(--font);
+  transition: background .15s;
+  white-space: nowrap;
+}
+.btn:hover   { background: var(--bg-tertiary); }
+.btn:active  { transform: scale(.97); }
+.btn-primary { background: var(--blue); color: #fff; border-color: var(--blue); }
+.btn-primary:hover { background: var(--blue-dark); }
+.btn-green   { background: var(--green); color: #fff; border-color: var(--green); }
+.btn-red     { background: var(--red-light); color: var(--red); border-color: transparent; }
+.btn-sm      { font-size: 12px; padding: 5px 11px; }
 
-.toast{position:fixed;bottom:20px;right:20px;background:var(--text);color:#fff;padding:12px 18px;border-radius:var(--radius-md);font-size:12.5px;box-shadow:0 4px 16px rgba(0,0,0,.2);z-index:999;max-width:340px;line-height:1.5;display:none}
-.toast.show{display:block;animation:slideIn .25s ease}
-@keyframes slideIn{from{transform:translateY(10px);opacity:0}to{transform:translateY(0);opacity:1}}
+/* ── Pages ───────────────────────────────────────────── */
+.page { display: none; flex: 1; overflow-y: auto; }
+.page.active { display: flex; flex-direction: column; }
 
-::-webkit-scrollbar{width:8px;height:8px}
-::-webkit-scrollbar-thumb{background:var(--border-strong);border-radius:4px}
-::-webkit-scrollbar-track{background:transparent}
+/* ── KPI Row ─────────────────────────────────────────── */
+.kpi-row {
+  display: grid; gap: 10px;
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0; background: var(--bg-elevated);
+}
+.kpi {
+  background: var(--bg-secondary);
+  border-radius: var(--radius-md);
+  padding: 12px 14px;
+}
+.kpi label { font-size: 11px; color: var(--text-secondary); display: block; margin-bottom: 4px; font-weight: 500; }
+.kpi .val   { font-size: 20px; font-weight: 700; letter-spacing: -.5px; }
+.kpi .sub   { font-size: 11px; color: var(--text-secondary); margin-top: 2px; }
 
-.mobile-menu-btn{display:none;background:var(--blue-light);border:none;font-size:22px;cursor:pointer;color:var(--blue);margin-right:8px;width:38px;height:38px;align-items:center;justify-content:center;border-radius:8px;flex-shrink:0}
-.mobile-menu-btn:active{background:var(--blue);color:#fff}
+/* ── Card ────────────────────────────────────────────── */
+.card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 16px;
+  margin-bottom: 12px;
+}
+.card-title {
+  font-size: 11px; font-weight: 600;
+  color: var(--text-secondary);
+  text-transform: uppercase; letter-spacing: .5px;
+  margin-bottom: 12px;
+  display: flex; align-items: center; gap: 6px;
+}
+.card-title i { color: var(--blue); font-size: 14px; }
 
-@media (max-width:900px){
-  .sidebar{position:fixed;left:0;top:0;height:100vh;z-index:200;transform:translateX(-100%);transition:transform .25s ease;box-shadow:2px 0 24px rgba(0,0,0,.18)}
-  .sidebar.open{transform:translateX(0)}
-  .mobile-menu-btn{display:flex !important}
-  .sidebar-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:150}
-  .sidebar-overlay.show{display:block}
-  .nav-item{padding:11px 16px;font-size:13.5px}
-  .topbar{padding:10px 14px}
-  .topbar h1{font-size:14px}
-  .topbar-right{gap:5px}
-  .pill{font-size:10px;padding:3px 7px}
-  .body-pad,.kpi-row{padding-left:14px;padding-right:14px}
-  .kpi-row{grid-template-columns:repeat(2,1fr) !important}
-  .body-pad table, .card table{display:block;overflow-x:auto;white-space:nowrap}
-  table{font-size:11.5px}
-  th,td{padding:7px 6px}
-  .dash-grid-2{grid-template-columns:1fr !important}
+/* ── Body pad ────────────────────────────────────────── */
+.body-pad { padding: 16px; flex: 1; overflow-y: auto; }
 
-  /* Reparaciones: patrón lista/detalle a pantalla completa, controlado por JS */
-  .rep-list-panel{width:100% !important;min-width:0 !important;border-right:none !important}
+/* ── Tables ──────────────────────────────────────────── */
+table { width: 100%; border-collapse: collapse; font-size: 13px; }
+th {
+  text-align: left; padding: 9px 12px;
+  color: var(--text-secondary); font-weight: 600; font-size: 11px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-secondary); position: sticky; top: 0;
+  text-transform: uppercase; letter-spacing: .4px;
+}
+td { padding: 10px 12px; border-bottom: 1px solid var(--border); color: var(--text); }
+tr:last-child td { border-bottom: none; }
+tbody tr:hover td { background: var(--bg-secondary); }
 
-  /* Panel de control: menú lateral pasa a tabs horizontales scrolleables */
-  .panel-shell{flex-direction:column}
-  .panel-nav-side{width:100% !important;min-width:0 !important;border-right:none !important;border-bottom:1px solid var(--border);display:flex;overflow-x:auto;padding:6px 8px !important;gap:4px}
-  .panel-nav-item{border-left:none !important;border-bottom:2px solid transparent;border-radius:8px}
-  .panel-nav-item[style*="border-left: 2px solid var(--blue)"]{border-bottom:2px solid var(--blue) !important}
+/* ── Badges ──────────────────────────────────────────── */
+.badge {
+  display: inline-block; padding: 3px 8px;
+  border-radius: 20px; font-size: 11px; font-weight: 600; white-space: nowrap;
+}
+.b-blue   { background: var(--blue-light);   color: var(--blue);   }
+.b-green  { background: var(--green-light);  color: var(--green);  }
+.b-amber  { background: var(--amber-light);  color: var(--amber);  }
+.b-red    { background: var(--red-light);    color: var(--red);    }
+.b-purple { background: var(--purple-light); color: var(--purple); }
+.b-teal   { background: var(--teal-light);   color: var(--teal);   }
+.b-gray   { background: var(--gray-light);   color: var(--gray);   }
 
-  /* Stock: tabla se oculta, tarjetas se muestran */
-  .stock-table-desktop{display:none !important}
-  .stock-cards-mobile{display:block !important}
-  .stock-kpi-grid{grid-template-columns:repeat(2,1fr) !important}
-  #ventas-metricas{grid-template-columns:repeat(2,1fr) !important}
+/* ── Avatar ──────────────────────────────────────────── */
+.av {
+  width: 26px; height: 26px; border-radius: 50%;
+  background: var(--blue-light); color: var(--blue);
+  display: inline-flex; align-items: center; justify-content: center;
+  font-size: 10px; font-weight: 700; flex-shrink: 0;
+}
 
-  /* Formularios de dos/tres columnas con grid inline pasan a una sola columna */
-  [style*="grid-template-columns:1fr 1fr 1fr"]{grid-template-columns:1fr 1fr !important}
-  [style*="grid-template-columns:1fr 1fr"]{grid-template-columns:1fr !important}
-  [style*="grid-template-columns: repeat(3"]{grid-template-columns:1fr 1fr !important}
+/* ── Empty state ─────────────────────────────────────── */
+.empty-state {
+  text-align: center; padding: 60px 20px; color: var(--text-secondary);
+}
+.empty-state i { font-size: 36px; display: block; margin: 0 auto 10px; opacity: .3; }
+
+/* ── Input / Select ──────────────────────────────────── */
+input[type="text"], input[type="number"], input[type="email"],
+input[type="date"], input[type="tel"], select, textarea {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-strong);
+  color: var(--text);
+  border-radius: var(--radius-md);
+  font-family: var(--font);
+  font-size: 15px;
+}
+input[type="text"]:focus, input[type="number"]:focus, input[type="email"]:focus,
+input[type="date"]:focus, input[type="tel"]:focus, select:focus, textarea:focus {
+  outline: none; border-color: var(--blue); box-shadow: 0 0 0 3px var(--blue-light);
+}
+input::placeholder { color: var(--text-tertiary); }
+select option { background: var(--bg-elevated); }
+
+/* ── Stock cards (mobile) ────────────────────────────── */
+.stock-cards-mobile { display: none; }
+.stock-table-desktop { display: table; }
+.stock-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 14px 16px; margin-bottom: 10px; cursor: pointer;
+  transition: background .15s;
+}
+.stock-card:active { background: var(--bg-secondary); }
+.stock-card-top { display: flex; justify-content: space-between; align-items: flex-start; gap: 8px; margin-bottom: 10px; }
+.stock-card-name { font-size: 15px; font-weight: 600; letter-spacing: -.3px; }
+.stock-card-grid { display: grid; grid-template-columns: repeat(4,1fr); gap: 6px; background: var(--bg-secondary); border-radius: var(--radius-sm); padding: 8px 6px; margin-bottom: 8px; }
+.stock-card-grid div { text-align: center; }
+.stock-card-grid label { font-size: 9px; color: var(--text-secondary); display: block; margin-bottom: 2px; }
+.stock-card-grid span { font-size: 13px; font-weight: 600; }
+.stock-card-bottom { display: flex; justify-content: space-between; font-size: 12px; color: var(--text-secondary); gap: 8px; }
+.stock-card-notas { font-size: 11px; color: var(--amber); background: var(--amber-light); border-radius: var(--radius-sm); padding: 5px 8px; margin-top: 8px; }
+
+/* ── Toast ───────────────────────────────────────────── */
+.toast {
+  position: fixed; bottom: calc(20px + env(safe-area-inset-bottom)); right: 20px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-strong);
+  color: var(--text);
+  padding: 12px 18px;
+  border-radius: var(--radius-md);
+  font-size: 13px;
+  box-shadow: var(--shadow-md);
+  z-index: 9999; max-width: 320px; line-height: 1.5; display: none;
+}
+.toast.show { display: block; animation: slideInToast .25s ease; }
+@keyframes slideInToast { from { transform: translateY(10px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+
+/* ── Scrollbar ───────────────────────────────────────── */
+::-webkit-scrollbar { width: 5px; height: 5px; }
+::-webkit-scrollbar-thumb { background: var(--bg-tertiary); border-radius: 3px; }
+::-webkit-scrollbar-track { background: transparent; }
+
+/* ── Login screen ────────────────────────────────────── */
+#login-screen {
+  background: var(--bg) !important;
+}
+#login-google-btn {
+  background: var(--bg-elevated) !important;
+  border-color: var(--border-strong) !important;
+  color: var(--text) !important;
+}
+
+/* ══════════════════════════════════════════════════════
+   RESPONSIVE — Desktop enhancements (≥768px)
+   Sidebar always visible, bigger text, wider padding
+══════════════════════════════════════════════════════ */
+@media (min-width: 768px) {
+  /* Sidebar always visible on desktop */
+  .sidebar {
+    position: relative;
+    transform: none !important;
+    height: 100%;
+  }
+  .sidebar-overlay { display: none !important; }
+  .mobile-menu-btn { display: none !important; }
+
+  /* Slightly more padding on desktop */
+  .topbar, .body-pad, .kpi-row { padding-left: 22px; padding-right: 22px; }
+  .topbar { padding-top: 12px; }
+
+  /* Tables visible, cards hidden */
+  .stock-table-desktop { display: table !important; }
+  .stock-cards-mobile  { display: none   !important; }
+}
+
+/* ══════════════════════════════════════════════════════
+   MOBILE OVERRIDES (< 768px)
+══════════════════════════════════════════════════════ */
+@media (max-width: 767px) {
+  body { font-size: 15px; }
+
+  /* Sidebar always hidden until .open */
+  .topbar { padding-top: calc(12px + env(safe-area-inset-top)); }
+  .mobile-menu-btn { display: flex !important; }
+
+  /* Nav items bigger for touch */
+  .nav-item { padding: 12px 16px; font-size: 15px; }
+
+  /* KPI grids: 2 col max */
+  .kpi-row { grid-template-columns: repeat(2, 1fr) !important; }
+  .stock-kpi-grid { grid-template-columns: repeat(2, 1fr) !important; }
+  #ventas-metricas { grid-template-columns: repeat(2, 1fr) !important; }
+
+  /* Stock: cards instead of table */
+  .stock-table-desktop { display: none   !important; }
+  .stock-cards-mobile  { display: block  !important; }
+
+  /* Tables: horizontal scroll */
+  .body-pad table, .card table { display: block; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  th, td { padding: 8px 10px; }
+
+  /* Inline grids: collapse to 1 col */
+  [style*="grid-template-columns:1fr 1fr 1fr"] { grid-template-columns: 1fr 1fr !important; }
+  [style*="grid-template-columns:1fr 1fr"]     { grid-template-columns: 1fr      !important; }
+  [style*="grid-template-columns: repeat(3"]   { grid-template-columns: 1fr 1fr  !important; }
+  [style*="grid-template-columns:repeat(3"]    { grid-template-columns: 1fr 1fr  !important; }
+  [style*="grid-template-columns:repeat(5"]    { grid-template-columns: 1fr 1fr  !important; }
+  [style*="grid-template-columns:repeat(4"]    { grid-template-columns: 1fr 1fr  !important; }
+
+  /* Modals full-screen on mobile */
+  [style*="width:600px"], [style*="width:820px"], [style*="width:440px"],
+  [style*="width:380px"], [style*="width:340px"] {
+    width: 96vw !important; max-width: 96vw !important;
+  }
+
+  /* Panel de control: tabs horizontales */
+  .panel-shell { flex-direction: column; }
+  .panel-nav-side {
+    width: 100% !important; min-width: 0 !important;
+    border-right: none !important; border-bottom: 1px solid var(--border) !important;
+    display: flex; overflow-x: auto; padding: 6px 8px !important; gap: 4px;
+    -webkit-overflow-scrolling: touch;
+  }
+  .panel-nav-item {
+    border-left: none !important; border-radius: var(--radius-md) !important;
+    white-space: nowrap !important; flex-shrink: 0;
+  }
+
+  /* Reparaciones */
+  .rep-list-panel { width: 100% !important; min-width: 0 !important; border-right: none !important; }
+
+  /* Dashboard 2-col charts */
+  .dash-grid-2 { grid-template-columns: 1fr !important; }
+
+  /* Buttons: full-width in forms */
+  .btn-block-mobile { width: 100%; justify-content: center; }
+
+  /* Topbar pills: shorter */
+  .pill { font-size: 10px; padding: 3px 7px; }
+  .topbar h1 { font-size: 16px; }
+  .topbar-right { gap: 5px; }
+
+  /* Quick action bottom bar feel */
+  .sb-foot { padding-bottom: calc(14px + env(safe-area-inset-bottom)); }
 }
 </style>
 </head>
 <body>
 
-<div id="login-screen" style="position:fixed;inset:0;background:var(--bg-secondary);display:flex;align-items:center;justify-content:center;z-index:500;flex-direction:column;gap:20px;padding:20px">
+<div id="login-screen" style="position:fixed;inset:0;background:var(--bg);display:flex;align-items:center;justify-content:center;z-index:500;flex-direction:column;gap:24px;padding:20px">
   <div style="text-align:center">
-    <div style="width:56px;height:56px;border-radius:14px;background:var(--blue);color:#fff;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:22px;margin:0 auto 14px">iM</div>
-    <h1 style="font-size:20px;font-weight:600;margin-bottom:4px">iPhoneMood CRM</h1>
-    <p style="font-size:13px;color:var(--text-secondary)">Iniciá sesión con tu cuenta de Google para continuar</p>
+    <div style="width:72px;height:72px;border-radius:18px;background:var(--blue);display:flex;align-items:center;justify-content:center;font-weight:700;font-size:28px;color:#fff;margin:0 auto 20px;box-shadow:0 8px 32px rgba(10,132,255,.4)">iM</div>
+    <h1 style="font-size:28px;font-weight:700;letter-spacing:-.6px;margin-bottom:6px">iPhoneMood CRM</h1>
+    <p style="font-size:15px;color:var(--text-secondary)">Iniciá sesión con tu cuenta de Google</p>
   </div>
-  <button id="login-google-btn" onclick="Auth.iniciarSesionConGoogle()" style="display:flex;align-items:center;gap:10px;background:#fff;border:1px solid var(--border-strong);border-radius:10px;padding:12px 24px;font-size:14px;font-weight:600;color:var(--text);cursor:pointer;box-shadow:0 1px 3px rgba(0,0,0,.08)">
-    <svg width="18" height="18" viewBox="0 0 18 18"><path fill="#4285F4" d="M17.64 9.2c0-.64-.06-1.25-.16-1.84H9v3.48h4.84a4.14 4.14 0 0 1-1.8 2.72v2.26h2.92c1.7-1.57 2.68-3.88 2.68-6.62z"/><path fill="#34A853" d="M9 18c2.43 0 4.47-.81 5.96-2.18l-2.92-2.26c-.81.54-1.84.86-3.04.86-2.34 0-4.32-1.58-5.03-3.7H.96v2.33A9 9 0 0 0 9 18z"/><path fill="#FBBC05" d="M3.97 10.72A5.4 5.4 0 0 1 3.69 9c0-.6.1-1.18.28-1.72V4.95H.96A9 9 0 0 0 0 9c0 1.45.35 2.82.96 4.05l3.01-2.33z"/><path fill="#EA4335" d="M9 3.58c1.32 0 2.5.45 3.44 1.35l2.58-2.58C13.46.89 11.43 0 9 0A9 9 0 0 0 .96 4.95L3.97 7.28C4.68 5.16 6.66 3.58 9 3.58z"/></svg>
+  <button id="login-google-btn" onclick="Auth.iniciarSesionConGoogle()" style="display:flex;align-items:center;gap:12px;background:var(--bg-elevated);border:1px solid var(--border-strong);border-radius:var(--radius-lg);padding:14px 28px;font-size:15px;font-weight:600;color:var(--text);cursor:pointer;font-family:var(--font);transition:background .15s">
+    <svg width="20" height="20" viewBox="0 0 18 18"><path fill="#4285F4" d="M17.64 9.2c0-.64-.06-1.25-.16-1.84H9v3.48h4.84a4.14 4.14 0 0 1-1.8 2.72v2.26h2.92c1.7-1.57 2.68-3.88 2.68-6.62z"/><path fill="#34A853" d="M9 18c2.43 0 4.47-.81 5.96-2.18l-2.92-2.26c-.81.54-1.84.86-3.04.86-2.34 0-4.32-1.58-5.03-3.7H.96v2.33A9 9 0 0 0 9 18z"/><path fill="#FBBC05" d="M3.97 10.72A5.4 5.4 0 0 1 3.69 9c0-.6.1-1.18.28-1.72V4.95H.96A9 9 0 0 0 0 9c0 1.45.35 2.82.96 4.05l3.01-2.33z"/><path fill="#EA4335" d="M9 3.58c1.32 0 2.5.45 3.44 1.35l2.58-2.58C13.46.89 11.43 0 9 0A9 9 0 0 0 .96 4.95L3.97 7.28C4.68 5.16 6.66 3.58 9 3.58z"/></svg>
     Continuar con Google
   </button>
-  <div id="login-status" style="font-size:12px;color:var(--text-secondary);min-height:18px"></div>
+  <div id="login-status" style="font-size:13px;color:var(--text-secondary);min-height:18px"></div>
 </div>
 
 <div class="app-shell" id="app-shell" style="display:none">
@@ -224,14 +527,14 @@ tbody tr:hover td{background:var(--bg-secondary)}
         <span class="pill pill-blue"><i class="ti ti-currency-dollar"></i> Blue: $<span id="topbar-blue">1075</span></span>
         <span class="pill pill-green"><i class="ti ti-currency-bitcoin"></i> USDT: $<span id="topbar-usdt">1061</span></span>
         <div id="user-menu" style="position:relative">
-          <button onclick="App.toggleUserMenu()" style="display:flex;align-items:center;gap:6px;background:var(--bg-secondary);border:1px solid var(--border);border-radius:20px;padding:4px 10px 4px 4px;cursor:pointer">
-            <span id="user-avatar" class="av" style="width:22px;height:22px;font-size:9px"></span>
-            <span id="user-name" style="font-size:11px;font-weight:600;max-width:90px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"></span>
+          <button onclick="App.toggleUserMenu()" style="display:flex;align-items:center;gap:6px;background:var(--bg-secondary);border:1px solid var(--border);border-radius:20px;padding:4px 10px 4px 4px;cursor:pointer;font-family:var(--font)">
+            <span id="user-avatar" class="av" style="width:24px;height:24px;font-size:9px"></span>
+            <span id="user-name" style="font-size:12px;font-weight:600;max-width:80px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text)"></span>
             <i class="ti ti-chevron-down" style="font-size:12px;color:var(--text-secondary)"></i>
           </button>
-          <div id="user-menu-dropdown" style="display:none;position:absolute;top:36px;right:0;background:var(--bg);border:1px solid var(--border);border-radius:10px;box-shadow:0 4px 16px rgba(0,0,0,.12);min-width:180px;z-index:100;overflow:hidden">
+          <div id="user-menu-dropdown" style="display:none;position:absolute;top:38px;right:0;background:var(--bg-elevated);border:1px solid var(--border);border-radius:var(--radius-lg);box-shadow:var(--shadow-md);min-width:190px;z-index:300;overflow:hidden">
             <div id="user-email-full" style="padding:10px 14px;font-size:11px;color:var(--text-secondary);border-bottom:1px solid var(--border);word-break:break-all"></div>
-            <div onclick="Auth.cerrarSesion()" style="padding:10px 14px;font-size:12.5px;cursor:pointer;display:flex;align-items:center;gap:8px;color:var(--red)"><i class="ti ti-logout"></i> Cerrar sesión</div>
+            <div onclick="Auth.cerrarSesion()" style="padding:12px 14px;font-size:14px;cursor:pointer;display:flex;align-items:center;gap:8px;color:var(--red)"><i class="ti ti-logout"></i> Cerrar sesión</div>
           </div>
         </div>
       </div>
@@ -1034,17 +1337,17 @@ const Dashboard = {
       </div>
 
       <div class="kpi-row" style="grid-template-columns:repeat(4,1fr);padding:0 0 14px 0;border:none">
-        <div class="kpi"><label>Ventas del período</label><div class="val">${State.fmtARS(totalVentasARS)}</div><div class="sub">${State.ventas.length} ventas · ticket prom. ${State.fmtARS(ticketPromedio)}</div></div>
-        <div class="kpi"><label>Resultado comercial</label><div class="val" style="color:${resultComercial>=0?'var(--green-dark)':'var(--red)'}">${resultComercial>=0?'+':''}${State.fmtARS(resultComercial)}</div><div class="sub">margen de ventas</div></div>
-        <div class="kpi"><label>Resultado financiero</label><div class="val" style="color:${resultFinanciero>=0?'var(--green-dark)':'var(--red)'}">${resultFinanciero>=0?'+':''}${State.fmtARS(resultFinanciero)}</div><div class="sub">spread cueva + diferencial tarjeta</div></div>
-        <div class="kpi"><label>Resultado total</label><div class="val" style="color:var(--blue-dark)">${totalResultado>=0?'+':''}${State.fmtARS(totalResultado)}</div><div class="sub">comercial + financiero</div></div>
+        <div class="kpi"><label>Ventas del período</label><div class="val">${State.fmtUSD(totalVentasARS / State.refBlue)}</div><div class="sub">${State.ventas.length} ventas · ticket prom. ${State.fmtUSD(ticketPromedio / State.refBlue)}</div></div>
+        <div class="kpi"><label>Resultado comercial</label><div class="val" style="color:${resultComercial>=0?'var(--green)':'var(--red)'}">${resultComercial>=0?'+':''}${State.fmtUSD(resultComercial / State.refBlue)}</div><div class="sub">margen de ventas</div></div>
+        <div class="kpi"><label>Resultado financiero</label><div class="val" style="color:${resultFinanciero>=0?'var(--green)':'var(--red)'}">${resultFinanciero>=0?'+':''}${State.fmtUSD(resultFinanciero / State.refBlue)}</div><div class="sub">spread cueva + diferencial tarjeta</div></div>
+        <div class="kpi"><label>Resultado total</label><div class="val" style="color:var(--blue)">${totalResultado>=0?'+':''}${State.fmtUSD(totalResultado / State.refBlue)}</div><div class="sub">comercial + financiero</div></div>
       </div>
 
       <div class="kpi-row" style="grid-template-columns:repeat(4,1fr);padding:0 0 14px 0;border:none">
-        <div class="kpi"><label>Equivalente total en caja</label><div class="val">${State.fmtARS(equivalenteTotalARS)}</div><div class="sub">ARS + USD + USDT a cotización actual</div></div>
-        <div class="kpi"><label>Ventas con saldo pendiente</label><div class="val" style="color:${ventasAbiertas?'var(--amber-dark)':'var(--green-dark)'}">${ventasAbiertas}</div><div class="sub">requieren seguimiento de cobro</div></div>
+        <div class="kpi"><label>Equivalente total en caja</label><div class="val">${State.fmtUSD(equivalenteTotalARS / State.refBlue)}</div><div class="sub">ARS + USD + USDT a cotización actual</div></div>
+        <div class="kpi"><label>Ventas con saldo pendiente</label><div class="val" style="color:${ventasAbiertas?'var(--amber)':'var(--green)'}">${ventasAbiertas}</div><div class="sub">requieren seguimiento de cobro</div></div>
         <div class="kpi"><label>Reparaciones activas</label><div class="val">${repActivas}</div><div class="sub">${repListas} lista(s) para entregar</div></div>
-        <div class="kpi"><label>Stock con alerta</label><div class="val" style="color:${stockCritico?'var(--red)':'var(--green-dark)'}">${stockCritico}</div><div class="sub">productos bajos o agotados</div></div>
+        <div class="kpi"><label>Stock con alerta</label><div class="val" style="color:${stockCritico?'var(--red)':'var(--green)'}">${stockCritico}</div><div class="sub">productos bajos o agotados</div></div>
       </div>
 
       <div class="card">
@@ -1187,15 +1490,15 @@ const Dashboard = {
         data: {
           labels: serie.labels,
           datasets: [
-            { label: 'Monto vendido', data: serie.montos, borderColor: '#185FA5', backgroundColor: 'rgba(24,95,165,0.08)', fill: true, tension: 0.35, pointRadius: 2 },
-            { label: 'Beneficio', data: serie.beneficios, borderColor: '#3B6D11', backgroundColor: 'rgba(59,109,17,0.08)', fill: true, tension: 0.35, pointRadius: 2 },
+            { label: 'Monto vendido', data: serie.montos, borderColor: '#0A84FF', backgroundColor: 'rgba(24,95,165,0.08)', fill: true, tension: 0.35, pointRadius: 2 },
+            { label: 'Beneficio', data: serie.beneficios, borderColor: '#30D158', backgroundColor: 'rgba(59,109,17,0.08)', fill: true, tension: 0.35, pointRadius: 2 },
           ]
         },
         options: {
           responsive: true, maintainAspectRatio: false,
           plugins: { legend: { position: 'bottom', labels: { boxWidth: 10, font: { size: 11 } } } },
           scales: {
-            y: { ticks: { callback: v => '$' + (v / 1000).toFixed(0) + 'k', font: { size: 10 } }, grid: { color: '#EFEDE6' } },
+            y: { ticks: { callback: v => '$' + (v / 1000).toFixed(0) + 'k', font: { size: 10 }, color: '#AEAEB2' }, grid: { color: 'rgba(255,255,255,.08)' } },
             x: { ticks: { font: { size: 10 }, maxRotation: 0, autoSkip: true, maxTicksLimit: 10 }, grid: { display: false } }
           }
         }
@@ -1209,15 +1512,15 @@ const Dashboard = {
         data: {
           labels: serie.labels,
           datasets: [
-            { label: 'Monto vendido', data: serie.montos, backgroundColor: '#E6F1FB', borderColor: '#185FA5', borderWidth: 1 },
-            { label: 'Beneficio', data: serie.beneficios, backgroundColor: '#EAF3DE', borderColor: '#3B6D11', borderWidth: 1 },
+            { label: 'Monto vendido', data: serie.montos, backgroundColor: 'rgba(10,132,255,.15)', borderColor: '#0A84FF', borderWidth: 1 },
+            { label: 'Beneficio', data: serie.beneficios, backgroundColor: 'rgba(48,209,88,.15)', borderColor: '#30D158', borderWidth: 1 },
           ]
         },
         options: {
           responsive: true, maintainAspectRatio: false,
           plugins: { legend: { position: 'bottom', labels: { boxWidth: 10, font: { size: 11 } } } },
           scales: {
-            y: { ticks: { callback: v => '$' + (v / 1000).toFixed(0) + 'k', font: { size: 10 } }, grid: { color: '#EFEDE6' } },
+            y: { ticks: { callback: v => '$' + (v / 1000).toFixed(0) + 'k', font: { size: 10 }, color: '#AEAEB2' }, grid: { color: 'rgba(255,255,255,.08)' } },
             x: { ticks: { font: { size: 10 }, maxRotation: 0, autoSkip: true, maxTicksLimit: 8 }, grid: { display: false } }
           }
         }
@@ -1230,18 +1533,18 @@ const Dashboard = {
         const c = State.cajas[p] || {};
         return (c['ARS cash']||0) + (c['ARS transferencia']||0) + ((c['USD cash']||0)+(c['USD transferencia']||0))*State.refBlue + (c['USDT']||0)*State.refUsdt;
       });
-      const colores = ['#185FA5', '#3B6D11', '#854F0B', '#3C3489', '#085041'];
+      const colores = ['#0A84FF', '#30D158', '#854F0B', '#3C3489', '#085041'];
       this.charts.personas = new Chart(ctxP, {
         type: 'doughnut',
         data: {
           labels: State.personas,
-          datasets: [{ data: equivPorPersona, backgroundColor: colores.slice(0, State.personas.length), borderWidth: 2, borderColor: '#fff' }]
+          datasets: [{ data: equivPorPersona, backgroundColor: colores.slice(0, State.personas.length), borderWidth: 2, borderColor: 'rgba(0,0,0,.3)' }]
         },
         options: {
           responsive: true, maintainAspectRatio: false,
           plugins: {
             legend: { position: 'bottom', labels: { boxWidth: 10, font: { size: 11 } } },
-            tooltip: { callbacks: { label: ctx => `${ctx.label}: ${State.fmtARS(ctx.raw)}` } }
+            tooltip: { callbacks: { label: ctx => `${ctx.label}: ${State.fmtUSD(ctx.raw / State.refBlue)}` } }
           }
         }
       });
@@ -1321,10 +1624,10 @@ const Stock = {
 
     const kpis = [
       ['Total', total, 'ti-box', 'var(--blue)', 'var(--blue-light)'],
-      ['Disponibles', disponibles, 'ti-circle-check', 'var(--green-dark)', 'var(--green-light)'],
+      ['Disponibles', disponibles, 'ti-circle-check', 'var(--green)', 'var(--green-light)'],
       ['Vendidos', vendidos, 'ti-trending-up', 'var(--text)', 'var(--bg-secondary)'],
-      ['Valor Disponible', State.fmtUSD(valorDisponible), 'ti-currency-dollar', 'var(--blue-dark)', 'var(--blue-light)'],
-      ['Valor de Venta', State.fmtUSD(valorVendidoPotencial), 'ti-cash', 'var(--green-dark)', 'var(--green-light)'],
+      ['Valor Disponible', State.fmtUSD(valorDisponible), 'ti-currency-dollar', 'var(--blue)', 'var(--blue-light)'],
+      ['Valor de Venta', State.fmtUSD(valorVendidoPotencial), 'ti-cash', 'var(--green)', 'var(--green-light)'],
     ];
     document.getElementById('stock-kpis').innerHTML = kpis.map(([label,val,icon,color,bg]) => `
       <div class="card" style="padding:12px 14px;margin-bottom:0;display:flex;justify-content:space-between;align-items:flex-start">
@@ -1378,7 +1681,7 @@ const Stock = {
     document.getElementById('stock-grupo-tabs').innerHTML = Object.entries(this.GRUPOS).map(([k,g]) => {
       const count = this.productosDelGrupo(k).length;
       const active = this.currentGroup === k;
-      return `<button onclick="Stock.setGrupo('${k}')" style="display:flex;align-items:center;gap:6px;padding:8px 14px;border-radius:8px;border:1.5px solid ${active?'var(--blue)':'var(--border)'};background:${active?'var(--blue-light)':'var(--bg)'};color:${active?'var(--blue-dark)':'var(--text-secondary)'};font-size:12.5px;font-weight:${active?'600':'400'};cursor:pointer">
+      return `<button onclick="Stock.setGrupo('${k}')" style="display:flex;align-items:center;gap:6px;padding:8px 14px;border-radius:8px;border:1.5px solid ${active?'var(--blue)':'var(--border)'};background:${active?'var(--blue-light)':'var(--bg)'};color:${active?'var(--blue)':'var(--text-secondary)'};font-size:12.5px;font-weight:${active?'600':'400'};cursor:pointer">
         <i class="ti ${g.icon}"></i> ${g.label} <span style="background:${active?'#fff':'var(--bg-secondary)'};padding:1px 6px;border-radius:10px;font-size:10.5px">${count}</span>
       </button>`;
     }).join('');
@@ -1392,7 +1695,7 @@ const Stock = {
       const count = e === 'todos' ? grupo.length : grupo.filter(p => (p.estadoInventario||'disponible') === e).length;
       const label = e === 'todos' ? 'Todos' : this.ESTADO_INV_LABEL[e];
       const active = this.currentEstado === e;
-      return `<span onclick="Stock.setEstadoFiltro('${e}')" style="cursor:pointer;font-size:12px;padding:5px 11px;border-radius:20px;border-bottom:2px solid ${active?'var(--blue)':'transparent'};color:${active?'var(--blue-dark)':'var(--text-secondary)'};font-weight:${active?'600':'400'};display:inline-flex;align-items:center;gap:5px">${label} <span style="background:var(--bg-secondary);padding:1px 6px;border-radius:10px;font-size:10px">${count}</span></span>`;
+      return `<span onclick="Stock.setEstadoFiltro('${e}')" style="cursor:pointer;font-size:12px;padding:5px 11px;border-radius:20px;border-bottom:2px solid ${active?'var(--blue)':'transparent'};color:${active?'var(--blue)':'var(--text-secondary)'};font-weight:${active?'600':'400'};display:inline-flex;align-items:center;gap:5px">${label} <span style="background:var(--bg-secondary);padding:1px 6px;border-radius:10px;font-size:10px">${count}</span></span>`;
     }).join('');
   },
   setEstadoFiltro(e) { this.currentEstado = e; this.renderEstadoTabs(); this.renderTable(); },
@@ -1452,7 +1755,7 @@ const Stock = {
         <td style="font-size:11.5px">${p.custodio||'—'}</td>
         <td>USD ${p.costoUSD}</td>
         <td>${State.fmtUSD(precioUSD)}<div style="font-size:10px;color:var(--text-secondary)">${State.fmtARS(p.precioARS)}</div></td>
-        <td style="color:${margin>=0?'var(--green-dark)':'var(--red)'}">${margin>=0?'+':''}${margin}%</td>
+        <td style="color:${margin>=0?'var(--green)':'var(--red)'}">${margin>=0?'+':''}${margin}%</td>
         <td>${detalleStock}</td>
         <td>${statusBadge}</td>
         <td><button class="btn btn-sm" onclick="Stock.openDrawer('edit','${p.id}')"><i class="ti ti-edit"></i></button></td>
@@ -1473,7 +1776,7 @@ const Stock = {
           <div class="stock-card-grid">
             <div><label>Costo</label><span>USD ${p.costoUSD}</span></div>
             <div><label>Venta</label><span>${State.fmtUSD(precioUSD)}</span></div>
-            <div><label>Margen</label><span style="color:${margin>=0?'var(--green-dark)':'var(--red)'}">${margin>=0?'+':''}${margin}%</span></div>
+            <div><label>Margen</label><span style="color:${margin>=0?'var(--green)':'var(--red)'}">${margin>=0?'+':''}${margin}%</span></div>
             <div><label>Stock</label><span>${detalleStock}</span></div>
           </div>
           <div class="stock-card-bottom">
@@ -2156,9 +2459,9 @@ const Ventas = {
     const diferencial=ventas.reduce((s,v)=>s+(v.pagos||[]).filter(p=>p.esTarjeta).reduce((a,p)=>a+(p.diferencialArs?(p.diferencialArs/(p.cotizacionDiferencial||State.refBlue)):0),0),0);
 
     const kpis=[
-      {label:'Volumen vendido',val:State.fmtUSD(volumen),sub:`${ventas.length} venta(s)`,icon:'ti-trending-up',color:'var(--blue-dark)',bg:'var(--blue-light)'},
-      {label:'Margen total',val:State.fmtUSD(margenTotal),sub:'precio venta − costo',icon:'ti-cash',color:margenTotal>=0?'var(--green-dark)':'var(--red)',bg:margenTotal>=0?'var(--green-light)':'#FEE2E2'},
-      {label:'Margen por equipo',val:State.fmtUSD(margenXEquipo),sub:'promedio (disp − todo)',icon:'ti-device-mobile',color:margenXEquipo>=0?'var(--green-dark)':'var(--red)',bg:margenXEquipo>=0?'var(--green-light)':'#FEE2E2'},
+      {label:'Volumen vendido',val:State.fmtUSD(volumen),sub:`${ventas.length} venta(s)`,icon:'ti-trending-up',color:'var(--blue)',bg:'var(--blue-light)'},
+      {label:'Margen total',val:State.fmtUSD(margenTotal),sub:'precio venta − costo',icon:'ti-cash',color:margenTotal>=0?'var(--green)':'var(--red)',bg:margenTotal>=0?'var(--green-light)':'#FEE2E2'},
+      {label:'Margen por equipo',val:State.fmtUSD(margenXEquipo),sub:'promedio (disp − todo)',icon:'ti-device-mobile',color:margenXEquipo>=0?'var(--green)':'var(--red)',bg:margenXEquipo>=0?'var(--green-light)':'#FEE2E2'},
       {label:'Diferencial tarjeta',val:State.fmtUSD(diferencial),sub:'ganancia financiera',icon:'ti-credit-card',color:'var(--purple)',bg:'var(--purple-light)'},
       {label:'Ticket promedio',val:ventas.length?State.fmtUSD(volumen/ventas.length):'USD 0',sub:'por venta',icon:'ti-receipt',color:'var(--text)',bg:'var(--bg-secondary)'},
     ];
@@ -2256,7 +2559,7 @@ const Ventas = {
     host.innerHTML = `
       <div style="position:fixed;inset:0;background:rgba(0,0,0,.4);display:flex;align-items:center;justify-content:center;z-index:200">
         <div style="width:380px;max-width:92vw;background:var(--bg);border-radius:14px;padding:20px" onclick="event.stopPropagation()">
-          <h3 style="font-size:15px;font-weight:600;margin-bottom:8px"><i class="ti ti-alert-circle" style="color:var(--amber-dark)"></i> Encontramos una venta sin terminar</h3>
+          <h3 style="font-size:15px;font-weight:600;margin-bottom:8px"><i class="ti ti-alert-circle" style="color:var(--amber)"></i> Encontramos una venta sin terminar</h3>
           <p style="font-size:12.5px;color:var(--text-secondary);margin-bottom:14px">
             Parece que la página se recargó mientras estabas cargando una venta para <b>${pendiente.draft.cliente || 'un cliente'}</b>
             (${pendiente.draft.items?.length || 0} ítem(s)), hace ${minsAtras < 1 ? 'menos de un minuto' : minsAtras + ' min'}.
@@ -2464,7 +2767,7 @@ const Ventas = {
     return `
       <div style="display:flex;gap:16px;padding:10px 0;border-bottom:1px solid var(--border);margin-bottom:12px">
         <div><div style="font-size:11px;color:var(--text-secondary)">Total venta</div><div style="font-size:16px;font-weight:600">${State.fmtUSD(total)}</div></div>
-        <div><div style="font-size:11px;color:var(--text-secondary)">Saldo restante</div><div style="font-size:16px;font-weight:600;color:${saldo>0?'var(--red)':'var(--green-dark)'}">${State.fmtUSD(saldo)}</div></div>
+        <div><div style="font-size:11px;color:var(--text-secondary)">Saldo restante</div><div style="font-size:16px;font-weight:600;color:${saldo>0?'var(--red)':'var(--green)'}">${State.fmtUSD(saldo)}</div></div>
       </div>
       ${d.pagos.map((p, idx) => `<div style="display:flex;justify-content:space-between;align-items:center;padding:7px 10px;background:var(--bg-secondary);border-radius:8px;margin-bottom:5px;font-size:12px">
         <span>${p.persona} — ${p.bolsillo} — ${State.fmtUSD(p.monto)}${p.esTarjeta?` <span class="badge b-purple" style="font-size:9px">Tarjeta +$${(p.diferencialArs||0).toLocaleString('es-AR')}</span>`:''}</span>
@@ -2549,7 +2852,7 @@ const Ventas = {
       <div style="display:flex;justify-content:space-between;font-size:11px;color:var(--purple);padding:2px 0"><span>Precio de venta real</span><b>${State.fmtUSD(precioVentaRealUSD)}</b></div>
     `;
     if (diferencialUSD > 0.005) {
-      preview.innerHTML = filas + `<div style="display:flex;justify-content:space-between;font-size:12px;color:var(--green-dark);font-weight:600;padding-top:4px">Diferencial ganado<span>+${State.fmtUSD(diferencialUSD)}</span></div>`;
+      preview.innerHTML = filas + `<div style="display:flex;justify-content:space-between;font-size:12px;color:var(--green);font-weight:600;padding-top:4px">Diferencial ganado<span>+${State.fmtUSD(diferencialUSD)}</span></div>`;
     } else if (diferencialUSD < -0.005) {
       preview.innerHTML = filas + `<div style="display:flex;justify-content:space-between;font-size:12px;color:var(--red);font-weight:600;padding-top:4px"><span><i class="ti ti-alert-triangle"></i> Falta cubrir</span><span>${State.fmtUSD(diferencialUSD)}</span></div>`;
     } else {
@@ -2603,7 +2906,7 @@ const Ventas = {
           return `
             <div style="font-size:11px;color:var(--purple);padding:2px 0;display:flex;justify-content:space-between"><span>Cotización usada</span><b>$${cotiz.toLocaleString('es-AR')}</b></div>
             <div style="font-size:11px;color:var(--purple);padding:2px 0;display:flex;justify-content:space-between"><span>Precio de venta real</span><b>${State.fmtUSD(precioVentaRealUSD)}</b></div>
-            <div style="font-size:12px;color:var(--green-dark);font-weight:600;padding-top:4px;display:flex;justify-content:space-between"><span>Diferencial ganado</span><span>+$${(p.diferencialArs||0).toLocaleString('es-AR')} (${State.fmtUSD((p.diferencialArs||0)/cotiz)})</span></div>
+            <div style="font-size:12px;color:var(--green);font-weight:600;padding-top:4px;display:flex;justify-content:space-between"><span>Diferencial ganado</span><span>+$${(p.diferencialArs||0).toLocaleString('es-AR')} (${State.fmtUSD((p.diferencialArs||0)/cotiz)})</span></div>
           `;
         }).join('<div style="height:1px;background:#fff;margin:6px 0"></div>')}
       </div>` : ''}
@@ -2612,9 +2915,9 @@ const Ventas = {
         <input type="number" id="vf-comision-vendedor" value="${d.comisionVendedor||''}" placeholder="0" oninput="Ventas.draft.comisionVendedor=parseFloat(this.value)||0" style="width:100%;font-size:12px;padding:7px 10px;border:1px solid var(--border-strong);border-radius:8px">
       </div>
       <div style="display:flex;justify-content:space-between;padding:8px 0;border-top:1px solid var(--border);font-weight:600">Total<span>${State.fmtUSD(total)}</span></div>
-      <div style="display:flex;justify-content:space-between;padding:4px 0;font-size:12px;color:${saldo>0?'var(--red)':'var(--green-dark)'}">Saldo<span>${State.fmtUSD(saldo)}</span></div>
+      <div style="display:flex;justify-content:space-between;padding:4px 0;font-size:12px;color:${saldo>0?'var(--red)':'var(--green)'}">Saldo<span>${State.fmtUSD(saldo)}</span></div>
       ${totalDiferencialArs > 0 ? `<div style="display:flex;justify-content:space-between;padding:4px 0;font-size:12px;color:var(--purple)">Diferencial de tarjeta<span>+$${totalDiferencialArs.toLocaleString('es-AR')}</span></div>` : ''}
-      <div style="background:var(--blue-light);border-radius:8px;padding:10px 12px;margin-top:12px;font-size:12px;color:var(--blue-dark)">
+      <div style="background:var(--blue-light);border-radius:8px;padding:10px 12px;margin-top:12px;font-size:12px;color:var(--blue)">
         La venta se guardará como: <b>${saldo > 0 ? 'Abierta' : 'Cerrada'}</b>
       </div>
     `;
@@ -2748,8 +3051,8 @@ const Ventas = {
                 <div class="card-title"><i class="ti ti-shield"></i> Resumen de Garantías</div>
                 <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px">
                   <div style="background:var(--bg-secondary);border-radius:8px;padding:12px;display:flex;justify-content:space-between;align-items:center"><div><div style="font-size:11px;color:var(--text-secondary)">Total con Garantía</div><div style="font-size:22px;font-weight:700">${v.items.filter(i=>i.garantiaFin).length}</div></div><i class="ti ti-shield" style="font-size:24px;color:var(--blue);opacity:.4"></i></div>
-                  <div style="background:var(--bg-secondary);border-radius:8px;padding:12px;display:flex;justify-content:space-between;align-items:center"><div><div style="font-size:11px;color:var(--text-secondary)">Garantías Activas</div><div style="font-size:22px;font-weight:700;color:var(--green-dark)">${garantiasActivas}</div></div><i class="ti ti-shield-check" style="font-size:24px;color:var(--green-dark);opacity:.4"></i></div>
-                  <div style="background:var(--bg-secondary);border-radius:8px;padding:12px;display:flex;justify-content:space-between;align-items:center"><div><div style="font-size:11px;color:var(--text-secondary)">Vencen Pronto</div><div style="font-size:22px;font-weight:700;color:${vencenPronto>0?'var(--amber-dark)':'var(--text)'}">${vencenPronto}</div></div><i class="ti ti-shield-exclamation" style="font-size:24px;color:${vencenPronto>0?'var(--amber-dark)':'var(--text-secondary)'};opacity:.4"></i></div>
+                  <div style="background:var(--bg-secondary);border-radius:8px;padding:12px;display:flex;justify-content:space-between;align-items:center"><div><div style="font-size:11px;color:var(--text-secondary)">Garantías Activas</div><div style="font-size:22px;font-weight:700;color:var(--green)">${garantiasActivas}</div></div><i class="ti ti-shield-check" style="font-size:24px;color:var(--green);opacity:.4"></i></div>
+                  <div style="background:var(--bg-secondary);border-radius:8px;padding:12px;display:flex;justify-content:space-between;align-items:center"><div><div style="font-size:11px;color:var(--text-secondary)">Vencen Pronto</div><div style="font-size:22px;font-weight:700;color:${vencenPronto>0?'var(--amber)':'var(--text)'}">${vencenPronto}</div></div><i class="ti ti-shield-exclamation" style="font-size:24px;color:${vencenPronto>0?'var(--amber)':'var(--text-secondary)'};opacity:.4"></i></div>
                 </div>
               </div>`;
             })()}
@@ -2763,7 +3066,7 @@ const Ventas = {
                 <div><label style="font-size:11px;color:var(--text-secondary)">DNI</label><div style="font-size:13px">${v.clienteDni||'—'}</div></div>
                 <div><label style="font-size:11px;color:var(--text-secondary)">Vendedor</label>
                   <div style="font-size:13px;font-weight:600">${v.vendedor||'—'}</div>
-                  <div style="font-size:11px;color:var(--green-dark)">Comisión: ${State.fmtUSD(v.comisionVendedor||0)}</div>
+                  <div style="font-size:11px;color:var(--green)">Comisión: ${State.fmtUSD(v.comisionVendedor||0)}</div>
                 </div>
               </div>
             </div>
@@ -2783,13 +3086,13 @@ const Ventas = {
                   <td><span class="badge b-amber">${p?.estadoProducto||'Usado'}</span></td>
                   <td style="font-family:monospace;font-size:11px">${i.imei||'—'}</td>
                   <td>${diasRestantes !== null ? `
-                    <div style="font-size:11px;color:var(--green-dark);font-weight:600">Garantía activa</div>
+                    <div style="font-size:11px;color:var(--green);font-weight:600">Garantía activa</div>
                     <div style="font-size:10px;color:var(--text-secondary)">${diasRestantes} días restantes</div>
-                    <div style="height:4px;background:var(--border);border-radius:2px;margin-top:4px;width:80px"><div style="height:4px;background:var(--green-dark);border-radius:2px;width:${100-progreso}%"></div></div>
+                    <div style="height:4px;background:var(--border);border-radius:2px;margin-top:4px;width:80px"><div style="height:4px;background:var(--green);border-radius:2px;width:${100-progreso}%"></div></div>
                   ` : '—'}</td>
                   <td>${State.fmtUSD(i.costo||0)}</td>
                   <td><b>${State.fmtUSD(i.precio)}</b></td>
-                  <td style="color:${profit>=0?'var(--green-dark)':'var(--red)'}"><b>${profit>=0?'+':''}${State.fmtUSD(profit)}</b></td>
+                  <td style="color:${profit>=0?'var(--green)':'var(--red)'}"><b>${profit>=0?'+':''}${State.fmtUSD(profit)}</b></td>
                   <td>${State.fmtUSD(v.comisionVendedor||0)}</td>
                 </tr>`;
               }).join('')}</tbody></table>
@@ -2808,7 +3111,7 @@ const Ventas = {
                   <td style="font-size:11px;color:var(--text-secondary)">${p?.storage||p?.notas||'N/A'}</td>
                   <td>1</td>
                   <td>${State.fmtUSD(i.precio)}</td>
-                  <td style="color:${profit>=0?'var(--green-dark)':'var(--red)'}">${profit>=0?'+':''}${State.fmtUSD(profit)}</td>
+                  <td style="color:${profit>=0?'var(--green)':'var(--red)'}">${profit>=0?'+':''}${State.fmtUSD(profit)}</td>
                   <td>$0</td>
                 </tr>`;
               }).join('')}</tbody></table>
@@ -2820,7 +3123,7 @@ const Ventas = {
                 <div style="font-size:12px;color:var(--text-secondary)">Subtotal Dispositivos: ${State.fmtUSD(itemsDispositivos.reduce((s,i)=>s+i.precio,0))}</div>
                 <div style="font-size:12px;color:var(--text-secondary)">Subtotal Accesorios: ${State.fmtUSD(itemsAccesorios.reduce((s,i)=>s+i.precio,0))}</div>
                 <div style="font-size:16px;font-weight:700;margin-top:6px">Subtotal: ${State.fmtUSD(total)}</div>
-                ${(()=>{ const pt = v.items.reduce((s,i)=>s+(i.precio-(i.costo||0)),0); return `<div style="font-size:12px;color:${pt>=0?'var(--green-dark)':'var(--red)'}">Profit: ${pt>=0?'+':''}${State.fmtUSD(pt)}</div>`; })()}
+                ${(()=>{ const pt = v.items.reduce((s,i)=>s+(i.precio-(i.costo||0)),0); return `<div style="font-size:12px;color:${pt>=0?'var(--green)':'var(--red)'}">Profit: ${pt>=0?'+':''}${State.fmtUSD(pt)}</div>`; })()}
               </div>
             </div>
 
@@ -3268,7 +3571,7 @@ const Reparaciones = {
     if (isTerminal) {
       movInfo = tieneMov
         ? `<div style="background:var(--red-light);border:1px solid #F09595;border-radius:8px;padding:10px 12px;margin-bottom:12px;font-size:11.5px;color:var(--red)"><b style="display:block;margin-bottom:3px">⚠ Esta orden tiene movimientos asociados</b>Usá "Cancelar orden" para revertir pagos y repuestos de stock.</div>`
-        : `<div style="background:var(--green-light);border:1px solid #97C459;border-radius:8px;padding:10px 12px;margin-bottom:12px;font-size:11.5px;color:var(--green-dark)"><b style="display:block;margin-bottom:3px">✓ Sin movimientos asociados</b>Equipo marcado automáticamente como devuelto al cliente.</div>`;
+        : `<div style="background:var(--green-light);border:1px solid #97C459;border-radius:8px;padding:10px 12px;margin-bottom:12px;font-size:11.5px;color:var(--green)"><b style="display:block;margin-bottom:3px">✓ Sin movimientos asociados</b>Equipo marcado automáticamente como devuelto al cliente.</div>`;
     }
 
     detail.innerHTML = `
@@ -3277,7 +3580,7 @@ const Reparaciones = {
         <span class="badge ${this.ESTADO_CLASS[o.estado]}" style="flex-shrink:0">${this.ESTADO_LABEL[o.estado]}</span>
       </div>
       <div style="display:flex;gap:4px;flex-wrap:wrap;margin-bottom:14px">
-        ${this.ESTADOS.map(s => `<span onclick="Reparaciones.setEstado('${s}')" style="font-size:11px;padding:5px 11px;border-radius:20px;border:1.5px solid ${o.estado===s?'var(--blue)':'var(--border-strong)'};background:${o.estado===s?'var(--blue-light)':'var(--bg)'};color:${o.estado===s?'var(--blue-dark)':'var(--text-secondary)'};cursor:pointer">${this.ESTADO_LABEL[s]}</span>`).join('')}
+        ${this.ESTADOS.map(s => `<span onclick="Reparaciones.setEstado('${s}')" style="font-size:11px;padding:5px 11px;border-radius:20px;border:1.5px solid ${o.estado===s?'var(--blue)':'var(--border-strong)'};background:${o.estado===s?'var(--blue-light)':'var(--bg)'};color:${o.estado===s?'var(--blue)':'var(--text-secondary)'};cursor:pointer">${this.ESTADO_LABEL[s]}</span>`).join('')}
         <span onclick="Reparaciones.setEstado('rechazado')" style="font-size:11px;padding:5px 11px;border-radius:20px;border:1.5px solid #F09595;background:${o.estado==='rechazado'?'var(--red-light)':'var(--bg)'};color:${o.estado==='rechazado'?'var(--red)':'var(--text-secondary)'};cursor:pointer">Rechazado</span>
         <span onclick="Reparaciones.setEstado('no_reparable')" style="font-size:11px;padding:5px 11px;border-radius:20px;border:1.5px solid #F09595;background:${o.estado==='no_reparable'?'var(--red-light)':'var(--bg)'};color:${o.estado==='no_reparable'?'var(--red)':'var(--text-secondary)'};cursor:pointer">No reparable</span>
       </div>
@@ -3304,9 +3607,9 @@ const Reparaciones = {
           <div><label style="font-size:11px;color:var(--text-secondary)">Precio cobrado</label><input type="number" id="rep-f-precio" value="${o.precioFinal}" style="width:100%;font-size:12px;padding:6px 9px;border:1px solid var(--border-strong);border-radius:8px"></div>
         </div>
         <div style="background:var(--blue-light);border-radius:8px;padding:10px;display:flex;justify-content:space-around;text-align:center">
-          <div><label style="font-size:10px;color:var(--blue-dark)">Costo</label><div style="font-weight:600;color:var(--blue-dark)">${State.fmtARS(totalCosto)}</div></div>
-          <div><label style="font-size:10px;color:var(--blue-dark)">Precio</label><div style="font-weight:600;color:var(--blue-dark)">${State.fmtARS(o.precioFinal)}</div></div>
-          <div><label style="font-size:10px;color:var(--blue-dark)">Margen</label><div style="font-weight:600;color:${margen>=0?'var(--green-dark)':'var(--red)'}">${margen>=0?'+':''}${State.fmtARS(margen)}</div></div>
+          <div><label style="font-size:10px;color:var(--blue)">Costo</label><div style="font-weight:600;color:var(--blue)">${State.fmtARS(totalCosto)}</div></div>
+          <div><label style="font-size:10px;color:var(--blue)">Precio</label><div style="font-weight:600;color:var(--blue)">${State.fmtARS(o.precioFinal)}</div></div>
+          <div><label style="font-size:10px;color:var(--blue)">Margen</label><div style="font-weight:600;color:${margen>=0?'var(--green)':'var(--red)'}">${margen>=0?'+':''}${State.fmtARS(margen)}</div></div>
         </div>
       </div>
       <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:6px">
@@ -3663,7 +3966,7 @@ const Gastos = {
 
   viewGastosFijos() {
     return `
-      <div style="padding:12px 22px;background:var(--blue-light);font-size:12px;color:var(--blue-dark)">
+      <div style="padding:12px 22px;background:var(--blue-light);font-size:12px;color:var(--blue)">
         <i class="ti ti-info-circle"></i> Esta es tu plantilla de gastos fijos (Alquiler, Monotributos, CRM, etc). Editá los conceptos y montos sugeridos acá una vez, y cada mes los "cargás" con un clic en Cierre de mes — sin tener que escribirlos de nuevo.
       </div>
       <div style="padding:12px 22px;display:flex;justify-content:flex-end">
@@ -3781,12 +4084,12 @@ const Gastos = {
     const socios = ['Franco', 'Angel', 'Lautaro', 'iPhoneMood'];
 
     host.innerHTML = `
-      ${yaCerrado ? `<div style="background:var(--green-light);color:var(--green-dark);border-radius:8px;padding:10px 14px;margin-bottom:14px;font-size:12.5px"><i class="ti ti-circle-check"></i> Este mes ya fue cerrado el ${new Date(cierreExistente.cerradoEn).toLocaleDateString('es-AR')}${cierreExistente.cerradoPor?` por ${cierreExistente.cerradoPor}`:''}.</div>` : ''}
+      ${yaCerrado ? `<div style="background:var(--green-light);color:var(--green);border-radius:8px;padding:10px 14px;margin-bottom:14px;font-size:12.5px"><i class="ti ti-circle-check"></i> Este mes ya fue cerrado el ${new Date(cierreExistente.cerradoEn).toLocaleDateString('es-AR')}${cierreExistente.cerradoPor?` por ${cierreExistente.cerradoPor}`:''}.</div>` : ''}
 
       <div class="kpi-row" style="grid-template-columns:repeat(4,1fr);padding:0 0 14px 0;border:none">
-        <div class="kpi"><label>Ingresos del mes</label><div class="val" style="color:var(--green-dark)">${State.fmtARS(totalIngresos)}</div><div class="sub">ventas + spread cueva</div></div>
+        <div class="kpi"><label>Ingresos del mes</label><div class="val" style="color:var(--green)">${State.fmtARS(totalIngresos)}</div><div class="sub">ventas + spread cueva</div></div>
         <div class="kpi"><label>Gastos del mes</label><div class="val" style="color:var(--red)">${State.fmtARS(totalGastosARS)}</div><div class="sub">${gastosMes.length} gasto(s) cargados</div></div>
-        <div class="kpi"><label>Balance</label><div class="val" style="color:var(--blue-dark)">${State.fmtARS(balance)}</div><div class="sub">antes de repartir</div></div>
+        <div class="kpi"><label>Balance</label><div class="val" style="color:var(--blue)">${State.fmtARS(balance)}</div><div class="sub">antes de repartir</div></div>
         <div class="kpi"><label>Balance en USD</label><div class="val">${State.fmtUSD(balance / State.refBlue)}</div><div class="sub">a cotización blue actual</div></div>
       </div>
 
@@ -3977,9 +4280,9 @@ const Gastos = {
       data: { labels: meses.map(m => m.label.split(' ')[0].substring(0,3)), datasets },
       options: {
         responsive: true, maintainAspectRatio: false,
-        plugins: { legend: { position: 'bottom', labels: { boxWidth: 10, font: { size: 10.5 } } } },
+        plugins: { legend: { position: 'bottom', labels: { boxWidth: 10, font: { size: 10.5 }, color: '#AEAEB2' } } },
         scales: {
-          y: { ticks: { callback: v => 'USD ' + v, font: { size: 10 } }, grid: { color: '#EFEDE6' } },
+          y: { ticks: { callback: v => 'USD ' + v, font: { size: 10 }, color: '#AEAEB2' }, grid: { color: 'rgba(255,255,255,.08)' } },
           x: { grid: { display: false }, ticks: { font: { size: 10.5 } } }
         }
       }
@@ -4069,7 +4372,7 @@ const Gastos = {
     }
 
     const iconPorTipo = { alerta: 'ti-alert-triangle', positivo: 'ti-trending-down', info: 'ti-info-circle' };
-    const colorPorTipo = { alerta: 'var(--amber-dark)', positivo: 'var(--green-dark)', info: 'var(--blue-dark)' };
+    const colorPorTipo = { alerta: 'var(--amber)', positivo: 'var(--green)', info: 'var(--blue)' };
     const bgPorTipo = { alerta: 'var(--amber-light)', positivo: 'var(--green-light)', info: 'var(--blue-light)' };
 
     host.innerHTML = `
@@ -4131,7 +4434,7 @@ const Cueva = {
         <td>${o.origenP} (${o.origenB})<br><b>${this.fmtByMoneda(o.entrega, t.monedaO)}</b></td>
         <td>${o.destinoP} (${o.destinoB})<br><b>${this.fmtByMoneda(o.recibe, t.monedaD)}</b></td>
         <td>$${o.cotiz.toLocaleString('es-AR')}</td>
-        <td style="color:${spread>=0?'var(--green-dark)':'var(--red)'};font-weight:600">${spread>=0?'+':''}${State.fmtARS(spread)}</td>
+        <td style="color:${spread>=0?'var(--green)':'var(--red)'};font-weight:600">${spread>=0?'+':''}${State.fmtARS(spread)}</td>
         <td><button class="btn btn-sm" onclick="Cueva.openView('${o.id}')"><i class="ti ti-edit"></i> Ver</button></td>
       </tr>`;
     }).join('');
@@ -4155,11 +4458,11 @@ const Cueva = {
             <div style="font-size:13px">${o.origenP} — ${o.origenB}: <b>${this.fmtByMoneda(o.entrega, t.monedaO)}</b></div>
           </div>
           <div style="background:var(--green-light);border-radius:8px;padding:10px 12px;margin-bottom:12px">
-            <div style="font-size:11px;color:var(--green-dark);font-weight:600;margin-bottom:2px">Entra a</div>
+            <div style="font-size:11px;color:var(--green);font-weight:600;margin-bottom:2px">Entra a</div>
             <div style="font-size:13px">${o.destinoP} — ${o.destinoB}: <b>${this.fmtByMoneda(o.recibe, t.monedaD)}</b></div>
           </div>
           <div style="display:flex;justify-content:space-between;padding:8px 0;border-top:1px solid var(--border);font-size:12.5px"><span>Cotización usada</span><b>$${o.cotiz.toLocaleString('es-AR')}</b></div>
-          <div style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--border);font-size:12.5px"><span>Spread</span><b style="color:${spread>=0?'var(--green-dark)':'var(--red)'}">${spread>=0?'+':''}${State.fmtARS(spread)}</b></div>
+          <div style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--border);font-size:12.5px"><span>Spread</span><b style="color:${spread>=0?'var(--green)':'var(--red)'}">${spread>=0?'+':''}${State.fmtARS(spread)}</b></div>
           <div style="display:flex;justify-content:space-between;margin-top:14px">
             <button class="btn" style="color:var(--red)" onclick="Cueva.deleteOp('${o.id}')"><i class="ti ti-trash"></i> Eliminar</button>
             <button class="btn" onclick="Cueva.close()">Cerrar</button>
@@ -4203,7 +4506,7 @@ const Cueva = {
           <div style="text-align:center;font-size:11px;color:var(--text-secondary);margin:4px 0">cotización <input type="number" id="cf-cotiz" value="1075" oninput="Cueva.calcPreview()" style="width:65px;text-align:center;border:1px solid var(--border-strong);border-radius:6px;padding:3px"></div>
 
           <div style="background:var(--green-light);border-radius:8px;padding:10px 12px;margin-bottom:8px">
-            <b style="font-size:11px;color:var(--green-dark)">Entra a (destino)</b>
+            <b style="font-size:11px;color:var(--green)">Entra a (destino)</b>
             <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:6px">
               <select id="cf-destino-p" style="font-size:12px;padding:6px 8px;border:1px solid var(--border-strong);border-radius:8px">${State.personas.map(p=>`<option>${p}</option>`).join('')}</select>
               <select id="cf-destino-b" style="font-size:12px;padding:6px 8px;border:1px solid var(--border-strong);border-radius:8px"></select>
@@ -4255,7 +4558,7 @@ const Cueva = {
     if (entrega > 0) {
       prev.style.display = 'block';
       document.getElementById('cueva-preview-val').textContent = (spread>=0?'+':'') + State.fmtARS(spread);
-      document.getElementById('cueva-preview-val').style.color = spread >= 0 ? 'var(--green-dark)' : 'var(--red)';
+      document.getElementById('cueva-preview-val').style.color = spread >= 0 ? 'var(--green)' : 'var(--red)';
     } else prev.style.display = 'none';
   },
 
@@ -4353,18 +4656,18 @@ const CashFlow = {
 
     c.innerHTML = `
       <div class="kpi-row" style="grid-template-columns:repeat(4,1fr);padding:0 0 14px 0;border:none">
-        <div class="kpi"><label>Ingresos por ventas</label><div class="val" style="color:var(--green-dark)">${State.fmtARS(ventasIngresos)}</div></div>
+        <div class="kpi"><label>Ingresos por ventas</label><div class="val" style="color:var(--green)">${State.fmtARS(ventasIngresos)}</div></div>
         <div class="kpi"><label>Egresos (gastos)</label><div class="val" style="color:var(--red)">${State.fmtARS(gastosEgresos)}</div></div>
-        <div class="kpi"><label>Resultado comercial</label><div class="val">${resultComercial>=0?'+':''}${State.fmtARS(resultComercial)}</div></div>
+        <div class="kpi"><label>Resultado comercial</label><div class="val">${resultComercial>=0?'+':''}${State.fmtUSD(resultComercial/State.refBlue)}</div></div>
         <div class="kpi"><label>Resultado financiero</label><div class="val" style="color:var(--purple)">${resultFinanciero>=0?'+':''}${State.fmtARS(resultFinanciero)}</div></div>
       </div>
       <div class="card">
         <div class="card-title"><i class="ti ti-list"></i> Movimientos del período</div>
         <table><thead><tr><th>Fecha</th><th>Concepto</th><th>Tipo</th><th>Monto</th></tr></thead>
         <tbody>
-          ${State.ventas.map(v => `<tr><td>${v.fecha}</td><td>Venta #${v.id} — ${v.cliente}</td><td><span class="badge b-blue">Venta</span></td><td style="color:var(--green-dark)">+${State.fmtUSD(v.items.reduce((s,i)=>s+i.precio,0))}</td></tr>`).join('')}
+          ${State.ventas.map(v => `<tr><td>${v.fecha}</td><td>Venta #${v.id} — ${v.cliente}</td><td><span class="badge b-blue">Venta</span></td><td style="color:var(--green)">+${State.fmtUSD(v.items.reduce((s,i)=>s+i.precio,0))}</td></tr>`).join('')}
           ${State.gastos.map(g => `<tr><td>${g.fecha}</td><td>${g.motivo}</td><td><span class="badge b-amber">Gasto</span></td><td style="color:var(--red)">-${g.moneda==='USD'?State.fmtUSD(g.monto):State.fmtARS(g.monto)}</td></tr>`).join('')}
-          ${State.cambios.map(c => `<tr><td>${c.fecha}</td><td>Cambio ${Cueva.typeObj(c.tipo).label}</td><td><span class="badge b-purple">Cambio</span></td><td style="color:${State.calcSpreadARS(c)>=0?'var(--green-dark)':'var(--red)'}">${State.calcSpreadARS(c)>=0?'+':''}${State.fmtARS(State.calcSpreadARS(c))} (spread)</td></tr>`).join('')}
+          ${State.cambios.map(c => `<tr><td>${c.fecha}</td><td>Cambio ${Cueva.typeObj(c.tipo).label}</td><td><span class="badge b-purple">Cambio</span></td><td style="color:${State.calcSpreadARS(c)>=0?'var(--green)':'var(--red)'}">${State.calcSpreadARS(c)>=0?'+':''}${State.fmtARS(State.calcSpreadARS(c))} (spread)</td></tr>`).join('')}
         </tbody></table>
       </div>
     `;
@@ -4540,7 +4843,7 @@ const Panel = {
   cotizacionesView() {
     return `
       <h3 style="font-size:13px;font-weight:600;color:var(--text-secondary);text-transform:uppercase;letter-spacing:.4px;margin-bottom:12px;border-bottom:1px solid var(--border);padding-bottom:8px">Cotizaciones del día</h3>
-      <div style="background:var(--blue-light);border-radius:8px;padding:10px 12px;margin-bottom:14px;font-size:11.5px;color:var(--blue-dark)">
+      <div style="background:var(--blue-light);border-radius:8px;padding:10px 12px;margin-bottom:14px;font-size:11.5px;color:var(--blue)">
         <i class="ti ti-info-circle"></i> Estos valores se usan en toda la app: precios de venta, conversiones de gastos, cierres de mes, etc. Actualizalos al empezar el día.
       </div>
       <div class="card">
@@ -4677,7 +4980,7 @@ const Panel = {
   usuariosView() {
     return `
       <h3 style="font-size:13px;font-weight:600;color:var(--text-secondary);text-transform:uppercase;letter-spacing:.4px;margin-bottom:12px;border-bottom:1px solid var(--border);padding-bottom:8px">Usuarios y accesos</h3>
-      <div style="background:var(--blue-light);border-radius:8px;padding:10px 12px;margin-bottom:14px;font-size:11.5px;color:var(--blue-dark)">
+      <div style="background:var(--blue-light);border-radius:8px;padding:10px 12px;margin-bottom:14px;font-size:11.5px;color:var(--blue)">
         <i class="ti ti-info-circle"></i> Solo las cuentas de Gmail listadas acá pueden iniciar sesión en la app. Si alguien intenta entrar con un email que no está en esta lista, va a ver un mensaje de acceso denegado.
       </div>
       <div id="usuarios-list" style="margin-bottom:14px"><div class="empty-state"><i class="ti ti-loader-2"></i>Cargando usuarios...</div></div>

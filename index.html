@@ -4285,13 +4285,43 @@ const App = {
     this.goTo('dashboard');
 
     // Si la página se recargó sola mientras había una venta a medio cargar
-    // (por ejemplo, el navegador descargó la pestaña por inactividad), avisamos.
+    // (por ejemplo, el navegador descargó la pestaña por inactividad), avisamos
+    // con un banner FIJO (no un toast que desaparece solo) para que no se pierda
+    // aunque el usuario tarde en volver a mirar la pantalla.
+    this.chequearBorradorVentaPendiente();
+  },
+
+  chequearBorradorVentaPendiente() {
     const borradorPendiente = Ventas.hayBorradorPendiente();
-    if (borradorPendiente && borradorPendiente.draft && (borradorPendiente.draft.items?.length || borradorPendiente.draft.cliente)) {
-      setTimeout(() => {
-        toast('Encontramos una venta sin terminar. Andá a Ventas → Nueva venta para continuarla.');
-      }, 600);
-    }
+    const tieneAlgo = borradorPendiente && borradorPendiente.draft && (borradorPendiente.draft.items?.length || borradorPendiente.draft.cliente);
+    const existing = document.getElementById('borrador-venta-banner');
+    if (existing) existing.remove();
+    if (!tieneAlgo) return;
+
+    const banner = document.createElement('div');
+    banner.id = 'borrador-venta-banner';
+    banner.style.cssText = 'background:var(--amber-light);border-bottom:2px solid var(--amber);padding:10px 20px;display:flex;align-items:center;justify-content:center;gap:14px;flex-wrap:wrap;font-size:12.5px;color:var(--amber-dark);flex-shrink:0';
+    const items = borradorPendiente.draft.items?.length || 0;
+    banner.innerHTML = `
+      <span><i class="ti ti-alert-triangle"></i> Tenés una venta sin terminar para <b>${borradorPendiente.draft.cliente || 'un cliente'}</b> (${items} ítem(s)). La página se reinició antes de que la confirmaras.</span>
+      <button class="btn btn-sm btn-primary" onclick="App.continuarVentaPendiente()">Continuar venta</button>
+      <button class="btn btn-sm" onclick="App.descartarVentaPendiente()">Descartar</button>
+    `;
+    // Lo insertamos como primer hijo de .main (la columna vertical: topbar + contenido),
+    // antes de la topbar — así empuja todo hacia abajo en vez de romper el layout horizontal.
+    const main = document.querySelector('.main');
+    if (main) main.insertBefore(banner, main.firstChild);
+  },
+
+  continuarVentaPendiente() {
+    document.getElementById('borrador-venta-banner')?.remove();
+    this.goTo('ventas');
+    setTimeout(() => Ventas.openNew(), 100);
+  },
+
+  descartarVentaPendiente() {
+    Ventas.borrarBorrador();
+    document.getElementById('borrador-venta-banner')?.remove();
   },
 
   toggleUserMenu() {

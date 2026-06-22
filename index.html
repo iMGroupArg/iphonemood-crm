@@ -370,10 +370,14 @@ const DB = {
       });
     });
     State.ventas = (ventasRes.data || []).map(v => ({
-      id: v.id, fecha: this.fmtFecha(v.creado_en), cliente: v.cliente,
+      id: v.id, fecha: this.fmtFecha(v.creado_en), fechaISO: v.creado_en, cliente: v.cliente,
+      clienteDni: v.cliente_dni || '', clienteTel: v.cliente_tel || '',
+      tipoVenta: v.tipo_venta || 'minorista',
+      comisionVendedor: Number(v.comision_vendedor) || 0,
       vendedor: this.personasIdToNombre[v.vendedor_id] || '',
       items: itemsPorVenta[v.id] || [], pagos: pagosPorVenta[v.id] || [],
-      estado: v.estado, tradeIn: v.trade_in_modelo ? { modelo: v.trade_in_modelo, valor: Number(v.trade_in_valor) } : null
+      estado: v.estado, tradeIn: v.trade_in_modelo ? { modelo: v.trade_in_modelo, valor: Number(v.trade_in_valor) } : null,
+      notas: []
     }));
     State.nextVentaId = State.ventas.length ? Math.max(...State.ventas.map(v => v.id)) + 1 : 1;
 
@@ -475,7 +479,9 @@ const DB = {
   async crearVenta(draft, estado) {
     const { data: ventaRow, error } = await supa.from('ventas').insert({
       cliente: draft.cliente, vendedor_id: this.personaId(draft.vendedor) || null, estado,
-      trade_in_modelo: draft.tradeIn?.modelo || null, trade_in_valor: draft.tradeIn?.valor || 0
+      trade_in_modelo: draft.tradeIn?.modelo || null, trade_in_valor: draft.tradeIn?.valor || 0,
+      cliente_dni: draft.clienteDni || null, cliente_tel: draft.clienteTel || null,
+      tipo_venta: draft.tipoVenta || 'minorista', comision_vendedor: draft.comisionVendedor || 0
     }).select().single();
     if (error || !ventaRow) { console.error(error); return null; }
 
@@ -493,6 +499,19 @@ const DB = {
     if (pagosToInsert.length) await supa.from('venta_pagos').insert(pagosToInsert);
 
     return ventaRow.id;
+  },
+
+  async agregarNotaVenta(ventaId, texto) {
+    const usuarioNombre = Auth.usuario?.nombre || Auth.usuario?.email || '';
+    const { data } = await supa.from('venta_notas').insert({ venta_id: ventaId, texto, usuario_nombre: usuarioNombre }).select().single();
+    return data;
+  },
+  async cargarNotasVenta(ventaId) {
+    const { data } = await supa.from('venta_notas').select('*').eq('venta_id', ventaId).order('creado_en', { ascending: true });
+    return data || [];
+  },
+  async actualizarComisionVenta(ventaId, comision) {
+    await supa.from('ventas').update({ comision_vendedor: comision }).eq('id', ventaId);
   },
 
   async anularVenta(ventaId) {
@@ -2127,7 +2146,7 @@ const Ventas = {
       this.mostrarRecuperarBorrador(pendiente);
       return;
     }
-    this.draft = { cliente: '', vendedor: '', tradeIn: null, items: [], pagos: [] };
+    this.draft = { cliente: '', clienteTel: '', clienteDni: '', tipoVenta: 'minorista', vendedor: '', tradeIn: null, items: [], pagos: [], comisionVendedor: 0 };
     this.step = 0;
     this.selectedStockIds = [];
     this.invMode = 'manual';
@@ -2166,7 +2185,7 @@ const Ventas = {
   },
   descartarBorradorYEmpezarNueva() {
     this.borrarBorrador();
-    this.draft = { cliente: '', vendedor: '', tradeIn: null, items: [], pagos: [] };
+    this.draft = { cliente: '', clienteTel: '', clienteDni: '', tipoVenta: 'minorista', vendedor: '', tradeIn: null, items: [], pagos: [], comisionVendedor: 0 };
     this.step = 0;
     this.selectedStockIds = [];
     this.invMode = 'manual';
@@ -2221,15 +2240,28 @@ const Ventas = {
   stepCliente() {
     const d = this.draft;
     return `
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px">
         <div><label style="font-size:11px;color:var(--text-secondary);font-weight:600;display:block;margin-bottom:4px">Nombre del cliente</label>
-          <input type="text" id="vf-cliente" value="${d.cliente}" placeholder="Consumidor final si se deja vacío" style="width:100%;font-size:12px;padding:7px 10px;border:1px solid var(--border-strong);border-radius:8px"></div>
-        <div><label style="font-size:11px;color:var(--text-secondary);font-weight:600;display:block;margin-bottom:4px">Vendedor</label>
-          <select id="vf-vendedor" style="width:100%;font-size:12px;padding:7px 10px;border:1px solid var(--border-strong);border-radius:8px">
-            <option value="">Seleccionar</option>
-            ${State.personas.map(p=>`<option ${d.vendedor===p?'selected':''}>${p}</option>`).join('')}
+          <input type="text" id="vf-cliente" value="${d.cliente||''}" placeholder="Consumidor final si se deja vacío" style="width:100%;font-size:12px;padding:7px 10px;border:1px solid var(--border-strong);border-radius:8px"></div>
+        <div><label style="font-size:11px;color:var(--text-secondary);font-weight:600;display:block;margin-bottom:4px">Teléfono</label>
+          <input type="text" id="vf-cliente-tel" value="${d.clienteTel||''}" placeholder="ej: 3413686909" style="width:100%;font-size:12px;padding:7px 10px;border:1px solid var(--border-strong);border-radius:8px"></div>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px">
+        <div><label style="font-size:11px;color:var(--text-secondary);font-weight:600;display:block;margin-bottom:4px">DNI</label>
+          <input type="text" id="vf-cliente-dni" value="${d.clienteDni||''}" placeholder="ej: 34139974" style="width:100%;font-size:12px;padding:7px 10px;border:1px solid var(--border-strong);border-radius:8px"></div>
+        <div><label style="font-size:11px;color:var(--text-secondary);font-weight:600;display:block;margin-bottom:4px">Tipo de venta</label>
+          <select id="vf-tipo-venta" style="width:100%;font-size:12px;padding:7px 10px;border:1px solid var(--border-strong);border-radius:8px">
+            <option value="minorista" ${(d.tipoVenta||'minorista')==='minorista'?'selected':''}>Minorista</option>
+            <option value="mayorista" ${d.tipoVenta==='mayorista'?'selected':''}>Mayorista</option>
+            <option value="revendedor" ${d.tipoVenta==='revendedor'?'selected':''}>Revendedor</option>
           </select></div>
-      </div>`;
+      </div>
+      <div><label style="font-size:11px;color:var(--text-secondary);font-weight:600;display:block;margin-bottom:4px">Vendedor</label>
+        <select id="vf-vendedor" style="width:100%;font-size:12px;padding:7px 10px;border:1px solid var(--border-strong);border-radius:8px">
+          <option value="">Seleccionar</option>
+          ${State.personas.map(p=>`<option ${d.vendedor===p?'selected':''}>${p}</option>`).join('')}
+        </select></div>
+    `;
   },
 
   stepTradeIn() {
@@ -2478,6 +2510,10 @@ const Ventas = {
           `;
         }).join('<div style="height:1px;background:#fff;margin:6px 0"></div>')}
       </div>` : ''}
+      <div style="margin-bottom:12px">
+        <label style="font-size:11px;color:var(--text-secondary);font-weight:600;display:block;margin-bottom:4px">Comisión del vendedor (USD) <span style="font-weight:400">— opcional</span></label>
+        <input type="number" id="vf-comision-vendedor" value="${d.comisionVendedor||''}" placeholder="0" oninput="Ventas.draft.comisionVendedor=parseFloat(this.value)||0" style="width:100%;font-size:12px;padding:7px 10px;border:1px solid var(--border-strong);border-radius:8px">
+      </div>
       <div style="display:flex;justify-content:space-between;padding:8px 0;border-top:1px solid var(--border);font-weight:600">Total<span>${State.fmtUSD(total)}</span></div>
       <div style="display:flex;justify-content:space-between;padding:4px 0;font-size:12px;color:${saldo>0?'var(--red)':'var(--green-dark)'}">Saldo<span>${State.fmtUSD(saldo)}</span></div>
       ${totalDiferencialArs > 0 ? `<div style="display:flex;justify-content:space-between;padding:4px 0;font-size:12px;color:var(--purple)">Diferencial de tarjeta<span>+$${totalDiferencialArs.toLocaleString('es-AR')}</span></div>` : ''}
@@ -2495,6 +2531,9 @@ const Ventas = {
       }
       if (this.step === 0) {
         this.draft.cliente = document.getElementById('vf-cliente').value.trim() || 'Consumidor final';
+        this.draft.clienteTel = document.getElementById('vf-cliente-tel')?.value.trim() || '';
+        this.draft.clienteDni = document.getElementById('vf-cliente-dni')?.value.trim() || '';
+        this.draft.tipoVenta = document.getElementById('vf-tipo-venta')?.value || 'minorista';
         this.draft.vendedor = document.getElementById('vf-vendedor').value;
       }
       if (this.step === 2 && this.draft.items.length === 0) { toast('Agregá al menos un ítem.'); return; }
@@ -2565,24 +2604,433 @@ const Ventas = {
     if (!v) return;
     const total = v.items.reduce((s, i) => s + i.precio, 0);
     const pagado = v.pagos.reduce((s, p) => s + p.monto, 0);
+    const saldo = pagado - total;
     const cerrada = v.estado === 'cerrada';
+    const TIPO_LABEL = { minorista: 'Minorista', mayorista: 'Mayorista', revendedor: 'Revendedor' };
+
+    // Separar ítems en dispositivos y accesorios
+    const dispositivosCats = ['iphone','android','mac','ipad','watch'];
+    const itemsDispositivos = v.items.filter(i => {
+      const p = State.stock.find(s => s.id === i.stockId);
+      return p ? dispositivosCats.includes(p.cat) : false;
+    });
+    const itemsAccesorios = v.items.filter(i => {
+      const p = State.stock.find(s => s.id === i.stockId);
+      return !p || !dispositivosCats.includes(p.cat);
+    });
+
     const host = document.getElementById('venta-modal-host');
     host.innerHTML = `
-      <div style="position:fixed;inset:0;background:rgba(0,0,0,.4);display:flex;align-items:center;justify-content:center;z-index:200" onclick="if(event.target===this) Ventas.closeModal()">
-        <div style="width:440px;max-width:92vw;background:var(--bg);border-radius:14px;padding:20px" onclick="event.stopPropagation()">
-          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px"><h3 style="font-size:15px;font-weight:600">Venta #${v.id}</h3>${this.estadoToggle(cerrada)}</div>
-          <p style="font-size:12px;color:var(--text-secondary);margin-bottom:10px">${v.cliente} · ${v.fecha}${v.vendedor?` · Vendedor: ${v.vendedor}`:''}</p>
-          ${v.items.map(i=>`<div style="display:flex;justify-content:space-between;font-size:12.5px;padding:5px 0;border-bottom:1px solid var(--border)">${i.nombre}<span>${State.fmtUSD(i.precio)}</span></div>`).join('')}
-          <div style="display:flex;justify-content:space-between;padding:8px 0;font-weight:600">Total<span>${State.fmtUSD(total)}</span></div>
-          <div style="display:flex;justify-content:space-between;padding:4px 0;font-size:12px;color:var(--text-secondary)">Pagado<span>${State.fmtUSD(pagado)}</span></div>
-          ${(v.pagos||[]).filter(p=>p.esTarjeta).map(p => `<div style="display:flex;justify-content:space-between;padding:4px 0;font-size:12px;color:var(--purple)"><span><i class="ti ti-credit-card"></i> Diferencial tarjeta (${p.persona})</span><span>+$${(p.diferencialArs||0).toLocaleString('es-AR')}</span></div>`).join('')}
-          <div style="display:flex;justify-content:space-between;margin-top:16px;padding-top:14px;border-top:1px solid var(--border)">
-            <button class="btn" style="color:var(--red)" onclick="Ventas.anular(${v.id})"><i class="ti ti-trash"></i> Anular venta</button>
+      <div style="position:fixed;inset:0;background:rgba(0,0,0,.5);display:flex;align-items:center;justify-content:center;z-index:200" onclick="if(event.target===this) Ventas.closeModal()">
+        <div style="width:820px;max-width:96vw;max-height:92vh;background:var(--bg);border-radius:14px;display:flex;flex-direction:column;overflow:hidden" onclick="event.stopPropagation()">
+
+          <!-- HEADER -->
+          <div style="padding:16px 20px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;flex-shrink:0">
+            <div>
+              <h2 style="font-size:20px;font-weight:700">Venta #${v.id}</h2>
+              <p style="font-size:12px;color:var(--text-secondary);margin-top:2px">${v.fecha}${v.tipoVenta ? ` · ${TIPO_LABEL[v.tipoVenta]||v.tipoVenta}` : ''}</p>
+            </div>
+            <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+              ${this.estadoToggle(cerrada)}
+              <span style="font-size:20px;font-weight:700">${State.fmtUSD(total)}</span>
+              <button class="btn btn-sm btn-primary" onclick="Ventas.generarRecibo(${id})"><i class="ti ti-download"></i> Recibo</button>
+              <button class="btn btn-sm" onclick="Ventas.generarDetallePDF(${id})"><i class="ti ti-download"></i> Detalle PDF</button>
+              <button class="btn btn-sm" onclick="Ventas.closeModal()"><i class="ti ti-x"></i></button>
+            </div>
+          </div>
+
+          <!-- CUERPO SCROLLEABLE -->
+          <div style="flex:1;overflow-y:auto;padding:18px 20px">
+
+            <!-- RESUMEN GARANTÍAS -->
+            ${(()=>{
+              const garantiasActivas = v.items.filter(i => i.garantiaFin && new Date(i.garantiaFin) > new Date()).length;
+              const vencenPronto = v.items.filter(i => { if (!i.garantiaFin) return false; const dias = (new Date(i.garantiaFin)-new Date())/86400000; return dias > 0 && dias <= 30; }).length;
+              return `
+              <div class="card" style="margin-bottom:14px">
+                <div class="card-title"><i class="ti ti-shield"></i> Resumen de Garantías</div>
+                <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px">
+                  <div style="background:var(--bg-secondary);border-radius:8px;padding:12px;display:flex;justify-content:space-between;align-items:center"><div><div style="font-size:11px;color:var(--text-secondary)">Total con Garantía</div><div style="font-size:22px;font-weight:700">${v.items.filter(i=>i.garantiaFin).length}</div></div><i class="ti ti-shield" style="font-size:24px;color:var(--blue);opacity:.4"></i></div>
+                  <div style="background:var(--bg-secondary);border-radius:8px;padding:12px;display:flex;justify-content:space-between;align-items:center"><div><div style="font-size:11px;color:var(--text-secondary)">Garantías Activas</div><div style="font-size:22px;font-weight:700;color:var(--green-dark)">${garantiasActivas}</div></div><i class="ti ti-shield-check" style="font-size:24px;color:var(--green-dark);opacity:.4"></i></div>
+                  <div style="background:var(--bg-secondary);border-radius:8px;padding:12px;display:flex;justify-content:space-between;align-items:center"><div><div style="font-size:11px;color:var(--text-secondary)">Vencen Pronto</div><div style="font-size:22px;font-weight:700;color:${vencenPronto>0?'var(--amber-dark)':'var(--text)'}">${vencenPronto}</div></div><i class="ti ti-shield-exclamation" style="font-size:24px;color:${vencenPronto>0?'var(--amber-dark)':'var(--text-secondary)'};opacity:.4"></i></div>
+                </div>
+              </div>`;
+            })()}
+
+            <!-- INFO CLIENTE -->
+            <div class="card" style="margin-bottom:14px">
+              <div class="card-title"><i class="ti ti-user"></i> Información del Cliente</div>
+              <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+                <div><label style="font-size:11px;color:var(--text-secondary)">Nombre</label><div style="font-size:13px;font-weight:500">${v.cliente}</div></div>
+                <div><label style="font-size:11px;color:var(--text-secondary)">Teléfono</label><div style="font-size:13px">${v.clienteTel||'—'}</div></div>
+                <div><label style="font-size:11px;color:var(--text-secondary)">DNI</label><div style="font-size:13px">${v.clienteDni||'—'}</div></div>
+                <div><label style="font-size:11px;color:var(--text-secondary)">Vendedor</label>
+                  <div style="font-size:13px;font-weight:600">${v.vendedor||'—'}</div>
+                  <div style="font-size:11px;color:var(--green-dark)">Comisión: ${State.fmtUSD(v.comisionVendedor||0)}</div>
+                </div>
+              </div>
+            </div>
+
+            <!-- DISPOSITIVOS VENDIDOS -->
+            ${itemsDispositivos.length ? `
+            <div class="card" style="margin-bottom:14px">
+              <div class="card-title"><i class="ti ti-device-mobile"></i> Dispositivos Vendidos</div>
+              <table><thead><tr><th>Dispositivo</th><th>Condición</th><th>Identificador</th><th>Garantía</th><th>Precio Compra</th><th>Precio Venta</th><th>Profit</th><th>Comisión</th></tr></thead>
+              <tbody>${itemsDispositivos.map(i => {
+                const p = State.stock.find(s => s.id === i.stockId);
+                const profit = i.precio - (i.costo||0);
+                const diasRestantes = i.garantiaFin ? Math.max(0, Math.round((new Date(i.garantiaFin)-new Date())/86400000)) : null;
+                const progreso = i.garantiaInicio && i.garantiaFin ? Math.min(100, Math.round((new Date()-new Date(i.garantiaInicio))/(new Date(i.garantiaFin)-new Date(i.garantiaInicio))*100)) : 0;
+                return `<tr>
+                  <td><b>${i.nombre}</b>${p?.notas?`<div style="font-size:10px;color:var(--text-secondary);font-style:italic">${p.notas}</div>`:''}</td>
+                  <td><span class="badge b-amber">${p?.estadoProducto||'Usado'}</span></td>
+                  <td style="font-family:monospace;font-size:11px">${i.imei||'—'}</td>
+                  <td>${diasRestantes !== null ? `
+                    <div style="font-size:11px;color:var(--green-dark);font-weight:600">Garantía activa</div>
+                    <div style="font-size:10px;color:var(--text-secondary)">${diasRestantes} días restantes</div>
+                    <div style="height:4px;background:var(--border);border-radius:2px;margin-top:4px;width:80px"><div style="height:4px;background:var(--green-dark);border-radius:2px;width:${100-progreso}%"></div></div>
+                  ` : '—'}</td>
+                  <td>${State.fmtUSD(i.costo||0)}</td>
+                  <td><b>${State.fmtUSD(i.precio)}</b></td>
+                  <td style="color:${profit>=0?'var(--green-dark)':'var(--red)'}"><b>${profit>=0?'+':''}${State.fmtUSD(profit)}</b></td>
+                  <td>${State.fmtUSD(v.comisionVendedor||0)}</td>
+                </tr>`;
+              }).join('')}</tbody></table>
+            </div>` : ''}
+
+            <!-- ACCESORIOS VENDIDOS -->
+            ${itemsAccesorios.length ? `
+            <div class="card" style="margin-bottom:14px">
+              <div class="card-title"><i class="ti ti-box"></i> Accesorios Vendidos</div>
+              <table><thead><tr><th>Accesorio</th><th>SKU</th><th>Cantidad</th><th>Precio Total</th><th>Profit</th><th>Comisión</th></tr></thead>
+              <tbody>${itemsAccesorios.map(i => {
+                const p = State.stock.find(s => s.id === i.stockId);
+                const profit = i.precio - (i.costo||0);
+                return `<tr>
+                  <td>${i.nombre}</td>
+                  <td style="font-size:11px;color:var(--text-secondary)">${p?.storage||p?.notas||'N/A'}</td>
+                  <td>1</td>
+                  <td>${State.fmtUSD(i.precio)}</td>
+                  <td style="color:${profit>=0?'var(--green-dark)':'var(--red)'}">${profit>=0?'+':''}${State.fmtUSD(profit)}</td>
+                  <td>$0</td>
+                </tr>`;
+              }).join('')}</tbody></table>
+            </div>` : ''}
+
+            <!-- SUBTOTAL -->
+            <div style="display:flex;justify-content:flex-end;margin-bottom:14px;gap:20px;flex-wrap:wrap">
+              <div style="text-align:right">
+                <div style="font-size:12px;color:var(--text-secondary)">Subtotal Dispositivos: ${State.fmtUSD(itemsDispositivos.reduce((s,i)=>s+i.precio,0))}</div>
+                <div style="font-size:12px;color:var(--text-secondary)">Subtotal Accesorios: ${State.fmtUSD(itemsAccesorios.reduce((s,i)=>s+i.precio,0))}</div>
+                <div style="font-size:16px;font-weight:700;margin-top:6px">Subtotal: ${State.fmtUSD(total)}</div>
+                ${(()=>{ const pt = v.items.reduce((s,i)=>s+(i.precio-(i.costo||0)),0); return `<div style="font-size:12px;color:${pt>=0?'var(--green-dark)':'var(--red)'}">Profit: ${pt>=0?'+':''}${State.fmtUSD(pt)}</div>`; })()}
+              </div>
+            </div>
+
+            <!-- PAGOS -->
+            <div class="card" style="margin-bottom:14px">
+              <div class="card-title"><i class="ti ti-credit-card"></i> Pagos</div>
+              <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:12px">
+                <div><label style="font-size:11px;color:var(--text-secondary)">Total Venta</label><div style="font-size:17px;font-weight:700">${State.fmtUSD(total)}</div></div>
+                <div><label style="font-size:11px;color:var(--text-secondary)">Total Pagos</label><div style="font-size:17px;font-weight:700">${State.fmtUSD(pagado)}</div></div>
+                <div><label style="font-size:11px;color:var(--text-secondary)">Saldo</label><div style="font-size:17px;font-weight:700;color:${saldo<=0?'var(--text)':'var(--red)'}">${State.fmtUSD(saldo)}</div></div>
+              </div>
+              ${v.pagos.map(p => `
+                <div style="display:flex;justify-content:space-between;align-items:center;background:var(--bg-secondary);border-radius:8px;padding:10px 12px;margin-bottom:6px">
+                  <div style="display:flex;align-items:center;gap:10px">
+                    <i class="ti ti-${p.bolsillo?.includes('USD')||p.bolsillo?.includes('USDT')?'currency-dollar':'building-bank'}" style="font-size:20px;color:var(--text-secondary)"></i>
+                    <div>
+                      <div style="font-size:12.5px;font-weight:600">${p.persona} — ${p.bolsillo}${p.esTarjeta?` <span class="badge b-purple" style="font-size:9px">Tarjeta</span>`:''}</div>
+                      <div style="font-size:11px;color:var(--text-secondary)">${v.fecha}</div>
+                    </div>
+                  </div>
+                  <div style="text-align:right">
+                    <div style="font-size:13px;font-weight:600">${State.fmtUSD(p.monto)}</div>
+                    ${p.bolsillo?.startsWith('ARS')&&p.cotizacionDiferencial ? `<div style="font-size:10px;color:var(--text-secondary)">(USD ${p.monto} @ $${(p.cotizacionDiferencial||State.refBlue).toLocaleString('es-AR')})</div>` : ''}
+                  </div>
+                </div>
+              `).join('')}
+            </div>
+
+            <!-- NOTAS -->
+            <div class="card" style="margin-bottom:14px">
+              <div class="card-title"><i class="ti ti-notes"></i> Notas internas</div>
+              <div id="venta-notas-list" style="margin-bottom:10px"></div>
+              <div style="display:flex;gap:8px">
+                <input type="text" id="venta-nota-input" placeholder="Escribir una nota..." style="flex:1;font-size:12px;padding:7px 10px;border:1px solid var(--border-strong);border-radius:8px">
+                <button class="btn btn-sm btn-primary" onclick="Ventas.agregarNota(${id})"><i class="ti ti-send"></i></button>
+              </div>
+            </div>
+
+          </div>
+
+          <!-- FOOTER -->
+          <div style="padding:12px 20px;border-top:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;flex-shrink:0">
+            <button class="btn" style="color:var(--red)" onclick="Ventas.anular(${id})"><i class="ti ti-trash"></i> Anular venta</button>
             <button class="btn" onclick="Ventas.closeModal()">Cerrar</button>
           </div>
         </div>
       </div>
     `;
+    this.cargarNotasVenta(id);
+  },
+
+  async cargarNotasVenta(ventaId) {
+    const notas = await DB.cargarNotasVenta(ventaId);
+    const list = document.getElementById('venta-notas-list');
+    if (!list) return;
+    if (!notas.length) { list.innerHTML = `<div style="font-size:11.5px;color:var(--text-secondary)">Sin notas todavía</div>`; return; }
+    list.innerHTML = notas.map(n => `
+      <div style="background:var(--bg-secondary);border-radius:8px;padding:8px 10px;margin-bottom:6px;font-size:12px">
+        <div style="color:var(--text-secondary);font-size:10px;margin-bottom:3px">${n.usuario_nombre||''} · ${new Date(n.creado_en).toLocaleDateString('es-AR')}</div>
+        ${n.texto}
+      </div>
+    `).join('');
+    const v = State.ventas.find(x => x.id === ventaId);
+    if (v) v.notas = notas;
+  },
+
+  async agregarNota(ventaId) {
+    const input = document.getElementById('venta-nota-input');
+    if (!input || !input.value.trim()) return;
+    await DB.agregarNotaVenta(ventaId, input.value.trim());
+    input.value = '';
+    this.cargarNotasVenta(ventaId);
+  },
+
+  _abrirVentanaPDF(htmlContent, titulo) {
+    const win = window.open('', '_blank', 'width=900,height=700');
+    win.document.write(htmlContent);
+    win.document.close();
+    win.focus();
+    setTimeout(() => { win.print(); }, 600);
+  },
+
+  generarRecibo(id) {
+    const v = State.ventas.find(x => x.id === id);
+    if (!v) return;
+    const total = v.items.reduce((s, i) => s + i.precio, 0);
+    const pagado = v.pagos.reduce((s, p) => s + p.monto, 0);
+    const saldo = pagado - total;
+    const dispositivosCats = ['iphone','android','mac','ipad','watch'];
+    const itemsDisp = v.items.filter(i => { const p = State.stock.find(s => s.id === i.stockId); return p ? dispositivosCats.includes(p.cat) : false; });
+    const itemsAcc = v.items.filter(i => { const p = State.stock.find(s => s.id === i.stockId); return !p || !dispositivosCats.includes(p.cat); });
+
+    const garantiasHTML = v.items.filter(i => i.garantiaFin).map(i =>
+      `<li>${i.nombre} - Válida desde ${i.garantiaInicio||v.fecha} hasta ${i.garantiaFin}</li>`
+    ).join('');
+
+    const html = `<!DOCTYPE html><html lang="es"><head><meta charset="UTF-8"><title>Recibo #${v.id}</title>
+    <style>
+      * { margin: 0; padding: 0; box-sizing: border-box; }
+      body { font-family: Arial, sans-serif; font-size: 12px; color: #1a1a1a; padding: 20px; }
+      .header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 20px; border-bottom: 2px solid #1a1a1a; padding-bottom: 12px; }
+      .logo { font-size: 24px; font-weight: bold; }
+      .recibo-badge { font-size: 24px; font-weight: bold; color: #888; }
+      .datos-negocio { font-size: 10px; color: #666; margin-top: 4px; }
+      .recibido { display: flex; justify-content: space-between; margin-bottom: 16px; }
+      .recibido-box { font-size: 12px; }
+      .recibido-box div { margin-bottom: 4px; }
+      .numero-recibo { border: 1px solid #ccc; padding: 8px 14px; font-size: 12px; min-width: 160px; }
+      .numero-recibo .num { font-size: 22px; font-weight: bold; margin: 2px 0; }
+      h3 { font-size: 13px; margin-bottom: 8px; }
+      table { width: 100%; border-collapse: collapse; margin-bottom: 12px; font-size: 11px; }
+      th { background: #1a1a1a; color: #fff; padding: 6px 8px; text-align: left; }
+      td { padding: 6px 8px; border-bottom: 1px solid #e0e0e0; vertical-align: top; }
+      .totales { margin-left: auto; width: 260px; }
+      .totales div { display: flex; justify-content: space-between; padding: 4px 0; }
+      .total-final { font-size: 16px; font-weight: bold; border-top: 2px solid #1a1a1a; padding-top: 6px; margin-top: 4px; }
+      .pagos-section { margin-bottom: 16px; }
+      .pagos-totales { display: flex; justify-content: flex-end; gap: 40px; }
+      .pagado-badge { background: #1a1a1a; color: #fff; padding: 6px 18px; font-weight: bold; text-align: center; }
+      .mensaje { margin: 16px 0; font-style: italic; }
+      .tyc { font-size: 10px; color: #555; margin-top: 12px; border-top: 1px solid #ccc; padding-top: 10px; }
+      .tyc h4 { font-size: 11px; margin-bottom: 6px; }
+      .garantias { margin-bottom: 12px; }
+      .firma-section { display: flex; gap: 40px; margin-top: 24px; }
+      .firma-box { flex: 1; border-top: 1px solid #1a1a1a; padding-top: 4px; font-size: 10px; color: #888; text-align: center; }
+      .footer { text-align: center; font-size: 9px; color: #aaa; margin-top: 20px; border-top: 1px solid #e0e0e0; padding-top: 8px; }
+      @media print { body { padding: 10px; } }
+    </style></head><body>
+    <div class="header">
+      <div>
+        <div class="logo">IPhoneMood</div>
+        <div class="datos-negocio">Julio Argentino Roca 700, Granadero Baigorria, Santa Fe<br>Tel: +54 9 3413 66-2150 | Email: iphonemood.ar@gmail.com</div>
+      </div>
+      <div style="display:flex;align-items:center;gap:20px">
+        <div class="numero-recibo">
+          <div>N° Recibo:</div><div class="num">${v.id}</div>
+          <div>Fecha:</div><div style="font-weight:bold">${v.fecha}</div>
+        </div>
+        <div class="recibo-badge">RECIBO</div>
+      </div>
+    </div>
+
+    <div class="recibido">
+      <div class="recibido-box">
+        <div style="font-weight:bold;margin-bottom:6px">RECIBIDO POR:</div>
+        <div><b>Cliente:</b> ${v.cliente}</div>
+        ${v.clienteTel ? `<div><b>Teléfono:</b> ${v.clienteTel}</div>` : ''}
+        ${v.clienteDni ? `<div><b>DNI:</b> ${v.clienteDni}</div>` : ''}
+      </div>
+    </div>
+
+    <h3>DETALLE DE PRODUCTOS Y SERVICIOS</h3>
+    ${itemsDisp.length ? `
+    <table>
+      <thead><tr><th>Cant.</th><th>Descripción</th><th>Identificador</th><th>Garantía</th><th>Precio Unit.</th><th>Subtotal</th></tr></thead>
+      <tbody>${itemsDisp.map(i => {
+        const diasRestantes = i.garantiaFin ? Math.max(0,Math.round((new Date(i.garantiaFin)-new Date())/86400000)) : null;
+        return `<tr>
+          <td>1</td><td>${i.nombre}</td>
+          <td style="font-family:monospace;font-size:10px">${i.imei ? i.imei.substring(0,6)+'...'+i.imei.substring(i.imei.length-4) : '—'}</td>
+          <td>${diasRestantes !== null ? `Garantía activa - ${diasRestantes} días restantes (${diasRestantes}d)` : '—'}</td>
+          <td>$${i.precio} USD</td><td><b>$${i.precio} USD</b></td>
+        </tr>`;
+      }).join('')}</tbody>
+    </table>` : ''}
+
+    ${itemsAcc.length ? `
+    <table>
+      <thead><tr><th>Cant.</th><th>Descripción</th><th>SKU</th><th>Garantía</th><th>Precio Unit.</th><th>Subtotal</th></tr></thead>
+      <tbody>${itemsAcc.map(i => {
+        const p = State.stock.find(s => s.id === i.stockId);
+        return `<tr><td>1</td><td>${i.nombre}</td><td style="font-size:10px">${p?.storage||p?.notas||'—'}</td><td>—</td><td>$${i.precio} USD</td><td><b>$${i.precio} USD</b></td></tr>`;
+      }).join('')}</tbody>
+    </table>` : ''}
+
+    ${garantiasHTML ? `<div class="garantias"><h3>GARANTÍAS:</h3><ul>${garantiasHTML}</ul></div>` : ''}
+
+    <div class="totales">
+      <div><span>Subtotal Dispositivos:</span><span>$${itemsDisp.reduce((s,i)=>s+i.precio,0)} USD</span></div>
+      <div><span>Subtotal Accesorios:</span><span>$${itemsAcc.reduce((s,i)=>s+i.precio,0)} USD</span></div>
+      <div class="total-final"><span>TOTAL:</span><span>$${total} USD</span></div>
+    </div>
+
+    <div class="pagos-section">
+      <h3>PAGOS REALIZADOS:</h3>
+      ${v.pagos.map(p => `<div style="margin-bottom:4px">${v.fecha} - ${p.bolsillo}${p.bolsillo?.startsWith('ARS')?`: $ ${(p.monto*State.refBlue).toLocaleString('es-AR')} ARS (USD ${p.monto} @ $${(p.cotizacionDiferencial||State.refBlue).toLocaleString('es-AR')})`:`${State.fmtUSD(p.monto)}`}</div>`).join('')}
+      <div class="pagos-totales" style="margin-top:8px">
+        <div style="text-align:right">
+          <div>Total Pagado: <b>$${pagado.toFixed(2)} USD</b></div>
+          <div>Saldo: <b>$${saldo.toFixed(2)} USD</b></div>
+        </div>
+        <div class="pagado-badge">${saldo <= 0.01 ? 'PAGADO' : 'SALDO PENDIENTE'}</div>
+      </div>
+    </div>
+
+    <div class="mensaje"><b>MENSAJE:</b><br>¡Muchas gracias por elegir a iPhoneMood! 🙌</div>
+
+    <div class="tyc">
+      <h4>TÉRMINOS Y CONDICIONES:</h4>
+      ${State.garantias.map(g => `<p style="margin-bottom:6px">${g.tc || ''}</p>`).join('')}
+    </div>
+
+    <div class="firma-section">
+      <div class="firma-box">Firma</div>
+      <div class="firma-box">Aclaración</div>
+      <div class="firma-box">DNI</div>
+    </div>
+
+    <div class="footer">
+      DOCUMENTO NO VÁLIDO COMO FACTURA<br>
+      Documento generado el ${new Date().toLocaleDateString('es-AR')} a las ${new Date().toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit'})}<br>
+      Recibo N° ${v.id} | IPhoneMood
+    </div>
+    </body></html>`;
+    this._abrirVentanaPDF(html, `Recibo_${v.id}`);
+  },
+
+  generarDetallePDF(id) {
+    const v = State.ventas.find(x => x.id === id);
+    if (!v) return;
+    const total = v.items.reduce((s, i) => s + i.precio, 0);
+    const pagado = v.pagos.reduce((s, p) => s + p.monto, 0);
+    const saldo = pagado - total;
+    const profitTotal = v.items.reduce((s,i)=>s+(i.precio-(i.costo||0)),0);
+    const dispositivosCats = ['iphone','android','mac','ipad','watch'];
+    const itemsDisp = v.items.filter(i => { const p = State.stock.find(s => s.id === i.stockId); return p ? dispositivosCats.includes(p.cat) : false; });
+    const itemsAcc = v.items.filter(i => { const p = State.stock.find(s => s.id === i.stockId); return !p || !dispositivosCats.includes(p.cat); });
+
+    const html = `<!DOCTYPE html><html lang="es"><head><meta charset="UTF-8"><title>Venta #${v.id}</title>
+    <style>
+      * { margin: 0; padding: 0; box-sizing: border-box; }
+      body { font-family: Arial, sans-serif; font-size: 12px; color: #1a1a1a; padding: 20px; }
+      .header { margin-bottom: 16px; }
+      .header h1 { font-size: 22px; margin-bottom: 2px; }
+      .header .sub { font-size: 11px; color: #666; }
+      .section { margin-bottom: 16px; }
+      .section h3 { font-size: 13px; border-bottom: 1px solid #ccc; padding-bottom: 4px; margin-bottom: 8px; }
+      .info-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 20px; margin-bottom: 12px; }
+      .info-grid div { font-size: 11px; }
+      .info-grid span { color: #666; display: block; }
+      table { width: 100%; border-collapse: collapse; margin-bottom: 10px; font-size: 11px; }
+      th { background: #1a1a1a; color: #fff; padding: 5px 7px; text-align: left; }
+      td { padding: 5px 7px; border-bottom: 1px solid #e0e0e0; vertical-align: top; }
+      .resumen { text-align: right; border-top: 1px solid #ccc; padding-top: 8px; }
+      .resumen div { margin-bottom: 2px; }
+      .footer { text-align: center; font-size: 9px; color: #aaa; margin-top: 20px; border-top: 1px solid #e0e0e0; padding-top: 8px; }
+      @media print { body { padding: 10px; } }
+    </style></head><body>
+    <div class="header">
+      <div style="font-size:16px;font-weight:bold">IPhoneMood</div>
+      <h1>DETALLE DE VENTA</h1>
+      <div class="sub">Venta #${v.id} · Fecha: ${v.fecha} · Estado: ${v.estado==='cerrada'?'Cerrada':'Abierta'}</div>
+    </div>
+
+    <div class="section">
+      <h3>INFORMACIÓN DEL CLIENTE</h3>
+      <div class="info-grid">
+        <div><span>Cliente</span>${v.cliente}</div>
+        ${v.clienteTel?`<div><span>Teléfono</span>${v.clienteTel}</div>`:''}
+        ${v.clienteDni?`<div><span>DNI</span>${v.clienteDni}</div>`:''}
+        <div><span>Vendedor</span>${v.vendedor||'—'}</div>
+      </div>
+    </div>
+
+    ${itemsDisp.length ? `
+    <div class="section">
+      <h3>DISPOSITIVOS VENDIDOS</h3>
+      <table><thead><tr><th>Dispositivo</th><th>Condición</th><th>Identificador</th><th>Garantía</th><th>P.Compra</th><th>P.Venta</th><th>Profit</th><th>Comisión</th></tr></thead>
+      <tbody>${itemsDisp.map(i=>{
+        const p=State.stock.find(s=>s.id===i.stockId);
+        const dias=i.garantiaFin?Math.max(0,Math.round((new Date(i.garantiaFin)-new Date())/86400000)):null;
+        const profit=i.precio-(i.costo||0);
+        return `<tr><td><b>${i.nombre}</b>${p?.notas?`<br><small style="color:#666;font-style:italic">${p.notas}</small>`:''}</td><td>${p?.estadoProducto||'Usado'}</td><td style="font-family:monospace;font-size:10px">${i.imei||'—'}</td><td>${dias!==null?`${dias} días restantes`:'—'}</td><td>$${(i.costo||0).toFixed(2)}</td><td>$${i.precio}</td><td style="color:${profit>=0?'green':'red'}">${profit>=0?'+':''}$${profit.toFixed(2)}</td><td>$${(v.comisionVendedor||0).toFixed(2)}</td></tr>`;
+      }).join('')}</tbody></table>
+    </div>` : ''}
+
+    ${itemsAcc.length ? `
+    <div class="section">
+      <h3>ACCESORIOS VENDIDOS</h3>
+      <table><thead><tr><th>Accesorio</th><th>SKU</th><th>Cant.</th><th>P.Compra</th><th>P.Venta</th><th>Profit</th><th>Comisión</th></tr></thead>
+      <tbody>${itemsAcc.map(i=>{
+        const p=State.stock.find(s=>s.id===i.stockId);
+        const profit=i.precio-(i.costo||0);
+        return `<tr><td>${i.nombre}</td><td style="font-size:10px">${p?.storage||p?.notas||'N/A'}</td><td>1</td><td>$${(i.costo||0).toFixed(2)}</td><td>$${i.precio}</td><td style="color:${profit>=0?'green':'red'}">${profit>=0?'+':''}$${profit.toFixed(2)}</td><td>$0</td></tr>`;
+      }).join('')}</tbody></table>
+    </div>` : ''}
+
+    <div class="section">
+      <h3>PAGOS REGISTRADOS</h3>
+      <table><thead><tr><th>Fecha</th><th>Método</th><th>Monto</th></tr></thead>
+      <tbody>${v.pagos.map(p=>`<tr><td>${v.fecha}</td><td>${p.bolsillo}${p.esTarjeta?' (Tarjeta)':''}</td><td>${p.bolsillo?.startsWith('ARS')?`$ ${(p.monto*(p.cotizacionDiferencial||State.refBlue)).toLocaleString('es-AR')} ARS (USD ${p.monto} @ $${(p.cotizacionDiferencial||State.refBlue).toLocaleString('es-AR')})`:State.fmtUSD(p.monto)}</td></tr>`).join('')}</tbody>
+      </table>
+    </div>
+
+    <div class="resumen">
+      <div>Total Venta: <b>$${total.toFixed(2)} USD</b></div>
+      <div style="color:${profitTotal>=0?'green':'red'}">Profit Total: ${profitTotal>=0?'+':''}$${profitTotal.toFixed(2)} USD</div>
+      <div>Total Pagado: <b>$${pagado.toFixed(2)} USD</b></div>
+      <div>Saldo: <b>$${saldo.toFixed(2)} USD</b></div>
+      <div style="font-weight:bold;margin-top:4px">Ganancia Neta: ${profitTotal>=0?'+':''}$${profitTotal.toFixed(2)} USD</div>
+    </div>
+
+    <div class="footer">
+      Generado el ${new Date().toLocaleDateString('es-AR')} a las ${new Date().toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit'})}
+    </div>
+    </body></html>`;
+    this._abrirVentanaPDF(html, `Venta_${v.id}`);
   },
 
   async anular(id) {

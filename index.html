@@ -155,6 +155,7 @@ tbody tr:hover td{background:var(--bg-secondary)}
   .stock-table-desktop{display:none !important}
   .stock-cards-mobile{display:block !important}
   .stock-kpi-grid{grid-template-columns:repeat(2,1fr) !important}
+  #ventas-metricas{grid-template-columns:repeat(2,1fr) !important}
 
   /* Formularios de dos/tres columnas con grid inline pasan a una sola columna */
   [style*="grid-template-columns:1fr 1fr 1fr"]{grid-template-columns:1fr 1fr !important}
@@ -2070,37 +2071,133 @@ const Ventas = {
     return Math.max(0, p.monto - (p.diferencialArs ? p.diferencialArs / (p.cotizacionDiferencial || State.refBlue) : 0));
   },
 
+  periodoVentas: 'mes',
+  periodoDesde: '', periodoHasta: '',
+
   render() {
     const c = document.createElement('div');
     c.innerHTML = `
-      <div style="padding:12px 22px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center">
-        <div style="font-size:13px;color:var(--text-secondary)">${State.ventas.length} ventas registradas</div>
+      <div style="padding:12px 22px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;flex-shrink:0">
+        <div style="display:flex;gap:4px;flex-wrap:wrap" id="ventas-periodo-tabs"></div>
         <button class="btn btn-primary" onclick="Ventas.openNew()"><i class="ti ti-plus"></i> Nueva venta</button>
       </div>
-      <div class="body-pad">
-        <table><thead><tr><th>#</th><th>Fecha</th><th>Cliente</th><th>Detalle</th><th>Total</th><th>Estado</th><th></th></tr></thead>
+      <div id="ventas-rango-libre" style="display:none;padding:8px 22px;border-bottom:1px solid var(--border);gap:8px;align-items:center;flex-wrap:wrap">
+        <input type="date" id="ventas-desde" style="font-size:12px;padding:5px 8px;border:1px solid var(--border-strong);border-radius:8px">
+        <span style="font-size:12px;color:var(--text-secondary)">hasta</span>
+        <input type="date" id="ventas-hasta" style="font-size:12px;padding:5px 8px;border:1px solid var(--border-strong);border-radius:8px">
+        <button class="btn btn-sm btn-primary" onclick="Ventas.aplicarRangoLibre()">Aplicar</button>
+      </div>
+      <div id="ventas-metricas" style="padding:14px 22px;border-bottom:1px solid var(--border);display:grid;grid-template-columns:repeat(5,1fr);gap:10px"></div>
+      <div class="body-pad" style="padding-top:0;overflow-y:auto">
+        <table><thead><tr>
+          <th>#</th><th>Fecha</th><th>Cliente</th><th>Tipo</th><th>Ítems</th><th>Total</th><th>Pagos</th><th>Estado</th><th></th>
+        </tr></thead>
         <tbody id="ventas-tbody"></tbody></table>
       </div>
       <div id="venta-modal-host"></div>
     `;
-    setTimeout(() => this.renderList(), 0);
+    setTimeout(() => { this.renderPeriodoTabs(); this.renderMetricas(); this.renderList(); }, 0);
     return c;
   },
 
+  ventasDelPeriodo() {
+    const hoy = new Date(); hoy.setHours(0,0,0,0);
+    return State.ventas.filter(v => {
+      if (!v.fechaISO) return true;
+      const f = new Date(v.fechaISO); f.setHours(0,0,0,0);
+      if (this.periodoVentas === 'hoy') return f.getTime() === hoy.getTime();
+      if (this.periodoVentas === 'semana') { const d=new Date(hoy); d.setDate(d.getDate()-7); return f>=d; }
+      if (this.periodoVentas === 'mes') return f.getFullYear()===hoy.getFullYear()&&f.getMonth()===hoy.getMonth();
+      if (this.periodoVentas === 'libre') {
+        const desde=this.periodoDesde?new Date(this.periodoDesde):null;
+        const hasta=this.periodoHasta?new Date(this.periodoHasta):null;
+        if (desde&&f<desde) return false;
+        if (hasta&&f>hasta) return false;
+        return true;
+      }
+      return true;
+    });
+  },
+
+  renderPeriodoTabs() {
+    const tabs=[['hoy','Hoy'],['semana','Esta semana'],['mes','Este mes'],['libre','Rango libre']];
+    const el=document.getElementById('ventas-periodo-tabs');
+    if (!el) return;
+    el.innerHTML=tabs.map(([k,l])=>`<button class="btn btn-sm ${this.periodoVentas===k?'btn-primary':''}" onclick="Ventas.setPeriodo('${k}')">${l}</button>`).join('');
+    const rangoEl=document.getElementById('ventas-rango-libre');
+    if (rangoEl) rangoEl.style.display=this.periodoVentas==='libre'?'flex':'none';
+  },
+
+  setPeriodo(p) { this.periodoVentas=p; this.renderPeriodoTabs(); this.renderMetricas(); this.renderList(); },
+
+  aplicarRangoLibre() {
+    this.periodoDesde=document.getElementById('ventas-desde')?.value||'';
+    this.periodoHasta=document.getElementById('ventas-hasta')?.value||'';
+    this.renderMetricas(); this.renderList();
+  },
+
+  renderMetricas() {
+    const el=document.getElementById('ventas-metricas');
+    if (!el) return;
+    const ventas=this.ventasDelPeriodo();
+    const dispCats=['iphone','android','mac','ipad','watch'];
+
+    const volumen=ventas.reduce((s,v)=>s+v.items.reduce((a,i)=>a+i.precio,0),0);
+    const margenTotal=ventas.reduce((s,v)=>s+v.items.reduce((a,i)=>a+(i.precio-(i.costo||0)),0),0);
+
+    // Margen por equipo: precio venta disp − (costo disp + costo accesorios), promediado
+    const margenesXVenta=ventas.map(v=>{
+      const disp=v.items.filter(i=>{const p=State.stock.find(s=>s.id===i.stockId);return p?dispCats.includes(p.cat):false;});
+      const acc=v.items.filter(i=>{const p=State.stock.find(s=>s.id===i.stockId);return!p||!dispCats.includes(p.cat);});
+      return disp.reduce((a,i)=>a+i.precio,0)-(disp.reduce((a,i)=>a+(i.costo||0),0)+acc.reduce((a,i)=>a+(i.costo||0),0));
+    });
+    const margenXEquipo=margenesXVenta.length?margenesXVenta.reduce((a,v)=>a+v,0)/margenesXVenta.length:0;
+
+    const diferencial=ventas.reduce((s,v)=>s+(v.pagos||[]).filter(p=>p.esTarjeta).reduce((a,p)=>a+(p.diferencialArs?(p.diferencialArs/(p.cotizacionDiferencial||State.refBlue)):0),0),0);
+
+    const kpis=[
+      {label:'Volumen vendido',val:State.fmtUSD(volumen),sub:`${ventas.length} venta(s)`,icon:'ti-trending-up',color:'var(--blue-dark)',bg:'var(--blue-light)'},
+      {label:'Margen total',val:State.fmtUSD(margenTotal),sub:'precio venta − costo',icon:'ti-cash',color:margenTotal>=0?'var(--green-dark)':'var(--red)',bg:margenTotal>=0?'var(--green-light)':'#FEE2E2'},
+      {label:'Margen por equipo',val:State.fmtUSD(margenXEquipo),sub:'promedio (disp − todo)',icon:'ti-device-mobile',color:margenXEquipo>=0?'var(--green-dark)':'var(--red)',bg:margenXEquipo>=0?'var(--green-light)':'#FEE2E2'},
+      {label:'Diferencial tarjeta',val:State.fmtUSD(diferencial),sub:'ganancia financiera',icon:'ti-credit-card',color:'var(--purple)',bg:'var(--purple-light)'},
+      {label:'Ticket promedio',val:ventas.length?State.fmtUSD(volumen/ventas.length):'USD 0',sub:'por venta',icon:'ti-receipt',color:'var(--text)',bg:'var(--bg-secondary)'},
+    ];
+
+    el.innerHTML=kpis.map(k=>`
+      <div class="card" style="padding:12px 14px;margin-bottom:0;display:flex;justify-content:space-between;align-items:flex-start">
+        <div>
+          <label style="font-size:10.5px;color:var(--text-secondary);display:block;margin-bottom:3px">${k.label}</label>
+          <div style="font-size:17px;font-weight:700;color:${k.color}">${k.val}</div>
+          <div style="font-size:10px;color:var(--text-secondary);margin-top:2px">${k.sub}</div>
+        </div>
+        <div style="width:32px;height:32px;border-radius:8px;background:${k.bg};display:flex;align-items:center;justify-content:center;flex-shrink:0">
+          <i class="ti ${k.icon}" style="color:${k.color};font-size:16px"></i>
+        </div>
+      </div>`).join('');
+  },
+
   renderList() {
-    const tbody = document.getElementById('ventas-tbody');
+    const tbody=document.getElementById('ventas-tbody');
     if (!tbody) return;
-    tbody.innerHTML = State.ventas.map(v => {
-      const total = v.items.reduce((s, i) => s + i.precio, 0);
-      const cerrada = v.estado === 'cerrada';
+    const ventas=this.ventasDelPeriodo();
+    const TIPO={minorista:'Minorista',mayorista:'Mayorista',revendedor:'Revendedor'};
+    if (!ventas.length) { tbody.innerHTML=`<tr><td colspan="9"><div class="empty-state"><i class="ti ti-receipt-off"></i>Sin ventas en este período</div></td></tr>`; return; }
+    tbody.innerHTML=ventas.map(v=>{
+      const total=v.items.reduce((s,i)=>s+i.precio,0);
+      const cerrada=v.estado==='cerrada';
+      const pagosHtml=v.pagos.length
+        ? v.pagos.map(p=>`<div style="font-size:10.5px;color:var(--text-secondary);white-space:nowrap">${p.persona} · ${(p.bolsillo||'').replace('transferencia','transf.')}${p.esTarjeta?' <span class="badge b-purple" style="font-size:8px">Tarjeta</span>':''} — <b>${State.fmtUSD(p.monto)}</b></div>`).join('')
+        : `<span style="font-size:10.5px;color:var(--text-secondary)">Sin pagos</span>`;
       return `<tr>
-        <td>#${v.id}</td><td>${v.fecha}</td><td>${v.cliente}</td>
-        <td>${v.items.map(i=>i.nombre).join(', ').substring(0,40)}</td>
-        <td>${State.fmtUSD(total)}</td>
+        <td style="font-weight:600">#${v.id}</td>
+        <td style="font-size:11.5px">${v.fecha}</td>
+        <td>${v.cliente}${v.clienteTel?`<div style="font-size:10px;color:var(--text-secondary)">${v.clienteTel}</div>`:''}</td>
+        <td><span class="badge b-blue" style="font-size:10px">${TIPO[v.tipoVenta]||'Minorista'}</span></td>
+        <td style="font-size:11.5px;max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${v.items.map(i=>i.nombre).join(', ')}</td>
+        <td><b>${State.fmtUSD(total)}</b></td>
+        <td style="min-width:160px">${pagosHtml}</td>
         <td>${this.estadoToggle(cerrada)}</td>
-        <td>
-          <button class="btn btn-sm" onclick="Ventas.viewSale(${v.id})"><i class="ti ti-edit"></i> Editar</button>
-        </td>
+        <td><button class="btn btn-sm" onclick="Ventas.viewSale(${v.id})"><i class="ti ti-eye"></i> Ver</button></td>
       </tr>`;
     }).join('');
   },

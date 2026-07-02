@@ -211,7 +211,7 @@ const Stock = {
     tbody.innerHTML = rows.map(p => {
       const { margin, precioUSD, detalleStock, statusBadge } = filaTabla(p);
       return `<tr>
-        <td><b>${p.nombre}</b>${p.notas ? `<div style="font-size:10.5px;color:var(--text-secondary)">${p.notas}</div>` : ''}</td>
+        <td><b>${p.nombre}</b>${p.cat === 'repuesto' && p.modelo ? `<div style="font-size:10.5px;color:var(--amber)"><i class="ti ti-device-mobile" style="font-size:9px"></i> ${p.modelo}</div>` : ''}${p.notas ? `<div style="font-size:10.5px;color:var(--text-secondary)">${p.notas}</div>` : ''}</td>
         <td><span class="badge ${this.CAT_CLASS[p.cat]||'b-gray'}">${this.CAT_LABELS[p.cat]||p.cat}</span></td>
         <td style="color:var(--text-secondary);font-size:11.5px">${p.proveedor}</td>
         <td style="font-size:11.5px">${p.custodio||'—'}</td>
@@ -232,6 +232,7 @@ const Stock = {
             <div style="min-width:0;flex:1">
               <div class="stock-card-name">${p.nombre}</div>
               <span class="badge ${this.CAT_CLASS[p.cat]||'b-gray'}" style="margin-top:4px">${this.CAT_LABELS[p.cat]||p.cat}</span>
+              ${p.cat === 'repuesto' && p.modelo ? `<div style="font-size:10.5px;color:var(--amber);margin-top:3px"><i class="ti ti-device-mobile" style="font-size:9px"></i> ${p.modelo}</div>` : ''}
             </div>
             ${statusBadge}
           </div>
@@ -411,7 +412,25 @@ const Stock = {
 
                 <div id="f-nombre-libre-wrap" style="display:${['perfumeria','accesorio','repuesto','herramienta','otro'].includes(p.cat)?'block':'none'};margin-bottom:12px">
                   <label style="font-size:11px;color:var(--text-secondary);font-weight:600;display:block;margin-bottom:4px">Nombre ${p.cat==='herramienta'?'de la herramienta':p.cat==='repuesto'?'del repuesto':'del producto'} *</label>
-                  <input type="text" id="f-nombre-libre" value="${['perfumeria','accesorio','repuesto','herramienta','otro'].includes(p.cat) ? (p.nombre||'') : ''}" placeholder="${p.cat==='herramienta'?'ej: Pistola de calor, iSclack, destornillador pentalobe…':p.cat==='repuesto'?'ej: Pantalla iPhone 13, Batería iPhone 12…':'ej: Dior Sauvage 100ml'}" style="width:100%;font-size:12px;padding:7px 10px;border:1px solid var(--border-strong);border-radius:8px">
+                  <input type="text" id="f-nombre-libre" value="${['perfumeria','accesorio','repuesto','herramienta','otro'].includes(p.cat) ? (p.nombre||'') : ''}" placeholder="${p.cat==='herramienta'?'ej: Pistola de calor, iSclack, destornillador pentalobe…':p.cat==='repuesto'?'ej: Batería, Pantalla, Flex de carga…':'ej: Dior Sauvage 100ml'}" style="width:100%;font-size:12px;padding:7px 10px;border:1px solid var(--border-strong);border-radius:8px">
+                </div>
+
+                <div id="f-modelo-repuesto-wrap" style="display:${p.cat==='repuesto'?'block':'none'};margin-bottom:12px">
+                  <label style="font-size:11px;color:var(--text-secondary);font-weight:600;display:block;margin-bottom:4px">Modelo compatible <span style="font-weight:400;color:var(--text-secondary)">(opcional)</span></label>
+                  <select id="f-modelo-repuesto" onchange="Stock.toggleModeloRepuestoOtro()" style="width:100%;font-size:12px;padding:7px 10px;border:1px solid var(--border-strong);border-radius:8px">
+                    <option value="">— Universal / sin modelo específico —</option>
+                    <optgroup label="iPhone">
+                      ${this.MODELOS_POR_CAT.iphone.map(m => `<option value="${m}" ${p.modelo===m?'selected':''}>${m}</option>`).join('')}
+                    </optgroup>
+                    <optgroup label="Android / Otra marca">
+                      ${this.MODELOS_POR_CAT.android.map(m => `<option value="${m}" ${p.modelo===m?'selected':''}>${m}</option>`).join('')}
+                    </optgroup>
+                    <optgroup label="iPad / Mac">
+                      ${[...this.MODELOS_POR_CAT.ipad, ...this.MODELOS_POR_CAT.mac].map(m => `<option value="${m}" ${p.modelo===m?'selected':''}>${m}</option>`).join('')}
+                    </optgroup>
+                    <option value="__otro__" ${p.modelo && !Object.values(this.MODELOS_POR_CAT).flat().includes(p.modelo) && p.modelo !== '' ? 'selected' : ''}>Otra marca / modelo (escribir)</option>
+                  </select>
+                  <input type="text" id="f-modelo-repuesto-otro" placeholder="ej: Samsung Galaxy A54, Motorola G84…" value="${p.modelo && !Object.values(this.MODELOS_POR_CAT).flat().includes(p.modelo) && p.modelo !== '' ? p.modelo : ''}" style="width:100%;font-size:12px;padding:7px 10px;border:1px solid var(--border-strong);border-radius:8px;margin-top:6px;display:${p.modelo && !Object.values(this.MODELOS_POR_CAT).flat().includes(p.modelo) && p.modelo !== '' ? 'block' : 'none'}">
                 </div>
 
                 <div id="f-specs-grid" style="display:${['iphone','android','mac','ipad'].includes(p.cat)?'grid':'none'};grid-template-columns:1fr 1fr;gap:10px;margin-bottom:12px">
@@ -560,6 +579,14 @@ const Stock = {
     otroInput.style.display = sel.value === '__otro__' ? 'block' : 'none';
   },
 
+  toggleModeloRepuestoOtro() {
+    const sel = document.getElementById('f-modelo-repuesto');
+    const input = document.getElementById('f-modelo-repuesto-otro');
+    if (!sel || !input) return;
+    input.style.display = sel.value === '__otro__' ? 'block' : 'none';
+    if (sel.value !== '__otro__') input.value = '';
+  },
+
   selectCat(cat) {
     document.getElementById('f-cat').value = cat;
     document.querySelectorAll('.cat-opt').forEach(el => {
@@ -658,6 +685,7 @@ const Stock = {
     set('f-serie-wrap', esMac ? 'block' : 'none');
     set('f-modelo-wrap', tieneModeloFijo ? 'block' : 'none');
     set('f-nombre-libre-wrap', esLibre ? 'block' : 'none');
+    set('f-modelo-repuesto-wrap', cat === 'repuesto' ? 'block' : 'none');
     set('f-specs-grid', tieneStorageColor ? 'grid' : 'none');
     set('f-bateria-wrap', tieneBateria ? 'grid' : 'none');
     set('f-mac-extra-wrap', esMac ? 'block' : 'none');
@@ -689,6 +717,9 @@ const Stock = {
     if (tieneModeloFijo) {
       const modeloSel = document.getElementById('f-modelo')?.value || '';
       modelo = modeloSel === '__otro__' ? (document.getElementById('f-modelo-otro')?.value.trim() || '') : modeloSel;
+    } else if (cat === 'repuesto') {
+      const modeloSel = document.getElementById('f-modelo-repuesto')?.value || '';
+      modelo = modeloSel === '__otro__' ? (document.getElementById('f-modelo-repuesto-otro')?.value.trim() || '') : modeloSel;
     }
     const nombreLibre = esLibre ? (document.getElementById('f-nombre-libre')?.value.trim() || '') : '';
     const storage = document.getElementById('f-storage')?.value || '';

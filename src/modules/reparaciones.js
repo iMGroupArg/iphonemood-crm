@@ -52,7 +52,7 @@ const Reparaciones = {
   },
   select(id) { this.currentId = id; this.renderList(); this.renderDetail(); this.syncMobileView(true); },
 
-  isMobile() { return window.innerWidth <= 900; },
+  isMobile() { return window.innerWidth < 1024; },
 
   syncMobileView(showDetail) {
     const listPanel = document.querySelector('.rep-list-panel');

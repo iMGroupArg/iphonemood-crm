@@ -333,8 +333,8 @@ select option { background: var(--bg-elevated); }
 .stock-card-bottom { display: flex; justify-content: space-between; font-size: 12px; color: var(--text-secondary); gap: 8px; }
 .stock-card-notas { font-size: 11px; color: var(--amber); background: var(--amber-light); border-radius: var(--radius-sm); padding: 5px 8px; margin-top: 8px; }
 
-/* Hide on mobile */
-@media (max-width: 767px) {
+/* Hide on mobile/tablet */
+@media (max-width: 1023px) {
   .hide-mobile { display: none !important; }
 }
 
@@ -369,10 +369,10 @@ select option { background: var(--bg-elevated); }
 }
 
 /* ══════════════════════════════════════════════════════
-   RESPONSIVE — Desktop enhancements (≥768px)
+   RESPONSIVE — Desktop enhancements (≥1024px)
    Sidebar always visible, bigger text, wider padding
 ══════════════════════════════════════════════════════ */
-@media (min-width: 768px) {
+@media (min-width: 1024px) {
   /* Sidebar always visible on desktop */
   .sidebar {
     position: relative;
@@ -392,9 +392,9 @@ select option { background: var(--bg-elevated); }
 }
 
 /* ══════════════════════════════════════════════════════
-   MOBILE OVERRIDES (< 768px)
+   MOBILE / TABLET OVERRIDES (< 1024px)
 ══════════════════════════════════════════════════════ */
-@media (max-width: 767px) {
+@media (max-width: 1023px) {
   body { font-size: 15px; }
 
   /* Sidebar always hidden until .open */
@@ -473,8 +473,8 @@ select option { background: var(--bg-elevated); }
   .topbar h1 { max-width: 160px; }
 }
 
-/* ── Tablet/mobile Reparaciones (≤ 900px): lista ancho completo ── */
-@media (max-width: 900px) {
+/* ── Tablet/mobile Reparaciones (< 1024px): lista ancho completo ── */
+@media (max-width: 1023px) {
   .rep-list-panel { width: 100% !important; min-width: 0 !important; }
 }
 

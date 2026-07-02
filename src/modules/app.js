@@ -163,12 +163,15 @@ const App = {
     pageEl.style.display = 'flex';
     pageEl.style.flexDirection = 'column';
     pageEl.style.overflow = 'hidden';
+    pageEl.style.width = '100%';
     pageEl.appendChild(page.module.render());
     container.appendChild(pageEl);
     container.style.display = 'flex';
     container.style.flex = '1';
     container.style.flexDirection = 'column';
     container.style.overflow = 'hidden';
+    container.style.alignItems = 'stretch';
+    container.style.justifyContent = 'flex-start';
     this.closeSidebar();
     document.getElementById('user-menu-dropdown').style.display = 'none';
   }

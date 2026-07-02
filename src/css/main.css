@@ -460,6 +460,12 @@ select option { background: var(--bg-elevated); }
   .topbar h1 { font-size: 16px; }
   .topbar-right { gap: 5px; }
 
+  /* En móvil chico ocultar pills para dar espacio al buscador */
+  @media (max-width: 480px) {
+    .pill { display: none !important; }
+    .search-btn { width: 36px; height: 36px; font-size: 19px; }
+  }
+
   /* Quick action bottom bar feel */
   .sb-foot { padding-bottom: calc(14px + env(safe-area-inset-bottom)); }
 }

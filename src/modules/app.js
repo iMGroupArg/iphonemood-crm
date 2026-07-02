@@ -184,11 +184,15 @@ document.addEventListener('DOMContentLoaded', () => App.init());
 
 // ── Búsqueda global ───────────────────────────────────────
 const Search = {
+  // Guardamos los resultados para event delegation (evita bugs con IDs string como R020)
+  _results: [],
+
   open() {
     document.getElementById('search-overlay').classList.add('open');
     const input = document.getElementById('search-input');
     input.value = '';
     document.getElementById('search-results').innerHTML = '';
+    this._results = [];
     setTimeout(() => input.focus(), 60);
     document.addEventListener('keydown', Search._onKeydown);
   },
@@ -203,18 +207,17 @@ const Search = {
   },
 
   handleOverlayClick(e) {
-    if (e.target === document.getElementById('search-overlay')) this.close();
+    if (e.target === document.getElementById('search-overlay')) Search.close();
   },
 
   onInput(q) {
     const container = document.getElementById('search-results');
     q = q.trim();
-    if (q.length < 2) { container.innerHTML = ''; return; }
+    if (q.length < 2) { container.innerHTML = ''; this._results = []; return; }
     const lower = q.toLowerCase();
 
     const ventas = (State.ventas || []).filter(v =>
-      v.cliente?.toLowerCase().includes(lower) ||
-      String(v.id).includes(lower)
+      v.cliente?.toLowerCase().includes(lower) || String(v.id).includes(lower)
     ).slice(0, 5);
 
     const stock = (State.stock || []).filter(p =>
@@ -228,18 +231,26 @@ const Search = {
       String(r.id).includes(lower)
     ).slice(0, 5);
 
+    // Guardamos los resultados indexados para event delegation
+    this._results = [
+      ...ventas.map(v => ({ type: 'venta', id: v.id })),
+      ...stock.map(p => ({ type: 'stock', id: p.id })),
+      ...reps.map(r => ({ type: 'rep', id: r.id })),
+    ];
+
     if (!ventas.length && !stock.length && !reps.length) {
       container.innerHTML = `<div class="search-empty">Sin resultados para <b>"${q}"</b></div>`;
       return;
     }
 
     let html = '';
+    let idx = 0;
 
     if (ventas.length) {
       html += `<div class="search-section-label">Ventas</div>`;
       ventas.forEach(v => {
         const total = (v.items || []).reduce((s, i) => s + i.precio, 0);
-        html += `<div class="search-item" onclick="Search._goVenta(${v.id})">
+        html += `<div class="search-item" data-idx="${idx++}">
           <div class="search-item-icon ic-ventas"><i class="ti ti-receipt"></i></div>
           <div class="search-item-text">
             <div class="search-item-title">${v.cliente || '—'}</div>
@@ -258,7 +269,7 @@ const Search = {
         const sub = imeiMatch
           ? `IMEI: ${imeiMatch}`
           : `${p.cat?.toUpperCase() || ''} · ${State.getStock(p)} uds · USD ${p.costoUSD}`;
-        html += `<div class="search-item" onclick="Search._goStock(${p.id})">
+        html += `<div class="search-item" data-idx="${idx++}">
           <div class="search-item-icon ic-stock"><i class="ti ti-box"></i></div>
           <div class="search-item-text">
             <div class="search-item-title">${p.nombre}</div>
@@ -273,7 +284,7 @@ const Search = {
       if (ventas.length || stock.length) html += `<div class="search-divider"></div>`;
       html += `<div class="search-section-label">Reparaciones</div>`;
       reps.forEach(r => {
-        html += `<div class="search-item" onclick="Search._goReparacion(${r.id})">
+        html += `<div class="search-item" data-idx="${idx++}">
           <div class="search-item-icon ic-reparaciones"><i class="ti ti-tool"></i></div>
           <div class="search-item-text">
             <div class="search-item-title">${r.cliente} — ${r.equipo}</div>
@@ -285,24 +296,35 @@ const Search = {
     }
 
     container.innerHTML = html;
+
+    // Event delegation: un solo listener en el contenedor
+    container.querySelectorAll('.search-item').forEach(el => {
+      el.addEventListener('click', () => {
+        const item = this._results[Number(el.dataset.idx)];
+        if (!item) return;
+        if (item.type === 'venta')  this._goVenta(item.id);
+        if (item.type === 'stock')  this._goStock(item.id);
+        if (item.type === 'rep')    this._goReparacion(item.id);
+      });
+    });
   },
 
   _goVenta(id) {
     this.close();
     App.goTo('ventas');
-    setTimeout(() => Ventas.viewSale(id), 80);
+    setTimeout(() => Ventas.viewSale(id), 150);
   },
 
   _goStock(id) {
     this.close();
     App.goTo('stock');
-    setTimeout(() => Stock.openDrawer('edit', id), 80);
+    setTimeout(() => Stock.openDrawer('edit', id), 150);
   },
 
   _goReparacion(id) {
     this.close();
     App.goTo('reparaciones');
-    setTimeout(() => Reparaciones.select(id), 80);
+    setTimeout(() => Reparaciones.select(id), 150);
   },
 };
 

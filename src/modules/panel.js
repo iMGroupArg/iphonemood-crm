@@ -76,31 +76,128 @@ const Panel = {
   },
 
   personasView() {
+    const TIPO_BADGE = { socio: 'b-blue', empleado: 'b-green', proveedor: 'b-amber' };
+    const TIPO_LABEL = { socio: 'Socio', empleado: 'Empleado', proveedor: 'Proveedor' };
     return `
       <h3 style="font-size:13px;font-weight:600;color:var(--text-secondary);text-transform:uppercase;letter-spacing:.4px;margin-bottom:12px;border-bottom:1px solid var(--border);padding-bottom:8px">Personas y sus cajas</h3>
+      <div style="background:var(--blue-light);border-radius:8px;padding:9px 12px;margin-bottom:14px;font-size:11.5px;color:var(--blue)">
+        <i class="ti ti-info-circle"></i> Cada persona tiene sus propias cajas (ARS cash, ARS transferencia, USD cash, USD transferencia, USDT). Las cajas de proveedores representan plata que te tienen temporalmente.
+      </div>
       ${State.personas.map(p => {
         const saldoTotal = this.saldoTotalPersona(p);
+        const tipo = (State.personasTipo && State.personasTipo[p]) || 'socio';
         return `
         <div style="background:var(--bg-elevated);border:1px solid var(--border);border-radius:10px;padding:12px 14px;margin-bottom:8px">
           <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap">
-            <div>
-              <b style="font-size:13px">${p}</b>
-              <div style="font-size:11px;color:var(--text-secondary);margin-top:2px">Equivalente en caja: ${State.fmtARS(saldoTotal)}</div>
+            <div style="display:flex;align-items:center;gap:8px">
+              <div class="av" style="width:32px;height:32px;font-size:11px">${p.substring(0,2).toUpperCase()}</div>
+              <div>
+                <div style="display:flex;align-items:center;gap:6px">
+                  <b style="font-size:13px">${p}</b>
+                  <span class="badge ${TIPO_BADGE[tipo]}">${TIPO_LABEL[tipo]}</span>
+                </div>
+                <div style="font-size:11px;color:var(--text-secondary);margin-top:1px">Equiv. en caja: <b>${State.fmtARS(saldoTotal)}</b></div>
+              </div>
             </div>
             <div style="display:flex;gap:6px">
-              <button class="btn btn-sm" onclick="Panel.renombrarPersona('${p}')"><i class="ti ti-edit"></i> Renombrar</button>
-              <button class="btn btn-sm" style="color:var(--red)" onclick="Panel.eliminarPersona('${p}')"><i class="ti ti-trash"></i> Eliminar</button>
+              <button class="btn btn-sm" onclick="Panel.renombrarPersonaModal('${p}')"><i class="ti ti-edit"></i></button>
+              <button class="btn btn-sm" style="color:var(--red)" onclick="Panel.eliminarPersona('${p}')"><i class="ti ti-trash"></i></button>
             </div>
           </div>
           <div style="display:flex;flex-wrap:wrap;gap:5px;margin-top:10px">
             ${Object.entries(State.cajas[p] || {}).map(([b, saldo]) => `
-              <span class="badge b-blue" style="cursor:pointer" onclick="Panel.editarSaldoCaja('${p}','${b}')" title="Tocar para editar el saldo">${b}: ${b==='USDT' ? saldo.toLocaleString('es-AR') : (b.startsWith('ARS')?State.fmtARS(saldo):State.fmtUSD(saldo))}</span>
+              <span class="badge b-blue" style="cursor:pointer" onclick="Cajas.abrirModal('${p}','${b}')" title="Tocar para editar el saldo">${b}: ${b==='USDT' ? saldo.toLocaleString('es-AR')+' USDT' : (b.startsWith('ARS')?State.fmtARS(saldo):State.fmtUSD(saldo))}</span>
             `).join('')}
           </div>
         </div>`;
       }).join('')}
-      <button class="btn btn-primary" onclick="Panel.addPersona()"><i class="ti ti-plus"></i> Agregar persona</button>
+      <button class="btn btn-primary" onclick="Panel.abrirModalPersona()"><i class="ti ti-plus"></i> Agregar persona</button>
     `;
+  },
+
+  abrirModalPersona(editar) {
+    const overlay = document.createElement('div');
+    overlay.id = 'persona-modal-overlay';
+    overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.7);backdrop-filter:blur(6px);z-index:900;display:flex;align-items:center;justify-content:center;padding:20px';
+    overlay.innerHTML = `
+      <div style="background:var(--bg-elevated);border:1px solid var(--border-strong);border-radius:var(--radius-xl);width:min(380px,96vw);overflow:hidden">
+        <div style="padding:14px 18px;border-bottom:1px solid var(--border)">
+          <div style="font-size:14px;font-weight:700">${editar ? 'Renombrar persona' : 'Nueva persona'}</div>
+        </div>
+        <div style="padding:18px;display:flex;flex-direction:column;gap:12px">
+          <div>
+            <label style="font-size:11px;color:var(--text-secondary);font-weight:600;display:block;margin-bottom:4px">Nombre</label>
+            <input type="text" id="persona-modal-nombre" value="${editar || ''}" placeholder="Ej: Franco" autofocus
+              style="width:100%;font-size:15px;padding:9px 12px;border:1px solid var(--border-strong);border-radius:8px;color:var(--text)">
+          </div>
+          ${!editar ? `<div>
+            <label style="font-size:11px;color:var(--text-secondary);font-weight:600;display:block;margin-bottom:6px">Tipo</label>
+            <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px" id="persona-tipo-selector">
+              ${[['socio','Socio','ti-user-check'],['empleado','Empleado','ti-briefcase'],['proveedor','Proveedor','ti-truck']].map(([v,l,ic]) =>
+                `<label style="display:flex;flex-direction:column;align-items:center;gap:4px;padding:9px 6px;border:1px solid var(--border-strong);border-radius:8px;cursor:pointer;font-size:11px;text-align:center;transition:all .12s" onclick="Panel._selectTipo(this,'${v}')">
+                  <input type="radio" name="persona-tipo" value="${v}" ${v==='socio'?'checked':''} style="display:none">
+                  <i class="ti ${ic}" style="font-size:18px;color:var(--text-secondary)"></i>${l}
+                </label>`
+              ).join('')}
+            </div>
+          </div>` : ''}
+        </div>
+        <div style="padding:12px 18px;border-top:1px solid var(--border);display:flex;justify-content:flex-end;gap:8px">
+          <button class="btn" onclick="document.getElementById('persona-modal-overlay').remove()">Cancelar</button>
+          <button class="btn btn-primary" onclick="Panel.${editar ? `confirmarRenombrar('${editar}')` : 'confirmarAddPersona()'}"><i class="ti ti-check"></i> ${editar ? 'Renombrar' : 'Agregar'}</button>
+        </div>
+      </div>`;
+    document.body.appendChild(overlay);
+    overlay.addEventListener('click', e => { if (e.target === overlay) overlay.remove(); });
+    const input = document.getElementById('persona-modal-nombre');
+    setTimeout(() => { input?.focus(); input?.select(); }, 60);
+  },
+
+  _selectTipo(el, val) {
+    document.querySelectorAll('#persona-tipo-selector label').forEach(l => {
+      l.style.borderColor = 'var(--border-strong)';
+      l.style.background = 'transparent';
+      l.querySelector('i').style.color = 'var(--text-secondary)';
+    });
+    el.style.borderColor = 'var(--blue)';
+    el.style.background = 'var(--blue-light)';
+    el.querySelector('i').style.color = 'var(--blue)';
+    el.querySelector('input').checked = true;
+  },
+
+  async confirmarAddPersona() {
+    const nombre = document.getElementById('persona-modal-nombre')?.value.trim();
+    if (!nombre) { toast('Ingresá un nombre.'); return; }
+    if (State.personas.includes(nombre)) { toast('Ya existe una persona con ese nombre.'); return; }
+    const tipoInput = document.querySelector('input[name="persona-tipo"]:checked');
+    const tipo = tipoInput?.value || 'socio';
+    document.getElementById('persona-modal-overlay')?.remove();
+    await DB.agregarPersona(nombre);
+    State.personas.push(nombre);
+    State.cajas[nombre] = { 'ARS cash': 0, 'ARS transferencia': 0, 'USD cash': 0, 'USD transferencia': 0, 'USDT': 0 };
+    if (!State.personasTipo) State.personasTipo = {};
+    State.personasTipo[nombre] = tipo;
+    this.renderBody();
+    toast(`${nombre} (${tipo}) agregado correctamente.`);
+  },
+
+  renombrarPersonaModal(nombreViejo) {
+    this.abrirModalPersona(nombreViejo);
+  },
+
+  async confirmarRenombrar(nombreViejo) {
+    const nombreNuevo = document.getElementById('persona-modal-nombre')?.value.trim();
+    if (!nombreNuevo || nombreNuevo === nombreViejo) { document.getElementById('persona-modal-overlay')?.remove(); return; }
+    if (State.personas.includes(nombreNuevo)) { toast('Ya existe una persona con ese nombre.'); return; }
+    const { error } = await DB.renombrarPersona(nombreViejo, nombreNuevo);
+    if (error) { toast('Error al renombrar. Intentá de nuevo.'); console.error(error); return; }
+    document.getElementById('persona-modal-overlay')?.remove();
+    State.personas = State.personas.map(p => p === nombreViejo ? nombreNuevo : p);
+    State.cajas[nombreNuevo] = State.cajas[nombreViejo];
+    delete State.cajas[nombreViejo];
+    if (State.personasTipo) { State.personasTipo[nombreNuevo] = State.personasTipo[nombreViejo]; delete State.personasTipo[nombreViejo]; }
+    this.renderBody();
+    toast(`"${nombreViejo}" ahora se llama "${nombreNuevo}".`);
   },
 
   saldoTotalPersona(p) {
@@ -108,22 +205,6 @@ const Panel = {
     return (c['ARS cash']||0) + (c['ARS transferencia']||0) + ((c['USD cash']||0)+(c['USD transferencia']||0))*State.refBlue + (c['USDT']||0)*State.refUsdt;
   },
 
-  async renombrarPersona(nombreViejo) {
-    const nombreNuevo = prompt(`Nuevo nombre para "${nombreViejo}":`, nombreViejo);
-    if (!nombreNuevo || nombreNuevo.trim() === '' || nombreNuevo === nombreViejo) return;
-    if (State.personas.includes(nombreNuevo)) { alert('Ya existe una persona con ese nombre.'); return; }
-
-    const { error } = await DB.renombrarPersona(nombreViejo, nombreNuevo);
-    if (error) { alert('Hubo un problema renombrando. Probá de nuevo.'); console.error(error); return; }
-
-    // Actualizar en memoria: lista de personas y el objeto de cajas
-    State.personas = State.personas.map(p => p === nombreViejo ? nombreNuevo : p);
-    State.cajas[nombreNuevo] = State.cajas[nombreViejo];
-    delete State.cajas[nombreViejo];
-
-    this.renderBody();
-    toast(`"${nombreViejo}" ahora se llama "${nombreNuevo}". Las cajas y el historial quedaron asociados al nuevo nombre.`);
-  },
 
   async eliminarPersona(nombre) {
     const saldo = this.saldoTotalPersona(nombre);
@@ -141,25 +222,6 @@ const Panel = {
     this.renderBody();
   },
 
-  async editarSaldoCaja(persona, bolsillo) {
-    const actual = (State.cajas[persona] && State.cajas[persona][bolsillo]) || 0;
-    const nuevoStr = prompt(`Ajustar saldo de ${persona} — ${bolsillo}:`, actual);
-    if (nuevoStr === null) return;
-    const nuevo = parseFloat(nuevoStr);
-    if (isNaN(nuevo)) { alert('Ingresá un número válido.'); return; }
-    State.cajas[persona][bolsillo] = nuevo;
-    await DB.actualizarSaldoCaja(persona, bolsillo, nuevo);
-    Sheets.caja(persona, bolsillo, nuevo);
-    this.renderBody();
-    toast(`Saldo de ${persona} — ${bolsillo} ajustado a ${nuevo.toLocaleString('es-AR')}.`);
-  },
-  async addPersona() {
-    const nombre = prompt('Nombre de la nueva persona:'); if (!nombre) return;
-    await DB.agregarPersona(nombre);
-    State.personas.push(nombre);
-    State.cajas[nombre] = { 'ARS cash': 0, 'ARS transferencia': 0, 'USD cash': 0, 'USD transferencia': 0, 'USDT': 0 };
-    this.renderBody();
-  },
 
   cotizacionesView() {
     return `

@@ -464,15 +464,26 @@ const Capital = {
   abrirModalActivo(id) {
     const activo = id ? (State.activosFijos||[]).find(x => x.id === id) : null;
     const CATS = { mobiliario:'Mobiliario', equipamiento:'Equipamiento', tecnologia:'Tecnología', vehiculo:'Vehículo', otro:'Otro' };
+    const BOLSILLOS = ['ARS cash', 'ARS transferencia', 'USD cash', 'USD transferencia', 'USDT'];
+
+    // Opciones de caja: persona + bolsillo con saldo actual
+    const cajaOpts = (State.personas || []).flatMap(p =>
+      BOLSILLOS.map(b => {
+        const saldo = State.cajas?.[p]?.[b] || 0;
+        return `<option value="${p}||${b}">${p} — ${b} (${State.fmtSaldo ? State.fmtSaldo(saldo, b) : saldo})</option>`;
+      })
+    ).join('');
+
     const overlay = document.createElement('div');
     overlay.id = 'cap-modal-overlay';
     overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.7);backdrop-filter:blur(6px);z-index:900;display:flex;align-items:center;justify-content:center;padding:20px';
     overlay.innerHTML = `
-      <div style="background:var(--bg-elevated);border:1px solid var(--border-strong);border-radius:var(--radius-xl);width:min(400px,96vw);overflow:hidden">
+      <div style="background:var(--bg-elevated);border:1px solid var(--border-strong);border-radius:var(--radius-xl);width:min(420px,96vw);max-height:90dvh;display:flex;flex-direction:column;overflow:hidden">
         <div style="padding:14px 18px;border-bottom:1px solid var(--border)">
-          <div style="font-size:14px;font-weight:700">${activo ? 'Editar activo' : 'Nuevo activo fijo'}</div>
+          <div style="font-size:14px;font-weight:700">${activo ? 'Editar activo fijo' : 'Registrar compra de activo'}</div>
+          ${!activo ? `<div style="font-size:11px;color:var(--text-secondary);margin-top:2px">Se agregará al inventario y descontará de la caja seleccionada</div>` : ''}
         </div>
-        <div style="padding:18px;display:flex;flex-direction:column;gap:12px">
+        <div style="padding:18px;overflow-y:auto;flex:1;display:flex;flex-direction:column;gap:12px">
           <div>
             <label style="font-size:11px;color:var(--text-secondary);display:block;margin-bottom:4px">Nombre *</label>
             <input id="cact-nombre" type="text" value="${activo?.nombre||''}" placeholder="ej: Escritorio, silla de oficina, aire acondicionado…"
@@ -480,13 +491,13 @@ const Capital = {
           </div>
           <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
             <div>
-              <label style="font-size:11px;color:var(--text-secondary);display:block;margin-bottom:4px">Valor estimado (USD) *</label>
+              <label style="font-size:11px;color:var(--text-secondary);display:block;margin-bottom:4px">Valor / costo de compra (USD) *</label>
               <input id="cact-valor" type="number" value="${activo?.valorUSD||''}" min="0" step="0.01" placeholder="0"
                 style="width:100%;font-size:14px;font-weight:700;padding:8px 10px;background:var(--bg-secondary);border:1px solid var(--border-strong);border-radius:8px;color:var(--text)">
             </div>
             <div>
               <label style="font-size:11px;color:var(--text-secondary);display:block;margin-bottom:4px">Fecha de compra</label>
-              <input id="cact-fecha" type="date" value="${activo?.fechaCompra||''}"
+              <input id="cact-fecha" type="date" value="${activo?.fechaCompra || new Date().toISOString().split('T')[0]}"
                 style="width:100%;font-size:13px;padding:8px 10px;background:var(--bg-secondary);border:1px solid var(--border-strong);border-radius:8px;color:var(--text)">
             </div>
           </div>
@@ -496,6 +507,17 @@ const Capital = {
               ${Object.entries(CATS).map(([k,v]) => `<option value="${k}" ${activo?.categoria===k?'selected':''}>${v}</option>`).join('')}
             </select>
           </div>
+
+          ${!activo ? `
+          <div style="background:rgba(255,214,10,.07);border:1px solid rgba(255,214,10,.25);border-radius:10px;padding:12px">
+            <div style="font-size:11px;font-weight:700;color:var(--amber);margin-bottom:8px"><i class="ti ti-wallet"></i> Descontar de caja</div>
+            <select id="cact-caja" style="width:100%;font-size:12.5px;padding:8px 10px;background:var(--bg-secondary);border:1px solid var(--border-strong);border-radius:8px;color:var(--text)">
+              <option value="">— No descontar de ninguna caja —</option>
+              ${cajaOpts}
+            </select>
+            <div style="font-size:10px;color:var(--text-secondary);margin-top:6px">El monto se convierte si la moneda de la caja es distinta a USD (usa cotización actual del blue).</div>
+          </div>` : ''}
+
           <div>
             <label style="font-size:11px;color:var(--text-secondary);display:block;margin-bottom:4px">Notas</label>
             <input id="cact-notas" type="text" value="${activo?.notas||''}" placeholder="Opcional"
@@ -504,7 +526,7 @@ const Capital = {
         </div>
         <div style="padding:12px 18px;border-top:1px solid var(--border);display:flex;justify-content:flex-end;gap:8px">
           <button class="btn" onclick="document.getElementById('cap-modal-overlay').remove()">Cancelar</button>
-          <button class="btn btn-primary" onclick="Capital.guardarActivo('${id||''}')"><i class="ti ti-check"></i> ${activo?'Guardar':'Agregar'}</button>
+          <button class="btn btn-primary" onclick="Capital.guardarActivo('${id||''}')"><i class="ti ti-check"></i> ${activo?'Guardar':'Registrar compra'}</button>
         </div>
       </div>`;
     document.body.appendChild(overlay);
@@ -522,6 +544,7 @@ const Capital = {
       fechaCompra: document.getElementById('cact-fecha')?.value || '',
       notas: document.getElementById('cact-notas')?.value.trim() || '',
     };
+    const cajaSeleccionada = document.getElementById('cact-caja')?.value || '';
     document.getElementById('cap-modal-overlay')?.remove();
 
     if (id) {
@@ -532,7 +555,28 @@ const Capital = {
     } else {
       const nuevo = await DB.crearActivoFijo(data);
       if (nuevo) { data.id = nuevo.id; if (!State.activosFijos) State.activosFijos = []; State.activosFijos.push(data); }
-      toast(`${nombre} agregado.`);
+
+      // Descontar de la caja seleccionada
+      if (cajaSeleccionada && valorUSD > 0) {
+        const [persona, bolsillo] = cajaSeleccionada.split('||');
+        const saldoActual = State.cajas?.[persona]?.[bolsillo] || 0;
+
+        // Convertir el valor USD a la moneda de la caja
+        let montoADescontar = valorUSD;
+        if (bolsillo.startsWith('ARS')) {
+          montoADescontar = valorUSD * (State.refBlue || 1);
+        } else if (bolsillo === 'USDT') {
+          // USDT ≈ USD, se descuenta directo
+          montoADescontar = valorUSD;
+        }
+
+        const nuevoSaldo = saldoActual - montoADescontar;
+        await DB.actualizarSaldoCaja(persona, bolsillo, nuevoSaldo);
+        if (State.cajas[persona]) State.cajas[persona][bolsillo] = nuevoSaldo;
+        toast(`${nombre} agregado. Se descontaron ${bolsillo.startsWith('ARS') ? '$'+montoADescontar.toLocaleString('es-AR') : 'USD '+valorUSD} de ${persona} — ${bolsillo}.`);
+      } else {
+        toast(`${nombre} agregado a activos fijos.`);
+      }
     }
     this.renderBody();
   },

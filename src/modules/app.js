@@ -9,6 +9,7 @@ import './cueva.js';
 import './cajas.js';
 import './cashflow.js';
 import './panel.js';
+import './capital.js';
 
 const App = {
   PAGES: {
@@ -20,6 +21,7 @@ const App = {
     cueva: { title: 'Cueva / cambio de divisas', module: Cueva },
     cajas: { title: 'Cajas', module: Cajas },
     cashflow: { title: 'Cash flow', module: CashFlow },
+    capital: { title: 'Capital & Inversiones', module: Capital },
     panel: { title: 'Panel de control', module: Panel },
   },
 

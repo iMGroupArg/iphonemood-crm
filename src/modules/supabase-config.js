@@ -18,7 +18,7 @@ const DB = {
   async cargarTodo() {
     const [personasRes, cajasRes, stockRes, garantiasRes, ventasRes, ventaItemsRes, ventaPagosRes,
            reparacionesRes, repRepuestosRes, repPagosRes, catGastoRes, gastosRes, cambiosRes,
-           gastosFijosRes, cierresRes] = await Promise.all([
+           gastosFijosRes, cierresRes, inversoresRes, inversorPagosRes, activosFijosRes] = await Promise.all([
       supa.from('personas').select('*'),
       supa.from('cajas').select('*'),
       supa.from('stock').select('*'),
@@ -34,6 +34,9 @@ const DB = {
       supa.from('cambios').select('*').order('creado_en', { ascending: false }),
       supa.from('gastos_fijos_plantilla').select('*').order('orden', { ascending: true }),
       supa.from('cierres_mensuales').select('*').order('mes', { ascending: false }),
+      supa.from('inversores').select('*').order('creado_en', { ascending: false }),
+      supa.from('inversor_pagos').select('*').order('fecha', { ascending: false }),
+      supa.from('activos_fijos').select('*').order('categoria', { ascending: true }),
     ]);
 
     // mapa de personas (id <-> nombre), lo usamos todo el tiempo para traducir
@@ -94,6 +97,23 @@ const DB = {
     State.gastosFijosPlantilla = (gastosFijosRes.data || []).map(g => ({
       id: g.id, motivo: g.motivo, cat: g.categoria_id, montoSugerido: Number(g.monto_sugerido) || 0,
       moneda: g.moneda || 'ARS', orden: g.orden || 0, activo: g.activo !== false
+    }));
+
+    // inversores
+    State.inversores = (inversoresRes.data || []).map(i => ({
+      id: i.id, nombre: i.nombre, contacto: i.contacto || '', tipo: i.tipo,
+      capitalInicialUSD: Number(i.capital_inicial_usd) || 0,
+      porcentaje: Number(i.porcentaje) || 0,
+      cuotaMensualUSD: Number(i.cuota_mensual_usd) || 0,
+      activo: i.activo !== false, notas: i.notas || '',
+    }));
+    State.inversorPagos = (inversorPagosRes.data || []).map(p => ({
+      id: p.id, inversorId: p.inversor_id, montoUSD: Number(p.monto_usd),
+      fecha: p.fecha, concepto: p.concepto || '', mesReferencia: p.mes_referencia || '',
+    }));
+    State.activosFijos = (activosFijosRes.data || []).map(a => ({
+      id: a.id, nombre: a.nombre, valorUSD: Number(a.valor_usd), categoria: a.categoria || 'mobiliario',
+      fechaCompra: a.fecha_compra || '', notas: a.notas || '',
     }));
 
     State.cierresMensuales = (cierresRes.data || []).map(c => ({
@@ -443,6 +463,48 @@ const DB = {
   },
   async editarCategoriaGasto(id, cambios) { await supa.from('categorias_gasto').update(cambios).eq('id', id); },
   async borrarCategoriaGasto(id) { await supa.from('categorias_gasto').delete().eq('id', id); },
+
+  // ===== INVERSORES =====
+  async crearInversor(data) {
+    const { data: row } = await supa.from('inversores').insert({
+      nombre: data.nombre, contacto: data.contacto || '', tipo: data.tipo,
+      capital_inicial_usd: data.capitalInicialUSD, porcentaje: data.porcentaje || 0,
+      cuota_mensual_usd: data.cuotaMensualUSD || 0, activo: data.activo, notas: data.notas || '',
+    }).select().single();
+    return row;
+  },
+  async actualizarInversor(id, data) {
+    await supa.from('inversores').update({
+      nombre: data.nombre, contacto: data.contacto || '', tipo: data.tipo,
+      capital_inicial_usd: data.capitalInicialUSD, porcentaje: data.porcentaje || 0,
+      cuota_mensual_usd: data.cuotaMensualUSD || 0, activo: data.activo, notas: data.notas || '',
+    }).eq('id', id);
+  },
+  async crearPagoInversor(pago) {
+    const { data: row } = await supa.from('inversor_pagos').insert({
+      inversor_id: pago.inversorId, monto_usd: pago.montoUSD,
+      fecha: pago.fecha, concepto: pago.concepto || '', mes_referencia: pago.mesReferencia || '',
+    }).select().single();
+    return row;
+  },
+
+  // ===== ACTIVOS FIJOS =====
+  async crearActivoFijo(data) {
+    const { data: row } = await supa.from('activos_fijos').insert({
+      nombre: data.nombre, valor_usd: data.valorUSD, categoria: data.categoria || 'mobiliario',
+      fecha_compra: data.fechaCompra || null, notas: data.notas || '',
+    }).select().single();
+    return row;
+  },
+  async actualizarActivoFijo(id, data) {
+    await supa.from('activos_fijos').update({
+      nombre: data.nombre, valor_usd: data.valorUSD, categoria: data.categoria || 'mobiliario',
+      fecha_compra: data.fechaCompra || null, notas: data.notas || '',
+    }).eq('id', id);
+  },
+  async eliminarActivoFijo(id) {
+    await supa.from('activos_fijos').delete().eq('id', id);
+  },
 };
 
 // ============================================================

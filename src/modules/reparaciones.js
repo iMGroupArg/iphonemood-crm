@@ -1,3 +1,26 @@
+const CONDICION_ITEMS = [
+  // Estética
+  { id:'rayones_pantalla',  grupo:'estetica',  label:'Rayones en pantalla' },
+  { id:'rayones_marco',     grupo:'estetica',  label:'Rayones en marco' },
+  { id:'rayones_tapa',      grupo:'estetica',  label:'Rayones en tapa trasera' },
+  { id:'vidrio_pantalla',   grupo:'estetica',  label:'Vidrio roto (pantalla)' },
+  { id:'vidrio_trasero',    grupo:'estetica',  label:'Vidrio roto (trasero)' },
+  { id:'carcasa_doblada',   grupo:'estetica',  label:'Carcasa doblada' },
+  // Funcional
+  { id:'face_id',           grupo:'funcional', label:'Face ID / Touch ID' },
+  { id:'camara_frontal',    grupo:'funcional', label:'Cámara frontal' },
+  { id:'camara_trasera',    grupo:'funcional', label:'Cámara trasera' },
+  { id:'altavoz',           grupo:'funcional', label:'Altavoz / auricular' },
+  { id:'microfono',         grupo:'funcional', label:'Micrófono' },
+  { id:'carga',             grupo:'funcional', label:'Puerto de carga' },
+  { id:'boton_volumen',     grupo:'funcional', label:'Botón de volumen' },
+  { id:'boton_encendido',   grupo:'funcional', label:'Botón de encendido' },
+  { id:'vibrador',          grupo:'funcional', label:'Vibrador' },
+  { id:'bateria',           grupo:'funcional', label:'Condición de batería' },
+  { id:'wifi_bt',           grupo:'funcional', label:'WiFi / Bluetooth' },
+  { id:'señal_sim',         grupo:'funcional', label:'Señal / SIM' },
+];
+
 const Reparaciones = {
   currentId: null,
   ESTADOS: ['ingresado','diagnosticado','en_reparacion','listo','entregado'],
@@ -227,6 +250,28 @@ const Reparaciones = {
           ${o.diagnostico ? `<div style="grid-column:1/-1;background:var(--purple-light);padding:8px 10px;border-radius:8px;color:var(--purple)"><b>Diagnóstico:</b> ${o.diagnostico}</div>` : ''}
         </div>
       </div>
+
+      <!-- Condición al ingreso -->
+      ${(() => {
+        const c = o.condicionIngreso || {};
+        const problemas = CONDICION_ITEMS.filter(i => c[i.id]);
+        if (!problemas.length && !c.nota) return '';
+        const esteticos  = problemas.filter(i => i.grupo === 'estetica');
+        const funcionales = problemas.filter(i => i.grupo === 'funcional');
+        return `<div class="card" style="margin-bottom:10px">
+          <div class="card-title"><i class="ti ti-clipboard-list" style="color:var(--amber)"></i> Condición al ingreso</div>
+          ${esteticos.length ? `<div style="margin-bottom:6px">
+            <div style="font-size:10px;font-weight:700;color:var(--amber);text-transform:uppercase;letter-spacing:.04em;margin-bottom:5px">Estética</div>
+            <div style="display:flex;flex-wrap:wrap;gap:4px">${esteticos.map(i=>`<span class="badge b-amber">${i.label}</span>`).join('')}</div>
+          </div>` : ''}
+          ${funcionales.length ? `<div style="margin-bottom:6px">
+            <div style="font-size:10px;font-weight:700;color:var(--red);text-transform:uppercase;letter-spacing:.04em;margin-bottom:5px">Funcional</div>
+            <div style="display:flex;flex-wrap:wrap;gap:4px">${funcionales.map(i=>`<span class="badge b-red">${i.label}</span>`).join('')}</div>
+          </div>` : ''}
+          ${c.nota ? `<div style="font-size:12px;color:var(--text-secondary);background:var(--bg-secondary);border-radius:7px;padding:7px 10px;margin-top:4px"><i class="ti ti-note"></i> ${c.nota}</div>` : ''}
+          <div style="font-size:11px;color:var(--text-secondary);margin-top:8px;padding-top:8px;border-top:1px solid var(--border)"><i class="ti ti-circle-check" style="color:var(--green)"></i> Las demás funciones se verificaron con normalidad al momento del ingreso.</div>
+        </div>`;
+      })()}
 
       <!-- Repuestos -->
       <div class="card" style="margin-bottom:10px">
@@ -620,6 +665,40 @@ const Reparaciones = {
             </div>
           </div>
 
+          <!-- Condición al ingreso -->
+          <div style="background:var(--bg-secondary);border-radius:var(--radius-md);padding:14px">
+            <div style="font-size:11px;font-weight:700;color:var(--text-tertiary);text-transform:uppercase;letter-spacing:.06em;margin-bottom:4px">Condición al ingreso</div>
+            <div style="font-size:11px;color:var(--text-secondary);margin-bottom:10px">Marcá lo que <b>NO anda o tiene problemas</b>. Lo demás se asume en orden.</div>
+
+            <div style="font-size:10px;font-weight:700;color:var(--amber);text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px">Estética</div>
+            <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:5px;margin-bottom:12px">
+              ${CONDICION_ITEMS.filter(i=>i.grupo==='estetica').map(item => {
+                const checked = o?.condicionIngreso?.[item.id] ? 'checked' : '';
+                return `<label style="display:flex;align-items:center;gap:7px;padding:7px 9px;border-radius:7px;cursor:pointer;border:1px solid var(--border);font-size:12px;transition:all .12s" onclick="Reparaciones._toggleCondicion(this)">
+                  <input type="checkbox" data-cid="${item.id}" ${checked} style="accent-color:var(--red);width:14px;height:14px;flex-shrink:0">
+                  <span>${item.label}</span>
+                </label>`;
+              }).join('')}
+            </div>
+
+            <div style="font-size:10px;font-weight:700;color:var(--red);text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px">Funcional</div>
+            <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:5px;margin-bottom:10px">
+              ${CONDICION_ITEMS.filter(i=>i.grupo==='funcional').map(item => {
+                const checked = o?.condicionIngreso?.[item.id] ? 'checked' : '';
+                return `<label style="display:flex;align-items:center;gap:7px;padding:7px 9px;border-radius:7px;cursor:pointer;border:1px solid var(--border);font-size:12px;transition:all .12s" onclick="Reparaciones._toggleCondicion(this)">
+                  <input type="checkbox" data-cid="${item.id}" ${checked} style="accent-color:var(--red);width:14px;height:14px;flex-shrink:0">
+                  <span>${item.label}</span>
+                </label>`;
+              }).join('')}
+            </div>
+
+            <div>
+              <label style="font-size:11px;color:var(--text-secondary);display:block;margin-bottom:4px">Aclaraciones estéticas (opcional)</label>
+              <input type="text" id="rof-condicion-nota" value="${o?.condicionIngreso?.nota||''}" placeholder="Ej: rayón leve en esquina superior derecha, tapa trasera con marca…"
+                style="width:100%;font-size:12.5px;padding:7px 10px;background:var(--bg-tertiary);border:1px solid var(--border-strong);border-radius:8px;color:var(--text)">
+            </div>
+          </div>
+
           <!-- Técnico y precio -->
           <div style="background:var(--bg-secondary);border-radius:var(--radius-md);padding:14px">
             <div style="font-size:11px;font-weight:700;color:var(--text-tertiary);text-transform:uppercase;letter-spacing:.06em;margin-bottom:10px">Asignación y precio</div>
@@ -659,6 +738,22 @@ const Reparaciones = {
     setTimeout(() => document.getElementById('rof-cliente')?.focus(), 80);
   },
 
+  _toggleCondicion(label) {
+    const cb = label.querySelector('input[type="checkbox"]');
+    const checked = cb.checked;
+    label.style.borderColor = checked ? 'var(--red)' : 'var(--border)';
+    label.style.background   = checked ? 'rgba(255,69,58,.08)' : 'transparent';
+  },
+
+  _leerCondicion() {
+    const result = {};
+    document.querySelectorAll('input[data-cid]').forEach(cb => {
+      result[cb.dataset.cid] = cb.checked;
+    });
+    result.nota = document.getElementById('rof-condicion-nota')?.value.trim() || '';
+    return result;
+  },
+
   _escOrderModal(e) { if (e.key === 'Escape') Reparaciones._closeOrderModal(); },
   _closeOrderModal() {
     document.getElementById('rep-form-overlay')?.remove();
@@ -672,13 +767,14 @@ const Reparaciones = {
 
     const data = {
       cliente,
-      tel:          document.getElementById('rof-tel')?.value.trim() || '',
+      tel:              document.getElementById('rof-tel')?.value.trim() || '',
       equipo,
-      clave:        document.getElementById('rof-pin')?.value.trim() || '',
-      falla:        document.getElementById('rof-falla')?.value.trim() || '',
-      tecnico:      document.getElementById('rof-tecnico')?.value || '',
-      precioFinal:  parseFloat(document.getElementById('rof-precio')?.value) || 0,
-      fechaEntrega: document.getElementById('rof-fecha-entrega')?.value || '',
+      clave:            document.getElementById('rof-pin')?.value.trim() || '',
+      falla:            document.getElementById('rof-falla')?.value.trim() || '',
+      tecnico:          document.getElementById('rof-tecnico')?.value || '',
+      precioFinal:      parseFloat(document.getElementById('rof-precio')?.value) || 0,
+      fechaEntrega:     document.getElementById('rof-fecha-entrega')?.value || '',
+      condicionIngreso: this._leerCondicion(),
     };
 
     this._closeOrderModal();

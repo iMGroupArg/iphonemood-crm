@@ -156,6 +156,7 @@ const DB = {
       tecnico: r.tecnico || '', custodio: this.personasIdToNombre[r.custodio_id] || '',
       notas: r.notas || '', equipoDevuelto: r.equipo_devuelto,
       tokenSeguimiento: r.token_seguimiento || null,
+      condicionIngreso: r.condicion_ingreso || {},
     }));
   },
 
@@ -292,7 +293,8 @@ const DB = {
       clave_desbloqueo: o.clave, estado: o.estado, diagnostico: o.diagnostico,
       presupuesto_aprobado: o.presupuestoAprobado, tecnico: o.tecnico,
       custodio_id: this.personaId(o.custodio) || null, costo_mano_obra: o.costoMO,
-      precio_final: o.precioFinal, notas: o.notas, equipo_devuelto: o.equipoDevuelto
+      precio_final: o.precioFinal, notas: o.notas, equipo_devuelto: o.equipoDevuelto,
+      condicion_ingreso: o.condicionIngreso || {},
     });
   },
   async actualizarReparacion(o) {
@@ -301,7 +303,8 @@ const DB = {
       clave_desbloqueo: o.clave, tecnico: o.tecnico,
       estado: o.estado, diagnostico: o.diagnostico, presupuesto_aprobado: o.presupuestoAprobado,
       custodio_id: this.personaId(o.custodio) || null, costo_mano_obra: o.costoMO,
-      precio_final: o.precioFinal, notas: o.notas, equipo_devuelto: o.equipoDevuelto
+      precio_final: o.precioFinal, notas: o.notas, equipo_devuelto: o.equipoDevuelto,
+      condicion_ingreso: o.condicionIngreso || {},
     }).eq('id', o.id);
   },
   async agregarRepuestoReparacion(reparacionId, repuesto) {

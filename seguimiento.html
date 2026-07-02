@@ -285,6 +285,27 @@
 const { SUPABASE_URL, SUPABASE_ANON_KEY } = window.__APP_CONFIG__;
 const supa = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
+const CONDICION_ITEMS = [
+  { id:'rayones_pantalla', grupo:'estetica',  label:'Rayones en pantalla' },
+  { id:'rayones_marco',    grupo:'estetica',  label:'Rayones en marco' },
+  { id:'rayones_tapa',     grupo:'estetica',  label:'Rayones en tapa trasera' },
+  { id:'vidrio_pantalla',  grupo:'estetica',  label:'Vidrio roto (pantalla)' },
+  { id:'vidrio_trasero',   grupo:'estetica',  label:'Vidrio roto (trasero)' },
+  { id:'carcasa_doblada',  grupo:'estetica',  label:'Carcasa doblada' },
+  { id:'face_id',          grupo:'funcional', label:'Face ID / Touch ID' },
+  { id:'camara_frontal',   grupo:'funcional', label:'Cámara frontal' },
+  { id:'camara_trasera',   grupo:'funcional', label:'Cámara trasera' },
+  { id:'altavoz',          grupo:'funcional', label:'Altavoz / auricular' },
+  { id:'microfono',        grupo:'funcional', label:'Micrófono' },
+  { id:'carga',            grupo:'funcional', label:'Puerto de carga' },
+  { id:'boton_volumen',    grupo:'funcional', label:'Botón de volumen' },
+  { id:'boton_encendido',  grupo:'funcional', label:'Botón de encendido' },
+  { id:'vibrador',         grupo:'funcional', label:'Vibrador' },
+  { id:'bateria',          grupo:'funcional', label:'Condición de batería' },
+  { id:'wifi_bt',          grupo:'funcional', label:'WiFi / Bluetooth' },
+  { id:'señal_sim',        grupo:'funcional', label:'Señal / SIM' },
+];
+
 const ESTADOS = [
   { key: 'ingresado',     label: 'Ingresado',      icon: '1' },
   { key: 'diagnosticado', label: 'Diagnosticado',   icon: '2' },
@@ -359,6 +380,32 @@ async function renderPage() {
         </div>` : ''}
       </div>
     </div>
+
+    <!-- Condición al ingreso -->
+    ${(() => {
+      const c = r.condicion_ingreso || {};
+      const problemas = CONDICION_ITEMS.filter(i => c[i.id]);
+      if (!problemas.length && !c.nota) return '';
+      const esteticos  = problemas.filter(i => i.grupo === 'estetica');
+      const funcionales = problemas.filter(i => i.grupo === 'funcional');
+      return `<div class="equipo-card">
+        <div class="label" style="margin-bottom:10px"><i class="ti ti-clipboard-list"></i> Condición registrada al ingreso</div>
+        ${esteticos.length ? `
+          <div style="font-size:10px;font-weight:700;color:#FFD60A;text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px">Estética</div>
+          <div style="display:flex;flex-wrap:wrap;gap:5px;margin-bottom:10px">
+            ${esteticos.map(i=>`<span style="background:rgba(255,214,10,.12);color:#FFD60A;border:1px solid rgba(255,214,10,.3);border-radius:20px;padding:3px 10px;font-size:11px;font-weight:500">${i.label}</span>`).join('')}
+          </div>` : ''}
+        ${funcionales.length ? `
+          <div style="font-size:10px;font-weight:700;color:#FF453A;text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px">Funcional</div>
+          <div style="display:flex;flex-wrap:wrap;gap:5px;margin-bottom:10px">
+            ${funcionales.map(i=>`<span style="background:rgba(255,69,58,.12);color:#FF453A;border:1px solid rgba(255,69,58,.3);border-radius:20px;padding:3px 10px;font-size:11px;font-weight:500">${i.label}</span>`).join('')}
+          </div>` : ''}
+        ${c.nota ? `<div style="font-size:12px;color:#AEAEB2;background:#2C2C2E;border-radius:7px;padding:8px 10px;margin-bottom:8px">${escHtml(c.nota)}</div>` : ''}
+        <div style="font-size:12px;color:#30D158;padding-top:8px;border-top:1px solid #38383A">
+          <i class="ti ti-circle-check"></i> Las demás funciones se verificaron con normalidad al momento del ingreso.
+        </div>
+      </div>`;
+    })()}
 
     <!-- Flujo de estado -->
     <div class="flujo-card">

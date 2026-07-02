@@ -67,6 +67,7 @@
         <h1 id="page-title">Panel general</h1>
       </div>
       <div class="topbar-right">
+        <button class="search-btn" onclick="Search.open()" title="Buscar"><i class="ti ti-search"></i></button>
         <span class="pill pill-blue"><i class="ti ti-currency-dollar"></i> Blue: $<span id="topbar-blue">1075</span></span>
         <span class="pill pill-green"><i class="ti ti-currency-bitcoin"></i> USDT: $<span id="topbar-usdt">1061</span></span>
         <div id="user-menu" style="position:relative">
@@ -84,6 +85,17 @@
     </div>
 
     <div id="pages"></div>
+  </div>
+</div>
+
+<div class="search-overlay" id="search-overlay" onclick="Search.handleOverlayClick(event)">
+  <div class="search-modal" id="search-modal">
+    <div class="search-input-row">
+      <i class="ti ti-search"></i>
+      <input type="text" id="search-input" placeholder="Buscar ventas, stock, reparaciones…" autocomplete="off" oninput="Search.onInput(this.value)">
+      <button class="search-close-btn" onclick="Search.close()"><i class="ti ti-x"></i></button>
+    </div>
+    <div class="search-results" id="search-results"></div>
   </div>
 </div>
 

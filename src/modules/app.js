@@ -182,4 +182,136 @@ document.addEventListener('click', (e) => {
 
 document.addEventListener('DOMContentLoaded', () => App.init());
 
+// ── Búsqueda global ───────────────────────────────────────
+const Search = {
+  open() {
+    document.getElementById('search-overlay').classList.add('open');
+    const input = document.getElementById('search-input');
+    input.value = '';
+    document.getElementById('search-results').innerHTML = '';
+    setTimeout(() => input.focus(), 60);
+    document.addEventListener('keydown', Search._onKeydown);
+  },
+
+  close() {
+    document.getElementById('search-overlay').classList.remove('open');
+    document.removeEventListener('keydown', Search._onKeydown);
+  },
+
+  _onKeydown(e) {
+    if (e.key === 'Escape') Search.close();
+  },
+
+  handleOverlayClick(e) {
+    if (e.target === document.getElementById('search-overlay')) this.close();
+  },
+
+  onInput(q) {
+    const container = document.getElementById('search-results');
+    q = q.trim();
+    if (q.length < 2) { container.innerHTML = ''; return; }
+    const lower = q.toLowerCase();
+
+    const ventas = (State.ventas || []).filter(v =>
+      v.cliente?.toLowerCase().includes(lower) ||
+      String(v.id).includes(lower)
+    ).slice(0, 5);
+
+    const stock = (State.stock || []).filter(p =>
+      p.nombre?.toLowerCase().includes(lower) ||
+      (p.imeis || []).some(i => i.toLowerCase().includes(lower))
+    ).slice(0, 5);
+
+    const reps = (State.reparaciones || []).filter(r =>
+      r.cliente?.toLowerCase().includes(lower) ||
+      r.equipo?.toLowerCase().includes(lower) ||
+      String(r.id).includes(lower)
+    ).slice(0, 5);
+
+    if (!ventas.length && !stock.length && !reps.length) {
+      container.innerHTML = `<div class="search-empty">Sin resultados para <b>"${q}"</b></div>`;
+      return;
+    }
+
+    let html = '';
+
+    if (ventas.length) {
+      html += `<div class="search-section-label">Ventas</div>`;
+      ventas.forEach(v => {
+        const total = (v.items || []).reduce((s, i) => s + i.precio, 0);
+        html += `<div class="search-item" onclick="Search._goVenta(${v.id})">
+          <div class="search-item-icon ic-ventas"><i class="ti ti-receipt"></i></div>
+          <div class="search-item-text">
+            <div class="search-item-title">${v.cliente || '—'}</div>
+            <div class="search-item-sub">#${v.id} · ${v.fecha} · USD ${total.toFixed(0)} · ${v.estado}</div>
+          </div>
+          <i class="ti ti-chevron-right search-arrow"></i>
+        </div>`;
+      });
+    }
+
+    if (stock.length) {
+      if (ventas.length) html += `<div class="search-divider"></div>`;
+      html += `<div class="search-section-label">Stock</div>`;
+      stock.forEach(p => {
+        const imeiMatch = (p.imeis || []).find(i => i.toLowerCase().includes(lower));
+        const sub = imeiMatch
+          ? `IMEI: ${imeiMatch}`
+          : `${p.cat?.toUpperCase() || ''} · ${State.getStock(p)} uds · USD ${p.costoUSD}`;
+        html += `<div class="search-item" onclick="Search._goStock(${p.id})">
+          <div class="search-item-icon ic-stock"><i class="ti ti-box"></i></div>
+          <div class="search-item-text">
+            <div class="search-item-title">${p.nombre}</div>
+            <div class="search-item-sub">${sub}</div>
+          </div>
+          <i class="ti ti-chevron-right search-arrow"></i>
+        </div>`;
+      });
+    }
+
+    if (reps.length) {
+      if (ventas.length || stock.length) html += `<div class="search-divider"></div>`;
+      html += `<div class="search-section-label">Reparaciones</div>`;
+      reps.forEach(r => {
+        html += `<div class="search-item" onclick="Search._goReparacion(${r.id})">
+          <div class="search-item-icon ic-reparaciones"><i class="ti ti-tool"></i></div>
+          <div class="search-item-text">
+            <div class="search-item-title">${r.cliente} — ${r.equipo}</div>
+            <div class="search-item-sub">#${r.id} · ${r.fechaIngreso} · ${r.estado}</div>
+          </div>
+          <i class="ti ti-chevron-right search-arrow"></i>
+        </div>`;
+      });
+    }
+
+    container.innerHTML = html;
+  },
+
+  _goVenta(id) {
+    this.close();
+    App.goTo('ventas');
+    setTimeout(() => Ventas.viewSale(id), 80);
+  },
+
+  _goStock(id) {
+    this.close();
+    App.goTo('stock');
+    setTimeout(() => Stock.openDrawer('edit', id), 80);
+  },
+
+  _goReparacion(id) {
+    this.close();
+    App.goTo('reparaciones');
+    setTimeout(() => Reparaciones.select(id), 80);
+  },
+};
+
+document.addEventListener('keydown', (e) => {
+  if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
+    e.preventDefault();
+    Search.open();
+  }
+});
+
 window.App = App;
+window.Search = Search;

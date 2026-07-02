@@ -1,9 +1,9 @@
 // ============================================================
 // CONEXIÓN A SUPABASE — acá vive la base de datos real
+// Las credenciales vienen de config.js (ignorado por git).
 // ============================================================
 
-const SUPABASE_URL = 'https://oqvmiozafgogfcclwseu.supabase.co';
-const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9xdm1pb3phZmdvZ2ZjY2x3c2V1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODE4MTg4MDQsImV4cCI6MjA5NzM5NDgwNH0.egzH4uyVJ0W1mj0dTJuJGIWTXXnur9B4z_f12Z8V1lQ';
+const { SUPABASE_URL, SUPABASE_ANON_KEY } = window.__APP_CONFIG__;
 
 const supa = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 

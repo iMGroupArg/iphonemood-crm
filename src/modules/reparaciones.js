@@ -1,29 +1,52 @@
 const Reparaciones = {
   currentId: null,
   ESTADOS: ['ingresado','diagnosticado','en_reparacion','listo','entregado'],
-  ESTADO_LABEL: { ingresado:'Ingresado', diagnosticado:'Diagnosticado', en_reparacion:'En reparación', listo:'Listo', entregado:'Entregado', rechazado:'Rechazado', no_reparable:'No reparable' },
-  ESTADO_CLASS: { ingresado:'b-gray', diagnosticado:'b-purple', en_reparacion:'b-blue', listo:'b-green', entregado:'b-teal', rechazado:'b-red', no_reparable:'b-red' },
+  ESTADO_LABEL: {
+    ingresado:'Ingresado', diagnosticado:'Diagnosticado', en_reparacion:'En reparación',
+    listo:'Listo', entregado:'Entregado', rechazado:'Rechazado', no_reparable:'No reparable'
+  },
+  ESTADO_CLASS: {
+    ingresado:'b-gray', diagnosticado:'b-purple', en_reparacion:'b-blue',
+    listo:'b-green', entregado:'b-teal', rechazado:'b-red', no_reparable:'b-red'
+  },
+  ESTADO_COLOR: {
+    ingresado:'var(--gray)', diagnosticado:'var(--purple)', en_reparacion:'var(--blue)',
+    listo:'var(--green)', entregado:'var(--teal)', rechazado:'var(--red)', no_reparable:'var(--red)'
+  },
+  BOLSILLOS: ['ARS cash','ARS transferencia','USD cash','USD transferencia','USDT'],
 
+  // ── Shell ─────────────────────────────────────────────
   render() {
     const c = document.createElement('div');
     c.className = 'rep-shell';
-    c.style.display = 'flex';
-    c.style.flex = '1';
-    c.style.overflow = 'hidden';
+    c.style.cssText = 'display:flex;flex:1;overflow:hidden;';
     c.innerHTML = `
-      <div class="rep-list-panel" style="width:260px;min-width:260px;border-right:1px solid var(--border);display:flex;flex-direction:column;background:var(--bg-secondary)">
-        <div style="padding:12px 14px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center">
-          <b style="font-size:13px">Órdenes (${State.reparaciones.length})</b>
-          <button class="btn btn-sm btn-primary" onclick="Reparaciones.newOrder()"><i class="ti ti-plus"></i></button>
+      <div class="rep-list-panel" style="width:300px;min-width:300px;border-right:1px solid var(--border);display:flex;flex-direction:column;background:var(--bg-secondary)">
+        <div style="padding:14px 14px 10px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;gap:8px">
+          <div>
+            <div style="font-size:13px;font-weight:700">Órdenes</div>
+            <div id="rep-list-count" style="font-size:11px;color:var(--text-secondary)"></div>
+          </div>
+          <button class="btn btn-sm btn-primary" onclick="Reparaciones.openNewForm()"><i class="ti ti-plus"></i> Nueva</button>
         </div>
-        <div style="padding:8px 10px;border-bottom:1px solid var(--border)"><input type="text" id="rep-search" placeholder="Buscar..." oninput="Reparaciones.renderList()" style="width:100%;font-size:12px;padding:5px 9px;border:1px solid var(--border-strong);border-radius:8px"></div>
+        <div style="padding:8px 10px;border-bottom:1px solid var(--border)">
+          <input type="text" id="rep-search" placeholder="Buscar por cliente, equipo, ID…" oninput="Reparaciones.renderList()"
+            style="width:100%;font-size:12px;padding:6px 10px;background:var(--bg-tertiary);border:1px solid var(--border-strong);border-radius:8px;color:var(--text)">
+        </div>
+        <div style="padding:6px 10px;border-bottom:1px solid var(--border);display:flex;gap:4px;overflow-x:auto;-webkit-overflow-scrolling:touch">
+          <button class="rep-filter-btn rep-filter-active" data-filter="all" onclick="Reparaciones.setFilter('all',this)" style="font-size:10px;padding:3px 9px;border-radius:14px;border:1px solid var(--blue);background:var(--blue-light);color:var(--blue);cursor:pointer;white-space:nowrap;font-weight:600">Todas</button>
+          <button class="rep-filter-btn" data-filter="activas" onclick="Reparaciones.setFilter('activas',this)" style="font-size:10px;padding:3px 9px;border-radius:14px;border:1px solid var(--border-strong);background:var(--bg-tertiary);color:var(--text-secondary);cursor:pointer;white-space:nowrap">Activas</button>
+          <button class="rep-filter-btn" data-filter="listo" onclick="Reparaciones.setFilter('listo',this)" style="font-size:10px;padding:3px 9px;border-radius:14px;border:1px solid var(--border-strong);background:var(--bg-tertiary);color:var(--text-secondary);cursor:pointer;white-space:nowrap">Listas</button>
+          <button class="rep-filter-btn" data-filter="entregado" onclick="Reparaciones.setFilter('entregado',this)" style="font-size:10px;padding:3px 9px;border-radius:14px;border:1px solid var(--border-strong);background:var(--bg-tertiary);color:var(--text-secondary);cursor:pointer;white-space:nowrap">Entregadas</button>
+        </div>
         <div style="flex:1;overflow-y:auto" id="rep-list"></div>
       </div>
       <div class="rep-detail-panel" style="flex:1;display:flex;flex-direction:column;overflow:hidden;min-width:0;background:var(--bg-elevated)">
-        <button class="btn btn-sm rep-back-btn" onclick="Reparaciones.backToList()" style="display:none;margin:10px 14px 0"><i class="ti ti-arrow-left"></i> Ver órdenes</button>
+        <button class="btn btn-sm rep-back-btn" onclick="Reparaciones.backToList()" style="display:none;margin:10px 14px 0;align-self:flex-start"><i class="ti ti-arrow-left"></i> Órdenes</button>
         <div id="rep-detail" style="flex:1;overflow-y:auto;padding:18px 20px"></div>
       </div>
     `;
+    this._filter = 'all';
     setTimeout(() => {
       if (!this.currentId && State.reparaciones.length) this.currentId = State.reparaciones[0].id;
       this.renderList();
@@ -34,24 +57,71 @@ const Reparaciones = {
     return c;
   },
 
-  hasMovimientos(o) { return (o.pagos && o.pagos.length > 0) || (o.repuestos && o.repuestos.length > 0); },
+  _filter: 'all',
+  setFilter(f, btn) {
+    this._filter = f;
+    document.querySelectorAll('.rep-filter-btn').forEach(b => {
+      const active = b === btn;
+      b.style.borderColor = active ? 'var(--blue)' : 'var(--border-strong)';
+      b.style.background  = active ? 'var(--blue-light)' : 'var(--bg-tertiary)';
+      b.style.color       = active ? 'var(--blue)' : 'var(--text-secondary)';
+      b.style.fontWeight  = active ? '600' : '400';
+    });
+    this.renderList();
+  },
 
+  _diasDesde(fechaStr) {
+    if (!fechaStr || fechaStr === 'Hoy') return 0;
+    const parts = fechaStr.split('/');
+    if (parts.length < 2) return 0;
+    const now = new Date();
+    const d = new Date(now.getFullYear(), parseInt(parts[1])-1, parseInt(parts[0]));
+    return Math.max(0, Math.floor((now - d) / 86400000));
+  },
+
+  // ── Lista ─────────────────────────────────────────────
   renderList() {
     const q = (document.getElementById('rep-search')?.value || '').toLowerCase();
-    const filtered = State.reparaciones.filter(o => !q || o.cliente.toLowerCase().includes(q) || o.equipo.toLowerCase().includes(q) || o.id.toLowerCase().includes(q));
-    document.getElementById('rep-list').innerHTML = filtered.map(o => {
-      const flags = [];
-      if (o.pagos?.length) flags.push(`<span class="badge b-green" style="font-size:9px">$ pago</span>`);
-      if (o.repuestos?.length) flags.push(`<span class="badge b-amber" style="font-size:9px">repuesto</span>`);
-      return `<div onclick="Reparaciones.select('${o.id}')" style="padding:10px 14px;border-bottom:1px solid var(--border);cursor:pointer;${this.currentId===o.id?'background:var(--bg-secondary);border-left:2px solid var(--blue)':''}">
-        <div style="display:flex;justify-content:space-between;font-size:12px;font-weight:600">${o.id} — ${o.equipo}<span style="font-size:10px;color:var(--text-secondary);font-weight:400">${o.fechaIngreso}</span></div>
-        <div style="font-size:11px;color:var(--text-secondary)">${o.cliente}</div>
-        <div style="margin-top:5px;display:flex;gap:4px"><span class="badge ${this.ESTADO_CLASS[o.estado]}" style="font-size:9.5px">${this.ESTADO_LABEL[o.estado]}</span>${flags.join('')}</div>
+    let items = State.reparaciones.filter(o => {
+      if (q && !o.cliente.toLowerCase().includes(q) && !o.equipo.toLowerCase().includes(q) && !String(o.id).toLowerCase().includes(q)) return false;
+      if (this._filter === 'activas') return !['entregado','rechazado','no_reparable'].includes(o.estado);
+      if (this._filter === 'listo') return o.estado === 'listo';
+      if (this._filter === 'entregado') return ['entregado','rechazado','no_reparable'].includes(o.estado);
+      return true;
+    });
+
+    const countEl = document.getElementById('rep-list-count');
+    if (countEl) countEl.textContent = `${items.length} orden${items.length !== 1 ? 'es' : ''}`;
+
+    document.getElementById('rep-list').innerHTML = items.map(o => {
+      const dias = this._diasDesde(o.fechaIngreso);
+      const diasStr = dias === 0 ? 'Hoy' : dias === 1 ? '1 día' : `${dias} días`;
+      const diasColor = dias >= 7 ? 'var(--red)' : dias >= 3 ? 'var(--amber)' : 'var(--text-secondary)';
+      const isActive = this.currentId === o.id;
+      const totalPagado = (o.pagos || []).reduce((s, p) => s + p.monto, 0);
+      return `<div onclick="Reparaciones.select('${o.id}')"
+        style="padding:11px 14px;border-bottom:1px solid var(--border);cursor:pointer;
+               border-left:3px solid ${isActive ? 'var(--blue)' : 'transparent'};
+               background:${isActive ? 'rgba(10,132,255,.08)' : 'transparent'};
+               transition:background .12s">
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:6px;margin-bottom:3px">
+          <div style="font-size:12px;font-weight:700;color:${isActive?'var(--blue)':'var(--text)'}">${o.id}</div>
+          <span class="badge ${this.ESTADO_CLASS[o.estado]}" style="font-size:9px;padding:2px 7px;flex-shrink:0">${this.ESTADO_LABEL[o.estado]}</span>
+        </div>
+        <div style="font-size:13px;font-weight:600;margin-bottom:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${o.cliente}</div>
+        <div style="font-size:11px;color:var(--text-secondary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-bottom:5px">${o.equipo}</div>
+        <div style="display:flex;justify-content:space-between;align-items:center">
+          <span style="font-size:10px;color:${diasColor}"><i class="ti ti-clock" style="font-size:9px"></i> ${diasStr}</span>
+          ${totalPagado ? `<span style="font-size:10px;color:var(--green)"><i class="ti ti-cash" style="font-size:9px"></i> ${State.fmtARS(totalPagado)}</span>` : ''}
+          ${o.estado === 'listo' ? '<span style="font-size:10px;color:var(--green);font-weight:700">✓ Lista para entregar</span>' : ''}
+        </div>
       </div>`;
-    }).join('');
+    }).join('') || `<div style="padding:30px 16px;text-align:center;color:var(--text-secondary);font-size:12px">Sin órdenes</div>`;
   },
+
   select(id) { this.currentId = id; this.renderList(); this.renderDetail(); this.syncMobileView(true); },
 
+  // ── Mobile / resize ───────────────────────────────────
   isMobile() { return window.innerWidth < 1024; },
 
   syncMobileView(showDetail) {
@@ -59,197 +129,612 @@ const Reparaciones = {
     const detailPanel = document.querySelector('.rep-detail-panel');
     const backBtn = document.querySelector('.rep-back-btn');
     if (!listPanel || !detailPanel) return;
-
     if (!this.isMobile()) {
-      // Desktop: siempre las dos columnas visibles, sin botón de volver
-      listPanel.style.display = 'flex';
-      detailPanel.style.display = 'flex';
+      listPanel.style.display = 'flex'; detailPanel.style.display = 'flex';
       if (backBtn) backBtn.style.display = 'none';
       return;
     }
-
-    // Mobile: una sola columna visible por vez
     if (showDetail) {
-      listPanel.style.display = 'none';
-      listPanel.style.width = '';
+      listPanel.style.display = 'none'; listPanel.style.width = '';
       detailPanel.style.display = 'flex';
       if (backBtn) backBtn.style.display = 'inline-flex';
     } else {
-      listPanel.style.display = 'flex';
-      listPanel.style.width = '100%';
+      listPanel.style.display = 'flex'; listPanel.style.width = '100%';
       detailPanel.style.display = 'none';
       if (backBtn) backBtn.style.display = 'none';
     }
   },
 
-  backToList() {
-    this.syncMobileView(false);
-  },
+  backToList() { this.syncMobileView(false); },
 
   _resizeBound: false,
   bindResizeListener() {
     if (this._resizeBound) return;
     this._resizeBound = true;
     window.addEventListener('resize', () => {
-      if (document.querySelector('.rep-list-panel')) this.syncMobileView(this.isMobile() && !!this.currentId && document.querySelector('.rep-detail-panel')?.style.display === 'flex');
+      if (document.querySelector('.rep-list-panel'))
+        this.syncMobileView(this.isMobile() && !!this.currentId && document.querySelector('.rep-detail-panel')?.style.display === 'flex');
     });
   },
 
+  // ── Detalle ───────────────────────────────────────────
   renderDetail() {
     const o = State.reparaciones.find(x => x.id === this.currentId);
-    const detail = document.getElementById('rep-detail');
-    if (!o) { detail.innerHTML = `<div class="empty-state"><i class="ti ti-tool"></i>Seleccioná una orden</div>`; return; }
-
-    const totalCosto = o.costoMO + o.repuestos.reduce((a, r) => a + r.costo, 0);
-    const margen = o.precioFinal - totalCosto;
-    const tieneMov = this.hasMovimientos(o);
-    const isTerminal = ['rechazado', 'no_reparable'].includes(o.estado);
-
-    let movInfo = '';
-    if (isTerminal) {
-      movInfo = tieneMov
-        ? `<div style="background:var(--red-light);border:1px solid #F09595;border-radius:8px;padding:10px 12px;margin-bottom:12px;font-size:11.5px;color:var(--red)"><b style="display:block;margin-bottom:3px">⚠ Esta orden tiene movimientos asociados</b>Usá "Cancelar orden" para revertir pagos y repuestos de stock.</div>`
-        : `<div style="background:var(--green-light);border:1px solid #97C459;border-radius:8px;padding:10px 12px;margin-bottom:12px;font-size:11.5px;color:var(--green)"><b style="display:block;margin-bottom:3px">✓ Sin movimientos asociados</b>Equipo marcado automáticamente como devuelto al cliente.</div>`;
+    const el = document.getElementById('rep-detail');
+    if (!el) return;
+    if (!o) {
+      el.innerHTML = `<div class="empty-state" style="margin-top:60px"><i class="ti ti-tool"></i><div>Seleccioná una orden de la lista</div><div style="font-size:12px;margin-top:6px">o creá una nueva con el botón <b>+ Nueva</b></div></div>`;
+      return;
     }
 
-    detail.innerHTML = `
-      <div class="rep-detail-header" style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px;margin-bottom:14px;flex-wrap:wrap">
-        <h2 style="font-size:15px;font-weight:600;flex:1;min-width:0">${o.id} — ${o.equipo}<br><span style="font-size:12px;color:var(--text-secondary);font-weight:400">${o.cliente}</span></h2>
-        <span class="badge ${this.ESTADO_CLASS[o.estado]}" style="flex-shrink:0">${this.ESTADO_LABEL[o.estado]}</span>
+    const totalRepuestos = (o.repuestos || []).reduce((a, r) => a + r.costo, 0);
+    const totalPagado = (o.pagos || []).reduce((a, p) => a + p.monto, 0);
+    const totalCosto = (o.costoMO || 0) + totalRepuestos;
+    const margen = (o.precioFinal || 0) - totalCosto;
+    const isTerminal = ['rechazado','no_reparable','entregado'].includes(o.estado);
+    const dias = this._diasDesde(o.fechaIngreso);
+
+    // Flujo de estados visual
+    const estadoFlow = this.ESTADOS.map((s, i) => {
+      const done = this.ESTADOS.indexOf(o.estado) > i;
+      const current = o.estado === s;
+      const color = current ? this.ESTADO_COLOR[s] : done ? 'var(--green)' : 'var(--border-strong)';
+      const bg = current ? `rgba(${this._hexToRgb(this.ESTADO_COLOR[s])}, .12)` : done ? 'var(--green-light)' : 'var(--bg-tertiary)';
+      return `<div onclick="Reparaciones.setEstado('${s}')" style="flex:1;min-width:0;text-align:center;padding:8px 4px;border-radius:8px;border:1.5px solid ${color};background:${bg};cursor:pointer;transition:all .15s">
+        <div style="font-size:${current?'13':'11'}px;font-weight:${current?'700':'500'};color:${color};white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${this.ESTADO_LABEL[s]}</div>
       </div>
-      <div style="display:flex;gap:4px;flex-wrap:wrap;margin-bottom:14px">
-        ${this.ESTADOS.map(s => `<span onclick="Reparaciones.setEstado('${s}')" style="font-size:11px;padding:5px 11px;border-radius:20px;border:1.5px solid ${o.estado===s?'var(--blue)':'var(--border-strong)'};background:${o.estado===s?'var(--blue-light)':'var(--bg)'};color:${o.estado===s?'var(--blue)':'var(--text-secondary)'};cursor:pointer">${this.ESTADO_LABEL[s]}</span>`).join('')}
-        <span onclick="Reparaciones.setEstado('rechazado')" style="font-size:11px;padding:5px 11px;border-radius:20px;border:1.5px solid #F09595;background:${o.estado==='rechazado'?'var(--red-light)':'var(--bg)'};color:${o.estado==='rechazado'?'var(--red)':'var(--text-secondary)'};cursor:pointer">Rechazado</span>
-        <span onclick="Reparaciones.setEstado('no_reparable')" style="font-size:11px;padding:5px 11px;border-radius:20px;border:1.5px solid #F09595;background:${o.estado==='no_reparable'?'var(--red-light)':'var(--bg)'};color:${o.estado==='no_reparable'?'var(--red)':'var(--text-secondary)'};cursor:pointer">No reparable</span>
+      ${i < this.ESTADOS.length - 1 ? `<div style="width:10px;flex-shrink:0;color:var(--text-tertiary);font-size:10px;align-self:center;text-align:center">›</div>` : ''}`;
+    }).join('');
+
+    el.innerHTML = `
+      <!-- Encabezado -->
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px;margin-bottom:16px;flex-wrap:wrap">
+        <div style="flex:1;min-width:0">
+          <div style="display:flex;align-items:center;gap:8px;margin-bottom:3px">
+            <span style="font-size:18px;font-weight:800;letter-spacing:-.4px">${o.id}</span>
+            <span class="badge ${this.ESTADO_CLASS[o.estado]}">${this.ESTADO_LABEL[o.estado]}</span>
+          </div>
+          <div style="font-size:15px;font-weight:600;margin-bottom:2px">${o.equipo}</div>
+          <div style="font-size:13px;color:var(--text-secondary)">${o.cliente}${o.tel ? ` · <a href="tel:${o.tel}" style="color:var(--blue)">${o.tel}</a>` : ''}</div>
+          <div style="font-size:11px;color:var(--text-secondary);margin-top:3px">Ingreso: ${o.fechaIngreso} · ${dias === 0 ? 'hoy' : dias + ' día' + (dias !== 1 ? 's' : '')} en taller${o.tecnico ? ` · Técnico: ${o.tecnico}` : ''}</div>
+        </div>
+        <div style="display:flex;gap:6px;flex-shrink:0;flex-wrap:wrap">
+          <button class="btn btn-sm" onclick="Reparaciones.openEditForm()" title="Editar datos"><i class="ti ti-pencil"></i></button>
+          ${o.estado === 'listo' ? `<button class="btn btn-sm btn-green" onclick="Reparaciones.entregarYCobrar()"><i class="ti ti-check"></i> Entregar</button>` : ''}
+        </div>
       </div>
-      ${movInfo}
-      <div style="background:var(--red-light);border:1px solid #F09595;border-radius:8px;padding:10px 12px;margin-bottom:14px;display:flex;align-items:center;gap:10px">
-        <i class="ti ti-lock" style="font-size:18px;color:var(--red)"></i>
-        <div style="flex:1"><div style="font-size:12px;font-weight:600;color:var(--red)">Clave de desbloqueo</div></div>
-        <div style="font-family:monospace;font-size:14px;font-weight:600;background:#fff;padding:4px 10px;border-radius:6px;color:var(--red)">${o.clave||'—'}</div>
+
+      <!-- Flujo de estado -->
+      <div style="background:var(--bg-secondary);border-radius:var(--radius-md);padding:12px;margin-bottom:14px">
+        <div style="font-size:10px;font-weight:600;color:var(--text-tertiary);text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px">Estado de la orden</div>
+        <div style="display:flex;gap:4px;align-items:center">${estadoFlow}</div>
+        <div style="display:flex;gap:6px;margin-top:8px">
+          <button onclick="Reparaciones.setEstado('rechazado')" style="font-size:11px;padding:4px 10px;border-radius:8px;border:1px solid var(--red);background:${o.estado==='rechazado'?'var(--red-light)':'transparent'};color:var(--red);cursor:pointer">Rechazado</button>
+          <button onclick="Reparaciones.setEstado('no_reparable')" style="font-size:11px;padding:4px 10px;border-radius:8px;border:1px solid var(--red);background:${o.estado==='no_reparable'?'var(--red-light)':'transparent'};color:var(--red);cursor:pointer">No reparable</button>
+        </div>
       </div>
-      <div class="card"><div class="card-title"><i class="ti ti-stethoscope"></i> Diagnóstico</div>
-        <p style="font-size:12.5px;background:var(--purple-light);padding:10px;border-radius:8px;color:var(--purple)">${o.diagnostico || 'Pendiente de diagnóstico'}</p>
+
+      <!-- Info equipo -->
+      <div class="card" style="margin-bottom:10px">
+        <div class="card-title"><i class="ti ti-device-mobile"></i> Equipo</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;font-size:12px">
+          <div><span style="color:var(--text-secondary)">Modelo:</span> <b>${o.equipo}</b></div>
+          <div><span style="color:var(--text-secondary)">Clave:</span> <b style="font-family:monospace;background:var(--bg-tertiary);padding:2px 6px;border-radius:5px">${o.clave || '—'}</b></div>
+          <div style="grid-column:1/-1"><span style="color:var(--text-secondary)">Falla reportada:</span> ${o.falla || '—'}</div>
+          ${o.diagnostico ? `<div style="grid-column:1/-1;background:var(--purple-light);padding:8px 10px;border-radius:8px;color:var(--purple)"><b>Diagnóstico:</b> ${o.diagnostico}</div>` : ''}
+        </div>
       </div>
-      <div class="card"><div class="card-title"><i class="ti ti-tool"></i> Repuestos utilizados</div>
-        ${o.repuestos.length ? o.repuestos.map(r => `<div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid var(--border);font-size:12px"><span>${r.nombre} ${r.fromStock?'<span style="color:var(--text-secondary);font-size:10px">(de stock)</span>':'<span style="color:var(--text-secondary);font-size:10px">(compra externa)</span>'}</span><b>USD ${r.costo}</b></div>`).join('') : '<p style="font-size:12px;color:var(--text-secondary)">Sin repuestos cargados</p>'}
-        <button class="btn btn-sm" style="margin-top:8px" onclick="Reparaciones.addRepuesto()"><i class="ti ti-plus"></i> Agregar repuesto</button>
+
+      <!-- Repuestos -->
+      <div class="card" style="margin-bottom:10px">
+        <div class="card-title" style="justify-content:space-between">
+          <span><i class="ti ti-tool"></i> Repuestos utilizados</span>
+          <button class="btn btn-sm" onclick="Reparaciones.openAddRepuestoModal()"><i class="ti ti-plus"></i> Agregar</button>
+        </div>
+        ${(o.repuestos || []).length ? `
+          <div style="border:1px solid var(--border);border-radius:8px;overflow:hidden;margin-bottom:4px">
+            ${o.repuestos.map((r, i) => `
+              <div style="display:flex;align-items:center;gap:8px;padding:8px 12px;border-bottom:1px solid var(--border);font-size:12px;${i===o.repuestos.length-1?'border-bottom:none':''}">
+                <div style="flex:1;min-width:0">
+                  <div style="font-weight:500">${r.nombre}</div>
+                  <div style="font-size:10px;color:var(--text-secondary)">${r.fromStock ? '📦 De stock' : '🛒 Compra externa'}</div>
+                </div>
+                <b style="color:var(--text)">USD ${r.costo}</b>
+              </div>`).join('')}
+          </div>
+          <div style="text-align:right;font-size:11px;color:var(--text-secondary)">Total repuestos: <b>USD ${totalRepuestos.toFixed(2)}</b></div>
+        ` : `<p style="font-size:12px;color:var(--text-secondary)">Sin repuestos cargados</p>`}
       </div>
-      <div class="card"><div class="card-title"><i class="ti ti-credit-card"></i> Pagos / señas</div>
-        ${o.pagos.length ? o.pagos.map(p => `<div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid var(--border);font-size:12px">${p.caja}<b>${State.fmtARS(p.monto)}</b></div>`).join('') : '<p style="font-size:12px;color:var(--text-secondary)">Sin pagos registrados</p>'}
-        <button class="btn btn-sm" style="margin-top:8px" onclick="Reparaciones.addPago()"><i class="ti ti-plus"></i> Registrar seña</button>
+
+      <!-- Pagos -->
+      <div class="card" style="margin-bottom:10px">
+        <div class="card-title" style="justify-content:space-between">
+          <span><i class="ti ti-credit-card"></i> Pagos / señas</span>
+          <button class="btn btn-sm" onclick="Reparaciones.openAddPagoModal()"><i class="ti ti-plus"></i> Registrar</button>
+        </div>
+        ${(o.pagos || []).length ? `
+          <div style="border:1px solid var(--border);border-radius:8px;overflow:hidden;margin-bottom:4px">
+            ${o.pagos.map((p, i) => `
+              <div style="display:flex;align-items:center;gap:8px;padding:8px 12px;border-bottom:1px solid var(--border);font-size:12px;${i===o.pagos.length-1?'border-bottom:none':''}">
+                <i class="ti ti-cash" style="color:var(--green);font-size:14px;flex-shrink:0"></i>
+                <div style="flex:1">${p.persona} · <span style="color:var(--text-secondary)">${p.bolsillo}</span></div>
+                <b style="color:var(--green)">${State.fmtARS(p.monto)}</b>
+              </div>`).join('')}
+          </div>
+          <div style="text-align:right;font-size:11px;color:var(--text-secondary)">Total cobrado: <b style="color:var(--green)">${State.fmtARS(totalPagado)}</b></div>
+        ` : `<p style="font-size:12px;color:var(--text-secondary)">Sin pagos registrados</p>`}
       </div>
-      <div class="card"><div class="card-title"><i class="ti ti-currency-dollar"></i> Costos y precio</div>
+
+      <!-- Costos y margen -->
+      <div class="card" style="margin-bottom:10px">
+        <div class="card-title"><i class="ti ti-currency-dollar"></i> Costos y precio</div>
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px">
-          <div><label style="font-size:11px;color:var(--text-secondary)">Mano de obra</label><input type="number" id="rep-f-mo" value="${o.costoMO}" style="width:100%;font-size:12px;padding:6px 9px;border:1px solid var(--border-strong);border-radius:8px"></div>
-          <div><label style="font-size:11px;color:var(--text-secondary)">Precio cobrado</label><input type="number" id="rep-f-precio" value="${o.precioFinal}" style="width:100%;font-size:12px;padding:6px 9px;border:1px solid var(--border-strong);border-radius:8px"></div>
+          <div>
+            <label style="font-size:11px;color:var(--text-secondary);display:block;margin-bottom:4px">Mano de obra (USD)</label>
+            <input type="number" id="rep-f-mo" value="${o.costoMO || 0}" min="0"
+              style="width:100%;font-size:13px;padding:7px 10px;background:var(--bg-secondary);border:1px solid var(--border-strong);border-radius:8px;color:var(--text)">
+          </div>
+          <div>
+            <label style="font-size:11px;color:var(--text-secondary);display:block;margin-bottom:4px">Precio final (USD)</label>
+            <input type="number" id="rep-f-precio" value="${o.precioFinal || 0}" min="0"
+              style="width:100%;font-size:13px;padding:7px 10px;background:var(--bg-secondary);border:1px solid var(--border-strong);border-radius:8px;color:var(--text)">
+          </div>
         </div>
-        <div style="background:var(--blue-light);border-radius:8px;padding:10px;display:flex;justify-content:space-around;text-align:center">
-          <div><label style="font-size:10px;color:var(--blue)">Costo</label><div style="font-weight:600;color:var(--blue)">${State.fmtARS(totalCosto)}</div></div>
-          <div><label style="font-size:10px;color:var(--blue)">Precio</label><div style="font-weight:600;color:var(--blue)">${State.fmtARS(o.precioFinal)}</div></div>
-          <div><label style="font-size:10px;color:var(--blue)">Margen</label><div style="font-weight:600;color:${margen>=0?'var(--green)':'var(--red)'}">${margen>=0?'+':''}${State.fmtARS(margen)}</div></div>
+        <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:6px;background:var(--bg-secondary);border-radius:8px;padding:10px">
+          <div style="text-align:center"><div style="font-size:10px;color:var(--text-secondary);margin-bottom:2px">Costo total</div><div style="font-size:14px;font-weight:700">USD ${totalCosto.toFixed(2)}</div></div>
+          <div style="text-align:center"><div style="font-size:10px;color:var(--text-secondary);margin-bottom:2px">Precio cobrado</div><div style="font-size:14px;font-weight:700;color:var(--blue)">USD ${(o.precioFinal||0).toFixed(2)}</div></div>
+          <div style="text-align:center"><div style="font-size:10px;color:var(--text-secondary);margin-bottom:2px">Margen</div><div style="font-size:14px;font-weight:700;color:${margen>=0?'var(--green)':'var(--red)'}">${margen>=0?'+':''}USD ${margen.toFixed(2)}</div></div>
         </div>
       </div>
-      <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:6px">
-        ${isTerminal && tieneMov ? `<button class="btn btn-red" onclick="Reparaciones.cancelarConReversion()"><i class="ti ti-arrow-back-up"></i> Cancelar orden (revertir)</button>` : ''}
-        ${o.estado === 'listo' ? `<button class="btn btn-green" onclick="Reparaciones.entregarYCobrar()"><i class="ti ti-check"></i> Entregar y cobrar</button>` : `<button class="btn btn-primary" onclick="Reparaciones.saveOrder()"><i class="ti ti-check"></i> Guardar cambios</button>`}
+
+      <!-- Diagnóstico / notas internas -->
+      <div class="card" style="margin-bottom:10px">
+        <div class="card-title"><i class="ti ti-notes"></i> Diagnóstico y notas internas</div>
+        <div style="margin-bottom:8px">
+          <label style="font-size:11px;color:var(--text-secondary);display:block;margin-bottom:4px">Diagnóstico técnico</label>
+          <textarea id="rep-f-diagnostico" rows="2"
+            style="width:100%;font-size:12.5px;padding:8px 10px;background:var(--bg-secondary);border:1px solid var(--border-strong);border-radius:8px;color:var(--text);resize:vertical;font-family:var(--font)"
+            placeholder="Diagnóstico y descripción del trabajo realizado…">${o.diagnostico || ''}</textarea>
+        </div>
+        <div>
+          <label style="font-size:11px;color:var(--text-secondary);display:block;margin-bottom:4px">Notas internas</label>
+          <textarea id="rep-f-notas" rows="2"
+            style="width:100%;font-size:12.5px;padding:8px 10px;background:var(--bg-secondary);border:1px solid var(--border-strong);border-radius:8px;color:var(--text);resize:vertical;font-family:var(--font)"
+            placeholder="Notas internas del equipo…">${o.notas || ''}</textarea>
+        </div>
+      </div>
+
+      <!-- Acciones -->
+      <div style="display:flex;gap:8px;justify-content:space-between;align-items:center;flex-wrap:wrap;margin-top:4px;padding-bottom:20px">
+        <div>
+          ${!isTerminal || this.hasMovimientos(o) ? `<button class="btn btn-red btn-sm" onclick="Reparaciones.cancelarConReversion()"><i class="ti ti-trash"></i> Cancelar orden</button>` : ''}
+        </div>
+        <button class="btn btn-primary" onclick="Reparaciones.saveOrder()"><i class="ti ti-check"></i> Guardar cambios</button>
       </div>
     `;
   },
 
+  _hexToRgb(cssVar) {
+    const map = {
+      'var(--gray)':'142,142,147','var(--purple)':'191,90,242','var(--blue)':'10,132,255',
+      'var(--green)':'48,209,88','var(--teal)':'90,200,250','var(--red)':'255,69,58'
+    };
+    return map[cssVar] || '10,132,255';
+  },
+
+  hasMovimientos(o) { return (o.pagos && o.pagos.length > 0) || (o.repuestos && o.repuestos.length > 0); },
+
+  // ── Cambio de estado ──────────────────────────────────
   async setEstado(estado) {
     const o = State.reparaciones.find(x => x.id === this.currentId);
     if (!o) return;
+    if (o.estado === estado) return;
     o.estado = estado;
-    if (['rechazado', 'no_reparable'].includes(estado) && !this.hasMovimientos(o)) {
+    if (['rechazado','no_reparable'].includes(estado) && !this.hasMovimientos(o)) {
       o.equipoDevuelto = true; o.custodio = '';
-      toast('Equipo marcado como devuelto al cliente automáticamente (sin movimientos que revertir).');
+      toast('Equipo marcado como devuelto automáticamente.');
     }
     await DB.actualizarReparacion(o);
     Sheets.reparacion(o);
     this.renderList(); this.renderDetail();
+    toast(`Estado actualizado a ${this.ESTADO_LABEL[estado]}.`);
   },
 
-  async addRepuesto() {
-    const fromStockChoice = confirm('¿Es un repuesto que sale de tu stock? Aceptar = sí, de stock. Cancelar = compra externa.');
-    const nombre = prompt('Nombre del repuesto:');
-    if (!nombre) return;
-    const costo = parseFloat(prompt('Costo en USD:', '0')) || 0;
-    const o = State.reparaciones.find(x => x.id === this.currentId);
-    const repuesto = { nombre, costo, fromStock: fromStockChoice };
-    o.repuestos.push(repuesto);
-    await DB.agregarRepuestoReparacion(o.id, repuesto);
-    this.renderList(); this.renderDetail();
-  },
-
-  async addPago() {
-    const monto = parseFloat(prompt('Monto de la seña (ARS):', '0')) || 0;
-    if (!monto) return;
-    const persona = prompt('¿Qué persona recibe el pago?', 'Valen') || 'Valen';
-    const o = State.reparaciones.find(x => x.id === this.currentId);
-    const pago = { caja: `${persona}-ARS cash`, monto, persona, bolsillo: 'ARS cash' };
-    o.pagos.push(pago);
-    State.acreditarCaja(persona, 'ARS cash', monto);
-    await DB.agregarPagoReparacion(o.id, pago);
-    this.renderList(); this.renderDetail();
-    toast(`Seña de ${State.fmtARS(monto)} acreditada en la caja de ${persona}.`);
-  },
-
-  async cancelarConReversion() {
-    const o = State.reparaciones.find(x => x.id === this.currentId);
-    if (!confirm('¿Cancelar esta orden? Se revertirán los pagos en sus cajas y los repuestos de stock volverán al inventario.')) return;
-
-    toast('Revirtiendo movimientos...');
-    // Revertir pagos
-    o.pagos.forEach(p => State.debitarCaja(p.persona, p.bolsillo, p.monto));
-    // Revertir repuestos que salieron de stock (sumarlos de nuevo al inventario)
-    for (const r of o.repuestos.filter(r => r.fromStock && r.stockId)) {
-      const item = State.stock.find(s => s.id === r.stockId);
-      if (item) {
-        if (item.imeis) { /* repuestos no manejan IMEI individual en esta maqueta */ }
-        else { item.cantidad = (item.cantidad || 0) + 1; await DB.actualizarCantidadStock(r.stockId, item.cantidad); }
-      }
-    }
-    await DB.limpiarMovimientosReparacion(o.id);
-    o.pagos = [];
-    o.repuestos = o.repuestos.filter(r => !r.fromStock);
-    o.equipoDevuelto = true; o.custodio = '';
-    await DB.actualizarReparacion(o);
-    this.renderList(); this.renderDetail();
-    toast('Orden cancelada. Pagos revertidos a sus cajas de origen y repuestos de stock restaurados.');
-  },
-
-  async entregarYCobrar() {
-    const o = State.reparaciones.find(x => x.id === this.currentId);
-    const persona = o.custodio || prompt('¿En qué caja se acredita el cobro?', 'Valen') || 'Valen';
-    State.acreditarCaja(persona, 'ARS cash', o.precioFinal);
-    o.estado = 'entregado';
-    await DB.actualizarReparacion(o);
-    this.renderList(); this.renderDetail();
-    toast(`Equipo entregado. ${State.fmtARS(o.precioFinal)} acreditado en la caja de ${persona}.`);
-  },
-
+  // ── Guardar cambios ───────────────────────────────────
   async saveOrder() {
     const o = State.reparaciones.find(x => x.id === this.currentId);
-    o.costoMO = parseFloat(document.getElementById('rep-f-mo').value) || 0;
-    o.precioFinal = parseFloat(document.getElementById('rep-f-precio').value) || 0;
+    if (!o) return;
+    o.costoMO    = parseFloat(document.getElementById('rep-f-mo')?.value) || 0;
+    o.precioFinal= parseFloat(document.getElementById('rep-f-precio')?.value) || 0;
+    o.diagnostico= document.getElementById('rep-f-diagnostico')?.value || '';
+    o.notas      = document.getElementById('rep-f-notas')?.value || '';
     await DB.actualizarReparacion(o);
     Sheets.reparacion(o);
     this.renderDetail();
     toast('Cambios guardados.');
   },
 
-  async newOrder() {
-    const id = 'R0' + (20 + State.reparaciones.length);
-    const o = { id, cliente: 'Nuevo cliente', tel: '', equipo: 'Sin especificar', falla: '', clave: '', estado: 'ingresado', fechaIngreso: 'Hoy', diagnostico: '', presupuestoAprobado: false, repuestos: [], pagos: [], costoMO: 0, precioFinal: 0, tecnico: 'Técnico ext.', custodio: '', notas: '', equipoDevuelto: false };
+  // ── Formulario nueva orden ────────────────────────────
+  openNewForm() { this._openOrderModal(null); },
+  openEditForm() {
+    const o = State.reparaciones.find(x => x.id === this.currentId);
+    if (o) this._openOrderModal(o);
+  },
+
+  _openOrderModal(o) {
+    const isEdit = !!o;
+    const personas = State.personas || [];
+    const personaOpts = personas.map(p => `<option value="${p}" ${o?.tecnico===p?'selected':''}>${p}</option>`).join('');
+    const overlay = document.createElement('div');
+    overlay.id = 'rep-form-overlay';
+    overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.7);backdrop-filter:blur(6px);z-index:800;display:flex;align-items:center;justify-content:center;padding:20px';
+    overlay.innerHTML = `
+      <div style="background:var(--bg-elevated);border:1px solid var(--border-strong);border-radius:var(--radius-xl);width:min(560px,96vw);max-height:90dvh;display:flex;flex-direction:column;overflow:hidden">
+        <div style="padding:16px 20px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;flex-shrink:0">
+          <div>
+            <div style="font-size:16px;font-weight:700">${isEdit ? 'Editar orden' : 'Nueva orden de reparación'}</div>
+            ${isEdit ? `<div style="font-size:12px;color:var(--text-secondary)">${o.id}</div>` : ''}
+          </div>
+          <button onclick="Reparaciones._closeOrderModal()" style="background:var(--bg-secondary);border:1px solid var(--border);border-radius:8px;width:30px;height:30px;cursor:pointer;color:var(--text);display:flex;align-items:center;justify-content:center;font-size:16px"><i class="ti ti-x"></i></button>
+        </div>
+        <div style="padding:20px;overflow-y:auto;flex:1;display:flex;flex-direction:column;gap:14px">
+
+          <!-- Cliente -->
+          <div style="background:var(--bg-secondary);border-radius:var(--radius-md);padding:14px">
+            <div style="font-size:11px;font-weight:700;color:var(--text-tertiary);text-transform:uppercase;letter-spacing:.06em;margin-bottom:10px">Datos del cliente</div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+              <div style="grid-column:1/-1">
+                <label style="font-size:11px;color:var(--text-secondary);display:block;margin-bottom:4px">Nombre del cliente *</label>
+                <input type="text" id="rof-cliente" value="${o?.cliente||''}" placeholder="Ej: Juan Pérez"
+                  style="width:100%;font-size:13px;padding:8px 10px;background:var(--bg-tertiary);border:1px solid var(--border-strong);border-radius:8px;color:var(--text)">
+              </div>
+              <div style="grid-column:1/-1">
+                <label style="font-size:11px;color:var(--text-secondary);display:block;margin-bottom:4px">Teléfono</label>
+                <input type="tel" id="rof-tel" value="${o?.tel||''}" placeholder="Ej: 3412345678"
+                  style="width:100%;font-size:13px;padding:8px 10px;background:var(--bg-tertiary);border:1px solid var(--border-strong);border-radius:8px;color:var(--text)">
+              </div>
+            </div>
+          </div>
+
+          <!-- Equipo -->
+          <div style="background:var(--bg-secondary);border-radius:var(--radius-md);padding:14px">
+            <div style="font-size:11px;font-weight:700;color:var(--text-tertiary);text-transform:uppercase;letter-spacing:.06em;margin-bottom:10px">Datos del equipo</div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+              <div style="grid-column:1/-1">
+                <label style="font-size:11px;color:var(--text-secondary);display:block;margin-bottom:4px">Equipo / modelo *</label>
+                <input type="text" id="rof-equipo" value="${o?.equipo||''}" placeholder="Ej: iPhone 13 Pro Max 256GB"
+                  style="width:100%;font-size:13px;padding:8px 10px;background:var(--bg-tertiary);border:1px solid var(--border-strong);border-radius:8px;color:var(--text)">
+              </div>
+              <div>
+                <label style="font-size:11px;color:var(--text-secondary);display:block;margin-bottom:4px">IMEI (opcional)</label>
+                <input type="text" id="rof-clave" value="${o?.clave||''}" placeholder="15 dígitos o código"
+                  style="width:100%;font-size:13px;padding:8px 10px;background:var(--bg-tertiary);border:1px solid var(--border-strong);border-radius:8px;color:var(--text);font-family:monospace">
+              </div>
+              <div>
+                <label style="font-size:11px;color:var(--text-secondary);display:block;margin-bottom:4px">Clave de desbloqueo</label>
+                <input type="text" id="rof-pin" value="${o?.clave||''}" placeholder="PIN / patrón"
+                  style="width:100%;font-size:13px;padding:8px 10px;background:var(--bg-tertiary);border:1px solid var(--border-strong);border-radius:8px;color:var(--text);font-family:monospace">
+              </div>
+              <div style="grid-column:1/-1">
+                <label style="font-size:11px;color:var(--text-secondary);display:block;margin-bottom:4px">Descripción del problema *</label>
+                <textarea id="rof-falla" rows="2"
+                  style="width:100%;font-size:13px;padding:8px 10px;background:var(--bg-tertiary);border:1px solid var(--border-strong);border-radius:8px;color:var(--text);resize:vertical;font-family:var(--font)"
+                  placeholder="Describir el problema reportado por el cliente…">${o?.falla||''}</textarea>
+              </div>
+            </div>
+          </div>
+
+          <!-- Técnico y precio -->
+          <div style="background:var(--bg-secondary);border-radius:var(--radius-md);padding:14px">
+            <div style="font-size:11px;font-weight:700;color:var(--text-tertiary);text-transform:uppercase;letter-spacing:.06em;margin-bottom:10px">Asignación y precio</div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+              <div style="grid-column:1/-1">
+                <label style="font-size:11px;color:var(--text-secondary);display:block;margin-bottom:4px">Técnico asignado</label>
+                <select id="rof-tecnico" style="width:100%;font-size:13px;padding:8px 10px;background:var(--bg-tertiary);border:1px solid var(--border-strong);border-radius:8px;color:var(--text)">
+                  <option value="">Sin asignar</option>
+                  ${personaOpts}
+                </select>
+              </div>
+              <div>
+                <label style="font-size:11px;color:var(--text-secondary);display:block;margin-bottom:4px">Precio estimado (USD)</label>
+                <input type="number" id="rof-precio" value="${o?.precioFinal||''}" placeholder="0" min="0"
+                  style="width:100%;font-size:13px;padding:8px 10px;background:var(--bg-tertiary);border:1px solid var(--border-strong);border-radius:8px;color:var(--text)">
+              </div>
+              <div>
+                <label style="font-size:11px;color:var(--text-secondary);display:block;margin-bottom:4px">Fecha est. de entrega</label>
+                <input type="date" id="rof-fecha-entrega" value="${o?.fechaEntrega||''}"
+                  style="width:100%;font-size:13px;padding:8px 10px;background:var(--bg-tertiary);border:1px solid var(--border-strong);border-radius:8px;color:var(--text)">
+              </div>
+            </div>
+          </div>
+
+        </div>
+        <div style="padding:14px 20px;border-top:1px solid var(--border);display:flex;justify-content:flex-end;gap:8px;flex-shrink:0">
+          <button class="btn" onclick="Reparaciones._closeOrderModal()">Cancelar</button>
+          <button class="btn btn-primary" onclick="Reparaciones._submitOrderForm(${isEdit})">
+            <i class="ti ti-${isEdit?'check':'plus'}"></i> ${isEdit ? 'Guardar cambios' : 'Crear orden'}
+          </button>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(overlay);
+    overlay.addEventListener('click', e => { if (e.target === overlay) this._closeOrderModal(); });
+    document.addEventListener('keydown', this._escOrderModal);
+    setTimeout(() => document.getElementById('rof-cliente')?.focus(), 80);
+  },
+
+  _escOrderModal(e) { if (e.key === 'Escape') Reparaciones._closeOrderModal(); },
+  _closeOrderModal() {
+    document.getElementById('rep-form-overlay')?.remove();
+    document.removeEventListener('keydown', Reparaciones._escOrderModal);
+  },
+
+  async _submitOrderForm(isEdit) {
+    const cliente = document.getElementById('rof-cliente')?.value.trim();
+    const equipo  = document.getElementById('rof-equipo')?.value.trim();
+    if (!cliente || !equipo) { toast('Completá al menos cliente y equipo.'); return; }
+
+    const data = {
+      cliente,
+      tel:          document.getElementById('rof-tel')?.value.trim() || '',
+      equipo,
+      clave:        document.getElementById('rof-pin')?.value.trim() || '',
+      falla:        document.getElementById('rof-falla')?.value.trim() || '',
+      tecnico:      document.getElementById('rof-tecnico')?.value || '',
+      precioFinal:  parseFloat(document.getElementById('rof-precio')?.value) || 0,
+      fechaEntrega: document.getElementById('rof-fecha-entrega')?.value || '',
+    };
+
+    this._closeOrderModal();
+
+    if (isEdit) {
+      const o = State.reparaciones.find(x => x.id === this.currentId);
+      if (!o) return;
+      Object.assign(o, data);
+      await DB.actualizarReparacion(o);
+      Sheets.reparacion(o);
+      this.renderList(); this.renderDetail();
+      toast('Orden actualizada.');
+    } else {
+      await this.newOrder(data);
+    }
+  },
+
+  async newOrder(data = {}) {
+    const maxNum = State.reparaciones.reduce((max, r) => {
+      const n = parseInt(String(r.id).replace(/\D/g, ''), 10);
+      return isNaN(n) ? max : Math.max(max, n);
+    }, 19);
+    const id = 'R' + String(maxNum + 1).padStart(3, '0');
+    const o = {
+      id,
+      cliente: data.cliente || 'Nuevo cliente',
+      tel: data.tel || '',
+      equipo: data.equipo || 'Sin especificar',
+      falla: data.falla || '',
+      clave: data.clave || '',
+      estado: 'ingresado',
+      fechaIngreso: new Date().toLocaleDateString('es-AR', { day:'2-digit', month:'2-digit' }),
+      fechaEntrega: data.fechaEntrega || '',
+      diagnostico: '',
+      presupuestoAprobado: false,
+      repuestos: [], pagos: [],
+      costoMO: 0,
+      precioFinal: data.precioFinal || 0,
+      tecnico: data.tecnico || '',
+      custodio: '',
+      notas: '',
+      equipoDevuelto: false
+    };
     await DB.crearReparacion(o);
     Sheets.reparacion(o);
     State.reparaciones.unshift(o);
     this.currentId = id;
     this.renderList(); this.renderDetail();
     this.syncMobileView(true);
-  }
-};
+    toast(`Orden ${id} creada.`);
+  },
 
+  // ── Modal agregar repuesto ────────────────────────────
+  openAddRepuestoModal() {
+    const overlay = document.createElement('div');
+    overlay.id = 'rep-repuesto-overlay';
+    overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.7);backdrop-filter:blur(6px);z-index:900;display:flex;align-items:center;justify-content:center;padding:20px';
+    overlay.innerHTML = `
+      <div style="background:var(--bg-elevated);border:1px solid var(--border-strong);border-radius:var(--radius-xl);width:min(400px,96vw);overflow:hidden">
+        <div style="padding:14px 18px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center">
+          <div style="font-size:14px;font-weight:700">Agregar repuesto</div>
+          <button onclick="document.getElementById('rep-repuesto-overlay').remove()" style="background:none;border:none;cursor:pointer;color:var(--text-secondary);font-size:18px"><i class="ti ti-x"></i></button>
+        </div>
+        <div style="padding:18px;display:flex;flex-direction:column;gap:12px">
+          <div>
+            <label style="font-size:11px;color:var(--text-secondary);display:block;margin-bottom:4px">Nombre del repuesto</label>
+            <input type="text" id="rep-r-nombre" placeholder="Ej: Pantalla OLED, Batería 3000mAh…"
+              style="width:100%;font-size:13px;padding:8px 10px;background:var(--bg-secondary);border:1px solid var(--border-strong);border-radius:8px;color:var(--text)">
+          </div>
+          <div>
+            <label style="font-size:11px;color:var(--text-secondary);display:block;margin-bottom:4px">Costo en USD</label>
+            <input type="number" id="rep-r-costo" value="0" min="0"
+              style="width:100%;font-size:13px;padding:8px 10px;background:var(--bg-secondary);border:1px solid var(--border-strong);border-radius:8px;color:var(--text)">
+          </div>
+          <div style="display:flex;gap:8px">
+            <label style="display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer;flex:1;padding:8px 10px;border:1.5px solid var(--border-strong);border-radius:8px">
+              <input type="radio" name="rep-r-origen" value="externo" checked> Compra externa
+            </label>
+            <label style="display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer;flex:1;padding:8px 10px;border:1.5px solid var(--border-strong);border-radius:8px">
+              <input type="radio" name="rep-r-origen" value="stock"> De mi stock
+            </label>
+          </div>
+        </div>
+        <div style="padding:12px 18px;border-top:1px solid var(--border);display:flex;justify-content:flex-end;gap:8px">
+          <button class="btn" onclick="document.getElementById('rep-repuesto-overlay').remove()">Cancelar</button>
+          <button class="btn btn-primary" onclick="Reparaciones.submitAddRepuesto()"><i class="ti ti-plus"></i> Agregar</button>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(overlay);
+    setTimeout(() => document.getElementById('rep-r-nombre')?.focus(), 60);
+  },
+
+  async submitAddRepuesto() {
+    const nombre = document.getElementById('rep-r-nombre')?.value.trim();
+    if (!nombre) { toast('Ingresá el nombre del repuesto.'); return; }
+    const costo = parseFloat(document.getElementById('rep-r-costo')?.value) || 0;
+    const fromStock = document.querySelector('input[name="rep-r-origen"]:checked')?.value === 'stock';
+    document.getElementById('rep-repuesto-overlay')?.remove();
+    const o = State.reparaciones.find(x => x.id === this.currentId);
+    if (!o) return;
+    const repuesto = { nombre, costo, fromStock };
+    o.repuestos.push(repuesto);
+    await DB.agregarRepuestoReparacion(o.id, repuesto);
+    this.renderDetail();
+    toast('Repuesto agregado.');
+  },
+
+  // ── Modal registrar pago ──────────────────────────────
+  openAddPagoModal() {
+    const personas = State.personas || [];
+    const personaOpts = personas.map(p => `<option value="${p}">${p}</option>`).join('');
+    const bolsilloOpts = this.BOLSILLOS.map(b => `<option value="${b}">${b}</option>`).join('');
+    const overlay = document.createElement('div');
+    overlay.id = 'rep-pago-overlay';
+    overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.7);backdrop-filter:blur(6px);z-index:900;display:flex;align-items:center;justify-content:center;padding:20px';
+    overlay.innerHTML = `
+      <div style="background:var(--bg-elevated);border:1px solid var(--border-strong);border-radius:var(--radius-xl);width:min(400px,96vw);overflow:hidden">
+        <div style="padding:14px 18px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center">
+          <div style="font-size:14px;font-weight:700">Registrar pago / seña</div>
+          <button onclick="document.getElementById('rep-pago-overlay').remove()" style="background:none;border:none;cursor:pointer;color:var(--text-secondary);font-size:18px"><i class="ti ti-x"></i></button>
+        </div>
+        <div style="padding:18px;display:flex;flex-direction:column;gap:12px">
+          <div>
+            <label style="font-size:11px;color:var(--text-secondary);display:block;margin-bottom:4px">Monto (ARS)</label>
+            <input type="number" id="rep-p-monto" value="" placeholder="0" min="0"
+              style="width:100%;font-size:15px;padding:9px 12px;background:var(--bg-secondary);border:1px solid var(--border-strong);border-radius:8px;color:var(--text)">
+          </div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+            <div>
+              <label style="font-size:11px;color:var(--text-secondary);display:block;margin-bottom:4px">Caja (persona)</label>
+              <select id="rep-p-persona" style="width:100%;font-size:13px;padding:8px 10px;background:var(--bg-secondary);border:1px solid var(--border-strong);border-radius:8px;color:var(--text)">
+                ${personaOpts}
+              </select>
+            </div>
+            <div>
+              <label style="font-size:11px;color:var(--text-secondary);display:block;margin-bottom:4px">Forma de pago</label>
+              <select id="rep-p-bolsillo" style="width:100%;font-size:13px;padding:8px 10px;background:var(--bg-secondary);border:1px solid var(--border-strong);border-radius:8px;color:var(--text)">
+                ${bolsilloOpts}
+              </select>
+            </div>
+          </div>
+        </div>
+        <div style="padding:12px 18px;border-top:1px solid var(--border);display:flex;justify-content:flex-end;gap:8px">
+          <button class="btn" onclick="document.getElementById('rep-pago-overlay').remove()">Cancelar</button>
+          <button class="btn btn-primary" onclick="Reparaciones.submitAddPago()"><i class="ti ti-cash"></i> Registrar</button>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(overlay);
+    setTimeout(() => document.getElementById('rep-p-monto')?.focus(), 60);
+  },
+
+  async submitAddPago() {
+    const monto = parseFloat(document.getElementById('rep-p-monto')?.value) || 0;
+    if (!monto) { toast('Ingresá un monto válido.'); return; }
+    const persona  = document.getElementById('rep-p-persona')?.value;
+    const bolsillo = document.getElementById('rep-p-bolsillo')?.value;
+    document.getElementById('rep-pago-overlay')?.remove();
+    const o = State.reparaciones.find(x => x.id === this.currentId);
+    if (!o) return;
+    const pago = { caja: `${persona}-${bolsillo}`, monto, persona, bolsillo };
+    o.pagos.push(pago);
+    State.acreditarCaja(persona, bolsillo, monto);
+    await DB.agregarPagoReparacion(o.id, pago);
+    this.renderDetail();
+    toast(`${State.fmtARS(monto)} acreditado en caja de ${persona}.`);
+  },
+
+  // ── Entregar ──────────────────────────────────────────
+  async entregarYCobrar() {
+    const o = State.reparaciones.find(x => x.id === this.currentId);
+    if (!o) return;
+    const personas = State.personas || [];
+    const overlay = document.createElement('div');
+    overlay.id = 'rep-entrega-overlay';
+    overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.7);backdrop-filter:blur(6px);z-index:900;display:flex;align-items:center;justify-content:center;padding:20px';
+    const totalPagado = (o.pagos || []).reduce((s, p) => s + p.monto, 0);
+    const saldo = (o.precioFinal || 0) * (State.refBlue || 1) - totalPagado;
+    overlay.innerHTML = `
+      <div style="background:var(--bg-elevated);border:1px solid var(--border-strong);border-radius:var(--radius-xl);width:min(380px,96vw);overflow:hidden">
+        <div style="padding:14px 18px;border-bottom:1px solid var(--border)">
+          <div style="font-size:15px;font-weight:700;color:var(--green)"><i class="ti ti-check-circle"></i> Entregar equipo</div>
+          <div style="font-size:12px;color:var(--text-secondary)">${o.id} — ${o.equipo} — ${o.cliente}</div>
+        </div>
+        <div style="padding:18px;display:flex;flex-direction:column;gap:10px">
+          <div style="background:var(--green-light);border-radius:8px;padding:12px;display:grid;grid-template-columns:1fr 1fr;gap:6px;font-size:12px">
+            <div><span style="color:var(--text-secondary)">Precio final</span><div style="font-size:15px;font-weight:700">USD ${(o.precioFinal||0).toFixed(2)}</div></div>
+            <div><span style="color:var(--text-secondary)">Ya pagado</span><div style="font-size:15px;font-weight:700;color:var(--green)">${State.fmtARS(totalPagado)}</div></div>
+            ${saldo > 0 ? `<div style="grid-column:1/-1;border-top:1px solid rgba(48,209,88,.3);padding-top:6px"><span style="color:var(--text-secondary)">Saldo a cobrar</span><div style="font-size:16px;font-weight:800;color:var(--amber)">${State.fmtARS(saldo)}</div></div>` : '<div style="grid-column:1/-1;color:var(--green);font-weight:600;text-align:center">✓ Pagado en su totalidad</div>'}
+          </div>
+          ${saldo > 0 ? `
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+            <div>
+              <label style="font-size:11px;color:var(--text-secondary);display:block;margin-bottom:4px">Caja</label>
+              <select id="rep-e-persona" style="width:100%;font-size:13px;padding:7px 10px;background:var(--bg-secondary);border:1px solid var(--border-strong);border-radius:8px;color:var(--text)">
+                ${personas.map(p => `<option value="${p}">${p}</option>`).join('')}
+              </select>
+            </div>
+            <div>
+              <label style="font-size:11px;color:var(--text-secondary);display:block;margin-bottom:4px">Forma de pago</label>
+              <select id="rep-e-bolsillo" style="width:100%;font-size:13px;padding:7px 10px;background:var(--bg-secondary);border:1px solid var(--border-strong);border-radius:8px;color:var(--text)">
+                ${this.BOLSILLOS.map(b => `<option value="${b}">${b}</option>`).join('')}
+              </select>
+            </div>
+          </div>` : ''}
+        </div>
+        <div style="padding:12px 18px;border-top:1px solid var(--border);display:flex;justify-content:flex-end;gap:8px">
+          <button class="btn" onclick="document.getElementById('rep-entrega-overlay').remove()">Cancelar</button>
+          <button class="btn btn-green" onclick="Reparaciones._confirmarEntrega(${saldo})"><i class="ti ti-check"></i> Confirmar entrega</button>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(overlay);
+  },
+
+  async _confirmarEntrega(saldo) {
+    const o = State.reparaciones.find(x => x.id === this.currentId);
+    if (!o) return;
+    if (saldo > 0) {
+      const persona  = document.getElementById('rep-e-persona')?.value;
+      const bolsillo = document.getElementById('rep-e-bolsillo')?.value;
+      const pago = { caja: `${persona}-${bolsillo}`, monto: saldo, persona, bolsillo };
+      o.pagos.push(pago);
+      State.acreditarCaja(persona, bolsillo, saldo);
+      await DB.agregarPagoReparacion(o.id, pago);
+    }
+    o.estado = 'entregado'; o.equipoDevuelto = true;
+    await DB.actualizarReparacion(o);
+    Sheets.reparacion(o);
+    document.getElementById('rep-entrega-overlay')?.remove();
+    this.renderList(); this.renderDetail();
+    toast(`Equipo entregado correctamente.`);
+  },
+
+  // ── Cancelar con reversión ────────────────────────────
+  async cancelarConReversion() {
+    const o = State.reparaciones.find(x => x.id === this.currentId);
+    if (!o) return;
+    if (!confirm(`¿Cancelar la orden ${o.id}? Los pagos se revertirán en sus cajas y los repuestos de stock volverán al inventario.`)) return;
+    o.pagos.forEach(p => State.debitarCaja(p.persona, p.bolsillo, p.monto));
+    for (const r of (o.repuestos || []).filter(r => r.fromStock && r.stockId)) {
+      const item = State.stock.find(s => s.id === r.stockId);
+      if (item && !item.imeis) { item.cantidad = (item.cantidad || 0) + 1; await DB.actualizarCantidadStock(r.stockId, item.cantidad); }
+    }
+    await DB.limpiarMovimientosReparacion(o.id);
+    o.pagos = []; o.repuestos = o.repuestos.filter(r => !r.fromStock);
+    o.estado = 'rechazado'; o.equipoDevuelto = true; o.custodio = '';
+    await DB.actualizarReparacion(o);
+    this.renderList(); this.renderDetail();
+    toast('Orden cancelada y movimientos revertidos.');
+  },
+};
 
 window.Reparaciones = Reparaciones;

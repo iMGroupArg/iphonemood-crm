@@ -284,6 +284,8 @@ const DB = {
   },
   async actualizarReparacion(o) {
     await supa.from('reparaciones').update({
+      cliente: o.cliente, telefono: o.tel, equipo: o.equipo, falla: o.falla,
+      clave_desbloqueo: o.clave, tecnico: o.tecnico,
       estado: o.estado, diagnostico: o.diagnostico, presupuesto_aprobado: o.presupuestoAprobado,
       custodio_id: this.personaId(o.custodio) || null, costo_mano_obra: o.costoMO,
       precio_final: o.precioFinal, notas: o.notas, equipo_devuelto: o.equipoDevuelto

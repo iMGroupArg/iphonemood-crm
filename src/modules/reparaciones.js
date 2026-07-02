@@ -200,6 +200,7 @@ const Reparaciones = {
         </div>
         <div style="display:flex;gap:6px;flex-shrink:0;flex-wrap:wrap">
           <button class="btn btn-sm" onclick="Reparaciones.imprimirOrden()" title="Imprimir orden"><i class="ti ti-printer"></i></button>
+          ${o.tokenSeguimiento ? `<button class="btn btn-sm" onclick="Reparaciones.copiarLinkSeguimiento()" title="Copiar link de seguimiento para el cliente"><i class="ti ti-link"></i></button>` : ''}
           ${o.tel ? `<button class="btn btn-sm" onclick="Reparaciones.whatsappRecordatorio()" title="WhatsApp recordatorio" style="color:#25D366;border-color:#25D366"><i class="ti ti-brand-whatsapp"></i></button>` : ''}
           <button class="btn btn-sm" onclick="Reparaciones.openEditForm()" title="Editar datos"><i class="ti ti-pencil"></i></button>
           ${o.estado === 'listo' ? `<button class="btn btn-sm" onclick="Reparaciones.whatsappListo()" style="background:#25D366;color:#fff;border-color:#25D366"><i class="ti ti-brand-whatsapp"></i> Avisar</button><button class="btn btn-sm btn-green" onclick="Reparaciones.entregarYCobrar()"><i class="ti ti-check"></i> Entregar</button>` : ''}
@@ -306,6 +307,27 @@ const Reparaciones = {
         </div>
       </div>
 
+      <!-- Mensajes del cliente (seguimiento) -->
+      <div class="card" style="margin-bottom:10px" id="seguimiento-msgs-card">
+        <div class="card-title" style="justify-content:space-between">
+          <span><i class="ti ti-messages" style="color:var(--blue)"></i> Mensajes del cliente</span>
+          ${o.tokenSeguimiento ? `<button class="btn btn-sm" onclick="Reparaciones.copiarLinkSeguimiento()" style="font-size:11px"><i class="ti ti-link"></i> Copiar link</button>` : ''}
+        </div>
+        ${!o.tokenSeguimiento ? `
+          <div style="font-size:12px;color:var(--text-secondary);background:var(--bg-secondary);border-radius:8px;padding:10px 12px">
+            <i class="ti ti-info-circle"></i> Esta reparación aún no tiene link de seguimiento. Ejecutá la migración SQL en Supabase para habilitarlo.
+          </div>` : `
+          <div id="seguimiento-msgs-list" style="display:flex;flex-direction:column;gap:8px;min-height:40px;margin-bottom:10px">
+            <div style="font-size:12px;color:var(--text-tertiary)"><i class="ti ti-loader-2"></i> Cargando mensajes…</div>
+          </div>
+          <div style="display:flex;flex-direction:column;gap:6px">
+            <textarea id="msg-tecnico-texto" rows="2" placeholder="Escribí una nota para el cliente (la va a ver en su página de seguimiento)…"
+              style="width:100%;font-size:12.5px;padding:8px 10px;background:var(--bg-secondary);border:1px solid var(--border-strong);border-radius:8px;color:var(--text);resize:vertical;font-family:var(--font)"></textarea>
+            <button class="btn btn-primary btn-sm" onclick="Reparaciones.enviarMsgTecnico()"><i class="ti ti-send"></i> Enviar nota al cliente</button>
+          </div>
+        `}
+      </div>
+
       <!-- Acciones -->
       <div style="display:flex;gap:8px;justify-content:space-between;align-items:center;flex-wrap:wrap;margin-top:4px;padding-bottom:20px">
         <div>
@@ -314,6 +336,7 @@ const Reparaciones = {
         <button class="btn btn-primary" onclick="Reparaciones.saveOrder()"><i class="ti ti-check"></i> Guardar cambios</button>
       </div>
     `;
+    setTimeout(() => this._cargarMsgsSeguimiento(), 0);
   },
 
   _hexToRgb(cssVar) {
@@ -463,6 +486,54 @@ const Reparaciones = {
     win.document.write(html);
     win.document.close();
     setTimeout(() => { win.focus(); win.print(); }, 500);
+  },
+
+  // ── Seguimiento público ───────────────────────────────────
+  copiarLinkSeguimiento() {
+    const o = State.reparaciones.find(x => x.id === this.currentId);
+    if (!o?.tokenSeguimiento) { toast('Esta reparación no tiene link de seguimiento aún.'); return; }
+    const base = location.origin + location.pathname.replace('index.html', '').replace(/\/$/, '');
+    const link = `${base}/seguimiento.html?t=${o.tokenSeguimiento}`;
+    navigator.clipboard.writeText(link).then(() => {
+      toast('Link copiado al portapapeles. Ya podés enviárselo al cliente.');
+    }).catch(() => {
+      prompt('Copiá este link y enviáselo al cliente:', link);
+    });
+  },
+
+  async _cargarMsgsSeguimiento() {
+    const o = State.reparaciones.find(x => x.id === this.currentId);
+    if (!o?.tokenSeguimiento) return;
+    const msgs = await DB.getSeguimientoComentarios(o.id);
+    const list = document.getElementById('seguimiento-msgs-list');
+    if (!list) return;
+    if (!msgs.length) {
+      list.innerHTML = `<div style="font-size:12px;color:var(--text-tertiary)">Sin mensajes aún. Cuando el cliente escriba desde su link de seguimiento, aparecerá acá.</div>`;
+      return;
+    }
+    list.innerHTML = msgs.map(m => {
+      const esTec = m.es_tecnico;
+      const d = new Date(m.creado_en);
+      const hora = d.toLocaleDateString('es-AR', { day:'2-digit', month:'2-digit' }) + ' ' + d.toLocaleTimeString('es-AR', { hour:'2-digit', minute:'2-digit' });
+      return `<div style="display:flex;flex-direction:column;gap:2px;align-self:${esTec ? 'flex-end' : 'flex-start'};max-width:90%">
+        <div style="padding:8px 11px;border-radius:${esTec ? '12px 12px 4px 12px' : '12px 12px 12px 4px'};font-size:12.5px;line-height:1.45;background:${esTec ? 'var(--blue)' : 'var(--bg-secondary)'};color:${esTec ? '#fff' : 'var(--text)'}">
+          ${m.texto.replace(/\n/g,'<br>')}
+        </div>
+        <div style="font-size:10px;color:var(--text-tertiary);padding:0 3px;text-align:${esTec ? 'right' : 'left'}">${esTec ? 'iPhoneMood' : (m.autor || 'Cliente')} · ${hora}</div>
+      </div>`;
+    }).join('');
+    list.lastElementChild?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  },
+
+  async enviarMsgTecnico() {
+    const o = State.reparaciones.find(x => x.id === this.currentId);
+    if (!o) return;
+    const texto = document.getElementById('msg-tecnico-texto')?.value.trim();
+    if (!texto) { toast('Escribí el mensaje antes de enviarlo.'); return; }
+    await DB.addSeguimientoComentario(o.id, texto, Auth.usuario?.nombre || 'iPhoneMood', true);
+    document.getElementById('msg-tecnico-texto').value = '';
+    await this._cargarMsgsSeguimiento();
+    toast('Nota enviada. El cliente la verá en su página de seguimiento.');
   },
 
   // ── Guardar cambios ───────────────────────────────────

@@ -1,0 +1,474 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>Seguimiento de reparación — iPhoneMood</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/tabler-icons/2.47.0/tabler-icons.min.css">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+<script src="config.js"></script>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  :root {
+    --bg: #000;
+    --bg-secondary: #1C1C1E;
+    --bg-elevated: #2C2C2E;
+    --border: #38383A;
+    --text: #F2F2F7;
+    --text-secondary: #AEAEB2;
+    --text-tertiary: #636366;
+    --blue: #0A84FF;
+    --blue-light: rgba(10,132,255,.12);
+    --green: #30D158;
+    --green-light: rgba(48,209,88,.12);
+    --amber: #FFD60A;
+    --amber-light: rgba(255,214,10,.12);
+    --red: #FF453A;
+    --radius: 10px;
+    --radius-lg: 14px;
+    --font: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Segoe UI', sans-serif;
+  }
+  body { background: var(--bg); color: var(--text); font-family: var(--font); min-height: 100dvh; }
+
+  .header {
+    background: rgba(28,28,30,.85);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    border-bottom: 1px solid var(--border);
+    padding: 14px 20px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    position: sticky;
+    top: 0;
+    z-index: 10;
+  }
+  .logo {
+    width: 36px; height: 36px; border-radius: 10px;
+    background: var(--blue); display: flex; align-items: center;
+    justify-content: center; font-weight: 800; font-size: 14px; color: #fff;
+    flex-shrink: 0;
+  }
+  .header-text { flex: 1; min-width: 0; }
+  .header-title { font-size: 15px; font-weight: 700; }
+  .header-sub { font-size: 11px; color: var(--text-secondary); margin-top: 1px; }
+
+  .container { max-width: 600px; margin: 0 auto; padding: 20px 16px 40px; }
+
+  /* Estado cargando / error */
+  .state-screen {
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    min-height: 60vh; gap: 14px; text-align: center; padding: 20px;
+  }
+  .state-screen .icon { font-size: 48px; }
+  .state-screen h2 { font-size: 18px; font-weight: 700; }
+  .state-screen p { font-size: 13px; color: var(--text-secondary); max-width: 280px; line-height: 1.5; }
+
+  /* Card del equipo */
+  .equipo-card {
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    padding: 18px;
+    margin-bottom: 14px;
+  }
+  .equipo-card .label { font-size: 10px; font-weight: 600; color: var(--text-secondary); text-transform: uppercase; letter-spacing: .05em; margin-bottom: 3px; }
+  .equipo-card .value { font-size: 15px; font-weight: 600; }
+  .equipo-card .value.big { font-size: 20px; }
+  .equipo-row { display: flex; flex-direction: column; gap: 12px; }
+  .equipo-field { border-left: 2px solid var(--border); padding-left: 10px; }
+  .equipo-falla { background: var(--bg-elevated); border-radius: 8px; padding: 10px 12px; margin-top: 4px; font-size: 13px; line-height: 1.5; color: var(--text-secondary); }
+
+  /* Flujo de estados */
+  .flujo-card {
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    padding: 18px;
+    margin-bottom: 14px;
+  }
+  .flujo-title { font-size: 11px; font-weight: 600; color: var(--text-secondary); text-transform: uppercase; letter-spacing: .05em; margin-bottom: 16px; }
+  .flujo-steps {
+    display: flex;
+    align-items: flex-start;
+    gap: 0;
+    position: relative;
+  }
+  .flujo-step {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 6px;
+    position: relative;
+    z-index: 1;
+  }
+  .flujo-step::before {
+    content: '';
+    position: absolute;
+    top: 12px;
+    left: calc(-50% + 12px);
+    right: calc(50% + 12px);
+    height: 2px;
+    background: var(--border);
+    z-index: 0;
+  }
+  .flujo-step:first-child::before { display: none; }
+  .flujo-step.done::before { background: var(--green); }
+  .flujo-step.active::before { background: var(--blue); }
+
+  .flujo-dot {
+    width: 24px; height: 24px; border-radius: 50%;
+    background: var(--bg-elevated); border: 2px solid var(--border);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 11px; flex-shrink: 0; position: relative; z-index: 1;
+    transition: all .3s;
+  }
+  .flujo-step.done .flujo-dot { background: var(--green); border-color: var(--green); color: #000; }
+  .flujo-step.active .flujo-dot {
+    background: var(--blue); border-color: var(--blue); color: #fff;
+    box-shadow: 0 0 0 4px rgba(10,132,255,.2);
+  }
+  .flujo-label {
+    font-size: 9px; font-weight: 600; text-align: center; color: var(--text-tertiary);
+    text-transform: uppercase; letter-spacing: .03em; line-height: 1.2; max-width: 52px;
+  }
+  .flujo-step.done .flujo-label { color: var(--green); }
+  .flujo-step.active .flujo-label { color: var(--blue); }
+
+  .estado-banner {
+    margin-top: 14px;
+    padding: 10px 14px;
+    border-radius: 8px;
+    font-size: 13px;
+    font-weight: 600;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .estado-banner.en-proceso { background: var(--blue-light); color: var(--blue); }
+  .estado-banner.listo { background: var(--green-light); color: var(--green); }
+  .estado-banner.entregado { background: rgba(255,255,255,.06); color: var(--text-secondary); }
+
+  /* Mensajes */
+  .mensajes-card {
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    overflow: hidden;
+    margin-bottom: 14px;
+  }
+  .mensajes-header {
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--border);
+    display: flex; align-items: center; gap: 8px;
+    font-size: 12px; font-weight: 600;
+  }
+  .mensajes-list { padding: 12px 16px; display: flex; flex-direction: column; gap: 10px; min-height: 60px; }
+  .mensaje {
+    display: flex; flex-direction: column; gap: 3px;
+    max-width: 85%;
+  }
+  .mensaje.tecnico { align-self: flex-start; }
+  .mensaje.cliente { align-self: flex-end; }
+  .mensaje-burbuja {
+    padding: 9px 12px;
+    border-radius: 14px;
+    font-size: 13px;
+    line-height: 1.45;
+  }
+  .mensaje.tecnico .mensaje-burbuja {
+    background: var(--bg-elevated);
+    border-bottom-left-radius: 4px;
+  }
+  .mensaje.cliente .mensaje-burbuja {
+    background: var(--blue);
+    color: #fff;
+    border-bottom-right-radius: 4px;
+  }
+  .mensaje-meta {
+    font-size: 10px;
+    color: var(--text-tertiary);
+    padding: 0 4px;
+  }
+  .mensaje.cliente .mensaje-meta { text-align: right; }
+
+  /* Formulario nuevo mensaje */
+  .nuevo-mensaje {
+    padding: 12px 16px;
+    border-top: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+  .nuevo-mensaje input, .nuevo-mensaje textarea {
+    background: var(--bg-elevated);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 9px 12px;
+    color: var(--text);
+    font-size: 13px;
+    font-family: var(--font);
+    resize: none;
+    outline: none;
+    transition: border-color .15s;
+    width: 100%;
+  }
+  .nuevo-mensaje input:focus, .nuevo-mensaje textarea:focus { border-color: var(--blue); }
+  .nuevo-mensaje textarea { min-height: 70px; }
+  .btn-send {
+    background: var(--blue);
+    border: none;
+    border-radius: 8px;
+    padding: 10px 16px;
+    color: #fff;
+    font-size: 13px;
+    font-weight: 600;
+    font-family: var(--font);
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    transition: opacity .15s;
+  }
+  .btn-send:hover { opacity: .85; }
+  .btn-send:disabled { opacity: .4; cursor: not-allowed; }
+
+  /* WA footer */
+  .wa-card {
+    background: rgba(37,211,102,.08);
+    border: 1px solid rgba(37,211,102,.25);
+    border-radius: var(--radius-lg);
+    padding: 14px 16px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    text-decoration: none;
+    transition: background .15s;
+  }
+  .wa-card:hover { background: rgba(37,211,102,.15); }
+  .wa-icon { font-size: 22px; color: #25D366; flex-shrink: 0; }
+  .wa-text .t { font-size: 13px; font-weight: 600; color: var(--text); }
+  .wa-text .s { font-size: 11px; color: var(--text-secondary); margin-top: 2px; }
+
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .spin { animation: spin 1s linear infinite; }
+
+  @media (max-width: 480px) {
+    .container { padding: 14px 12px 32px; }
+    .flujo-label { font-size: 8px; max-width: 44px; }
+    .flujo-dot { width: 20px; height: 20px; font-size: 10px; }
+    .flujo-step::before { top: 10px; left: calc(-50% + 10px); right: calc(50% + 10px); }
+  }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <div class="logo">iM</div>
+  <div class="header-text">
+    <div class="header-title">iPhoneMood</div>
+    <div class="header-sub">Seguimiento de reparación · Rosario</div>
+  </div>
+</div>
+
+<div class="container" id="app">
+  <div class="state-screen">
+    <i class="ti ti-loader-2 spin icon" style="color:var(--blue)"></i>
+    <h2>Cargando...</h2>
+    <p>Buscando los datos de tu reparación</p>
+  </div>
+</div>
+
+<script>
+const { SUPABASE_URL, SUPABASE_ANON_KEY } = window.__APP_CONFIG__;
+const supa = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+const ESTADOS = [
+  { key: 'ingresado',     label: 'Ingresado',      icon: '1' },
+  { key: 'diagnosticado', label: 'Diagnosticado',   icon: '2' },
+  { key: 'en_reparacion', label: 'En reparación',   icon: '3' },
+  { key: 'listo',         label: 'Listo',            icon: '4' },
+  { key: 'entregado',     label: 'Entregado',        icon: '✓' },
+];
+
+const ESTADO_BANNER = {
+  ingresado:     { clase: 'en-proceso', icon: 'ti-clock', msg: 'Tu equipo fue recibido y está en espera de diagnóstico.' },
+  diagnosticado: { clase: 'en-proceso', icon: 'ti-clipboard-check', msg: 'El técnico ya lo analizó. Pronto comenzamos con la reparación.' },
+  en_reparacion: { clase: 'en-proceso', icon: 'ti-tool', msg: 'En este momento estamos trabajando en tu equipo.' },
+  listo:         { clase: 'listo',      icon: 'ti-circle-check', msg: '¡Tu equipo está listo! Podés pasar a retirarlo.' },
+  entregado:     { clase: 'entregado',  icon: 'ti-package-export', msg: 'El equipo fue entregado. ¡Gracias por elegirnos!' },
+};
+
+const app = document.getElementById('app');
+const params = new URLSearchParams(location.search);
+const token = params.get('t');
+
+let repData = null;
+
+function renderError(titulo, msg) {
+  app.innerHTML = `
+    <div class="state-screen">
+      <span class="icon">🔍</span>
+      <h2>${titulo}</h2>
+      <p>${msg}</p>
+    </div>`;
+}
+
+function fmtFecha(iso) {
+  if (!iso) return '';
+  const d = new Date(iso);
+  return d.toLocaleDateString('es-AR', { day: '2-digit', month: '2-digit', year: 'numeric' })
+    + ' ' + d.toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' });
+}
+
+async function cargar() {
+  if (!token) { renderError('Link inválido', 'Este link no tiene un código de seguimiento. Pedile a la tienda el link correcto.'); return; }
+
+  const { data, error } = await supa.rpc('get_reparacion_publica', { p_token: token });
+  if (error || !data) { renderError('Reparación no encontrada', 'No encontramos una reparación con este link. Es posible que el link esté vencido o sea incorrecto.'); return; }
+
+  repData = data;
+  await renderPage();
+}
+
+async function renderPage() {
+  const r = repData;
+  const estadoActualIdx = ESTADOS.findIndex(e => e.key === r.estado);
+  const banner = ESTADO_BANNER[r.estado] || ESTADO_BANNER.ingresado;
+
+  // Mensajes
+  const msgs = await cargarMensajes();
+
+  app.innerHTML = `
+    <!-- Equipo -->
+    <div class="equipo-card">
+      <div class="equipo-row">
+        <div>
+          <div class="label">Equipo</div>
+          <div class="value big">${r.equipo || '—'}</div>
+        </div>
+        ${r.falla ? `<div class="equipo-field">
+          <div class="label">Problema reportado</div>
+          <div class="equipo-falla">${escHtml(r.falla)}</div>
+        </div>` : ''}
+        ${r.cliente ? `<div class="equipo-field">
+          <div class="label">Cliente</div>
+          <div class="value">${escHtml(r.cliente)}</div>
+        </div>` : ''}
+      </div>
+    </div>
+
+    <!-- Flujo de estado -->
+    <div class="flujo-card">
+      <div class="flujo-title"><i class="ti ti-route"></i> Estado de la reparación</div>
+      <div class="flujo-steps">
+        ${ESTADOS.map((e, i) => {
+          const done   = i < estadoActualIdx;
+          const active = i === estadoActualIdx;
+          return `<div class="flujo-step ${done ? 'done' : active ? 'active' : ''}">
+            <div class="flujo-dot">${done ? '<i class="ti ti-check" style="font-size:11px"></i>' : active ? '<i class="ti ti-circle-dot" style="font-size:11px"></i>' : e.icon}</div>
+            <div class="flujo-label">${e.label}</div>
+          </div>`;
+        }).join('')}
+      </div>
+      <div class="estado-banner ${banner.clase}">
+        <i class="ti ${banner.icon}"></i> ${banner.msg}
+      </div>
+    </div>
+
+    <!-- Mensajes del técnico -->
+    <div class="mensajes-card">
+      <div class="mensajes-header">
+        <i class="ti ti-messages" style="color:var(--blue)"></i>
+        Novedades y consultas
+      </div>
+      <div class="mensajes-list" id="msgs-list">
+        ${renderMensajes(msgs)}
+      </div>
+      <div class="nuevo-mensaje">
+        <div style="font-size:11px;color:var(--text-secondary);margin-bottom:2px">¿Tenés alguna consulta? Escribinos:</div>
+        <input type="text" id="msg-nombre" placeholder="Tu nombre (opcional)" maxlength="60">
+        <textarea id="msg-texto" placeholder="Escribí tu consulta acá…" maxlength="500" rows="3"></textarea>
+        <button class="btn-send" id="btn-send" onclick="enviarMensaje()">
+          <i class="ti ti-send"></i> Enviar consulta
+        </button>
+      </div>
+    </div>
+
+    <!-- WhatsApp -->
+    ${r.telefono_negocio ? `
+    <a class="wa-card" href="https://wa.me/549${r.telefono_negocio}?text=${encodeURIComponent('Hola! Escribo por la reparación de ' + (r.equipo||'mi equipo') + '.')}" target="_blank">
+      <i class="ti ti-brand-whatsapp wa-icon"></i>
+      <div class="wa-text">
+        <div class="t">Contactar por WhatsApp</div>
+        <div class="s">Si preferís hablar directamente con el técnico</div>
+      </div>
+      <i class="ti ti-chevron-right" style="color:var(--text-tertiary);margin-left:auto"></i>
+    </a>` : ''}
+  `;
+}
+
+function renderMensajes(msgs) {
+  if (!msgs || !msgs.length) {
+    return `<div style="font-size:12px;color:var(--text-tertiary);text-align:center;padding:10px 0">El técnico aún no dejó novedades. Te avisamos cuando haya novedades.</div>`;
+  }
+  return msgs.map(m => `
+    <div class="mensaje ${m.es_tecnico ? 'tecnico' : 'cliente'}">
+      <div class="mensaje-burbuja">${escHtml(m.texto)}</div>
+      <div class="mensaje-meta">${m.es_tecnico ? '<b>iPhoneMood</b> · ' : (m.autor ? escHtml(m.autor) + ' · ' : '')}${fmtFecha(m.creado_en)}</div>
+    </div>
+  `).join('');
+}
+
+async function cargarMensajes() {
+  const { data } = await supa
+    .from('seguimiento_comentarios')
+    .select('*')
+    .eq('reparacion_id', repData.id)
+    .order('creado_en', { ascending: true });
+  return data || [];
+}
+
+async function enviarMensaje() {
+  const nombre = document.getElementById('msg-nombre')?.value.trim() || 'Cliente';
+  const texto  = document.getElementById('msg-texto')?.value.trim();
+  if (!texto) return;
+
+  const btn = document.getElementById('btn-send');
+  btn.disabled = true;
+  btn.innerHTML = '<i class="ti ti-loader-2 spin"></i> Enviando…';
+
+  const { error } = await supa.from('seguimiento_comentarios').insert({
+    reparacion_id: repData.id,
+    autor: nombre,
+    es_tecnico: false,
+    texto,
+  });
+
+  if (error) {
+    btn.disabled = false;
+    btn.innerHTML = '<i class="ti ti-send"></i> Enviar consulta';
+    alert('No se pudo enviar. Intentá de nuevo.');
+    return;
+  }
+
+  document.getElementById('msg-nombre').value = '';
+  document.getElementById('msg-texto').value  = '';
+  btn.disabled = false;
+  btn.innerHTML = '<i class="ti ti-send"></i> Enviar consulta';
+
+  const msgs = await cargarMensajes();
+  document.getElementById('msgs-list').innerHTML = renderMensajes(msgs);
+  document.getElementById('msgs-list').lastElementChild?.scrollIntoView({ behavior: 'smooth' });
+}
+
+function escHtml(str) {
+  return String(str || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/\n/g,'<br>');
+}
+
+cargar();
+</script>
+</body>
+</html>

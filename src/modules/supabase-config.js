@@ -154,7 +154,8 @@ const DB = {
       repuestos: repuestosPorRep[r.id] || [], pagos: pagosPorRep[r.id] || [],
       costoMO: Number(r.costo_mano_obra), precioFinal: Number(r.precio_final),
       tecnico: r.tecnico || '', custodio: this.personasIdToNombre[r.custodio_id] || '',
-      notas: r.notas || '', equipoDevuelto: r.equipo_devuelto
+      notas: r.notas || '', equipoDevuelto: r.equipo_devuelto,
+      tokenSeguimiento: r.token_seguimiento || null,
     }));
   },
 
@@ -317,6 +318,17 @@ const DB = {
   async limpiarMovimientosReparacion(reparacionId) {
     await supa.from('reparacion_pagos').delete().eq('reparacion_id', reparacionId);
     await supa.from('reparacion_repuestos').delete().eq('reparacion_id', reparacionId).eq('de_stock', true);
+  },
+
+  async getSeguimientoComentarios(reparacionId) {
+    const { data } = await supa.from('seguimiento_comentarios')
+      .select('*').eq('reparacion_id', reparacionId).order('creado_en', { ascending: true });
+    return data || [];
+  },
+  async addSeguimientoComentario(reparacionId, texto, autor, esTecnico) {
+    await supa.from('seguimiento_comentarios').insert({
+      reparacion_id: reparacionId, texto, autor, es_tecnico: esTecnico
+    });
   },
 
   async crearGasto(g) {

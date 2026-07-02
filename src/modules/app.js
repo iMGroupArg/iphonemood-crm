@@ -33,9 +33,9 @@ const App = {
     }
     await this.validarYArrancar(session);
 
-    // Si el login redirige y vuelve a esta misma página, Supabase dispara este evento
+    // SIGNED_IN puede dispararse al volver a la pestaña (token refresh). Solo arrancar si no hay sesión activa.
     Auth.escucharCambiosDeSesion(async (event, session) => {
-      if (event === 'SIGNED_IN' && session) {
+      if (event === 'SIGNED_IN' && session && !Auth.usuario) {
         await this.validarYArrancar(session);
       }
       if (event === 'SIGNED_OUT') {

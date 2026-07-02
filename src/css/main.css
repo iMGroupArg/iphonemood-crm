@@ -398,7 +398,7 @@ select option { background: var(--bg-elevated); }
   body { font-size: 15px; }
 
   /* Sidebar always hidden until .open */
-  .topbar { padding-top: calc(12px + env(safe-area-inset-top)); }
+  .topbar { padding-top: calc(12px + env(safe-area-inset-top)); flex-wrap: nowrap; }
   .mobile-menu-btn { display: flex !important; }
 
   /* Nav items bigger for touch */
@@ -446,7 +446,7 @@ select option { background: var(--bg-elevated); }
     white-space: nowrap !important; flex-shrink: 0 !important;
   }
 
-  /* Reparaciones */
+  /* Reparaciones: lista ocupa todo el ancho, detalle se oculta */
   .rep-list-panel { width: 100% !important; min-width: 0 !important; border-right: none !important; }
 
   /* Dashboard 2-col charts */
@@ -455,35 +455,43 @@ select option { background: var(--bg-elevated); }
   /* Buttons: full-width in forms */
   .btn-block-mobile { width: 100%; justify-content: center; }
 
-  /* Topbar pills: shorter */
-  .pill { font-size: 10px; padding: 3px 7px; }
-  .topbar h1 { font-size: 16px; }
-  .topbar-right { gap: 5px; }
+  /* Topbar: prevent overflow */
+  .topbar h1 { font-size: 15px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 140px; }
+  .topbar-right { gap: 5px; flex-shrink: 0; }
 
-  /* En móvil chico ocultar pills para dar espacio al buscador */
-  @media (max-width: 480px) {
-    .pill { display: none !important; }
-    .search-btn { width: 36px; height: 36px; font-size: 19px; }
-  }
+  /* Topbar pills: smaller */
+  .pill { font-size: 10px; padding: 3px 7px; }
 
   /* Quick action bottom bar feel */
   .sb-foot { padding-bottom: calc(14px + env(safe-area-inset-bottom)); }
+}
+
+/* ── Móvil chico (< 480px): ocultar pills, buscador más grande ── */
+@media (max-width: 480px) {
+  .pill { display: none !important; }
+  .search-btn { width: 36px; height: 36px; font-size: 19px; }
+  .topbar h1 { max-width: 160px; }
+}
+
+/* ── Tablet/mobile Reparaciones (≤ 900px): lista ancho completo ── */
+@media (max-width: 900px) {
+  .rep-list-panel { width: 100% !important; min-width: 0 !important; }
 }
 
 /* ── Buscador global ─────────────────────────────────── */
 .search-btn {
   display: flex; align-items: center; justify-content: center;
   width: 32px; height: 32px;
-  background: var(--bg-secondary);
-  border: 1px solid var(--border);
+  background: var(--blue-light);
+  border: 1px solid rgba(10,132,255,.35);
   border-radius: var(--radius-md);
-  color: var(--text-secondary);
+  color: var(--blue);
   cursor: pointer;
   font-size: 17px;
   transition: color .15s, border-color .15s, background .15s;
   flex-shrink: 0;
 }
-.search-btn:hover { color: var(--blue); border-color: var(--blue); background: var(--blue-light); }
+.search-btn:hover { background: var(--blue); color: #fff; border-color: var(--blue); }
 .search-btn:active { transform: scale(.94); }
 
 .search-overlay {

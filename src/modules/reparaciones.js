@@ -71,10 +71,12 @@ const Reparaciones = {
     // Mobile: una sola columna visible por vez
     if (showDetail) {
       listPanel.style.display = 'none';
+      listPanel.style.width = '';
       detailPanel.style.display = 'flex';
       if (backBtn) backBtn.style.display = 'inline-flex';
     } else {
       listPanel.style.display = 'flex';
+      listPanel.style.width = '100%';
       detailPanel.style.display = 'none';
       if (backBtn) backBtn.style.display = 'none';
     }

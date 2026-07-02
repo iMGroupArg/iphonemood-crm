@@ -199,8 +199,10 @@ const Reparaciones = {
           <div style="font-size:11px;color:var(--text-secondary);margin-top:3px">Ingreso: ${o.fechaIngreso} · ${dias === 0 ? 'hoy' : dias + ' día' + (dias !== 1 ? 's' : '')} en taller${o.tecnico ? ` · Técnico: ${o.tecnico}` : ''}</div>
         </div>
         <div style="display:flex;gap:6px;flex-shrink:0;flex-wrap:wrap">
+          <button class="btn btn-sm" onclick="Reparaciones.imprimirOrden()" title="Imprimir orden"><i class="ti ti-printer"></i></button>
+          ${o.tel ? `<button class="btn btn-sm" onclick="Reparaciones.whatsappRecordatorio()" title="WhatsApp recordatorio" style="color:#25D366;border-color:#25D366"><i class="ti ti-brand-whatsapp"></i></button>` : ''}
           <button class="btn btn-sm" onclick="Reparaciones.openEditForm()" title="Editar datos"><i class="ti ti-pencil"></i></button>
-          ${o.estado === 'listo' ? `<button class="btn btn-sm btn-green" onclick="Reparaciones.entregarYCobrar()"><i class="ti ti-check"></i> Entregar</button>` : ''}
+          ${o.estado === 'listo' ? `<button class="btn btn-sm" onclick="Reparaciones.whatsappListo()" style="background:#25D366;color:#fff;border-color:#25D366"><i class="ti ti-brand-whatsapp"></i> Avisar</button><button class="btn btn-sm btn-green" onclick="Reparaciones.entregarYCobrar()"><i class="ti ti-check"></i> Entregar</button>` : ''}
         </div>
       </div>
 
@@ -338,6 +340,129 @@ const Reparaciones = {
     Sheets.reparacion(o);
     this.renderList(); this.renderDetail();
     toast(`Estado actualizado a ${this.ESTADO_LABEL[estado]}.`);
+    if (estado === 'listo' && o.tel) this._sugerirWhatsapp(o);
+  },
+
+  // ── WhatsApp ──────────────────────────────────────────
+  _sugerirWhatsapp(o) {
+    const banner = document.createElement('div');
+    banner.style.cssText = 'position:fixed;bottom:80px;right:20px;background:var(--bg-elevated);border:1px solid #25D366;border-radius:var(--radius-lg);padding:12px 16px;z-index:9000;box-shadow:var(--shadow-md);max-width:300px';
+    banner.innerHTML = `
+      <div style="font-size:12px;font-weight:600;color:#25D366;margin-bottom:6px"><i class="ti ti-brand-whatsapp"></i> ¿Avisar al cliente?</div>
+      <div style="font-size:11px;color:var(--text-secondary);margin-bottom:10px">El equipo de <b>${o.cliente}</b> está listo. Enviá el aviso por WhatsApp.</div>
+      <div style="display:flex;gap:6px">
+        <button onclick="this.closest('div[style]').remove()" style="flex:1;font-size:11px;padding:5px;border:1px solid var(--border);border-radius:6px;background:transparent;color:var(--text-secondary);cursor:pointer">Ahora no</button>
+        <button onclick="Reparaciones.whatsappListo('${o.id}');this.closest('div[style]').remove()" style="flex:2;font-size:11px;padding:5px;border:none;border-radius:6px;background:#25D366;color:#fff;cursor:pointer;font-weight:600"><i class="ti ti-brand-whatsapp"></i> Enviar aviso</button>
+      </div>`;
+    document.body.appendChild(banner);
+    setTimeout(() => banner.remove(), 12000);
+  },
+
+  whatsappListo(id) {
+    const o = State.reparaciones.find(x => x.id === (id || this.currentId));
+    if (!o) return;
+    const trabajo = o.diagnostico || o.falla || 'Reparación completada';
+    const precio = o.precioFinal ? `USD ${o.precioFinal}` : 'a confirmar en el local';
+    const msg = `¡Hola ${o.cliente}! 👋\n\nTe avisamos que tu equipo *${o.equipo}* ya está listo para retirar en *iPhoneMood*.\n\n🔧 Trabajo realizado: ${trabajo}\n💰 Total: ${precio}\n\n¡Te esperamos! 🙌\n_iPhoneMood — Rosario_`;
+    const tel = (o.tel || '').replace(/\D/g, '');
+    const url = `https://wa.me/${tel ? '549' + tel : ''}?text=${encodeURIComponent(msg)}`;
+    window.open(url, '_blank');
+  },
+
+  whatsappRecordatorio(id) {
+    const o = State.reparaciones.find(x => x.id === (id || this.currentId));
+    if (!o) return;
+    const msg = `¡Hola ${o.cliente}! 👋\n\nQueremos recordarte que tu equipo *${o.equipo}* sigue en nuestro taller.\n\n📍 Estado actual: *${this.ESTADO_LABEL[o.estado]}*\n\nCualquier novedad te avisamos. ¡Gracias por tu paciencia! 🙏\n_iPhoneMood — Rosario_`;
+    const tel = (o.tel || '').replace(/\D/g, '');
+    const url = `https://wa.me/${tel ? '549' + tel : ''}?text=${encodeURIComponent(msg)}`;
+    window.open(url, '_blank');
+  },
+
+  // ── PDF Orden de trabajo ──────────────────────────────
+  imprimirOrden() {
+    const o = State.reparaciones.find(x => x.id === this.currentId);
+    if (!o) return;
+    const fecha = new Date().toLocaleDateString('es-AR');
+    const hora  = new Date().toLocaleTimeString('es-AR', { hour:'2-digit', minute:'2-digit' });
+    const totalRep = (o.repuestos||[]).reduce((s,r) => s+r.costo, 0);
+    const html = `<!DOCTYPE html><html lang="es"><head><meta charset="UTF-8"><title>Orden ${o.id}</title>
+    <style>
+      *{margin:0;padding:0;box-sizing:border-box}body{font-family:Arial,sans-serif;font-size:12px;color:#1a1a1a;padding:24px}
+      .header{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:20px;border-bottom:2px solid #1a1a1a;padding-bottom:14px}
+      .logo{font-size:22px;font-weight:800;letter-spacing:-.5px}.sub{font-size:10px;color:#666;margin-top:3px}
+      .orden-num{font-size:28px;font-weight:800;color:#888;letter-spacing:-.5px}
+      .grid{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:16px}
+      .box{border:1px solid #e0e0e0;border-radius:6px;padding:12px}
+      .box h3{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:#888;margin-bottom:8px}
+      .row{display:flex;justify-content:space-between;padding:3px 0;font-size:11px;border-bottom:1px solid #f0f0f0}
+      .row:last-child{border-bottom:none}.row span{color:#666}
+      table{width:100%;border-collapse:collapse;font-size:11px;margin-bottom:12px}
+      th{background:#1a1a1a;color:#fff;padding:5px 8px;text-align:left}
+      td{padding:5px 8px;border-bottom:1px solid #e0e0e0}
+      .badge{display:inline-block;padding:2px 8px;border-radius:12px;font-size:10px;font-weight:700;background:#f0f0f0}
+      .firma{display:flex;gap:30px;margin-top:24px}
+      .firma-box{flex:1;border-top:1px solid #1a1a1a;padding-top:4px;font-size:10px;color:#888;text-align:center}
+      .footer{text-align:center;font-size:9px;color:#aaa;margin-top:20px;border-top:1px solid #e0e0e0;padding-top:8px}
+      .falla-box{background:#fff3cd;border:1px solid #ffc107;border-radius:6px;padding:10px;margin-bottom:14px;font-size:11.5px}
+      @media print{body{padding:10px}}
+    </style></head><body>
+    <div class="header">
+      <div><div class="logo">iPhoneMood</div><div class="sub">Julio Argentino Roca 700, Gral. Baigorria, Santa Fe<br>Tel: +54 9 3413 66-2150 · iphonemood.ar@gmail.com</div></div>
+      <div style="text-align:right"><div class="orden-num">ORDEN ${o.id}</div><div style="font-size:10px;color:#888">Fecha: ${fecha} ${hora}</div><div class="badge">${this.ESTADO_LABEL[o.estado]}</div></div>
+    </div>
+
+    <div class="grid">
+      <div class="box"><h3>Datos del cliente</h3>
+        <div class="row"><span>Nombre</span><b>${o.cliente}</b></div>
+        ${o.tel ? `<div class="row"><span>Teléfono</span><b>${o.tel}</b></div>` : ''}
+        <div class="row"><span>Fecha ingreso</span><b>${o.fechaIngreso}</b></div>
+        ${o.tecnico ? `<div class="row"><span>Técnico</span><b>${o.tecnico}</b></div>` : ''}
+      </div>
+      <div class="box"><h3>Datos del equipo</h3>
+        <div class="row"><span>Equipo</span><b>${o.equipo}</b></div>
+        ${o.clave ? `<div class="row"><span>Clave/PIN</span><b style="font-family:monospace">${o.clave}</b></div>` : ''}
+        <div class="row"><span>Precio estimado</span><b>${o.precioFinal ? 'USD ' + o.precioFinal : 'A presupuestar'}</b></div>
+        ${o.fechaEntrega ? `<div class="row"><span>Entrega estimada</span><b>${o.fechaEntrega}</b></div>` : ''}
+      </div>
+    </div>
+
+    <div class="falla-box"><b>⚠ Problema reportado:</b><br>${o.falla || 'Sin descripción'}</div>
+
+    ${(o.repuestos||[]).length ? `
+    <table><thead><tr><th>Repuesto</th><th>Origen</th><th>Costo USD</th></tr></thead>
+    <tbody>${o.repuestos.map(r => `<tr><td>${r.nombre}</td><td>${r.fromStock?'De stock':'Compra externa'}</td><td>USD ${r.costo}</td></tr>`).join('')}
+    <tr style="font-weight:700"><td colspan="2">Total repuestos</td><td>USD ${totalRep.toFixed(2)}</td></tr>
+    </tbody></table>` : ''}
+
+    ${(o.pagos||[]).length ? `
+    <table><thead><tr><th>Pagos registrados</th><th>Forma</th><th>Monto</th></tr></thead>
+    <tbody>${o.pagos.map(p => `<tr><td>${p.persona}</td><td>${p.bolsillo}</td><td>${p.bolsillo.startsWith('USD')?'USD '+p.monto:State.fmtARS(p.monto)}</td></tr>`).join('')}
+    </tbody></table>` : ''}
+
+    <table style="margin-top:4px"><thead><tr><th>Concepto</th><th>Monto</th></tr></thead>
+    <tbody>
+      ${o.costoMO ? `<tr><td>Mano de obra</td><td>USD ${o.costoMO}</td></tr>` : ''}
+      ${totalRep ? `<tr><td>Repuestos</td><td>USD ${totalRep.toFixed(2)}</td></tr>` : ''}
+      <tr style="font-weight:700"><td>TOTAL A ABONAR</td><td>USD ${o.precioFinal||0}</td></tr>
+    </tbody></table>
+
+    <div style="margin-top:14px;font-size:10px;color:#555;border:1px solid #e0e0e0;border-radius:6px;padding:10px">
+      <b>Condiciones:</b> El cliente declara haber entregado el equipo en las condiciones descritas. iPhoneMood no se responsabiliza por datos almacenados en el dispositivo. El presupuesto tiene validez de 7 días hábiles.
+    </div>
+
+    <div class="firma">
+      <div class="firma-box">Firma del cliente</div>
+      <div class="firma-box">Aclaración</div>
+      <div class="firma-box">DNI</div>
+      <div class="firma-box">Técnico iPhoneMood</div>
+    </div>
+
+    <div class="footer">DOCUMENTO NO VÁLIDO COMO FACTURA · iPhoneMood · Orden N° ${o.id} · ${fecha}</div>
+    </body></html>`;
+    const win = window.open('', '_blank', 'width=860,height=680');
+    win.document.write(html);
+    win.document.close();
+    setTimeout(() => { win.focus(); win.print(); }, 500);
   },
 
   // ── Guardar cambios ───────────────────────────────────

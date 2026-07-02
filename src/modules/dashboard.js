@@ -34,6 +34,27 @@ const Dashboard = {
     const repActivas = State.reparaciones.filter(r => !['entregado', 'rechazado', 'no_reparable'].includes(r.estado)).length;
     const repListas = State.reparaciones.filter(r => r.estado === 'listo').length;
     const stockCritico = State.stock.filter(s => State.getStockStatus(s) !== 'ok').length;
+
+    // KPIs reparaciones
+    const ahora = new Date();
+    const inicioMes = new Date(ahora.getFullYear(), ahora.getMonth(), 1);
+    const repMes = State.reparaciones.filter(r => {
+      if (!r.fecha) return false;
+      const [d, m, y] = (r.fecha.includes('/') ? r.fecha.split('/') : [1, 1, ahora.getFullYear()]);
+      const f = new Date(y || ahora.getFullYear(), (m||1)-1, d||1);
+      return f >= inicioMes;
+    });
+    const ingresosRepMes = State.reparaciones.reduce((sum, r) => {
+      const pagado = (r.pagos || []).reduce((s, p) => s + (p.monto || 0), 0);
+      return sum + pagado;
+    }, 0);
+    const entregadasConFecha = State.reparaciones.filter(r => r.estado === 'entregado' && r.fechaEntrega && r.fecha);
+    const diasPromedio = entregadasConFecha.length ? Math.round(
+      entregadasConFecha.reduce((sum, r) => {
+        const parseDate = str => { const [d,m,y] = str.split('/'); return new Date(y||ahora.getFullYear(),(m||1)-1,d||1); };
+        return sum + Math.max(0, (parseDate(r.fechaEntrega) - parseDate(r.fecha)) / 86400000);
+      }, 0) / entregadasConFecha.length
+    ) : null;
     const ventasAbiertas = State.ventas.filter(v => v.estado === 'abierta').length;
     const ticketPromedio = State.ventas.length ? totalVentasARS / State.ventas.length : 0;
 
@@ -66,8 +87,16 @@ const Dashboard = {
       <div class="kpi-row" style="grid-template-columns:repeat(4,1fr);padding:0 0 14px 0;border:none">
         <div class="kpi"><label>Equivalente total en caja</label><div class="val">${State.fmtUSD(equivalenteTotalARS / State.refBlue)}</div><div class="sub">ARS + USD + USDT a cotización actual</div></div>
         <div class="kpi"><label>Ventas con saldo pendiente</label><div class="val" style="color:${ventasAbiertas?'var(--amber)':'var(--green)'}">${ventasAbiertas}</div><div class="sub">requieren seguimiento de cobro</div></div>
-        <div class="kpi"><label>Reparaciones activas</label><div class="val">${repActivas}</div><div class="sub">${repListas} lista(s) para entregar</div></div>
         <div class="kpi"><label>Stock con alerta</label><div class="val" style="color:${stockCritico?'var(--red)':'var(--green)'}">${stockCritico}</div><div class="sub">productos bajos o agotados</div></div>
+        <div class="kpi"><label>Reparaciones este mes</label><div class="val">${repMes.length}</div><div class="sub">${repActivas} activa(s) · ${repListas} lista(s)</div></div>
+      </div>
+
+      <div style="font-size:11px;font-weight:600;color:var(--text-secondary);text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px"><i class="ti ti-tool" style="margin-right:4px"></i>Reparaciones</div>
+      <div class="kpi-row" style="grid-template-columns:repeat(4,1fr);padding:0 0 14px 0;border:none">
+        <div class="kpi"><label>Órdenes activas</label><div class="val" style="color:${repActivas?'var(--blue)':'var(--text-secondary)'}">${repActivas}</div><div class="sub">en proceso ahora</div></div>
+        <div class="kpi"><label>Listas para entregar</label><div class="val" style="color:${repListas?'var(--green)':'var(--text-secondary)'}">${repListas}</div><div class="sub">${repListas?'pendientes de retiro':'al día'}</div></div>
+        <div class="kpi"><label>Ingresos del mes</label><div class="val">${State.fmtUSD(ingresosRepMes)}</div><div class="sub">pagos cobrados en reparaciones</div></div>
+        <div class="kpi"><label>Días promedio resolución</label><div class="val">${diasPromedio !== null ? diasPromedio + ' d' : '—'}</div><div class="sub">${entregadasConFecha.length} reparacion(es) entregadas</div></div>
       </div>
 
       <div class="card">

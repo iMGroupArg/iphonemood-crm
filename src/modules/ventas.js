@@ -636,6 +636,7 @@ const Ventas = {
     this.closeModal();
     this.renderList();
     toast(`Venta #${venta.id} confirmada y guardada. Stock actualizado y pagos acreditados en las cajas correspondientes.`);
+    if (d.clienteTel) this._sugerirWhatsappVenta(venta);
   },
 
   viewSale(id) {
@@ -804,9 +805,13 @@ const Ventas = {
           </div>
 
           <!-- FOOTER -->
-          <div style="padding:12px 20px;border-top:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;flex-shrink:0">
-            <button class="btn" style="color:var(--red)" onclick="Ventas.anular(${id})"><i class="ti ti-trash"></i> Anular venta</button>
-            <button class="btn" onclick="Ventas.closeModal()">Cerrar</button>
+          <div style="padding:12px 20px;border-top:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;flex-shrink:0;flex-wrap:wrap;gap:8px">
+            <button class="btn btn-sm" style="color:var(--red)" onclick="Ventas.anular(${id})"><i class="ti ti-trash"></i> Anular</button>
+            <div style="display:flex;gap:8px;flex-wrap:wrap">
+              ${v.clienteTel ? `<button class="btn btn-sm" onclick="Ventas._whatsappVenta(${id})" style="color:#25D366;border-color:#25D366"><i class="ti ti-brand-whatsapp"></i> WhatsApp</button>` : ''}
+              ${!cerrada ? `<button class="btn btn-sm btn-primary" onclick="Ventas.abrirCobro(${id})"><i class="ti ti-cash"></i> Registrar cobro</button>` : ''}
+              <button class="btn btn-sm" onclick="Ventas.closeModal()">Cerrar</button>
+            </div>
           </div>
         </div>
       </div>
@@ -1070,6 +1075,103 @@ const Ventas = {
     </div>
     </body></html>`;
     this._abrirVentanaPDF(html, `Venta_${v.id}`);
+  },
+
+  _sugerirWhatsappVenta(v) {
+    const banner = document.createElement('div');
+    banner.style.cssText = 'position:fixed;bottom:80px;right:20px;background:var(--bg-elevated);border:1px solid #25D366;border-radius:var(--radius-lg);padding:12px 16px;z-index:9000;box-shadow:var(--shadow-md);max-width:300px';
+    banner.innerHTML = `
+      <div style="font-size:12px;font-weight:600;color:#25D366;margin-bottom:6px"><i class="ti ti-brand-whatsapp"></i> ¿Enviar recibo por WhatsApp?</div>
+      <div style="font-size:11px;color:var(--text-secondary);margin-bottom:10px">Venta #${v.id} para <b>${v.cliente}</b></div>
+      <div style="display:flex;gap:6px">
+        <button onclick="this.closest('div[style]').remove()" style="flex:1;font-size:11px;padding:5px;border:1px solid var(--border);border-radius:6px;background:transparent;color:var(--text-secondary);cursor:pointer">No</button>
+        <button onclick="Ventas._whatsappVenta(${v.id});this.closest('div[style]').remove()" style="flex:2;font-size:11px;padding:5px;border:none;border-radius:6px;background:#25D366;color:#fff;cursor:pointer;font-weight:600"><i class="ti ti-brand-whatsapp"></i> Enviar</button>
+      </div>`;
+    document.body.appendChild(banner);
+    setTimeout(() => banner.remove(), 12000);
+  },
+
+  _whatsappVenta(id) {
+    const v = State.ventas.find(x => x.id === id);
+    if (!v) return;
+    const total = v.items.reduce((s, i) => s + i.precio, 0);
+    const items = v.items.map(i => `• ${i.nombre} — USD ${i.precio.toFixed(0)}`).join('\n');
+    const estado = v.estado === 'cerrada' ? '✅ Pagado' : '⏳ Saldo pendiente';
+    const msg = `¡Hola ${v.cliente}! 🙌\n\nAcá va el resumen de tu compra en *iPhoneMood*:\n\n${items}\n\n💰 *Total: USD ${total.toFixed(0)}*\n${estado}\n\n¡Muchas gracias por elegirnos! 😊\n_iPhoneMood — Rosario_`;
+    const tel = (v.clienteTel || '').replace(/\D/g, '');
+    window.open(`https://wa.me/${tel ? '549' + tel : ''}?text=${encodeURIComponent(msg)}`, '_blank');
+  },
+
+  // ── Registrar cobro en ventas abiertas ────────────────
+  abrirCobro(id) {
+    const v = State.ventas.find(x => x.id === id);
+    if (!v) return;
+    const total = v.items.reduce((s, i) => s + i.precio, 0);
+    const pagado = v.pagos.reduce((s, p) => s + p.monto, 0);
+    const saldo = Math.max(0, total - pagado);
+    const personaOpts = State.personas.map(p => `<option>${p}</option>`).join('');
+    const overlay = document.createElement('div');
+    overlay.id = 'cobro-overlay';
+    overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.7);backdrop-filter:blur(6px);z-index:900;display:flex;align-items:center;justify-content:center;padding:20px';
+    overlay.innerHTML = `
+      <div style="background:var(--bg-elevated);border:1px solid var(--border-strong);border-radius:var(--radius-xl);width:min(400px,96vw);overflow:hidden">
+        <div style="padding:14px 18px;border-bottom:1px solid var(--border)">
+          <div style="font-size:14px;font-weight:700">Registrar cobro — Venta #${v.id}</div>
+          <div style="font-size:11px;color:var(--text-secondary)">${v.cliente} · Saldo pendiente: <b style="color:var(--amber)">USD ${saldo.toFixed(2)}</b></div>
+        </div>
+        <div style="padding:18px;display:flex;flex-direction:column;gap:12px">
+          <div>
+            <label style="font-size:11px;color:var(--text-secondary);display:block;margin-bottom:4px">Monto (USD)</label>
+            <input type="number" id="cobro-monto" value="${saldo.toFixed(2)}" min="0" step="0.01"
+              style="width:100%;font-size:16px;font-weight:700;padding:9px 12px;background:var(--bg-secondary);border:1px solid var(--border-strong);border-radius:8px;color:var(--text)">
+          </div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+            <div>
+              <label style="font-size:11px;color:var(--text-secondary);display:block;margin-bottom:4px">Caja</label>
+              <select id="cobro-persona" style="width:100%;font-size:13px;padding:8px 10px;background:var(--bg-secondary);border:1px solid var(--border-strong);border-radius:8px;color:var(--text)">${personaOpts}</select>
+            </div>
+            <div>
+              <label style="font-size:11px;color:var(--text-secondary);display:block;margin-bottom:4px">Forma de pago</label>
+              <select id="cobro-bolsillo" style="width:100%;font-size:13px;padding:8px 10px;background:var(--bg-secondary);border:1px solid var(--border-strong);border-radius:8px;color:var(--text)">
+                <option>ARS cash</option><option>ARS transferencia</option><option>USD cash</option><option>USD transferencia</option><option>USDT</option>
+              </select>
+            </div>
+          </div>
+        </div>
+        <div style="padding:12px 18px;border-top:1px solid var(--border);display:flex;justify-content:flex-end;gap:8px">
+          <button class="btn" onclick="document.getElementById('cobro-overlay').remove()">Cancelar</button>
+          <button class="btn btn-primary" onclick="Ventas.submitCobro(${id})"><i class="ti ti-cash"></i> Registrar cobro</button>
+        </div>
+      </div>`;
+    document.body.appendChild(overlay);
+    setTimeout(() => document.getElementById('cobro-monto')?.select(), 60);
+  },
+
+  async submitCobro(id) {
+    const monto = parseFloat(document.getElementById('cobro-monto')?.value) || 0;
+    if (!monto) { toast('Ingresá un monto.'); return; }
+    const persona  = document.getElementById('cobro-persona')?.value;
+    const bolsillo = document.getElementById('cobro-bolsillo')?.value;
+    document.getElementById('cobro-overlay')?.remove();
+    const v = State.ventas.find(x => x.id === id);
+    if (!v) return;
+    const pago = { persona, bolsillo, monto, caja: `${persona}-${bolsillo}`, esTarjeta: false, diferencialArs: 0 };
+    v.pagos.push(pago);
+    let montoEnBolsillo = monto;
+    if (bolsillo.startsWith('ARS')) montoEnBolsillo = monto * State.refBlue;
+    State.acreditarCaja(persona, bolsillo, montoEnBolsillo);
+    await DB.agregarPagoVenta(id, pago);
+    const total = v.items.reduce((s, i) => s + i.precio, 0);
+    const pagado = v.pagos.reduce((s, p) => s + p.monto, 0);
+    if (pagado >= total) {
+      v.estado = 'cerrada';
+      await DB.actualizarEstadoVenta(id, 'cerrada');
+      toast(`Cobro registrado. Venta #${id} cerrada ✓`);
+    } else {
+      toast(`Cobro de USD ${monto.toFixed(2)} registrado en caja de ${persona}.`);
+    }
+    this.renderList();
+    this.viewSale(id);
   },
 
   async anular(id) {

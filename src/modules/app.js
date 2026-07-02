@@ -174,6 +174,30 @@ const App = {
     container.style.justifyContent = 'flex-start';
     this.closeSidebar();
     document.getElementById('user-menu-dropdown').style.display = 'none';
+    this.actualizarBadges();
+  },
+
+  actualizarBadges() {
+    const repListas = (State.reparaciones || []).filter(r => r.estado === 'listo').length;
+    const badge = document.getElementById('badge-reparaciones');
+    if (badge) {
+      if (repListas > 0) {
+        badge.textContent = repListas;
+        badge.style.display = 'inline-flex';
+      } else {
+        badge.style.display = 'none';
+      }
+    }
+    const ventasAbiertas = (State.ventas || []).filter(v => v.estado === 'abierta').length;
+    const badgeVentas = document.getElementById('badge-ventas');
+    if (badgeVentas) {
+      if (ventasAbiertas > 0) {
+        badgeVentas.textContent = ventasAbiertas;
+        badgeVentas.style.display = 'inline-flex';
+      } else {
+        badgeVentas.style.display = 'none';
+      }
+    }
   }
 };
 
@@ -335,6 +359,13 @@ document.addEventListener('keydown', (e) => {
   if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
     e.preventDefault();
     Search.open();
+  }
+  if ((e.metaKey || e.ctrlKey) && e.key === 'n') {
+    const tag = document.activeElement?.tagName;
+    if (tag === 'INPUT' || tag === 'TEXTAREA') return;
+    e.preventDefault();
+    App.goTo('ventas');
+    setTimeout(() => Ventas.openNew(), 120);
   }
 });
 

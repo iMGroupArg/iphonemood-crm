@@ -273,6 +273,18 @@ const DB = {
     await supa.from('ventas').delete().eq('id', ventaId); // borra en cascada items y pagos
   },
 
+  async agregarPagoVenta(ventaId, pago) {
+    await supa.from('venta_pagos').insert({
+      venta_id: ventaId, persona_id: this.personaId(pago.persona),
+      bolsillo: pago.bolsillo, monto: pago.monto,
+      es_tarjeta: false, diferencial_ars: 0
+    });
+  },
+
+  async actualizarEstadoVenta(ventaId, estado) {
+    await supa.from('ventas').update({ estado }).eq('id', ventaId);
+  },
+
   async crearReparacion(o) {
     await supa.from('reparaciones').insert({
       id: o.id, cliente: o.cliente, telefono: o.tel, equipo: o.equipo, falla: o.falla,

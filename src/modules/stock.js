@@ -3,14 +3,15 @@ const Stock = {
   currentView: 'productos', // 'productos' | 'historial'
   currentGroup: 'dispositivos', // 'dispositivos' | 'accesorios' | 'perfumeria'
   currentEstado: 'todos', // 'todos' | 'disponible' | 'vendido' | 'reservado' | 'en_reparacion'
-  CAT_LABELS: { iphone:'iPhone', android:'Android', mac:'Mac', ipad:'iPad', watch:'Watch', audio:'Audio', perfumeria:'Perfumería', accesorio:'Accesorio', repuesto:'Repuesto', otro:'Otro' },
-  CAT_CLASS: { iphone:'b-blue', android:'b-teal', mac:'b-blue', ipad:'b-blue', watch:'b-blue', audio:'b-purple', perfumeria:'b-green', accesorio:'b-purple', repuesto:'b-amber', otro:'b-gray' },
+  CAT_LABELS: { iphone:'iPhone', android:'Android', mac:'Mac', ipad:'iPad', watch:'Watch', audio:'Audio', perfumeria:'Perfumería', accesorio:'Accesorio', repuesto:'Repuesto', herramienta:'Herramienta', otro:'Otro' },
+  CAT_CLASS: { iphone:'b-blue', android:'b-teal', mac:'b-blue', ipad:'b-blue', watch:'b-blue', audio:'b-purple', perfumeria:'b-green', accesorio:'b-purple', repuesto:'b-amber', herramienta:'b-amber', otro:'b-gray' },
   CATS_IMEI: ['iphone','android','mac','ipad'],
   // Agrupación de rubros para las pestañas grandes del panel
   GRUPOS: {
     dispositivos: { label: 'Dispositivos', icon: 'ti-device-mobile', cats: ['iphone','android','mac','ipad','watch','audio'] },
-    accesorios: { label: 'Accesorios', icon: 'ti-plug', cats: ['accesorio','repuesto'] },
+    accesorios: { label: 'Accesorios', icon: 'ti-plug', cats: ['accesorio'] },
     perfumeria: { label: 'Perfumería', icon: 'ti-droplet', cats: ['perfumeria'] },
+    taller: { label: 'Taller', icon: 'ti-tool', cats: ['herramienta','repuesto'] },
   },
   ESTADO_INV_LABEL: { disponible:'Disponible', vendido:'Vendido', reservado:'Reservado', en_reparacion:'En reparación' },
   ESTADO_INV_CLASS: { disponible:'b-green', vendido:'b-gray', reservado:'b-amber', en_reparacion:'b-purple' },
@@ -57,22 +58,39 @@ const Stock = {
 
   renderKpis() {
     const grupo = this.productosDelGrupo(this.currentGroup);
-    const total = grupo.length;
-    const disponibles = grupo.filter(p => (p.estadoInventario||'disponible') === 'disponible' && this.stockReal(p) > 0).length;
-    const vendidos = grupo.filter(p => p.estadoInventario === 'vendido' || this.stockReal(p) === 0).length;
-    const valorDisponible = grupo.filter(p => (p.estadoInventario||'disponible')!=='vendido').reduce((a,p)=>a + p.costoUSD * this.stockReal(p), 0);
-    const valorVendidoPotencial = grupo.reduce((a,p)=>{
-      const precioUSD = p.cotiz ? p.precioARS / p.cotiz : 0;
-      return a + precioUSD * Math.max(this.stockReal(p), p.estadoInventario==='vendido'?1:0);
-    }, 0);
 
-    const kpis = [
-      ['Total', total, 'ti-box', 'var(--blue)', 'var(--blue-light)'],
-      ['Disponibles', disponibles, 'ti-circle-check', 'var(--green)', 'var(--green-light)'],
-      ['Vendidos', vendidos, 'ti-trending-up', 'var(--text)', 'var(--bg-secondary)'],
-      ['Valor Disponible', State.fmtUSD(valorDisponible), 'ti-currency-dollar', 'var(--blue)', 'var(--blue-light)'],
-      ['Valor de Venta', State.fmtUSD(valorVendidoPotencial), 'ti-cash', 'var(--green)', 'var(--green-light)'],
-    ];
+    let kpis;
+    if (this.currentGroup === 'taller') {
+      const herramientas = grupo.filter(p => p.cat === 'herramienta');
+      const repuestos    = grupo.filter(p => p.cat === 'repuesto');
+      const valorHerr    = herramientas.reduce((a,p) => a + p.costoUSD * Math.max(this.stockReal(p), 1), 0);
+      const valorRep     = repuestos.reduce((a,p) => a + p.costoUSD * Math.max(this.stockReal(p), 1), 0);
+      const unidadesRep  = repuestos.reduce((a,p) => a + this.stockReal(p), 0);
+      kpis = [
+        ['Herramientas', herramientas.length + ' ítems', 'ti-tool', 'var(--amber)', 'rgba(255,214,10,.12)'],
+        ['Valor herramientas', State.fmtUSD(valorHerr), 'ti-currency-dollar', 'var(--amber)', 'rgba(255,214,10,.12)'],
+        ['Repuestos', repuestos.length + ' tipos · ' + unidadesRep + ' uds', 'ti-components', 'var(--blue)', 'var(--blue-light)'],
+        ['Valor repuestos', State.fmtUSD(valorRep), 'ti-currency-dollar', 'var(--blue)', 'var(--blue-light)'],
+        ['Total activos taller', State.fmtUSD(valorHerr + valorRep), 'ti-building-store', 'var(--green)', 'var(--green-light)'],
+      ];
+    } else {
+      const total = grupo.length;
+      const disponibles = grupo.filter(p => (p.estadoInventario||'disponible') === 'disponible' && this.stockReal(p) > 0).length;
+      const vendidos = grupo.filter(p => p.estadoInventario === 'vendido' || this.stockReal(p) === 0).length;
+      const valorDisponible = grupo.filter(p => (p.estadoInventario||'disponible')!=='vendido').reduce((a,p)=>a + p.costoUSD * this.stockReal(p), 0);
+      const valorVendidoPotencial = grupo.reduce((a,p)=>{
+        const precioUSD = p.cotiz ? p.precioARS / p.cotiz : 0;
+        return a + precioUSD * Math.max(this.stockReal(p), p.estadoInventario==='vendido'?1:0);
+      }, 0);
+      kpis = [
+        ['Total', total, 'ti-box', 'var(--blue)', 'var(--blue-light)'],
+        ['Disponibles', disponibles, 'ti-circle-check', 'var(--green)', 'var(--green-light)'],
+        ['Vendidos', vendidos, 'ti-trending-up', 'var(--text)', 'var(--bg-secondary)'],
+        ['Valor Disponible', State.fmtUSD(valorDisponible), 'ti-currency-dollar', 'var(--blue)', 'var(--blue-light)'],
+        ['Valor de Venta', State.fmtUSD(valorVendidoPotencial), 'ti-cash', 'var(--green)', 'var(--green-light)'],
+      ];
+    }
+
     document.getElementById('stock-kpis').innerHTML = kpis.map(([label,val,icon,color,bg]) => `
       <div class="card" style="padding:12px 14px;margin-bottom:0;display:flex;justify-content:space-between;align-items:flex-start;gap:8px;min-height:90px">
         <div style="min-width:0;flex:1"><label style="font-size:11px;color:var(--text-secondary);display:block;margin-bottom:4px">${label}</label><div style="font-size:19px;font-weight:700;color:${color};word-break:break-word">${val}</div></div>
@@ -283,7 +301,7 @@ const Stock = {
     return d.toLocaleDateString('es-AR', { day:'2-digit', month:'2-digit' }) + ' ' + d.toLocaleTimeString('es-AR', { hour:'2-digit', minute:'2-digit' });
   },
 
-  CAT_ICONS: { iphone:'ti-device-mobile', android:'ti-device-mobile', mac:'ti-device-laptop', ipad:'ti-device-ipad', watch:'ti-device-watch', audio:'ti-headphones', perfumeria:'ti-droplet', accesorio:'ti-plug', repuesto:'ti-tool', otro:'ti-box' },
+  CAT_ICONS: { iphone:'ti-device-mobile', android:'ti-device-mobile', mac:'ti-device-laptop', ipad:'ti-device-ipad', watch:'ti-device-watch', audio:'ti-headphones', perfumeria:'ti-droplet', accesorio:'ti-plug', repuesto:'ti-components', herramienta:'ti-tool', otro:'ti-box' },
   MODELOS_POR_CAT: {
     iphone: ['iPhone 11','iPhone 12','iPhone 12 Pro','iPhone 13','iPhone 13 Pro','iPhone 14','iPhone 14 Pro','iPhone 14 Pro Max','iPhone 15','iPhone 15 Plus','iPhone 15 Pro','iPhone 15 Pro Max','iPhone 16','iPhone 16 Pro','iPhone 16 Pro Max','iPhone 17','iPhone 17 Pro','iPhone 17 Pro Max'],
     android: ['Samsung Galaxy S23','Samsung Galaxy S24','Samsung Galaxy S24+','Samsung Galaxy S24 Ultra','Samsung Galaxy A54','Samsung Galaxy A34','Motorola G84','Motorola G54','Motorola Edge 40','Xiaomi 13'],
@@ -391,9 +409,9 @@ const Stock = {
                   <input type="text" id="f-modelo-otro" value="${p.modelo && !(this.MODELOS_POR_CAT[p.cat]||[]).includes(p.modelo) ? p.modelo : ''}" placeholder="Escribí el modelo" style="width:100%;font-size:12px;padding:7px 10px;border:1px solid var(--border-strong);border-radius:8px;margin-top:6px;display:${p.modelo && !(this.MODELOS_POR_CAT[p.cat]||[]).includes(p.modelo) ? 'block':'none'}">
                 </div>
 
-                <div id="f-nombre-libre-wrap" style="display:${['perfumeria','accesorio','repuesto','otro'].includes(p.cat)?'block':'none'};margin-bottom:12px">
-                  <label style="font-size:11px;color:var(--text-secondary);font-weight:600;display:block;margin-bottom:4px">Nombre del producto *</label>
-                  <input type="text" id="f-nombre-libre" value="${['perfumeria','accesorio','repuesto','otro'].includes(p.cat) ? (p.nombre||'') : ''}" placeholder="ej: Dior Sauvage 100ml" style="width:100%;font-size:12px;padding:7px 10px;border:1px solid var(--border-strong);border-radius:8px">
+                <div id="f-nombre-libre-wrap" style="display:${['perfumeria','accesorio','repuesto','herramienta','otro'].includes(p.cat)?'block':'none'};margin-bottom:12px">
+                  <label style="font-size:11px;color:var(--text-secondary);font-weight:600;display:block;margin-bottom:4px">Nombre ${p.cat==='herramienta'?'de la herramienta':p.cat==='repuesto'?'del repuesto':'del producto'} *</label>
+                  <input type="text" id="f-nombre-libre" value="${['perfumeria','accesorio','repuesto','herramienta','otro'].includes(p.cat) ? (p.nombre||'') : ''}" placeholder="${p.cat==='herramienta'?'ej: Pistola de calor, iSclack, destornillador pentalobe…':p.cat==='repuesto'?'ej: Pantalla iPhone 13, Batería iPhone 12…':'ej: Dior Sauvage 100ml'}" style="width:100%;font-size:12px;padding:7px 10px;border:1px solid var(--border-strong);border-radius:8px">
                 </div>
 
                 <div id="f-specs-grid" style="display:${['iphone','android','mac','ipad'].includes(p.cat)?'grid':'none'};grid-template-columns:1fr 1fr;gap:10px;margin-bottom:12px">
@@ -630,7 +648,7 @@ const Stock = {
     if (!cat) return;
     const esIMEI = this.CATS_IMEI.includes(cat);
     const tieneModeloFijo = ['iphone','android','mac','ipad','watch','audio'].includes(cat);
-    const esLibre = ['perfumeria','accesorio','repuesto','otro'].includes(cat);
+    const esLibre = ['perfumeria','accesorio','repuesto','herramienta','otro'].includes(cat);
     const tieneStorageColor = ['iphone','android','mac','ipad'].includes(cat);
     const tieneBateria = ['iphone','android','ipad'].includes(cat);
     const esMac = cat === 'mac';
@@ -664,7 +682,7 @@ const Stock = {
     const cat = document.getElementById('f-cat').value;
     const esIMEI = this.CATS_IMEI.includes(cat);
     const tieneModeloFijo = ['iphone','android','mac','ipad','watch','audio'].includes(cat);
-    const esLibre = ['perfumeria','accesorio','repuesto','otro'].includes(cat);
+    const esLibre = ['perfumeria','accesorio','repuesto','herramienta','otro'].includes(cat);
 
     // Resolver el modelo (de la lista o "otro" escrito a mano)
     let modelo = '';

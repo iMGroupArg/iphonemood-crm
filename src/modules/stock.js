@@ -735,7 +735,7 @@ const Stock = {
     const costoUSD = parseFloat(document.getElementById('f-costo').value) || 0;
     const cotiz = parseFloat(document.getElementById('f-cotiz').value) || State.refBlue;
     const precioUSD = parseFloat(document.getElementById('f-precio-usd').value) || 0;
-    if (!nombre || !costoUSD || !precioUSD) { toast('Completá los campos obligatorios: producto, costo y precio de venta.'); return; }
+    if (!nombre || !costoUSD) { toast('Completá los campos obligatorios: producto y costo.'); return; }
 
     const cantidadNueva = parseInt(document.getElementById('f-cantidad').value, 10) || 0;
     const precioReventa = parseFloat(document.getElementById('f-precio-reventa')?.value) || null;

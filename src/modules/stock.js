@@ -213,7 +213,7 @@ const Stock = {
       const { margin, precioUSD, detalleStock, statusBadge } = filaTabla(p);
       return `<tr>
         <td>
-          <b>${p.nombre.replace(/ ?${p.color||'XXXXXXX'}/,'').replace(/ ?${p.storage||'XXXXXXX'}/,'').trim()}</b>
+          <b>${p.nombre}</b>
           ${p.cat === 'repuesto' && p.modelo ? `<div style="font-size:10px;color:var(--amber)"><i class="ti ti-device-mobile" style="font-size:9px"></i> ${p.modelo}</div>` : ''}
           ${p.notas ? `<div style="font-size:10px;color:var(--text-secondary)">${p.notas}</div>` : ''}
         </td>

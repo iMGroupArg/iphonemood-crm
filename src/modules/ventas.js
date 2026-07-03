@@ -881,6 +881,7 @@ const Ventas = {
   viewSale(id) {
     const v = State.ventas.find(x => x.id === id);
     if (!v) return;
+    App.closeSidebar();
     const total = v.items.reduce((s, i) => s + i.precio, 0);
     const pagado = v.pagos.reduce((s, p) => s + p.monto, 0);
     const saldo = pagado - total;
@@ -1111,8 +1112,10 @@ const Ventas = {
     const fmtFecha = (iso) => {
       if (!iso) return '—';
       const d = new Date(iso);
+      if (isNaN(d)) return iso;
       return d.toLocaleDateString('es-AR', { day:'2-digit', month:'2-digit', year:'numeric' });
     };
+    const fechaVentaFmt = v.fecha === 'Hoy' ? fmtFecha(new Date().toISOString()) : fmtFecha(v.fecha);
     const calcVencimiento = (fechaVenta, dias) => {
       if (!dias) return null;
       const base = fechaVenta && fechaVenta !== 'Hoy' ? new Date(fechaVenta) : new Date();
@@ -1216,7 +1219,7 @@ const Ventas = {
           <div>N° Recibo:</div>
           <div class="num">${v.id}</div>
           <div style="margin-top:6px">Fecha:</div>
-          <div style="font-weight:700;color:#1a1a1a">${v.fecha}</div>
+          <div style="font-weight:700;color:#1a1a1a">${fechaVentaFmt}</div>
         </div>
         <div class="recibo-badge">RECIBO</div>
       </div>
@@ -1292,7 +1295,7 @@ const Ventas = {
       <div class="section-title">Pagos Realizados</div>
       ${v.pagos.map(p => `
         <div class="pago-row">
-          <span>${v.fecha} · ${p.bolsillo}</span>
+          <span>${fechaVentaFmt} · ${p.bolsillo}</span>
           <span>${p.bolsillo?.startsWith('ARS') ? `$ ${(p.monto*(p.cotizacionDiferencial||State.refBlue)).toLocaleString('es-AR')} ARS (USD ${p.monto} @ $${(p.cotizacionDiferencial||State.refBlue).toLocaleString('es-AR')})` : `USD ${p.monto.toFixed(2)}`}</span>
         </div>`).join('')}
       <div class="pagos-resumen">
@@ -1316,7 +1319,7 @@ const Ventas = {
         return `<div class="garantia-item">
           <span><b>${i.nombre}</b>${i.imei ? ` · IMEI ${i.imei}` : ''}</span>
           <div class="garantia-dates">
-            <div>Desde: ${fmtFecha(v.fecha !== 'Hoy' ? v.fecha : new Date().toISOString())}</div>
+            <div>Desde: ${fechaVentaFmt}</div>
             <div class="vence">Vence: ${vence ? fmtFecha(vence.toISOString()) : '—'}</div>
             <div style="font-size:9.5px;color:${activa?'#388e3c':'#b71c1c'}">${activa ? `${diasRest} días restantes` : 'Garantía vencida'}</div>
           </div>

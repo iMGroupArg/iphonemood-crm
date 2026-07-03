@@ -372,7 +372,7 @@ select option { background: var(--bg-elevated); }
    RESPONSIVE — Desktop enhancements (≥1024px)
    Sidebar always visible, bigger text, wider padding
 ══════════════════════════════════════════════════════ */
-@media (min-width: 1024px) {
+@media (min-width: 768px) {
   /* Sidebar always visible on desktop */
   .sidebar {
     position: relative;

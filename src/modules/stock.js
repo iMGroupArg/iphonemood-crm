@@ -210,7 +210,7 @@ const Stock = {
     };
 
     tbody.innerHTML = rows.map(p => {
-      const { margin, precioUSD, detalleStock, statusBadge } = filaTabla(p);
+      const { margin, precioUSD, esIMEI, detalleStock, statusBadge } = filaTabla(p);
       return `<tr>
         <td>
           <b>${p.nombre}</b>

@@ -11,6 +11,7 @@ import './cashflow.js';
 import './panel.js';
 import './capital.js';
 import './clientes.js';
+import './proveedores.js';
 
 const App = {
   PAGES: {
@@ -24,6 +25,7 @@ const App = {
     cashflow: { title: 'Cash flow', module: CashFlow },
     capital: { title: 'Capital & Inversiones', module: Capital },
     clientes: { title: 'Clientes', module: Clientes },
+    proveedores: { title: 'Proveedores', module: Proveedores },
     panel: { title: 'Panel de control', module: Panel },
   },
 

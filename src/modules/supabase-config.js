@@ -18,7 +18,8 @@ const DB = {
   async cargarTodo() {
     const [personasRes, cajasRes, stockRes, garantiasRes, ventasRes, ventaItemsRes, ventaPagosRes,
            reparacionesRes, repRepuestosRes, repPagosRes, catGastoRes, gastosRes, cambiosRes,
-           gastosFijosRes, cierresRes, inversoresRes, inversorPagosRes, activosFijosRes] = await Promise.all([
+           gastosFijosRes, cierresRes, inversoresRes, inversorPagosRes, activosFijosRes,
+           proveedoresRes, lotesRes, loteItemsRes, lotePagosRes] = await Promise.all([
       supa.from('personas').select('*'),
       supa.from('cajas').select('*'),
       supa.from('stock').select('*'),
@@ -37,6 +38,10 @@ const DB = {
       supa.from('inversores').select('*').order('creado_en', { ascending: false }),
       supa.from('inversor_pagos').select('*').order('fecha', { ascending: false }),
       supa.from('activos_fijos').select('*').order('categoria', { ascending: true }),
+      supa.from('proveedores').select('*').order('creado_en', { ascending: false }),
+      supa.from('lotes_compra').select('*').order('id', { ascending: false }),
+      supa.from('lote_items').select('*'),
+      supa.from('lote_pagos').select('*').order('id', { ascending: true }),
     ]);
 
     // mapa de personas (id <-> nombre), lo usamos todo el tiempo para traducir
@@ -177,6 +182,30 @@ const DB = {
       notas: r.notas || '', equipoDevuelto: r.equipo_devuelto,
       tokenSeguimiento: r.token_seguimiento || null,
       condicionIngreso: r.condicion_ingreso || {},
+    }));
+
+    // proveedores
+    State.proveedores = (proveedoresRes.data || []).map(p => ({
+      id: p.id, nombre: p.nombre, contacto: p.contacto || '', telefono: p.telefono || '',
+      email: p.email || '', notas: p.notas || '', activo: p.activo !== false,
+    }));
+    State.lotesCompra = (lotesRes.data || []).map(l => ({
+      id: l.id, proveedorId: l.proveedor_id, nombre: l.nombre || '',
+      fechaOrden: l.fecha_orden, fechaLlegadaEsperada: l.fecha_llegada_esperada || '',
+      fechaRecepcion: l.fecha_recepcion || '', estado: l.estado || 'programado', notas: l.notas || '',
+    }));
+    State.loteItems = (loteItemsRes.data || []).map(i => ({
+      id: i.id, loteId: i.lote_id, nombre: i.nombre, cat: i.cat || 'iphone',
+      modelo: i.modelo || '', storage: i.storage || '', color: i.color || '',
+      cantidad: Number(i.cantidad), precioUsd: Number(i.precio_usd), grado: i.grado || '', notas: i.notas || '',
+    }));
+    State.lotePagos = (lotePagosRes.data || []).map(p => ({
+      id: p.id, loteId: p.lote_id, tipo: p.tipo,
+      montoUsd: Number(p.monto_usd), montoUsdt: Number(p.monto_usdt),
+      comisionPct: Number(p.comision_pct), comisionUsd: Number(p.comision_usd),
+      moneda: p.moneda || 'USD', persona: p.persona || '', bolsillo: p.bolsillo || '',
+      personaDest: p.persona_dest || '', bolsilloDestino: p.bolsillo_dest || '',
+      fecha: p.fecha || '', notas: p.notas || '',
     }));
   },
 
@@ -400,6 +429,59 @@ const DB = {
       .upsert({ mes, total_ingresos: totalIngresos, total_gastos: totalGastos, balance, reparto, cerrado_por: Auth.usuario?.nombre || Auth.usuario?.email || '' }, { onConflict: 'mes' })
       .select().single();
     return { data, error };
+  },
+
+  // ===== PROVEEDORES =====
+
+  async guardarProveedor(id, data) {
+    if (id) {
+      await supa.from('proveedores').update({ nombre: data.nombre, contacto: data.contacto, telefono: data.telefono, email: data.email, notas: data.notas }).eq('id', id);
+      const p = State.proveedores.find(x => x.id === id);
+      if (p) Object.assign(p, data);
+    } else {
+      const { data: row } = await supa.from('proveedores').insert({ nombre: data.nombre, contacto: data.contacto, telefono: data.telefono, email: data.email, notas: data.notas, activo: true }).select().single();
+      if (row) State.proveedores.unshift({ id: row.id, activo: true, ...data });
+    }
+  },
+
+  async borrarProveedorDB(id) {
+    await supa.from('proveedores').update({ activo: false }).eq('id', id);
+    const idx = State.proveedores.findIndex(p => p.id === id);
+    if (idx >= 0) State.proveedores.splice(idx, 1);
+  },
+
+  async crearLote(lote, items) {
+    const { data: row } = await supa.from('lotes_compra').insert({
+      proveedor_id: lote.proveedorId, nombre: lote.nombre || '', fecha_orden: lote.fechaOrden,
+      fecha_llegada_esperada: lote.fechaLlegadaEsperada || null, notas: lote.notas || '', estado: 'programado',
+    }).select().single();
+    const loteObj = { id: row.id, proveedorId: row.proveedor_id, nombre: row.nombre, fechaOrden: row.fecha_orden, fechaLlegadaEsperada: row.fecha_llegada_esperada || '', fechaRecepcion: '', estado: 'programado', notas: row.notas };
+    State.lotesCompra.unshift(loteObj);
+    if (items?.length) {
+      const rows = items.map(i => ({ lote_id: row.id, nombre: i.nombre, cat: i.cat || 'iphone', modelo: i.modelo || '', storage: i.storage || '', color: i.color || '', cantidad: i.cantidad || 1, precio_usd: i.precioUsd || 0, grado: i.grado || '' }));
+      const { data: itemRows } = await supa.from('lote_items').insert(rows).select();
+      (itemRows || []).forEach(i => State.loteItems.push({ id: i.id, loteId: i.lote_id, nombre: i.nombre, cat: i.cat, modelo: i.modelo, storage: i.storage, color: i.color, cantidad: Number(i.cantidad), precioUsd: Number(i.precio_usd), grado: i.grado || '', notas: i.notas || '' }));
+    }
+    return loteObj;
+  },
+
+  async guardarLotePago(loteId, p) {
+    const { data: row } = await supa.from('lote_pagos').insert({
+      lote_id: loteId, tipo: p.tipo, monto_usd: p.montoUsd, monto_usdt: p.montoUsdt || 0,
+      comision_pct: p.comisionPct || 0, comision_usd: p.comisionUsd || 0,
+      moneda: p.moneda || 'USD', persona: p.persona || '', bolsillo: p.bolsillo || '',
+      persona_dest: p.personaDest || '', bolsillo_dest: p.bolsilloDestino || '',
+      fecha: p.fecha || new Date().toISOString().slice(0, 10), notas: p.notas || '',
+    }).select().single();
+    if (row) State.lotePagos.push({ id: row.id, loteId, tipo: p.tipo, montoUsd: Number(p.montoUsd), montoUsdt: Number(p.montoUsdt || 0), comisionPct: Number(p.comisionPct || 0), comisionUsd: Number(p.comisionUsd || 0), moneda: p.moneda || 'USD', persona: p.persona || '', bolsillo: p.bolsillo || '', personaDest: p.personaDest || '', bolsilloDestino: p.bolsilloDestino || '', fecha: p.fecha || '', notas: p.notas || '' });
+  },
+
+  async actualizarEstadoLote(loteId, estado, fechaRecepcion) {
+    const upd = { estado };
+    if (fechaRecepcion) upd.fecha_recepcion = fechaRecepcion;
+    await supa.from('lotes_compra').update(upd).eq('id', loteId);
+    const l = State.lotesCompra.find(x => x.id === loteId);
+    if (l) { l.estado = estado; if (fechaRecepcion) l.fechaRecepcion = fechaRecepcion; }
   },
 
   async crearCambio(c) {

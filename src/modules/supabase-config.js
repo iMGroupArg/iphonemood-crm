@@ -440,9 +440,20 @@ const DB = {
   async borrarPersona(nombre) {
     const pid = this.personaId(nombre);
     if (!pid) return { error: 'No se encontró la persona' };
-    // Las cajas se borran en cascada por la referencia de la tabla.
-    // Ventas, reparaciones y gastos asociados quedan con la referencia en null (no se borran).
+
+    // Borrar cajas explícitamente (por si no hay ON DELETE CASCADE)
+    await supa.from('cajas').delete().eq('persona_id', pid);
+
+    // Desvincular ventas, gastos, reparaciones y cambios que referencian esta persona
+    await supa.from('ventas').update({ vendedor_id: null }).eq('vendedor_id', pid);
+    await supa.from('gastos').update({ responsable_id: null }).eq('responsable_id', pid);
+    await supa.from('gastos').update({ persona_caja_id: null }).eq('persona_caja_id', pid);
+    await supa.from('reparaciones').update({ custodio_id: null }).eq('custodio_id', pid);
+    await supa.from('cambios').update({ origen_persona_id: null }).eq('origen_persona_id', pid);
+    await supa.from('cambios').update({ destino_persona_id: null }).eq('destino_persona_id', pid);
+
     const { error } = await supa.from('personas').delete().eq('id', pid);
+    if (error) console.error('Error al borrar persona:', error);
     if (!error) {
       delete this.personasMap[nombre];
       delete this.personasIdToNombre[pid];

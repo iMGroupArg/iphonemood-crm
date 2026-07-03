@@ -102,6 +102,7 @@ const App = {
 
     document.getElementById('topbar-blue').textContent = State.refBlue.toLocaleString('es-AR');
     document.getElementById('topbar-usdt').textContent = State.refUsdt.toLocaleString('es-AR');
+    Panel.cargarMarcaAlInicio();
     this.goTo('dashboard');
 
     // Si la página se recargó sola mientras había una venta a medio cargar

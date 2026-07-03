@@ -1104,10 +1104,17 @@ const Ventas = {
       `<li>${i.nombre} - Válida desde ${i.garantiaInicio||v.fecha} hasta ${i.garantiaFin}</li>`
     ).join('');
 
-    const LOGO_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 240" width="52" height="62">
-      <path d="M100 20 C85 5, 65 8, 62 22 C59 36, 72 46, 82 42 C75 55, 60 58, 48 80 C34 106, 35 138, 50 160 C62 178, 80 188, 96 188 C108 188, 116 182, 124 182 C132 182, 140 188, 153 188 C170 188, 188 174, 198 152 C172 140, 172 104, 198 92 C188 64, 168 54, 150 58 C140 60, 132 68, 124 68 C116 68, 108 60, 96 58 C88 56, 80 48, 84 35 C88 24, 100 20, 100 20 Z" fill="#1a1a1a"/>
-      <path d="M105 5 C105 5, 118 0, 128 10 C138 20, 130 38, 118 36 C110 34, 100 20, 105 5 Z" fill="#1a1a1a"/>
-    </svg>`;
+    const logoB64 = localStorage.getItem('im_logo_b64');
+    const fuenteId = localStorage.getItem('im_fuente') || 'system';
+    const fuenteObj = (Panel?.FUENTES || []).find(f => f.id === fuenteId);
+    const fuenteStack = fuenteObj?.stack || 'Helvetica Neue, Arial, sans-serif';
+    const gfontUrl = fuenteObj?.google ? `https://fonts.googleapis.com/css2?family=${fuenteObj.google}&display=swap` : null;
+    const LOGO_HTML = logoB64
+      ? `<img src="${logoB64}" style="width:54px;height:54px;object-fit:contain">`
+      : `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 245" width="44" height="54"><path d="M100,18 C86,4 64,7 61,22 C58,37 71,48 83,43 C76,56 60,60 48,82 C33,108 34,140 50,162 C62,180 80,190 96,190 C108,190 116,184 124,184 C132,184 140,190 154,190 C171,190 189,176 199,154 C173,141 173,105 199,93 C189,65 168,55 150,59 C140,61 132,69 124,69 C116,69 108,61 96,59 C87,57 79,48 83,35 C87,22 100,18 100,18 Z" fill="#1a1a1a"/><path d="M104,4 C104,4 117,-1 128,10 C139,21 131,40 118,38 C109,36 99,20 104,4 Z" fill="#1a1a1a"/></svg>`;
+    const LOGO_FOOTER = logoB64
+      ? `<img src="${logoB64}" style="width:22px;height:22px;object-fit:contain;opacity:0.3">`
+      : `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 245" width="22" height="27"><path d="M100,18 C86,4 64,7 61,22 C58,37 71,48 83,43 C76,56 60,60 48,82 C33,108 34,140 50,162 C62,180 80,190 96,190 C108,190 116,184 124,184 C132,184 140,190 154,190 C171,190 189,176 199,154 C173,141 173,105 199,93 C189,65 168,55 150,59 C140,61 132,69 124,69 C116,69 108,61 96,59 C87,57 79,48 83,35 C87,22 100,18 100,18 Z" fill="#1a1a1a"/><path d="M104,4 C104,4 117,-1 128,10 C139,21 131,40 118,38 C109,36 99,20 104,4 Z" fill="#1a1a1a"/></svg>`;
 
     const fmtFecha = (iso) => {
       if (!iso) return '—';
@@ -1125,9 +1132,10 @@ const Ventas = {
     const condiciones = State.condicionesGarantia || '';
 
     const html = `<!DOCTYPE html><html lang="es"><head><meta charset="UTF-8"><title>Recibo #${v.id}</title>
+    ${gfontUrl ? `<link rel="stylesheet" href="${gfontUrl}">` : ''}
     <style>
       * { margin: 0; padding: 0; box-sizing: border-box; }
-      body { font-family: 'Helvetica Neue', Arial, sans-serif; font-size: 12px; color: #1a1a1a; background: #fff; }
+      body { font-family: ${fuenteStack},'Helvetica Neue',Arial,sans-serif; font-size: 12px; color: #1a1a1a; background: #fff; }
       .page { max-width: 760px; margin: 0 auto; padding: 32px 36px; }
 
       /* ── HEADER ── */
@@ -1205,10 +1213,7 @@ const Ventas = {
     <!-- HEADER -->
     <div class="header">
       <div class="brand">
-        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 245" width="44" height="54">
-          <path d="M100,18 C86,4 64,7 61,22 C58,37 71,48 83,43 C76,56 60,60 48,82 C33,108 34,140 50,162 C62,180 80,190 96,190 C108,190 116,184 124,184 C132,184 140,190 154,190 C171,190 189,176 199,154 C173,141 173,105 199,93 C189,65 168,55 150,59 C140,61 132,69 124,69 C116,69 108,61 96,59 C87,57 79,48 83,35 C87,22 100,18 100,18 Z" fill="#1a1a1a"/>
-          <path d="M104,4 C104,4 117,-1 128,10 C139,21 131,40 118,38 C109,36 99,20 104,4 Z" fill="#1a1a1a"/>
-        </svg>
+        ${LOGO_HTML}
         <div class="brand-text">
           <div class="brand-name">iPhoneMood</div>
           <div class="brand-addr">Julio Argentino Roca 700, Granadero Baigorria, Santa Fe<br>Tel: +54 9 3413 66-2150 · iphonemood.ar@gmail.com</div>
@@ -1343,10 +1348,7 @@ const Ventas = {
 
     <!-- FOOTER -->
     <div class="footer">
-      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 245" width="22" height="27">
-        <path d="M100,18 C86,4 64,7 61,22 C58,37 71,48 83,43 C76,56 60,60 48,82 C33,108 34,140 50,162 C62,180 80,190 96,190 C108,190 116,184 124,184 C132,184 140,190 154,190 C171,190 189,176 199,154 C173,141 173,105 199,93 C189,65 168,55 150,59 C140,61 132,69 124,69 C116,69 108,61 96,59 C87,57 79,48 83,35 C87,22 100,18 100,18 Z" fill="#1a1a1a"/>
-        <path d="M104,4 C104,4 117,-1 128,10 C139,21 131,40 118,38 C109,36 99,20 104,4 Z" fill="#1a1a1a"/>
-      </svg>
+      ${LOGO_FOOTER}
       <span>DOCUMENTO NO VÁLIDO COMO FACTURA</span>
       <span>Generado el ${new Date().toLocaleDateString('es-AR')} a las ${new Date().toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit'})}</span>
       <span>Recibo N° ${v.id} · iPhoneMood · Granadero Baigorria, Santa Fe</span>

@@ -24,6 +24,7 @@ const Panel = {
       ['personas', 'ti ti-users', 'Cajas y personas'],
       ['usuarios', 'ti ti-lock', 'Usuarios y accesos'],
       ['negocio', 'ti ti-building-store', 'Datos del negocio'],
+      ['marca', 'ti ti-palette', 'Logo y tipografía'],
       ['exportar', 'ti ti-file-spreadsheet', 'Exportar todo'],
     ];
     document.getElementById('panel-nav').innerHTML = items.map(([k, ic, l]) =>
@@ -40,6 +41,7 @@ const Panel = {
     else if (this.activeTab === 'categorias-gasto') body.innerHTML = this.categoriasGastoView();
     else if (this.activeTab === 'personas') body.innerHTML = this.personasView();
     else if (this.activeTab === 'usuarios') { body.innerHTML = this.usuariosView(); this.cargarUsuarios(); }
+    else if (this.activeTab === 'marca') { body.innerHTML = this.marcaView(); this._initMarcaPreview(); }
     else if (this.activeTab === 'exportar') body.innerHTML = this.exportarView();
     else body.innerHTML = this.negocioView();
   },
@@ -518,7 +520,202 @@ const Panel = {
     if (!confirm(`¿Quitar el acceso de ${email}? Esa persona ya no va a poder iniciar sesión.`)) return;
     await Auth.quitarUsuarioAutorizado(id);
     this.cargarUsuarios();
-  }
+  },
+
+  // ── LOGO Y TIPOGRAFÍA ─────────────────────────────────────────────────────
+
+  FUENTES: [
+    { id: 'system',       label: 'Sistema (SF Pro / Helvetica)', stack: '-apple-system,"SF Pro Display","Helvetica Neue",sans-serif', google: null },
+    { id: 'inter',        label: 'Inter',        stack: '"Inter",sans-serif',        google: 'Inter:wght@400;500;600;700;800' },
+    { id: 'poppins',      label: 'Poppins',      stack: '"Poppins",sans-serif',      google: 'Poppins:wght@400;500;600;700;800' },
+    { id: 'nunito',       label: 'Nunito',       stack: '"Nunito",sans-serif',       google: 'Nunito:wght@400;500;600;700;800' },
+    { id: 'montserrat',   label: 'Montserrat',   stack: '"Montserrat",sans-serif',   google: 'Montserrat:wght@400;500;600;700;800' },
+    { id: 'raleway',      label: 'Raleway',      stack: '"Raleway",sans-serif',      google: 'Raleway:wght@400;500;600;700;800' },
+    { id: 'dm-sans',      label: 'DM Sans',      stack: '"DM Sans",sans-serif',      google: 'DM+Sans:wght@400;500;600;700;800' },
+    { id: 'plus-jakarta', label: 'Plus Jakarta Sans', stack: '"Plus Jakarta Sans",sans-serif', google: 'Plus+Jakarta+Sans:wght@400;500;600;700;800' },
+    { id: 'geist',        label: 'Geist',        stack: '"Geist",sans-serif',        google: 'Geist:wght@400;500;600;700;800' },
+    { id: 'lato',         label: 'Lato',         stack: '"Lato",sans-serif',         google: 'Lato:wght@400;700' },
+    { id: 'roboto',       label: 'Roboto',       stack: '"Roboto",sans-serif',       google: 'Roboto:wght@400;500;700' },
+  ],
+
+  marcaView() {
+    const logoActual = localStorage.getItem('im_logo_b64') || '';
+    const fuenteActual = localStorage.getItem('im_fuente') || 'system';
+    const fuente = this.FUENTES.find(f => f.id === fuenteActual) || this.FUENTES[0];
+
+    return `
+      <h3 style="font-size:13px;font-weight:600;color:var(--text-secondary);text-transform:uppercase;letter-spacing:.4px;margin-bottom:18px;border-bottom:1px solid var(--border);padding-bottom:8px">Logo y tipografía</h3>
+
+      <!-- LOGO -->
+      <div style="margin-bottom:28px">
+        <div style="font-size:13px;font-weight:700;margin-bottom:4px">Logo de la marca</div>
+        <div style="font-size:11px;color:var(--text-secondary);margin-bottom:14px">Se usa en el sidebar y en todos los recibos generados. Formatos: PNG, JPG, SVG. Recomendado: fondo transparente.</div>
+
+        <div style="display:flex;align-items:flex-start;gap:20px;flex-wrap:wrap">
+          <!-- Preview actual -->
+          <div style="display:flex;flex-direction:column;align-items:center;gap:8px">
+            <div style="width:80px;height:80px;border-radius:16px;background:#1a1a1a;display:flex;align-items:center;justify-content:center;overflow:hidden;border:1px solid var(--border)" id="marca-logo-preview">
+              ${logoActual
+                ? `<img src="${logoActual}" style="width:60px;height:60px;object-fit:contain">`
+                : `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 245" width="44" height="54"><path d="M100,18 C86,4 64,7 61,22 C58,37 71,48 83,43 C76,56 60,60 48,82 C33,108 34,140 50,162 C62,180 80,190 96,190 C108,190 116,184 124,184 C132,184 140,190 154,190 C171,190 189,176 199,154 C173,141 173,105 199,93 C189,65 168,55 150,59 C140,61 132,69 124,69 C116,69 108,61 96,59 C87,57 79,48 83,35 C87,22 100,18 100,18 Z" fill="#fff"/><path d="M104,4 C104,4 117,-1 128,10 C139,21 131,40 118,38 C109,36 99,20 104,4 Z" fill="#fff"/></svg>`}
+            </div>
+            <div style="font-size:10px;color:var(--text-secondary)">Vista previa</div>
+          </div>
+
+          <!-- Acciones -->
+          <div style="display:flex;flex-direction:column;gap:8px">
+            <label class="btn btn-primary" style="cursor:pointer">
+              <i class="ti ti-upload"></i> Subir logo
+              <input type="file" accept="image/png,image/jpeg,image/svg+xml,image/webp" style="display:none" onchange="Panel._subirLogo(this)">
+            </label>
+            ${logoActual ? `<button class="btn" style="color:var(--red)" onclick="Panel._quitarLogo()"><i class="ti ti-trash"></i> Quitar logo</button>` : ''}
+            <div style="font-size:10px;color:var(--text-secondary);max-width:220px">Máx. 2MB. Para mejores resultados usá un logo cuadrado con fondo transparente (PNG).</div>
+          </div>
+        </div>
+
+        <!-- Preview sidebar simulado -->
+        <div style="margin-top:16px;background:var(--bg-secondary);border:1px solid var(--border);border-radius:10px;padding:14px;display:inline-flex;align-items:center;gap:10px">
+          <div style="width:36px;height:36px;border-radius:9px;background:#1a1a1a;display:flex;align-items:center;justify-content:center;overflow:hidden;flex-shrink:0" id="marca-sidebar-preview">
+            ${logoActual
+              ? `<img src="${logoActual}" style="width:26px;height:26px;object-fit:contain">`
+              : `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 245" width="22" height="26"><path d="M100,18 C86,4 64,7 61,22 C58,37 71,48 83,43 C76,56 60,60 48,82 C33,108 34,140 50,162 C62,180 80,190 96,190 C108,190 116,184 124,184 C132,184 140,190 154,190 C171,190 189,176 199,154 C173,141 173,105 199,93 C189,65 168,55 150,59 C140,61 132,69 124,69 C116,69 108,61 96,59 C87,57 79,48 83,35 C87,22 100,18 100,18 Z" fill="#fff"/><path d="M104,4 C104,4 117,-1 128,10 C139,21 131,40 118,38 C109,36 99,20 104,4 Z" fill="#fff"/></svg>`}
+          </div>
+          <div>
+            <div style="font-size:13px;font-weight:600">iPhoneMood</div>
+            <div style="font-size:11px;color:var(--text-secondary)">Rosario · CRM</div>
+          </div>
+          <div style="font-size:10px;color:var(--text-tertiary);margin-left:8px">← así se ve en el sidebar</div>
+        </div>
+      </div>
+
+      <!-- TIPOGRAFÍA -->
+      <div>
+        <div style="font-size:13px;font-weight:700;margin-bottom:4px">Tipografía</div>
+        <div style="font-size:11px;color:var(--text-secondary);margin-bottom:14px">Afecta toda la plataforma y los recibos generados. La fuente se carga desde Google Fonts.</div>
+
+        <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:8px;margin-bottom:16px">
+          ${this.FUENTES.map(f => `
+            <div onclick="Panel._previewFuente('${f.id}')" id="fuente-card-${f.id}"
+              style="border:2px solid ${fuenteActual===f.id?'var(--blue)':'var(--border)'};background:${fuenteActual===f.id?'var(--blue-light)':'var(--bg)'};border-radius:10px;padding:12px 14px;cursor:pointer;transition:border .1s">
+              <div style="font-size:15px;font-weight:700;font-family:${f.stack};color:${fuenteActual===f.id?'var(--blue)':'var(--text)'};margin-bottom:3px">${f.label}</div>
+              <div style="font-size:11px;font-family:${f.stack};color:var(--text-secondary)">Aa Bb Cc 0123</div>
+            </div>`).join('')}
+        </div>
+
+        <!-- Preview texto con fuente seleccionada -->
+        <div style="background:var(--bg-secondary);border:1px solid var(--border);border-radius:10px;padding:16px;margin-bottom:14px">
+          <div style="font-size:10px;color:var(--text-secondary);text-transform:uppercase;letter-spacing:1px;margin-bottom:8px">Vista previa</div>
+          <div id="fuente-preview-text" style="font-family:${fuente.stack}">
+            <div style="font-size:20px;font-weight:700;margin-bottom:4px">iPhoneMood CRM</div>
+            <div style="font-size:13px;margin-bottom:2px">Ventas · Stock · Cajas · Reparaciones</div>
+            <div style="font-size:11px;color:var(--text-secondary)">Total venta: USD 820 · Pagado · Recibo N° 9</div>
+          </div>
+        </div>
+
+        <button class="btn btn-primary" onclick="Panel._guardarFuente()"><i class="ti ti-device-floppy"></i> Aplicar tipografía</button>
+        <div style="font-size:10px;color:var(--text-secondary);margin-top:6px">El cambio se aplica al instante y se guarda para todas las sesiones.</div>
+      </div>
+    `;
+  },
+
+  _initMarcaPreview() {
+    // Pre-carga las fuentes de Google para que se vean en el preview antes de aplicar
+    this.FUENTES.filter(f => f.google).forEach(f => {
+      const id = `gfont-preview-${f.id}`;
+      if (!document.getElementById(id)) {
+        const link = document.createElement('link');
+        link.id = id;
+        link.rel = 'stylesheet';
+        link.href = `https://fonts.googleapis.com/css2?family=${f.google}&display=swap`;
+        document.head.appendChild(link);
+      }
+    });
+  },
+
+  _subirLogo(input) {
+    const file = input.files[0];
+    if (!file) return;
+    if (file.size > 2 * 1024 * 1024) { toast('El archivo es muy grande. Máximo 2MB.'); return; }
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const b64 = e.target.result;
+      localStorage.setItem('im_logo_b64', b64);
+      // Actualizar sidebar en vivo
+      Panel._aplicarLogoSidebar(b64);
+      // Refrescar el panel
+      Panel.renderBody();
+      toast('Logo actualizado.');
+    };
+    reader.readAsDataURL(file);
+  },
+
+  _quitarLogo() {
+    if (!confirm('¿Quitar el logo personalizado y volver al logo por defecto?')) return;
+    localStorage.removeItem('im_logo_b64');
+    Panel._aplicarLogoSidebar(null);
+    Panel.renderBody();
+    toast('Logo eliminado. Se usa el logo por defecto.');
+  },
+
+  _aplicarLogoSidebar(b64) {
+    const sbLogo = document.querySelector('.sb-logo');
+    if (!sbLogo) return;
+    if (b64) {
+      sbLogo.innerHTML = `<img src="${b64}" style="width:26px;height:26px;object-fit:contain">`;
+    } else {
+      sbLogo.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 245" width="26" height="26"><path d="M100,18 C86,4 64,7 61,22 C58,37 71,48 83,43 C76,56 60,60 48,82 C33,108 34,140 50,162 C62,180 80,190 96,190 C108,190 116,184 124,184 C132,184 140,190 154,190 C171,190 189,176 199,154 C173,141 173,105 199,93 C189,65 168,55 150,59 C140,61 132,69 124,69 C116,69 108,61 96,59 C87,57 79,48 83,35 C87,22 100,18 100,18 Z" fill="#fff"/><path d="M104,4 C104,4 117,-1 128,10 C139,21 131,40 118,38 C109,36 99,20 104,4 Z" fill="#fff"/></svg>`;
+    }
+  },
+
+  _previewFuente(id) {
+    const fuente = this.FUENTES.find(f => f.id === id);
+    if (!fuente) return;
+    // Resaltar card seleccionada
+    this.FUENTES.forEach(f => {
+      const card = document.getElementById(`fuente-card-${f.id}`);
+      if (!card) return;
+      const sel = f.id === id;
+      card.style.borderColor = sel ? 'var(--blue)' : 'var(--border)';
+      card.style.background = sel ? 'var(--blue-light)' : 'var(--bg)';
+      card.querySelector('div').style.color = sel ? 'var(--blue)' : 'var(--text)';
+    });
+    // Actualizar preview
+    const prev = document.getElementById('fuente-preview-text');
+    if (prev) prev.style.fontFamily = fuente.stack;
+    // Guardar selección temporal
+    this._fuenteSelTemp = id;
+  },
+
+  _guardarFuente() {
+    const id = this._fuenteSelTemp || localStorage.getItem('im_fuente') || 'system';
+    const fuente = this.FUENTES.find(f => f.id === id);
+    if (!fuente) return;
+    localStorage.setItem('im_fuente', id);
+    Panel.aplicarFuente(id);
+    toast(`Tipografía "${fuente.label}" aplicada.`);
+  },
+
+  aplicarFuente(id) {
+    const fuente = this.FUENTES.find(f => f.id === (id || localStorage.getItem('im_fuente') || 'system'));
+    if (!fuente) return;
+    // Cargar Google Font si hace falta
+    if (fuente.google) {
+      const linkId = 'gfont-active';
+      let link = document.getElementById(linkId);
+      if (!link) { link = document.createElement('link'); link.id = linkId; link.rel = 'stylesheet'; document.head.appendChild(link); }
+      link.href = `https://fonts.googleapis.com/css2?family=${fuente.google}&display=swap`;
+    }
+    // Aplicar al :root
+    document.documentElement.style.setProperty('--font', fuente.stack);
+  },
+
+  cargarMarcaAlInicio() {
+    // Logo
+    const logo = localStorage.getItem('im_logo_b64');
+    if (logo) this._aplicarLogoSidebar(logo);
+    // Fuente
+    this.aplicarFuente(localStorage.getItem('im_fuente') || 'system');
+  },
 };
 
 

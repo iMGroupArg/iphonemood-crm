@@ -303,25 +303,230 @@ const Ventas = {
     `;
   },
 
+  _TI_CATS: [
+    { k:'iphone', label:'iPhone', icon:'ti-device-mobile' },
+    { k:'android', label:'Android', icon:'ti-device-mobile' },
+    { k:'mac', label:'Mac', icon:'ti-device-laptop' },
+    { k:'ipad', label:'iPad', icon:'ti-device-ipad' },
+    { k:'watch', label:'Apple Watch', icon:'ti-device-watch' },
+    { k:'audio', label:'Audio', icon:'ti-headphones' },
+    { k:'otro', label:'Personalizado', icon:'ti-box' },
+  ],
+  _tiCat: 'iphone',
+
   stepTradeIn() {
     const d = this.draft;
     const active = !!d.tradeIn;
+    const cat = d.tradeIn?.cat || this._tiCat || 'iphone';
+    const STORAGE = ['32GB','64GB','128GB','256GB','512GB','1TB','2TB'];
+    const COLORES = ['Negro','Blanco','Azul','Verde','Rosa','Rojo','Titanio Natural','Titanio Azul','Titanio Negro','Plata','Dorado','Gris Espacial','Otro'];
+    const ESTADO = ['Nuevo / Sellado','Excelente','Muy bueno','Bueno','Con detalles'];
+    const GRADO = ['Sin grado','A+','A','B','C'];
+    const modelos = Stock.MODELOS_POR_CAT[cat] || [];
+    const hasSpecs = ['iphone','android','mac','ipad'].includes(cat);
+    const hasBat = ['iphone','android','ipad'].includes(cat);
+    const ti = d.tradeIn || {};
+
+    const INPUT = 'width:100%;font-size:12px;padding:7px 10px;border:1px solid var(--border-strong);border-radius:8px;background:var(--bg-secondary);color:var(--text)';
+    const LABEL = 'font-size:11px;color:var(--text-secondary);font-weight:600;display:block;margin-bottom:4px';
+
     return `
-      <label style="display:flex;align-items:center;gap:8px;font-size:13px;cursor:pointer;margin-bottom:12px">
-        <input type="checkbox" id="vf-ti-active" ${active?'checked':''} onchange="Ventas.toggleTI()"> El cliente entrega un producto como parte de pago
+      <!-- Checkbox principal -->
+      <label style="display:flex;align-items:flex-start;gap:10px;font-size:13px;cursor:pointer;background:var(--bg-secondary);border:1px solid var(--border);border-radius:10px;padding:12px 14px;margin-bottom:14px">
+        <input type="checkbox" id="vf-ti-active" ${active?'checked':''} onchange="Ventas.toggleTI()" style="margin-top:2px;width:15px;height:15px;flex-shrink:0">
+        <span><b>El cliente entrega un producto como parte de pago</b><br><span style="font-size:11px;color:var(--text-secondary)">Se descuenta del total y el equipo se suma al stock automáticamente.</span></span>
       </label>
-      <div id="vf-ti-form" style="display:${active?'block':'none'}">
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px">
-          <div><label style="font-size:11px;color:var(--text-secondary);font-weight:600;display:block;margin-bottom:4px">Modelo entregado</label>
-            <input type="text" id="vf-ti-modelo" value="${d.tradeIn?.modelo||''}" style="width:100%;font-size:12px;padding:7px 10px;border:1px solid var(--border-strong);border-radius:8px"></div>
-          <div><label style="font-size:11px;color:var(--text-secondary);font-weight:600;display:block;margin-bottom:4px">Valor tomado (USD)</label>
-            <input type="number" id="vf-ti-valor" value="${d.tradeIn?.valor||''}" style="width:100%;font-size:12px;padding:7px 10px;border:1px solid var(--border-strong);border-radius:8px"></div>
+
+      <div id="vf-ti-form" style="display:${active?'flex':'none'};flex-direction:column;gap:14px">
+
+        <!-- Revisar antes de vender -->
+        <div style="background:var(--bg-secondary);border:1px solid var(--border);border-radius:10px;padding:12px 14px">
+          <label style="display:flex;align-items:flex-start;gap:10px;cursor:pointer;font-size:12.5px">
+            <input type="checkbox" id="vf-ti-revisar" ${ti.revisar?'checked':''} style="margin-top:2px;width:14px;height:14px;flex-shrink:0">
+            <span><b>Mandar a revisar en servicio técnico antes de ponerlo a la venta</b><br>
+            <span style="font-size:11px;color:var(--blue)">El equipo entra como "En revisión": no se puede vender ni aparece en el catálogo, y queda en Servicio técnico → A revisar hasta que lo marques disponible.</span></span>
+          </label>
         </div>
-        <div style="font-size:11px;color:var(--text-secondary)">Este valor se restará del total de la venta.</div>
+
+        <!-- Categoría -->
+        <div>
+          <label style="${LABEL}">Categoría de Producto *</label>
+          <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:6px" id="ti-cat-grid">
+            ${this._TI_CATS.map(c => `
+              <div onclick="Ventas.tiSelectCat('${c.k}')" data-ticat="${c.k}"
+                style="border:1.5px solid ${cat===c.k?'var(--blue)':'var(--border)'};background:${cat===c.k?'var(--blue-light)':'var(--bg)'};border-radius:8px;padding:8px 4px;text-align:center;cursor:pointer">
+                <i class="ti ${c.icon}" style="font-size:18px;color:${cat===c.k?'var(--blue)':'var(--text-secondary)'};display:block;margin-bottom:3px"></i>
+                <span style="font-size:9.5px;color:${cat===c.k?'var(--blue)':'var(--text-secondary)'};font-weight:${cat===c.k?'600':'400'}">${c.label}</span>
+              </div>`).join('')}
+          </div>
+        </div>
+
+        <div id="ti-detalle">
+          ${this._tiDetalleHTML(cat, ti)}
+        </div>
+
       </div>`;
   },
+
+  _tiDetalleHTML(cat, ti={}) {
+    const STORAGE = ['32GB','64GB','128GB','256GB','512GB','1TB','2TB'];
+    const COLORES = ['Negro','Blanco','Azul','Verde','Rosa','Rojo','Titanio Natural','Titanio Azul','Titanio Negro','Plata','Dorado','Gris Espacial','Otro'];
+    const ESTADO = ['Nuevo / Sellado','Excelente','Muy bueno','Bueno','Con detalles'];
+    const GRADO = ['Sin grado','A+','A','B','C'];
+    const modelos = Stock.MODELOS_POR_CAT[cat] || [];
+    const hasSpecs = ['iphone','android','mac','ipad'].includes(cat);
+    const hasBat = ['iphone','android','ipad'].includes(cat);
+    const LABEL_ST = 'font-size:11px;color:var(--text-secondary);font-weight:600;display:block;margin-bottom:4px';
+    const INPUT_ST = 'width:100%;font-size:12px;padding:7px 10px;border:1px solid var(--border-strong);border-radius:8px;background:var(--bg-secondary);color:var(--text)';
+    const catLabel = this._TI_CATS.find(c=>c.k===cat)?.label || cat;
+
+    return `
+      <div style="font-size:13px;font-weight:700;margin-bottom:10px">Detalles del ${catLabel}</div>
+
+      ${cat !== 'otro' ? `
+      <!-- IMEI + Modelo -->
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:12px">
+        <div>
+          <label style="${LABEL_ST}">IMEI <span style="font-weight:400">(Opcional)</span></label>
+          <input type="text" id="vf-ti-imei" value="${ti.imei||''}" placeholder="123456789012345" style="${INPUT_ST};font-family:monospace">
+          <div style="font-size:10px;color:var(--text-secondary);margin-top:3px">Podés dejarlo vacío. Se permite vender sin IMEI.</div>
+        </div>
+        <div>
+          <label style="${LABEL_ST}">Modelo *</label>
+          <select id="vf-ti-modelo" onchange="Ventas.tiToggleModeloOtro()" style="${INPUT_ST}">
+            <option value="">Seleccionar modelo</option>
+            ${modelos.map(m=>`<option ${ti.modelo===m?'selected':''}>${m}</option>`).join('')}
+            <option value="__otro__" ${ti.modelo && !modelos.includes(ti.modelo)?'selected':''}>Otro (escribir)</option>
+          </select>
+          <input type="text" id="vf-ti-modelo-otro" value="${ti.modelo && !modelos.includes(ti.modelo)?ti.modelo:''}" placeholder="Escribí el modelo" style="${INPUT_ST};margin-top:6px;display:${ti.modelo && !modelos.includes(ti.modelo)?'block':'none'}">
+        </div>
+      </div>` : `
+      <!-- Nombre libre -->
+      <div style="margin-bottom:12px">
+        <label style="${LABEL_ST}">Nombre del producto *</label>
+        <input type="text" id="vf-ti-nombre-libre" value="${ti.modelo||''}" placeholder="ej: Auriculares Sony WH-1000XM5" style="${INPUT_ST}">
+      </div>`}
+
+      ${hasSpecs ? `
+      <!-- Storage + Color -->
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:12px">
+        <div>
+          <label style="${LABEL_ST}">Storage *</label>
+          <select id="vf-ti-storage" style="${INPUT_ST}">
+            <option value="">Seleccionar almacenamiento</option>
+            ${STORAGE.map(s=>`<option ${ti.storage===s?'selected':''}>${s}</option>`).join('')}
+          </select>
+        </div>
+        <div>
+          <label style="${LABEL_ST}">Color *</label>
+          <select id="vf-ti-color" style="${INPUT_ST}">
+            <option value="">Seleccionar color</option>
+            ${COLORES.map(c=>`<option ${ti.color===c?'selected':''}>${c}</option>`).join('')}
+          </select>
+        </div>
+      </div>` : ''}
+
+      ${hasBat ? `
+      <!-- Batería + Estado -->
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:12px">
+        <div>
+          <label style="${LABEL_ST}">Batería %</label>
+          <input type="number" id="vf-ti-bateria" value="${ti.bateriaPct||''}" placeholder="85" min="0" max="100" style="${INPUT_ST}">
+        </div>
+        <div>
+          <label style="${LABEL_ST}">Estado del Producto</label>
+          <select id="vf-ti-estado" style="${INPUT_ST}">
+            <option value="">Seleccionar</option>
+            ${ESTADO.map(e=>`<option ${ti.estadoProducto===e?'selected':''}>${e}</option>`).join('')}
+          </select>
+        </div>
+      </div>` : ''}
+
+      <!-- Grado -->
+      <div style="margin-bottom:12px">
+        <label style="${LABEL_ST}">Grado estético</label>
+        <select id="vf-ti-grado" style="${INPUT_ST}">
+          ${GRADO.map(g=>`<option ${(ti.grado||'Sin grado')===g?'selected':''}>${g}</option>`).join('')}
+        </select>
+        <div style="font-size:10px;color:var(--text-secondary);margin-top:3px">Opcional. Califica el estado estético del equipo recibido (A+ excelente — C con marcas visibles).</div>
+      </div>
+
+      <!-- Valor tomado -->
+      <div style="margin-bottom:12px">
+        <label style="${LABEL_ST}">Valor en que se toma el producto *</label>
+        <input type="number" id="vf-ti-valor" value="${ti.valor||''}" placeholder="ej: 500" style="${INPUT_ST}">
+        <div style="font-size:10px;color:var(--text-secondary);margin-top:3px">Este valor se restará automáticamente del total de la venta</div>
+      </div>
+
+      <!-- Notas -->
+      <div style="margin-bottom:12px">
+        <label style="${LABEL_ST}">Notas del Producto</label>
+        <textarea id="vf-ti-notas" placeholder="Describe el estado del producto, rayones, golpes, etc..." maxlength="200"
+          style="${INPUT_ST};resize:vertical;min-height:70px">${ti.notas||''}</textarea>
+        <div style="font-size:10px;color:var(--text-secondary);margin-top:3px">Máximo 200 caracteres</div>
+      </div>
+
+      <!-- Depósito -->
+      <div>
+        <label style="${LABEL_ST}"><i class="ti ti-building-warehouse" style="font-size:11px"></i> Depósito</label>
+        <select id="vf-ti-custodio" style="${INPUT_ST}">
+          ${State.personas.map(p=>`<option ${ti.custodio===p?'selected':''}>${p}</option>`).join('')}
+        </select>
+      </div>
+    `;
+  },
+
+  tiSelectCat(cat) {
+    this._tiCat = cat;
+    // Actualizar grilla visual
+    document.querySelectorAll('[data-ticat]').forEach(el => {
+      const active = el.dataset.ticat === cat;
+      el.style.borderColor = active ? 'var(--blue)' : 'var(--border)';
+      el.style.background = active ? 'var(--blue-light)' : 'var(--bg)';
+      el.querySelector('i').style.color = active ? 'var(--blue)' : 'var(--text-secondary)';
+      el.querySelector('span').style.color = active ? 'var(--blue)' : 'var(--text-secondary)';
+      el.querySelector('span').style.fontWeight = active ? '600' : '400';
+    });
+    // Re-render solo la sección de detalles
+    document.getElementById('ti-detalle').innerHTML = this._tiDetalleHTML(cat, this.draft.tradeIn || {});
+  },
+
+  tiToggleModeloOtro() {
+    const val = document.getElementById('vf-ti-modelo')?.value;
+    const otro = document.getElementById('vf-ti-modelo-otro');
+    if (otro) otro.style.display = val === '__otro__' ? 'block' : 'none';
+  },
+
   toggleTI() {
-    document.getElementById('vf-ti-form').style.display = document.getElementById('vf-ti-active').checked ? 'block' : 'none';
+    const active = document.getElementById('vf-ti-active').checked;
+    document.getElementById('vf-ti-form').style.display = active ? 'flex' : 'none';
+  },
+
+  _leerTradeIn() {
+    const active = document.getElementById('vf-ti-active')?.checked;
+    if (!active) return null;
+    const cat = this._tiCat || 'iphone';
+    let modelo = '';
+    if (cat === 'otro') {
+      modelo = document.getElementById('vf-ti-nombre-libre')?.value.trim() || '';
+    } else {
+      const sel = document.getElementById('vf-ti-modelo')?.value;
+      modelo = sel === '__otro__' ? (document.getElementById('vf-ti-modelo-otro')?.value.trim() || '') : (sel || '');
+    }
+    return {
+      cat,
+      modelo,
+      imei: document.getElementById('vf-ti-imei')?.value.trim() || '',
+      storage: document.getElementById('vf-ti-storage')?.value || '',
+      color: document.getElementById('vf-ti-color')?.value || '',
+      bateriaPct: parseFloat(document.getElementById('vf-ti-bateria')?.value) || null,
+      estadoProducto: document.getElementById('vf-ti-estado')?.value || '',
+      grado: document.getElementById('vf-ti-grado')?.value || 'Sin grado',
+      valor: parseFloat(document.getElementById('vf-ti-valor')?.value) || 0,
+      notas: document.getElementById('vf-ti-notas')?.value.trim() || '',
+      custodio: document.getElementById('vf-ti-custodio')?.value || '',
+      revisar: document.getElementById('vf-ti-revisar')?.checked || false,
+    };
   },
 
   stepItems() {
@@ -577,8 +782,8 @@ const Ventas = {
   nextStep() {
     try {
       if (this.step === 1 && document.getElementById('vf-ti-active')) {
-        const active = document.getElementById('vf-ti-active').checked;
-        this.draft.tradeIn = active ? { modelo: document.getElementById('vf-ti-modelo').value, valor: parseFloat(document.getElementById('vf-ti-valor').value) || 0 } : null;
+        this.draft.tradeIn = this._leerTradeIn();
+        if (this.draft.tradeIn) this._tiCat = this.draft.tradeIn.cat;
       }
       if (this.step === 0) {
         this.draft.cliente = document.getElementById('vf-cliente').value.trim() || 'Consumidor final';
@@ -625,11 +830,18 @@ const Ventas = {
 
     // Ingresar el equipo del Trade-In al stock
     if (d.tradeIn?.modelo && d.tradeIn?.valor > 0) {
+      const ti = d.tradeIn;
+      const imeis = ti.imei ? [ti.imei] : [];
+      const estadoInv = ti.revisar ? 'en_reparacion' : 'disponible';
+      const nombre = [ti.modelo, ti.storage, ti.color].filter(Boolean).join(' ') || ti.modelo;
       const tiObj = {
-        cat: 'iphone', nombre: d.tradeIn.modelo, costoUSD: d.tradeIn.valor,
-        cantidad: 1, imeis: [], cotiz: State.refBlue, precioARS: null,
-        proveedor: 'Trade-In', notas: `Trade-in de venta a ${d.cliente}`,
-        estadoInventario: 'disponible', grado: 'Sin grado'
+        cat: ti.cat || 'iphone', nombre, costoUSD: ti.valor,
+        cantidad: imeis.length > 0 ? 0 : 1, imeis, cotiz: State.refBlue, precioARS: null,
+        proveedor: 'Trade-In', custodio: ti.custodio || '',
+        notas: [ti.notas, `Trade-in de venta a ${d.cliente}`].filter(Boolean).join(' | '),
+        estadoInventario: estadoInv, grado: ti.grado || 'Sin grado',
+        modelo: ti.modelo, storage: ti.storage || '', color: ti.color || '',
+        bateriaPct: ti.bateriaPct || null, estadoProducto: ti.estadoProducto || '',
       };
       const { id: tiId, error: tiErr } = await DB.guardarProductoStock(tiObj, null);
       if (!tiErr && tiId) {

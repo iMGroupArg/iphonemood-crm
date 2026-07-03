@@ -1,0 +1,465 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Reservar turno — iPhoneMood</title>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+<script src="config.js"></script>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  :root {
+    --blue: #0A84FF;
+    --green: #34C759;
+    --bg: #0A0A0A;
+    --bg-elevated: #161616;
+    --bg-secondary: #1C1C1E;
+    --border: rgba(255,255,255,.10);
+    --text: #FFFFFF;
+    --text-secondary: rgba(255,255,255,.5);
+    --radius: 8px;
+    --radius-lg: 12px;
+    --radius-xl: 18px;
+    --font: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Segoe UI', sans-serif;
+  }
+  body { font-family: var(--font); background: var(--bg); color: var(--text); min-height: 100vh; }
+
+  .hero {
+    background: linear-gradient(135deg, #0A0A0A 0%, #0d1a30 100%);
+    padding: 40px 20px 30px;
+    text-align: center;
+    border-bottom: 1px solid var(--border);
+  }
+  .logo-box {
+    width: 64px; height: 64px; border-radius: 16px;
+    background: var(--blue); display: inline-flex; align-items: center; justify-content: center;
+    box-shadow: 0 8px 32px rgba(10,132,255,.4); margin-bottom: 16px;
+  }
+  .hero h1 { font-size: 26px; font-weight: 700; letter-spacing: -.5px; margin-bottom: 6px; }
+  .hero p { font-size: 15px; color: var(--text-secondary); }
+
+  .container { max-width: 600px; margin: 0 auto; padding: 28px 16px 60px; }
+
+  /* Stepper */
+  .stepper { display: flex; align-items: center; gap: 0; margin-bottom: 28px; }
+  .step { display: flex; align-items: center; gap: 8px; flex: 1; }
+  .step-dot {
+    width: 28px; height: 28px; border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 12px; font-weight: 700; flex-shrink: 0;
+    transition: all .3s;
+  }
+  .step-dot.active { background: var(--blue); color: #fff; box-shadow: 0 0 0 4px rgba(10,132,255,.2); }
+  .step-dot.done { background: var(--green); color: #fff; }
+  .step-dot.inactive { background: var(--bg-secondary); color: var(--text-secondary); border: 1px solid var(--border); }
+  .step-label { font-size: 12px; color: var(--text-secondary); font-weight: 600; }
+  .step-label.active { color: var(--text); }
+  .step-line { flex: 1; height: 1px; background: var(--border); margin: 0 8px; }
+
+  /* Cards */
+  .card {
+    background: var(--bg-elevated); border: 1px solid var(--border);
+    border-radius: var(--radius-xl); padding: 22px; margin-bottom: 16px;
+  }
+  .card h3 { font-size: 16px; font-weight: 700; margin-bottom: 14px; }
+
+  /* Date picker */
+  .date-grid { display: flex; gap: 8px; flex-wrap: wrap; }
+  .date-btn {
+    display: flex; flex-direction: column; align-items: center; gap: 2px;
+    padding: 10px 14px; border-radius: var(--radius-lg);
+    border: 1px solid var(--border); background: var(--bg-secondary);
+    cursor: pointer; transition: all .15s; min-width: 60px;
+    color: var(--text); font-family: var(--font);
+  }
+  .date-btn:hover { border-color: var(--blue); background: rgba(10,132,255,.1); }
+  .date-btn.selected { border-color: var(--blue); background: var(--blue); color: #fff; }
+  .date-btn .dow { font-size: 11px; font-weight: 600; text-transform: uppercase; opacity: .7; }
+  .date-btn .day { font-size: 20px; font-weight: 700; }
+  .date-btn .mon { font-size: 11px; opacity: .7; }
+
+  /* Slot grid */
+  .slot-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(100px, 1fr)); gap: 8px; }
+  .slot-btn {
+    padding: 10px 8px; border-radius: var(--radius-lg);
+    border: 1px solid var(--border); background: var(--bg-secondary);
+    cursor: pointer; text-align: center; font-family: var(--font);
+    color: var(--text); font-size: 14px; font-weight: 600;
+    transition: all .15s;
+  }
+  .slot-btn:hover { border-color: var(--blue); background: rgba(10,132,255,.1); }
+  .slot-btn.selected { border-color: var(--blue); background: var(--blue); color: #fff; }
+
+  /* Form */
+  .form-group { margin-bottom: 14px; }
+  .form-group label { display: block; font-size: 12px; font-weight: 600; color: var(--text-secondary); margin-bottom: 5px; text-transform: uppercase; letter-spacing: .4px; }
+  .form-group input, .form-group textarea {
+    width: 100%; padding: 11px 14px;
+    background: var(--bg-secondary); border: 1px solid var(--border);
+    border-radius: var(--radius-lg); color: var(--text);
+    font-size: 15px; font-family: var(--font);
+    transition: border .15s; outline: none;
+  }
+  .form-group input:focus, .form-group textarea:focus { border-color: var(--blue); }
+  .form-group textarea { resize: vertical; min-height: 80px; }
+
+  /* Buttons */
+  .btn-primary {
+    width: 100%; padding: 14px; background: var(--blue); color: #fff;
+    border: none; border-radius: var(--radius-lg);
+    font-size: 15px; font-weight: 700; font-family: var(--font);
+    cursor: pointer; transition: opacity .15s;
+  }
+  .btn-primary:hover { opacity: .9; }
+  .btn-primary:disabled { opacity: .4; cursor: not-allowed; }
+  .btn-secondary {
+    width: 100%; padding: 12px; background: transparent; color: var(--text-secondary);
+    border: 1px solid var(--border); border-radius: var(--radius-lg);
+    font-size: 14px; font-weight: 600; font-family: var(--font);
+    cursor: pointer; margin-top: 8px;
+  }
+
+  /* Confirmation */
+  .confirm-icon { font-size: 56px; text-align: center; margin-bottom: 16px; }
+  .confirm-detail {
+    display: flex; align-items: center; gap: 10px;
+    padding: 12px 14px; background: var(--bg-secondary);
+    border-radius: var(--radius-lg); margin-bottom: 8px;
+    font-size: 14px;
+  }
+  .confirm-detail .icon { font-size: 18px; flex-shrink: 0; }
+
+  /* Toast */
+  .toast {
+    position: fixed; bottom: 28px; left: 50%; transform: translateX(-50%) translateY(20px);
+    background: var(--bg-elevated); border: 1px solid var(--border);
+    border-radius: 30px; padding: 10px 20px; font-size: 14px; font-weight: 600;
+    opacity: 0; transition: all .3s; pointer-events: none; z-index: 999;
+    white-space: nowrap;
+  }
+  .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+
+  /* Loading */
+  .loading { text-align: center; padding: 40px; color: var(--text-secondary); }
+  .spinner {
+    width: 32px; height: 32px; border: 2px solid var(--border);
+    border-top-color: var(--blue); border-radius: 50%;
+    animation: spin .8s linear infinite; margin: 0 auto 12px;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  .empty { text-align: center; padding: 30px; color: var(--text-secondary); font-size: 14px; }
+
+  /* Slot selection summary */
+  .slot-summary {
+    background: rgba(10,132,255,.12); border: 1px solid rgba(10,132,255,.3);
+    border-radius: var(--radius-lg); padding: 12px 16px; margin-bottom: 16px;
+    font-size: 14px; display: flex; align-items: center; gap: 10px;
+  }
+</style>
+</head>
+<body>
+
+<div class="hero">
+  <div class="logo-box">
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 245" width="32" height="32">
+      <path d="M100,18 C86,4 64,7 61,22 C58,37 71,48 83,43 C76,56 60,60 48,82 C33,108 34,140 50,162 C62,180 80,190 96,190 C108,190 116,184 124,184 C132,184 140,190 154,190 C171,190 189,176 199,154 C173,141 173,105 199,93 C189,65 168,55 150,59 C140,61 132,69 124,69 C116,69 108,61 96,59 C87,57 79,48 83,35 C87,22 100,18 100,18 Z" fill="#fff"/>
+      <path d="M104,4 C104,4 117,-1 128,10 C139,21 131,40 118,38 C109,36 99,20 104,4 Z" fill="#fff"/>
+    </svg>
+  </div>
+  <h1>Reservar un turno</h1>
+  <p>iPhoneMood · Rosario</p>
+</div>
+
+<div class="container">
+  <!-- Stepper -->
+  <div class="stepper">
+    <div class="step">
+      <div class="step-dot active" id="dot-1">1</div>
+      <span class="step-label active" id="lbl-1">Elegir horario</span>
+    </div>
+    <div class="step-line"></div>
+    <div class="step">
+      <div class="step-dot inactive" id="dot-2">2</div>
+      <span class="step-label" id="lbl-2">Tus datos</span>
+    </div>
+    <div class="step-line"></div>
+    <div class="step">
+      <div class="step-dot inactive" id="dot-3">3</div>
+      <span class="step-label" id="lbl-3">Confirmación</span>
+    </div>
+  </div>
+
+  <!-- Content -->
+  <div id="main-content">
+    <div class="loading"><div class="spinner"></div>Cargando horarios disponibles…</div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+const { SUPABASE_URL, SUPABASE_ANON_KEY } = window.__APP_CONFIG__;
+const supa = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+let slots = [];
+let fechasSel = [];
+let slotSel = null;
+
+async function init() {
+  // Cargar slots disponibles (RLS permite anon SELECT donde disponible=true y fecha >= hoy)
+  const hoy = new Date().toISOString().split('T')[0];
+  const { data, error } = await supa
+    .from('turnos_slots')
+    .select('*')
+    .gte('fecha', hoy)
+    .order('fecha').order('hora_inicio');
+
+  if (error) {
+    document.getElementById('main-content').innerHTML = `<div class="empty">❌ No pudimos cargar los horarios. Intentá más tarde.</div>`;
+    return;
+  }
+
+  slots = data || [];
+
+  // Calcular fechas únicas con slots disponibles
+  const fechasSet = [...new Set(slots.map(s => s.fecha))];
+  // Mostrar hasta 14 días hacia adelante
+  const hasta = new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+  fechasSel = fechasSet.filter(f => f <= hasta).slice(0, 14);
+
+  if (fechasSel.length === 0) {
+    document.getElementById('main-content').innerHTML = `
+      <div class="empty">
+        <div style="font-size:48px;margin-bottom:12px">😔</div>
+        <p style="font-size:15px;margin-bottom:6px">No hay turnos disponibles por el momento</p>
+        <p>Escribinos por WhatsApp para coordinar</p>
+      </div>`;
+    return;
+  }
+
+  renderStep1(fechasSel[0]);
+}
+
+// ===== STEP 1: Elegir slot =====
+let fechaActual = null;
+function renderStep1(fechaInicial) {
+  fechaActual = fechaInicial || fechasSel[0];
+  actualizarStepper(1);
+
+  const hoy = new Date().toISOString().split('T')[0];
+
+  document.getElementById('main-content').innerHTML = `
+    <div class="card">
+      <h3>📅 Elegí un día</h3>
+      <div class="date-grid" id="date-grid">
+        ${fechasSel.map(f => {
+          const d = new Date(f + 'T12:00:00');
+          const dow = d.toLocaleDateString('es-AR', { weekday: 'short' });
+          const day = d.getDate();
+          const mon = d.toLocaleDateString('es-AR', { month: 'short' });
+          const label = f === hoy ? 'Hoy' : null;
+          return `<button class="date-btn ${f === fechaActual ? 'selected' : ''}" onclick="selFecha('${f}')">
+            <span class="dow">${label || dow}</span>
+            <span class="day">${day}</span>
+            <span class="mon">${mon}</span>
+          </button>`;
+        }).join('')}
+      </div>
+    </div>
+
+    <div class="card" id="slots-card">
+      <h3>🕐 Elegí un horario</h3>
+      <div id="slots-grid" class="slot-grid"></div>
+    </div>
+  `;
+
+  renderSlotsDelDia(fechaActual);
+}
+
+function selFecha(f) {
+  fechaActual = f;
+  slotSel = null;
+  document.querySelectorAll('.date-btn').forEach(b => {
+    b.classList.toggle('selected', b.getAttribute('onclick').includes(`'${f}'`));
+  });
+  renderSlotsDelDia(f);
+}
+
+function renderSlotsDelDia(fecha) {
+  const slotsDelDia = slots.filter(s => s.fecha === fecha);
+  const grid = document.getElementById('slots-grid');
+  if (!grid) return;
+  if (slotsDelDia.length === 0) {
+    grid.innerHTML = `<div class="empty" style="grid-column:1/-1;padding:20px">No hay horarios para este día</div>`;
+    return;
+  }
+  grid.innerHTML = slotsDelDia.map(s => `
+    <button class="slot-btn ${slotSel?.id === s.id ? 'selected' : ''}" onclick="selSlot(${s.id})">
+      ${s.hora_inicio.slice(0,5)}
+    </button>
+  `).join('');
+}
+
+function selSlot(id) {
+  slotSel = slots.find(s => s.id === id);
+  document.querySelectorAll('.slot-btn').forEach(b => {
+    b.classList.toggle('selected', b.getAttribute('onclick') === `selSlot(${id})`);
+  });
+  // Avanzar al step 2 con un pequeño delay visual
+  setTimeout(() => renderStep2(), 200);
+}
+
+// ===== STEP 2: Datos del cliente =====
+function renderStep2() {
+  if (!slotSel) return;
+  actualizarStepper(2);
+  const fecha = fmtFecha(slotSel.fecha);
+  const hora = slotSel.hora_inicio.slice(0,5);
+
+  document.getElementById('main-content').innerHTML = `
+    <div class="slot-summary">
+      <span>📅</span>
+      <span><strong>${fecha}</strong> a las <strong>${hora}hs</strong></span>
+      <button onclick="renderStep1()" style="margin-left:auto;background:none;border:none;cursor:pointer;color:var(--text-secondary);font-size:13px;font-family:var(--font)">Cambiar</button>
+    </div>
+
+    <div class="card">
+      <h3>📋 Tus datos</h3>
+      <div class="form-group">
+        <label>Nombre y apellido *</label>
+        <input type="text" id="f-nombre" placeholder="Juan Pérez" autocomplete="name">
+      </div>
+      <div class="form-group">
+        <label>Teléfono (WhatsApp) *</label>
+        <input type="tel" id="f-tel" placeholder="+54 341 XXX-XXXX" autocomplete="tel">
+      </div>
+      <div class="form-group">
+        <label>Email (opcional)</label>
+        <input type="email" id="f-email" placeholder="juan@ejemplo.com" autocomplete="email">
+      </div>
+      <div class="form-group">
+        <label>Equipo que querés ver / consultar</label>
+        <input type="text" id="f-equipo" placeholder="iPhone 15 Pro, reparación de pantalla, etc.">
+      </div>
+      <div class="form-group">
+        <label>Comentarios adicionales</label>
+        <textarea id="f-comentarios" placeholder="¿Algo más que quieras contarnos?"></textarea>
+      </div>
+    </div>
+
+    <button class="btn-primary" onclick="confirmarReserva()" id="btn-confirmar">
+      Confirmar turno
+    </button>
+    <button class="btn-secondary" onclick="renderStep1()">← Volver a elegir horario</button>
+  `;
+
+  document.getElementById('f-nombre').focus();
+}
+
+// ===== STEP 3: Confirmar =====
+async function confirmarReserva() {
+  const nombre = document.getElementById('f-nombre').value.trim();
+  const tel = document.getElementById('f-tel').value.trim();
+  const email = document.getElementById('f-email').value.trim();
+  const equipo = document.getElementById('f-equipo').value.trim();
+  const comentarios = document.getElementById('f-comentarios').value.trim();
+
+  if (!nombre) return showToast('Ingresá tu nombre');
+  if (!tel) return showToast('Ingresá tu teléfono');
+  if (!slotSel) return showToast('Elegí un horario primero');
+
+  const btn = document.getElementById('btn-confirmar');
+  btn.disabled = true;
+  btn.textContent = 'Reservando…';
+
+  // Asignar encargado: si el slot tiene uno, usarlo; si no, aleatorio
+  let encargado = slotSel.encargado || '';
+
+  // Crear reserva
+  const { data: reserva, error } = await supa.from('turnos_reservas').insert({
+    slot_id: slotSel.id,
+    nombre,
+    telefono: tel,
+    email,
+    equipo,
+    comentarios,
+    estado: 'pendiente',
+    encargado,
+  }).select().single();
+
+  if (error) {
+    btn.disabled = false;
+    btn.textContent = 'Confirmar turno';
+    // Si es error de RLS o slot ya tomado
+    if (error.code === '23505') return showToast('Este horario ya fue reservado, elegí otro');
+    return showToast('Error al reservar. Intentá de nuevo.');
+  }
+
+  // Marcar slot como no disponible
+  await supa.from('turnos_slots').update({ disponible: false }).eq('id', slotSel.id);
+
+  renderStep3(reserva);
+}
+
+function renderStep3(reserva) {
+  actualizarStepper(3);
+  const fecha = fmtFecha(slotSel.fecha);
+  const hora = slotSel.hora_inicio.slice(0,5);
+  const encargado = reserva.encargado || 'del equipo';
+
+  document.getElementById('main-content').innerHTML = `
+    <div class="card" style="text-align:center">
+      <div class="confirm-icon">🎉</div>
+      <h2 style="font-size:22px;font-weight:700;margin-bottom:8px">¡Turno confirmado!</h2>
+      <p style="color:var(--text-secondary);font-size:15px;margin-bottom:24px">Te esperamos en iPhoneMood</p>
+
+      <div style="text-align:left">
+        <div class="confirm-detail"><span class="icon">📅</span><div><strong>${fecha}</strong></div></div>
+        <div class="confirm-detail"><span class="icon">🕐</span><div><strong>${hora}hs</strong></div></div>
+        <div class="confirm-detail"><span class="icon">📍</span><div>iPhoneMood · Rosario</div></div>
+        ${reserva.equipo ? `<div class="confirm-detail"><span class="icon">📱</span><div>${reserva.equipo}</div></div>` : ''}
+      </div>
+
+      <p style="color:var(--text-secondary);font-size:13px;margin-top:20px">
+        Guardá esta información. Si necesitás cancelar o cambiar el turno, escribinos por WhatsApp.
+      </p>
+    </div>
+
+    <a href="https://wa.me/?text=${encodeURIComponent(`Hola! Reservé un turno en iPhoneMood para el ${fecha} a las ${hora}hs. Número de reserva: #${reserva.id}`)}"
+      target="_blank"
+      style="display:flex;align-items:center;justify-content:center;gap:8px;width:100%;padding:14px;background:#25D366;color:#fff;border-radius:var(--radius-lg);font-size:15px;font-weight:700;text-decoration:none;margin-bottom:8px">
+      💬 Guardar en WhatsApp
+    </a>
+    <button class="btn-secondary" onclick="window.location.reload()">Reservar otro turno</button>
+  `;
+}
+
+// ===== HELPERS =====
+function actualizarStepper(paso) {
+  [1, 2, 3].forEach(n => {
+    const dot = document.getElementById('dot-' + n);
+    const lbl = document.getElementById('lbl-' + n);
+    if (n < paso) { dot.className = 'step-dot done'; dot.textContent = '✓'; }
+    else if (n === paso) { dot.className = 'step-dot active'; dot.textContent = n; lbl.className = 'step-label active'; }
+    else { dot.className = 'step-dot inactive'; dot.textContent = n; lbl.className = 'step-label'; }
+  });
+}
+
+function fmtFecha(iso) {
+  const [y, m, d] = iso.split('-').map(Number);
+  const fecha = new Date(y, m - 1, d);
+  return fecha.toLocaleDateString('es-AR', { weekday: 'long', day: 'numeric', month: 'long' });
+}
+
+function showToast(msg) {
+  const el = document.getElementById('toast');
+  el.textContent = msg;
+  el.classList.add('show');
+  setTimeout(() => el.classList.remove('show'), 3500);
+}
+
+init();
+</script>
+</body>
+</html>

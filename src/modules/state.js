@@ -43,6 +43,10 @@ const State = {
   loteItems: [],
   lotePagos: [],
 
+  // TURNOS — se carga desde Supabase
+  turnosSlots: [],
+  turnosReservas: [],
+
   // CASH FLOW — log de movimientos para el módulo de cash flow
   movimientos: [],
 

@@ -12,6 +12,7 @@ import './panel.js';
 import './capital.js';
 import './clientes.js';
 import './proveedores.js';
+import './turnos.js';
 
 const App = {
   PAGES: {
@@ -26,6 +27,7 @@ const App = {
     capital: { title: 'Capital & Inversiones', module: Capital },
     clientes: { title: 'Clientes', module: Clientes },
     proveedores: { title: 'Proveedores', module: Proveedores },
+    turnos: { title: 'Turnos', module: Turnos },
     panel: { title: 'Panel de control', module: Panel },
   },
 

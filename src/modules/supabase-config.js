@@ -19,7 +19,8 @@ const DB = {
     const [personasRes, cajasRes, stockRes, garantiasRes, ventasRes, ventaItemsRes, ventaPagosRes,
            reparacionesRes, repRepuestosRes, repPagosRes, catGastoRes, gastosRes, cambiosRes,
            gastosFijosRes, cierresRes, inversoresRes, inversorPagosRes, activosFijosRes,
-           proveedoresRes, lotesRes, loteItemsRes, lotePagosRes] = await Promise.all([
+           proveedoresRes, lotesRes, loteItemsRes, lotePagosRes,
+           turnosSlotsRes, turnosReservasRes] = await Promise.all([
       supa.from('personas').select('*'),
       supa.from('cajas').select('*'),
       supa.from('stock').select('*'),
@@ -42,6 +43,8 @@ const DB = {
       supa.from('lotes_compra').select('*').order('id', { ascending: false }),
       supa.from('lote_items').select('*'),
       supa.from('lote_pagos').select('*').order('id', { ascending: true }),
+      supa.from('turnos_slots').select('*').order('fecha').order('hora_inicio'),
+      supa.from('turnos_reservas').select('*').order('creado_en', { ascending: false }),
     ]);
 
     // mapa de personas (id <-> nombre), lo usamos todo el tiempo para traducir
@@ -206,6 +209,16 @@ const DB = {
       moneda: p.moneda || 'USD', persona: p.persona || '', bolsillo: p.bolsillo || '',
       personaDest: p.persona_dest || '', bolsilloDestino: p.bolsillo_dest || '',
       fecha: p.fecha || '', notas: p.notas || '',
+    }));
+
+    State.turnosSlots = (turnosSlotsRes.data || []).map(s => ({
+      id: s.id, fecha: s.fecha, horaInicio: s.hora_inicio, horaFin: s.hora_fin,
+      encargado: s.encargado || '', disponible: s.disponible,
+    }));
+    State.turnosReservas = (turnosReservasRes.data || []).map(r => ({
+      id: r.id, slotId: r.slot_id, nombre: r.nombre, telefono: r.telefono,
+      email: r.email || '', equipo: r.equipo || '', comentarios: r.comentarios || '',
+      estado: r.estado, encargado: r.encargado || '', token: r.token,
     }));
   },
 
@@ -597,6 +610,46 @@ const DB = {
   },
   async eliminarActivoFijo(id) {
     await supa.from('activos_fijos').delete().eq('id', id);
+  },
+
+  // ===== TURNOS =====
+  async crearTurnoSlot(slot) {
+    const { data } = await supa.from('turnos_slots').insert({
+      fecha: slot.fecha, hora_inicio: slot.horaInicio, hora_fin: slot.horaFin,
+      encargado: slot.encargado || '', disponible: true,
+    }).select().single();
+    if (data) State.turnosSlots.push({ id: data.id, fecha: data.fecha, horaInicio: data.hora_inicio, horaFin: data.hora_fin, encargado: data.encargado, disponible: data.disponible });
+    return data;
+  },
+
+  async crearTurnoSlotsLote(slots) {
+    const rows = slots.map(s => ({ fecha: s.fecha, hora_inicio: s.horaInicio, hora_fin: s.horaFin, encargado: s.encargado || '', disponible: true }));
+    const { data } = await supa.from('turnos_slots').insert(rows).select();
+    if (data) data.forEach(d => State.turnosSlots.push({ id: d.id, fecha: d.fecha, horaInicio: d.hora_inicio, horaFin: d.hora_fin, encargado: d.encargado, disponible: d.disponible }));
+    return data;
+  },
+
+  async eliminarTurnoSlot(id) {
+    await supa.from('turnos_slots').delete().eq('id', id);
+    State.turnosSlots = State.turnosSlots.filter(s => s.id !== id);
+  },
+
+  async actualizarEstadoReserva(id, estado) {
+    await supa.from('turnos_reservas').update({ estado }).eq('id', id);
+    const r = State.turnosReservas.find(x => x.id === id);
+    if (r) r.estado = estado;
+  },
+
+  async cancelarReserva(id) {
+    const r = State.turnosReservas.find(x => x.id === id);
+    await supa.from('turnos_reservas').update({ estado: 'cancelado' }).eq('id', id);
+    if (r) {
+      r.estado = 'cancelado';
+      // Liberar el slot
+      await supa.from('turnos_slots').update({ disponible: true }).eq('id', r.slotId);
+      const s = State.turnosSlots.find(x => x.id === r.slotId);
+      if (s) s.disponible = true;
+    }
   },
 };
 

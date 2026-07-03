@@ -1103,124 +1103,253 @@ const Ventas = {
       `<li>${i.nombre} - Válida desde ${i.garantiaInicio||v.fecha} hasta ${i.garantiaFin}</li>`
     ).join('');
 
+    const LOGO_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 240" width="52" height="62">
+      <path d="M100 20 C85 5, 65 8, 62 22 C59 36, 72 46, 82 42 C75 55, 60 58, 48 80 C34 106, 35 138, 50 160 C62 178, 80 188, 96 188 C108 188, 116 182, 124 182 C132 182, 140 188, 153 188 C170 188, 188 174, 198 152 C172 140, 172 104, 198 92 C188 64, 168 54, 150 58 C140 60, 132 68, 124 68 C116 68, 108 60, 96 58 C88 56, 80 48, 84 35 C88 24, 100 20, 100 20 Z" fill="#1a1a1a"/>
+      <path d="M105 5 C105 5, 118 0, 128 10 C138 20, 130 38, 118 36 C110 34, 100 20, 105 5 Z" fill="#1a1a1a"/>
+    </svg>`;
+
+    const fmtFecha = (iso) => {
+      if (!iso) return '—';
+      const d = new Date(iso);
+      return d.toLocaleDateString('es-AR', { day:'2-digit', month:'2-digit', year:'numeric' });
+    };
+    const calcVencimiento = (fechaVenta, dias) => {
+      if (!dias) return null;
+      const base = fechaVenta && fechaVenta !== 'Hoy' ? new Date(fechaVenta) : new Date();
+      base.setDate(base.getDate() + dias);
+      return base;
+    };
+    const condiciones = State.condicionesGarantia || '';
+
     const html = `<!DOCTYPE html><html lang="es"><head><meta charset="UTF-8"><title>Recibo #${v.id}</title>
     <style>
       * { margin: 0; padding: 0; box-sizing: border-box; }
-      body { font-family: Arial, sans-serif; font-size: 12px; color: #1a1a1a; padding: 20px; }
-      .header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 20px; border-bottom: 2px solid #1a1a1a; padding-bottom: 12px; }
-      .logo { font-size: 24px; font-weight: bold; }
-      .recibo-badge { font-size: 24px; font-weight: bold; color: #888; }
-      .datos-negocio { font-size: 10px; color: #666; margin-top: 4px; }
-      .recibido { display: flex; justify-content: space-between; margin-bottom: 16px; }
-      .recibido-box { font-size: 12px; }
-      .recibido-box div { margin-bottom: 4px; }
-      .numero-recibo { border: 1px solid #ccc; padding: 8px 14px; font-size: 12px; min-width: 160px; }
-      .numero-recibo .num { font-size: 22px; font-weight: bold; margin: 2px 0; }
-      h3 { font-size: 13px; margin-bottom: 8px; }
-      table { width: 100%; border-collapse: collapse; margin-bottom: 12px; font-size: 11px; }
-      th { background: #1a1a1a; color: #fff; padding: 6px 8px; text-align: left; }
-      td { padding: 6px 8px; border-bottom: 1px solid #e0e0e0; vertical-align: top; }
-      .totales { margin-left: auto; width: 260px; }
-      .totales div { display: flex; justify-content: space-between; padding: 4px 0; }
-      .total-final { font-size: 16px; font-weight: bold; border-top: 2px solid #1a1a1a; padding-top: 6px; margin-top: 4px; }
-      .pagos-section { margin-bottom: 16px; }
-      .pagos-totales { display: flex; justify-content: flex-end; gap: 40px; }
-      .pagado-badge { background: #1a1a1a; color: #fff; padding: 6px 18px; font-weight: bold; text-align: center; }
-      .mensaje { margin: 16px 0; font-style: italic; }
-      .tyc { font-size: 10px; color: #555; margin-top: 12px; border-top: 1px solid #ccc; padding-top: 10px; }
-      .tyc h4 { font-size: 11px; margin-bottom: 6px; }
-      .garantias { margin-bottom: 12px; }
-      .firma-section { display: flex; gap: 40px; margin-top: 24px; }
-      .firma-box { flex: 1; border-top: 1px solid #1a1a1a; padding-top: 4px; font-size: 10px; color: #888; text-align: center; }
-      .footer { text-align: center; font-size: 9px; color: #aaa; margin-top: 20px; border-top: 1px solid #e0e0e0; padding-top: 8px; }
-      @media print { body { padding: 10px; } }
-    </style></head><body>
+      body { font-family: 'Helvetica Neue', Arial, sans-serif; font-size: 12px; color: #1a1a1a; background: #fff; }
+      .page { max-width: 760px; margin: 0 auto; padding: 32px 36px; }
+
+      /* ── HEADER ── */
+      .header { display: flex; justify-content: space-between; align-items: flex-start; padding-bottom: 20px; margin-bottom: 20px; border-bottom: 3px solid #1a1a1a; }
+      .brand { display: flex; align-items: center; gap: 14px; }
+      .brand-text { }
+      .brand-name { font-size: 22px; font-weight: 800; letter-spacing: -0.5px; line-height: 1; }
+      .brand-addr { font-size: 10px; color: #666; margin-top: 5px; line-height: 1.5; }
+      .header-right { display: flex; align-items: center; gap: 16px; }
+      .numero-recibo { border: 1.5px solid #ccc; border-radius: 6px; padding: 10px 16px; font-size: 11px; color: #666; min-width: 150px; }
+      .numero-recibo .num { font-size: 28px; font-weight: 800; color: #1a1a1a; line-height: 1.1; margin: 2px 0; }
+      .recibo-badge { font-size: 30px; font-weight: 900; color: #c8c8c8; letter-spacing: 2px; }
+
+      /* ── ACENTO ── */
+      .accent-bar { background: #1a1a1a; color: #fff; padding: 8px 16px; display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; border-radius: 6px; }
+      .accent-bar span { font-size: 11px; font-weight: 600; letter-spacing: 0.5px; text-transform: uppercase; }
+
+      /* ── CLIENTE ── */
+      .cliente-box { margin-bottom: 20px; padding: 14px 16px; background: #f7f7f7; border-radius: 8px; border-left: 4px solid #1a1a1a; }
+      .cliente-box .label { font-size: 9px; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; color: #888; margin-bottom: 6px; }
+      .cliente-box .nombre { font-size: 16px; font-weight: 700; }
+      .cliente-box .datos { font-size: 11px; color: #555; margin-top: 4px; display: flex; gap: 18px; flex-wrap: wrap; }
+
+      /* ── TABLA ── */
+      .section-title { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; color: #888; margin-bottom: 8px; }
+      table { width: 100%; border-collapse: collapse; margin-bottom: 16px; }
+      thead th { background: #1a1a1a; color: #fff; padding: 7px 10px; text-align: left; font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; }
+      thead th:last-child { text-align: right; }
+      td { padding: 9px 10px; border-bottom: 1px solid #ebebeb; font-size: 11.5px; vertical-align: top; }
+      td:last-child { text-align: right; font-weight: 700; }
+      .garantia-chip { display: inline-block; background: #e8f5e9; color: #2e7d32; border-radius: 20px; padding: 2px 8px; font-size: 10px; font-weight: 600; margin-top: 3px; }
+      .garantia-chip.vencida { background: #fce4e4; color: #b71c1c; }
+      .imei-label { font-family: monospace; font-size: 10px; color: #888; margin-top: 2px; }
+
+      /* ── TOTALES ── */
+      .totales-wrap { display: flex; justify-content: flex-end; margin-bottom: 20px; }
+      .totales-box { width: 280px; }
+      .totales-row { display: flex; justify-content: space-between; padding: 4px 0; font-size: 11.5px; color: #555; }
+      .totales-row.grand { font-size: 16px; font-weight: 800; color: #1a1a1a; border-top: 2px solid #1a1a1a; margin-top: 6px; padding-top: 8px; }
+
+      /* ── PAGOS ── */
+      .pagos-box { margin-bottom: 20px; }
+      .pago-row { display: flex; justify-content: space-between; padding: 6px 0; border-bottom: 1px solid #ebebeb; font-size: 11.5px; }
+      .pago-row:last-child { border-bottom: none; }
+      .pagos-resumen { display: flex; justify-content: flex-end; align-items: center; gap: 24px; margin-top: 10px; }
+      .pagos-nums { text-align: right; font-size: 11.5px; }
+      .estado-badge { padding: 7px 18px; font-size: 12px; font-weight: 800; text-transform: uppercase; letter-spacing: 1px; border-radius: 5px; }
+      .estado-badge.pagado { background: #1a1a1a; color: #fff; }
+      .estado-badge.pendiente { background: #ff9800; color: #fff; }
+
+      /* ── GARANTIAS ── */
+      .garantias-block { margin-bottom: 20px; padding: 14px 16px; background: #f0f7ff; border-radius: 8px; border-left: 4px solid #1565c0; }
+      .garantias-block .gtitle { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; color: #1565c0; margin-bottom: 10px; }
+      .garantia-item { display: flex; justify-content: space-between; align-items: center; padding: 6px 0; border-bottom: 1px solid #dce8f5; font-size: 11.5px; }
+      .garantia-item:last-child { border-bottom: none; }
+      .garantia-dates { text-align: right; font-size: 10.5px; color: #444; }
+      .garantia-dates .vence { font-weight: 700; color: #1565c0; font-size: 12px; }
+
+      /* ── TYC ── */
+      .tyc-block { margin-bottom: 20px; padding: 14px 16px; background: #fafafa; border: 1px solid #e0e0e0; border-radius: 8px; }
+      .tyc-block .tyc-title { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; color: #888; margin-bottom: 8px; }
+      .tyc-block p { font-size: 10.5px; color: #555; line-height: 1.6; }
+
+      /* ── FIRMA ── */
+      .firma-section { display: flex; gap: 30px; margin-bottom: 20px; margin-top: 24px; }
+      .firma-box { flex: 1; padding-top: 36px; border-top: 1.5px solid #1a1a1a; text-align: center; font-size: 10px; color: #888; }
+
+      /* ── FOOTER ── */
+      .footer { text-align: center; font-size: 9px; color: #aaa; padding-top: 12px; border-top: 1px solid #e0e0e0; display: flex; flex-direction: column; align-items: center; gap: 3px; }
+      .footer svg { margin-bottom: 4px; opacity: 0.25; }
+
+      @media print { .page { padding: 16px 20px; } body { -webkit-print-color-adjust: exact; print-color-adjust: exact; } }
+    </style></head><body><div class="page">
+
+    <!-- HEADER -->
     <div class="header">
-      <div>
-        <div class="logo">IPhoneMood</div>
-        <div class="datos-negocio">Julio Argentino Roca 700, Granadero Baigorria, Santa Fe<br>Tel: +54 9 3413 66-2150 | Email: iphonemood.ar@gmail.com</div>
+      <div class="brand">
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 245" width="44" height="54">
+          <path d="M100,18 C86,4 64,7 61,22 C58,37 71,48 83,43 C76,56 60,60 48,82 C33,108 34,140 50,162 C62,180 80,190 96,190 C108,190 116,184 124,184 C132,184 140,190 154,190 C171,190 189,176 199,154 C173,141 173,105 199,93 C189,65 168,55 150,59 C140,61 132,69 124,69 C116,69 108,61 96,59 C87,57 79,48 83,35 C87,22 100,18 100,18 Z" fill="#1a1a1a"/>
+          <path d="M104,4 C104,4 117,-1 128,10 C139,21 131,40 118,38 C109,36 99,20 104,4 Z" fill="#1a1a1a"/>
+        </svg>
+        <div class="brand-text">
+          <div class="brand-name">iPhoneMood</div>
+          <div class="brand-addr">Julio Argentino Roca 700, Granadero Baigorria, Santa Fe<br>Tel: +54 9 3413 66-2150 · iphonemood.ar@gmail.com</div>
+        </div>
       </div>
-      <div style="display:flex;align-items:center;gap:20px">
+      <div class="header-right">
         <div class="numero-recibo">
-          <div>N° Recibo:</div><div class="num">${v.id}</div>
-          <div>Fecha:</div><div style="font-weight:bold">${v.fecha}</div>
+          <div>N° Recibo:</div>
+          <div class="num">${v.id}</div>
+          <div style="margin-top:6px">Fecha:</div>
+          <div style="font-weight:700;color:#1a1a1a">${v.fecha}</div>
         </div>
         <div class="recibo-badge">RECIBO</div>
       </div>
     </div>
 
-    <div class="recibido">
-      <div class="recibido-box">
-        <div style="font-weight:bold;margin-bottom:6px">RECIBIDO POR:</div>
-        <div><b>Cliente:</b> ${v.cliente}</div>
-        ${v.clienteTel ? `<div><b>Teléfono:</b> ${v.clienteTel}</div>` : ''}
-        ${v.clienteDni ? `<div><b>DNI:</b> ${v.clienteDni}</div>` : ''}
+    <!-- BARRA ACENTO -->
+    <div class="accent-bar">
+      <span>Comprobante de venta — iPhoneMood Rosario</span>
+      <span>Venta #${v.id} · ${v.estado === 'cerrada' ? 'Cerrada' : 'Abierta'}</span>
+    </div>
+
+    <!-- CLIENTE -->
+    <div class="cliente-box">
+      <div class="label">Recibido por</div>
+      <div class="nombre">${v.cliente}</div>
+      <div class="datos">
+        ${v.clienteTel ? `<span>📞 ${v.clienteTel}</span>` : ''}
+        ${v.clienteDni ? `<span>DNI: ${v.clienteDni}</span>` : ''}
+        ${v.vendedor ? `<span>Vendedor: ${v.vendedor}</span>` : ''}
       </div>
     </div>
 
-    <h3>DETALLE DE PRODUCTOS Y SERVICIOS</h3>
-    ${itemsDisp.length ? `
+    <!-- ITEMS -->
+    <div class="section-title">Detalle de Productos y Servicios</div>
     <table>
-      <thead><tr><th>Cant.</th><th>Descripción</th><th>Identificador</th><th>Garantía</th><th>Precio Unit.</th><th>Subtotal</th></tr></thead>
-      <tbody>${itemsDisp.map(i => {
-        const diasRestantes = i.garantiaFin ? Math.max(0,Math.round((new Date(i.garantiaFin)-new Date())/86400000)) : null;
+      <thead><tr>
+        <th style="width:40px">Cant.</th>
+        <th>Descripción</th>
+        <th style="width:120px">Garantía</th>
+        <th style="width:100px;text-align:right">Precio</th>
+      </tr></thead>
+      <tbody>
+      ${v.items.map(i => {
+        const stockItem = State.stock.find(s => s.id === i.stockId);
+        const diasGar = i.garantiaDias || (i.garantiaFin ? Math.max(0, Math.round((new Date(i.garantiaFin)-new Date())/86400000)) : null);
+        const hoy = new Date();
+        const vence = i.garantiaFin ? new Date(i.garantiaFin) : (diasGar ? calcVencimiento(v.fecha, diasGar) : null);
+        const activa = vence && vence >= hoy;
         return `<tr>
-          <td>1</td><td>${i.nombre}</td>
-          <td style="font-family:monospace;font-size:10px">${i.imei ? i.imei.substring(0,6)+'...'+i.imei.substring(i.imei.length-4) : '—'}</td>
-          <td>${diasRestantes !== null ? `Garantía activa - ${diasRestantes} días restantes (${diasRestantes}d)` : '—'}</td>
-          <td>$${i.precio} USD</td><td><b>$${i.precio} USD</b></td>
+          <td style="text-align:center">1</td>
+          <td>
+            <div style="font-weight:600">${i.nombre}</div>
+            ${i.imei ? `<div class="imei-label">IMEI: ${i.imei}</div>` : ''}
+            ${stockItem?.estadoProducto ? `<div style="font-size:10px;color:#888">${stockItem.estadoProducto}</div>` : ''}
+          </td>
+          <td>
+            ${vence ? `<span class="garantia-chip ${activa?'':'vencida'}">${activa ? 'Activa' : 'Vencida'}</span>` : '<span style="color:#bbb;font-size:11px">Sin garantía</span>'}
+          </td>
+          <td>USD ${i.precio.toFixed(2)}</td>
         </tr>`;
-      }).join('')}</tbody>
-    </table>` : ''}
+      }).join('')}
+      ${v.tradeIn?.modelo ? `<tr>
+        <td style="text-align:center">1</td>
+        <td><div style="font-weight:600">Trade-In: ${v.tradeIn.modelo}</div><div style="font-size:10px;color:#888">Entregado como parte de pago</div></td>
+        <td><span style="color:#bbb;font-size:11px">—</span></td>
+        <td style="color:#b00000">- USD ${(v.tradeIn.valor||0).toFixed(2)}</td>
+      </tr>` : ''}
+      </tbody>
+    </table>
 
-    ${itemsAcc.length ? `
-    <table>
-      <thead><tr><th>Cant.</th><th>Descripción</th><th>SKU</th><th>Garantía</th><th>Precio Unit.</th><th>Subtotal</th></tr></thead>
-      <tbody>${itemsAcc.map(i => {
-        const p = State.stock.find(s => s.id === i.stockId);
-        return `<tr><td>1</td><td>${i.nombre}</td><td style="font-size:10px">${p?.storage||p?.notas||'—'}</td><td>—</td><td>$${i.precio} USD</td><td><b>$${i.precio} USD</b></td></tr>`;
-      }).join('')}</tbody>
-    </table>` : ''}
-
-    ${garantiasHTML ? `<div class="garantias"><h3>GARANTÍAS:</h3><ul>${garantiasHTML}</ul></div>` : ''}
-
-    <div class="totales">
-      <div><span>Subtotal Dispositivos:</span><span>$${itemsDisp.reduce((s,i)=>s+i.precio,0)} USD</span></div>
-      <div><span>Subtotal Accesorios:</span><span>$${itemsAcc.reduce((s,i)=>s+i.precio,0)} USD</span></div>
-      <div class="total-final"><span>TOTAL:</span><span>$${total} USD</span></div>
-    </div>
-
-    <div class="pagos-section">
-      <h3>PAGOS REALIZADOS:</h3>
-      ${v.pagos.map(p => `<div style="margin-bottom:4px">${v.fecha} - ${p.bolsillo}${p.bolsillo?.startsWith('ARS')?`: $ ${(p.monto*State.refBlue).toLocaleString('es-AR')} ARS (USD ${p.monto} @ $${(p.cotizacionDiferencial||State.refBlue).toLocaleString('es-AR')})`:`${State.fmtUSD(p.monto)}`}</div>`).join('')}
-      <div class="pagos-totales" style="margin-top:8px">
-        <div style="text-align:right">
-          <div>Total Pagado: <b>$${pagado.toFixed(2)} USD</b></div>
-          <div>Saldo: <b>$${saldo.toFixed(2)} USD</b></div>
-        </div>
-        <div class="pagado-badge">${saldo <= 0.01 ? 'PAGADO' : 'SALDO PENDIENTE'}</div>
+    <!-- TOTALES -->
+    <div class="totales-wrap">
+      <div class="totales-box">
+        <div class="totales-row"><span>Subtotal Dispositivos</span><span>USD ${itemsDisp.reduce((s,i)=>s+i.precio,0).toFixed(2)}</span></div>
+        <div class="totales-row"><span>Subtotal Accesorios</span><span>USD ${itemsAcc.reduce((s,i)=>s+i.precio,0).toFixed(2)}</span></div>
+        ${v.tradeIn?.valor ? `<div class="totales-row" style="color:#b00000"><span>Trade-In (descuento)</span><span>- USD ${v.tradeIn.valor.toFixed(2)}</span></div>` : ''}
+        <div class="totales-row grand"><span>TOTAL</span><span>USD ${Math.max(0,total-(v.tradeIn?.valor||0)).toFixed(2)}</span></div>
       </div>
     </div>
 
-    <div class="mensaje"><b>MENSAJE:</b><br>¡Muchas gracias por elegir a iPhoneMood! 🙌</div>
-
-    <div class="tyc">
-      <h4>TÉRMINOS Y CONDICIONES:</h4>
-      ${State.garantias.map(g => `<p style="margin-bottom:6px">${g.tc || ''}</p>`).join('')}
+    <!-- PAGOS -->
+    <div class="pagos-box">
+      <div class="section-title">Pagos Realizados</div>
+      ${v.pagos.map(p => `
+        <div class="pago-row">
+          <span>${v.fecha} · ${p.bolsillo}</span>
+          <span>${p.bolsillo?.startsWith('ARS') ? `$ ${(p.monto*(p.cotizacionDiferencial||State.refBlue)).toLocaleString('es-AR')} ARS (USD ${p.monto} @ $${(p.cotizacionDiferencial||State.refBlue).toLocaleString('es-AR')})` : `USD ${p.monto.toFixed(2)}`}</span>
+        </div>`).join('')}
+      <div class="pagos-resumen">
+        <div class="pagos-nums">
+          <div>Total pagado: <b>USD ${pagado.toFixed(2)}</b></div>
+          ${saldo < -0.01 ? `<div style="color:#b00000">Saldo: <b>USD ${saldo.toFixed(2)}</b></div>` : ''}
+        </div>
+        <div class="estado-badge ${saldo <= 0.01 ? 'pagado' : 'pendiente'}">${saldo <= 0.01 ? 'PAGADO' : 'SALDO PENDIENTE'}</div>
+      </div>
     </div>
 
+    <!-- GARANTÍAS CON FECHAS -->
+    ${v.items.some(i => i.garantiaDias || i.garantiaFin) ? `
+    <div class="garantias-block">
+      <div class="gtitle">🛡 Garantía incluida</div>
+      ${v.items.filter(i => i.garantiaDias || i.garantiaFin).map(i => {
+        const hoy = new Date();
+        const vence = i.garantiaFin ? new Date(i.garantiaFin) : calcVencimiento(v.fecha, i.garantiaDias);
+        const activa = vence && vence >= hoy;
+        const diasRest = vence ? Math.max(0, Math.round((vence - hoy) / 86400000)) : 0;
+        return `<div class="garantia-item">
+          <span><b>${i.nombre}</b>${i.imei ? ` · IMEI ${i.imei}` : ''}</span>
+          <div class="garantia-dates">
+            <div>Desde: ${fmtFecha(v.fecha !== 'Hoy' ? v.fecha : new Date().toISOString())}</div>
+            <div class="vence">Vence: ${vence ? fmtFecha(vence.toISOString()) : '—'}</div>
+            <div style="font-size:9.5px;color:${activa?'#388e3c':'#b71c1c'}">${activa ? `${diasRest} días restantes` : 'Garantía vencida'}</div>
+          </div>
+        </div>`;
+      }).join('')}
+    </div>` : ''}
+
+    <!-- CONDICIONES DE GARANTIA -->
+    ${condiciones ? `
+    <div class="tyc-block">
+      <div class="tyc-title">Términos y condiciones de garantía</div>
+      <p>${condiciones.replace(/\n/g,'<br>')}</p>
+    </div>` : ''}
+
+    <!-- FIRMA -->
     <div class="firma-section">
       <div class="firma-box">Firma</div>
       <div class="firma-box">Aclaración</div>
       <div class="firma-box">DNI</div>
     </div>
 
+    <!-- FOOTER -->
     <div class="footer">
-      DOCUMENTO NO VÁLIDO COMO FACTURA<br>
-      Documento generado el ${new Date().toLocaleDateString('es-AR')} a las ${new Date().toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit'})}<br>
-      Recibo N° ${v.id} | IPhoneMood
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 245" width="22" height="27">
+        <path d="M100,18 C86,4 64,7 61,22 C58,37 71,48 83,43 C76,56 60,60 48,82 C33,108 34,140 50,162 C62,180 80,190 96,190 C108,190 116,184 124,184 C132,184 140,190 154,190 C171,190 189,176 199,154 C173,141 173,105 199,93 C189,65 168,55 150,59 C140,61 132,69 124,69 C116,69 108,61 96,59 C87,57 79,48 83,35 C87,22 100,18 100,18 Z" fill="#1a1a1a"/>
+        <path d="M104,4 C104,4 117,-1 128,10 C139,21 131,40 118,38 C109,36 99,20 104,4 Z" fill="#1a1a1a"/>
+      </svg>
+      <span>DOCUMENTO NO VÁLIDO COMO FACTURA</span>
+      <span>Generado el ${new Date().toLocaleDateString('es-AR')} a las ${new Date().toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit'})}</span>
+      <span>Recibo N° ${v.id} · iPhoneMood · Granadero Baigorria, Santa Fe</span>
     </div>
-    </body></html>`;
+
+    </div></body></html>`;
     this._abrirVentanaPDF(html, `Recibo_${v.id}`);
   },
 

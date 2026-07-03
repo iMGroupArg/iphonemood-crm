@@ -56,7 +56,23 @@ const Panel = {
           <button class="btn btn-sm" onclick="Panel.delGarantia('${g.id}')" style="color:var(--red)"><i class="ti ti-trash"></i></button>
         </div>`).join('')}</div>
       <button class="btn btn-primary" onclick="Panel.addGarantia()"><i class="ti ti-plus"></i> Nueva categoría</button>
+
+      <!-- Condiciones de garantía para el recibo -->
+      <div style="margin-top:24px;border-top:1px solid var(--border);padding-top:18px">
+        <h3 style="font-size:13px;font-weight:600;color:var(--text-secondary);text-transform:uppercase;letter-spacing:.4px;margin-bottom:6px">Condiciones de garantía en el recibo</h3>
+        <p style="font-size:11px;color:var(--text-secondary);margin-bottom:10px">Este texto aparece en la sección "Términos y condiciones" de cada recibo generado. Usalo para agregar tu descargo de responsabilidad como marca.</p>
+        <textarea id="panel-condiciones-garantia" rows="6" style="width:100%;font-size:12.5px;padding:10px 12px;border:1px solid var(--border-strong);border-radius:10px;color:var(--text);background:var(--bg-secondary);resize:vertical;font-family:inherit">${State.condicionesGarantia}</textarea>
+        <div style="display:flex;justify-content:flex-end;margin-top:8px">
+          <button class="btn btn-primary" onclick="Panel.guardarCondicionesGarantia()"><i class="ti ti-device-floppy"></i> Guardar condiciones</button>
+        </div>
+      </div>
     `;
+  },
+  guardarCondicionesGarantia() {
+    const txt = document.getElementById('panel-condiciones-garantia')?.value || '';
+    State.condicionesGarantia = txt;
+    localStorage.setItem('im_condiciones_garantia', txt);
+    toast('Condiciones de garantía guardadas.');
   },
   async addGarantia() {
     const nombre = prompt('Nombre de la categoría:'); if (!nombre) return;

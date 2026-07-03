@@ -35,6 +35,7 @@ const State = {
 
   // GARANTÍAS configurables — se carga desde Supabase
   garantias: [],
+  condicionesGarantia: localStorage.getItem('im_condiciones_garantia') || 'La garantía cubre defectos de fabricación y fallas de funcionamiento. No cubre daños por caídas, humedad, golpes, uso indebido o intervención de terceros no autorizados. Para hacer efectiva la garantía, presentar este recibo en el local.',
 
   // CASH FLOW — log de movimientos para el módulo de cash flow
   movimientos: [],

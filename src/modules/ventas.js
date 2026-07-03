@@ -84,36 +84,38 @@ const Ventas = {
     const ventas=this.ventasDelPeriodo();
     const dispCats=['iphone','android','mac','ipad','watch'];
 
-    const volumen=ventas.reduce((s,v)=>s+v.items.reduce((a,i)=>a+i.precio,0),0);
-    const margenTotal=ventas.reduce((s,v)=>s+v.items.reduce((a,i)=>a+(i.precio-(i.costo||0)),0),0);
+    // Volumen = suma de precios de todos los ítems vendidos
+    const volumen = ventas.reduce((s,v) => s + v.items.reduce((a,i) => a + i.precio, 0), 0);
 
-    // Margen por equipo: precio venta disp − (costo disp + costo accesorios), promediado
-    const margenesXVenta=ventas.map(v=>{
-      const disp=v.items.filter(i=>{const p=State.stock.find(s=>s.id===i.stockId);return p?dispCats.includes(p.cat):false;});
-      const acc=v.items.filter(i=>{const p=State.stock.find(s=>s.id===i.stockId);return!p||!dispCats.includes(p.cat);});
-      return disp.reduce((a,i)=>a+i.precio,0)-(disp.reduce((a,i)=>a+(i.costo||0),0)+acc.reduce((a,i)=>a+(i.costo||0),0));
-    });
-    const margenXEquipo=margenesXVenta.length?margenesXVenta.reduce((a,v)=>a+v,0)/margenesXVenta.length:0;
+    // Margen total = precio venta − costo de cada ítem
+    const margenTotal = ventas.reduce((s,v) => s + v.items.reduce((a,i) => a + (i.precio - (i.costo||0)), 0), 0);
 
-    const diferencial=ventas.reduce((s,v)=>s+(v.pagos||[]).filter(p=>p.esTarjeta).reduce((a,p)=>a+(p.diferencialArs?(p.diferencialArs/(p.cotizacionDiferencial||State.refBlue)):0),0),0);
+    // Margen por equipo = margen total / cantidad de ventas del período
+    const margenXEquipo = ventas.length ? margenTotal / ventas.length : 0;
 
-    const kpis=[
-      {label:'Volumen vendido',val:State.fmtUSD(volumen),sub:`${ventas.length} venta(s)`,icon:'ti-trending-up',color:'var(--blue)',bg:'var(--blue-light)'},
-      {label:'Margen total',val:State.fmtUSD(margenTotal),sub:'precio venta − costo',icon:'ti-cash',color:margenTotal>=0?'var(--green)':'var(--red)',bg:margenTotal>=0?'var(--green-light)':'#FEE2E2'},
-      {label:'Margen por equipo',val:State.fmtUSD(margenXEquipo),sub:'promedio (disp − todo)',icon:'ti-device-mobile',color:margenXEquipo>=0?'var(--green)':'var(--red)',bg:margenXEquipo>=0?'var(--green-light)':'#FEE2E2'},
-      {label:'Diferencial tarjeta',val:State.fmtUSD(diferencial),sub:'ganancia financiera',icon:'ti-credit-card',color:'var(--purple)',bg:'var(--purple-light)'},
-      {label:'Ticket promedio',val:ventas.length?State.fmtUSD(volumen/ventas.length):'USD 0',sub:'por venta',icon:'ti-receipt',color:'var(--text)',bg:'var(--bg-secondary)'},
+    // Diferencial tarjeta = ganancia financiera generada por el recargo de tarjeta
+    const diferencial = ventas.reduce((s,v) => s + (v.pagos||[]).filter(p=>p.esTarjeta).reduce((a,p) => a + (p.diferencialArs ? (p.diferencialArs/(p.cotizacionDiferencial||State.refBlue)) : 0), 0), 0);
+
+    // Ticket promedio = volumen total / cantidad de ventas
+    const ticketProm = ventas.length ? volumen / ventas.length : 0;
+
+    const kpis = [
+      { label:'Volumen vendido',   val:State.fmtUSD(volumen),      sub:`${ventas.length} venta(s) en el período`, emoji:'💰', color:'var(--blue)' },
+      { label:'Margen total',      val:State.fmtUSD(margenTotal),  sub:'Precio venta − costo',                    emoji: margenTotal>=0?'📈':'📉', color:margenTotal>=0?'var(--green)':'var(--red)' },
+      { label:'Margen por venta',  val:State.fmtUSD(margenXEquipo),sub:'Margen total ÷ cantidad de ventas',       emoji: margenXEquipo>=0?'📊':'⚠️', color:margenXEquipo>=0?'var(--green)':'var(--red)' },
+      { label:'Diferencial tarjeta',val:State.fmtUSD(diferencial), sub:'Ganancia financiera por recargo',         emoji:'💳', color:'var(--purple)' },
+      { label:'Ticket promedio',   val:State.fmtUSD(ticketProm),   sub:'Volumen ÷ cantidad de ventas',            emoji:'🧾', color:'var(--text)' },
     ];
 
-    el.innerHTML=kpis.map(k=>`
+    el.innerHTML = kpis.map(k=>`
       <div class="card" style="padding:12px 14px;margin-bottom:0;display:flex;justify-content:space-between;align-items:flex-start;gap:8px;min-height:90px">
         <div style="min-width:0;flex:1">
           <label style="font-size:10.5px;color:var(--text-secondary);display:block;margin-bottom:3px">${k.label}</label>
           <div style="font-size:17px;font-weight:700;color:${k.color};word-break:break-word">${k.val}</div>
           <div style="font-size:10px;color:var(--text-secondary);margin-top:2px">${k.sub}</div>
         </div>
-        <div style="width:32px;height:32px;border-radius:8px;background:${k.bg};display:flex;align-items:center;justify-content:center;flex-shrink:0">
-          <i class="ti ${k.icon}" style="color:${k.color};font-size:16px"></i>
+        <div style="width:36px;height:36px;border-radius:9px;background:var(--bg-secondary);display:flex;align-items:center;justify-content:center;flex-shrink:0;font-size:18px">
+          ${k.emoji}
         </div>
       </div>`).join('');
   },

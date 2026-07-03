@@ -114,11 +114,13 @@ const Stock = {
         <div style="padding:12px 22px;border-bottom:1px solid var(--border);display:flex;gap:8px;flex-wrap:wrap" id="stock-tabs-wrap">
           <div style="display:flex;gap:4px;flex-wrap:wrap" id="stock-tabs"></div>
         </div>
-        <div style="padding:0 22px 12px;display:flex;gap:8px;flex-wrap:wrap">
+        <div style="padding:0 22px 12px;display:flex;gap:8px;flex-wrap:wrap;align-items:center">
           <input type="text" id="stock-search" placeholder="Buscar producto..." oninput="Stock.renderTable()" style="font-size:12px;padding:6px 10px;border:1px solid var(--border-strong);border-radius:8px;flex:1;min-width:160px">
-          <select id="stock-filter-prov" onchange="Stock.renderTable()" style="font-size:12px;padding:6px 10px;border:1px solid var(--border-strong);border-radius:8px">
-            <option value="">Todos los proveedores</option>
-            <option>Gonza</option><option>Proveedor perfumería</option><option>Proveedor accesorios</option>
+          <select id="stock-filter-modelo" onchange="Stock.renderTable()" style="font-size:12px;padding:6px 10px;border:1px solid var(--border-strong);border-radius:8px;min-width:180px">
+            <option value="">Todos los modelos</option>
+            ${Object.entries(this.MODELOS_POR_CAT).map(([cat, modelos]) =>
+              `<optgroup label="${this.CAT_LABELS[cat]||cat}">${modelos.map(m=>`<option value="${m}">${m}</option>`).join('')}</optgroup>`
+            ).join('')}
           </select>
         </div>
         <div class="body-pad" style="padding-top:0">
@@ -177,14 +179,14 @@ const Stock = {
 
   renderTable() {
     const q = (document.getElementById('stock-search')?.value || '').toLowerCase();
-    const prov = document.getElementById('stock-filter-prov')?.value || '';
+    const modeloFiltro = document.getElementById('stock-filter-modelo')?.value || '';
     const catsDelGrupo = this.GRUPOS[this.currentGroup]?.cats || [];
     let rows = State.stock.filter(s => {
       if (!catsDelGrupo.includes(s.cat)) return false;
       if (this.currentTab !== 'all' && s.cat !== this.currentTab) return false;
       if (this.currentEstado !== 'todos' && (s.estadoInventario||'disponible') !== this.currentEstado) return false;
       if (q && !s.nombre.toLowerCase().includes(q)) return false;
-      if (prov && s.proveedor !== prov) return false;
+      if (modeloFiltro && (s.modelo || '') !== modeloFiltro) return false;
       return true;
     });
     const tbody = document.getElementById('stock-tbody');

@@ -5,6 +5,7 @@
 
 const State = {
   refBlue: 1075,
+  refBlueCompra: 1075,
   refUsdt: 1061,
 
   personas: [], // se carga desde Supabase al iniciar

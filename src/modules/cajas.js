@@ -8,7 +8,7 @@ const Cajas = {
       totalUSD  += (caja['USD cash']||0) + (caja['USD transferencia']||0);
       totalUSDT += caja['USDT'] || 0;
     });
-    const equivalenteTotal = totalARS + totalUSD * State.refBlue + totalUSDT * State.refUsdt;
+    const equivalenteTotal = totalARS + totalUSD * State.refBlue + totalUSDT * State.refBlue;
 
     const BOLSILLO_ICON = {
       'ARS cash': 'ti-cash', 'ARS transferencia': 'ti-building-bank',
@@ -43,7 +43,10 @@ const Cajas = {
           const caja = State.cajas[p] || {};
           const arsEquiv = (caja['ARS cash']||0) + (caja['ARS transferencia']||0)
                          + ((caja['USD cash']||0)+(caja['USD transferencia']||0)) * State.refBlue
-                         + (caja['USDT']||0) * State.refUsdt;
+                         + (caja['USDT']||0) * State.refBlue;
+          const usdEquiv = ((caja['ARS cash']||0) + (caja['ARS transferencia']||0)) / State.refBlueCompra
+                         + (caja['USD cash']||0) + (caja['USD transferencia']||0)
+                         + (caja['USDT']||0);
           return `<div class="card" style="margin-bottom:0">
             <div class="card-title" style="margin-bottom:14px">
               <div class="av" style="width:30px;height:30px;font-size:11px">${p.substring(0,2).toUpperCase()}</div>
@@ -69,7 +72,7 @@ const Cajas = {
             </div>
             <div style="margin-top:6px;display:flex;justify-content:space-between;align-items:center">
               <span style="font-size:11px;color:var(--text-secondary)">Equiv. USD</span>
-              <b style="color:var(--text-secondary);font-size:12px">${State.fmtUSD(arsEquiv / State.refBlue)}</b>
+              <b style="color:var(--text-secondary);font-size:12px">${State.fmtUSD(usdEquiv)}</b>
             </div>
           </div>`;
         }).join('')}

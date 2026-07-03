@@ -1,6 +1,11 @@
 const Clientes = {
   _q: '',
   _sel: null,
+  _eliminados: new Set(JSON.parse(localStorage.getItem('im_clientes_eliminados') || '[]')),
+
+  _guardarEliminados() {
+    localStorage.setItem('im_clientes_eliminados', JSON.stringify([...this._eliminados]));
+  },
 
   render() {
     const c = document.createElement('div');
@@ -45,7 +50,9 @@ const Clientes = {
       map[key].reparaciones.push(r);
       if (r.tel && !map[key].tel) map[key].tel = r.tel;
     });
-    return Object.values(map).sort((a,b) => a.nombre.localeCompare(b.nombre));
+    return Object.values(map)
+      .filter(c => !this._eliminados.has(c.tel || c.nombre))
+      .sort((a,b) => a.nombre.localeCompare(b.nombre));
   },
 
   renderLista() {
@@ -102,7 +109,10 @@ const Clientes = {
             </div>
           </div>
         </div>
-        ${c.tel ? `<a href="https://wa.me/549${tel}" target="_blank" class="btn btn-primary" style="text-decoration:none"><i class="ti ti-brand-whatsapp"></i> WhatsApp</a>` : ''}
+        <div style="display:flex;gap:8px">
+          ${c.tel ? `<a href="https://wa.me/549${tel}" target="_blank" class="btn btn-primary" style="text-decoration:none"><i class="ti ti-brand-whatsapp"></i> WhatsApp</a>` : ''}
+          <button class="btn" style="color:var(--red)" onclick="Clientes.eliminar('${escHtml(c.tel || c.nombre)}')"><i class="ti ti-trash"></i> Eliminar</button>
+        </div>
       </div>
 
       <!-- KPIs -->
@@ -151,6 +161,16 @@ const Clientes = {
           </div>`).join('')}
       </div>` : ''}
     `;
+  },
+
+  eliminar(key) {
+    if (!confirm('¿Eliminar este cliente de la lista? Sus ventas y reparaciones no se borran.')) return;
+    this._eliminados.add(key);
+    this._guardarEliminados();
+    this._sel = null;
+    document.getElementById('cli-detalle').innerHTML = '';
+    this.renderLista();
+    toast('Cliente eliminado de la lista.');
   },
 
   abrirModal() {

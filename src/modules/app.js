@@ -88,6 +88,10 @@ const App = {
     container.style.justifyContent = 'center';
     container.style.flex = '1';
 
+    // Cotización blue en tiempo real (bluelytics — misma fuente que dolarito.ar)
+    this.actualizarCotizacion();
+    setInterval(() => this.actualizarCotizacion(), 5 * 60 * 1000); // refresca cada 5 min
+
     try {
       await DB.cargarTodo();
     } catch (err) {
@@ -96,8 +100,8 @@ const App = {
       return;
     }
 
-    document.getElementById('topbar-blue').textContent = State.refBlue;
-    document.getElementById('topbar-usdt').textContent = State.refUsdt;
+    document.getElementById('topbar-blue').textContent = State.refBlue.toLocaleString('es-AR');
+    document.getElementById('topbar-usdt').textContent = State.refUsdt.toLocaleString('es-AR');
     this.goTo('dashboard');
 
     // Si la página se recargó sola mientras había una venta a medio cargar
@@ -105,6 +109,22 @@ const App = {
     // con un banner FIJO (no un toast que desaparece solo) para que no se pierda
     // aunque el usuario tarde en volver a mirar la pantalla.
     this.chequearBorradorVentaPendiente();
+  },
+
+  async actualizarCotizacion() {
+    try {
+      const res = await fetch('https://api.bluelytics.com.ar/v2/latest');
+      if (!res.ok) return;
+      const data = await res.json();
+      const venta = data?.blue?.value_sell;
+      if (venta && venta > 0) {
+        State.refBlue = Math.round(venta);
+        const el = document.getElementById('topbar-blue');
+        if (el) el.textContent = State.refBlue.toLocaleString('es-AR');
+      }
+    } catch (e) {
+      // silencioso — se queda con el valor anterior
+    }
   },
 
   chequearBorradorVentaPendiente() {

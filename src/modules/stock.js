@@ -68,11 +68,11 @@ const Stock = {
       const valorRep     = repuestos.reduce((a,p) => a + p.costoUSD * Math.max(this.stockReal(p), 1), 0);
       const unidadesRep  = repuestos.reduce((a,p) => a + this.stockReal(p), 0);
       kpis = [
-        ['Herramientas', herramientas.length + ' ítems', 'ti-tool', 'var(--amber)', 'rgba(255,214,10,.12)'],
-        ['Valor herramientas', State.fmtUSD(valorHerr), 'ti-currency-dollar', 'var(--amber)', 'rgba(255,214,10,.12)'],
-        ['Repuestos', repuestos.length + ' tipos · ' + unidadesRep + ' uds', 'ti-components', 'var(--blue)', 'var(--blue-light)'],
-        ['Valor repuestos', State.fmtUSD(valorRep), 'ti-currency-dollar', 'var(--blue)', 'var(--blue-light)'],
-        ['Total activos taller', State.fmtUSD(valorHerr + valorRep), 'ti-building-store', 'var(--green)', 'var(--green-light)'],
+        ['Herramientas', herramientas.length + ' ítems', '🔧', 'var(--amber)', 'rgba(255,214,10,.12)'],
+        ['Valor herramientas', State.fmtUSD(valorHerr), '💵', 'var(--amber)', 'rgba(255,214,10,.12)'],
+        ['Repuestos', repuestos.length + ' tipos · ' + unidadesRep + ' uds', '🔩', 'var(--blue)', 'var(--blue-light)'],
+        ['Valor repuestos', State.fmtUSD(valorRep), '💰', 'var(--blue)', 'var(--blue-light)'],
+        ['Total activos taller', State.fmtUSD(valorHerr + valorRep), '🏪', 'var(--green)', 'var(--green-light)'],
       ];
     } else {
       const total = grupo.length;
@@ -84,18 +84,18 @@ const Stock = {
         return a + precioUSD * Math.max(this.stockReal(p), p.estadoInventario==='vendido'?1:0);
       }, 0);
       kpis = [
-        ['Total', total, 'ti-box', 'var(--blue)', 'var(--blue-light)'],
-        ['Disponibles', disponibles, 'ti-circle-check', 'var(--green)', 'var(--green-light)'],
-        ['Vendidos', vendidos, 'ti-trending-up', 'var(--text)', 'var(--bg-secondary)'],
-        ['Valor Disponible', State.fmtUSD(valorDisponible), 'ti-currency-dollar', 'var(--blue)', 'var(--blue-light)'],
-        ['Valor de Venta', State.fmtUSD(valorVendidoPotencial), 'ti-cash', 'var(--green)', 'var(--green-light)'],
+        ['Total', total, '📦', 'var(--blue)', 'var(--blue-light)'],
+        ['Disponibles', disponibles, '✅', 'var(--green)', 'var(--green-light)'],
+        ['Vendidos', vendidos, '📈', 'var(--text)', 'var(--bg-secondary)'],
+        ['Valor Disponible', State.fmtUSD(valorDisponible), '💰', 'var(--blue)', 'var(--blue-light)'],
+        ['Valor de Venta', State.fmtUSD(valorVendidoPotencial), '💵', 'var(--green)', 'var(--green-light)'],
       ];
     }
 
-    document.getElementById('stock-kpis').innerHTML = kpis.map(([label,val,icon,color,bg]) => `
+    document.getElementById('stock-kpis').innerHTML = kpis.map(([label,val,emoji,color,bg]) => `
       <div class="card" style="padding:12px 14px;margin-bottom:0;display:flex;justify-content:space-between;align-items:flex-start;gap:8px;min-height:90px">
         <div style="min-width:0;flex:1"><label style="font-size:11px;color:var(--text-secondary);display:block;margin-bottom:4px">${label}</label><div style="font-size:19px;font-weight:700;color:${color};word-break:break-word">${val}</div></div>
-        <div style="width:34px;height:34px;border-radius:8px;background:${bg};display:flex;align-items:center;justify-content:center;flex-shrink:0"><i class="ti ${icon}" style="color:${color};font-size:17px"></i></div>
+        <div style="width:34px;height:34px;border-radius:8px;background:${bg};display:flex;align-items:center;justify-content:center;flex-shrink:0;font-size:18px">${emoji}</div>
       </div>
     `).join('');
   },
@@ -227,7 +227,7 @@ const Stock = {
         <td>${detalleStock}</td>
         <td style="font-size:10.5px;color:var(--text-secondary)">${esIMEI ? (p.imeis||[]).join('<br>') || '—' : '—'}</td>
         <td>${statusBadge}</td>
-        <td><button class="btn btn-sm" onclick="Stock.openDrawer('edit','${p.id}')"><i class="ti ti-edit"></i></button></td>
+        <td><button class="btn btn-sm" onclick="Stock.openDrawer('edit','${p.id}')" title="Editar">✏️</button></td>
       </tr>`;
     }).join('');
 

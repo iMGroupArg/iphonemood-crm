@@ -623,6 +623,21 @@ const Ventas = {
       }
     }
 
+    // Ingresar el equipo del Trade-In al stock
+    if (d.tradeIn?.modelo && d.tradeIn?.valor > 0) {
+      const tiObj = {
+        cat: 'iphone', nombre: d.tradeIn.modelo, costoUSD: d.tradeIn.valor,
+        cantidad: 1, imeis: [], cotiz: State.refBlue, precioARS: null,
+        proveedor: 'Trade-In', notas: `Trade-in de venta a ${d.cliente}`,
+        estadoInventario: 'disponible', grado: 'Sin grado'
+      };
+      const { id: tiId, error: tiErr } = await DB.guardarProductoStock(tiObj, null);
+      if (!tiErr && tiId) {
+        tiObj.id = tiId;
+        State.stock.push(tiObj);
+      }
+    }
+
     // Acreditar pagos en las cajas correspondientes (memoria + base de datos)
     d.pagos.forEach(p => {
       let montoEnBolsillo = p.monto;

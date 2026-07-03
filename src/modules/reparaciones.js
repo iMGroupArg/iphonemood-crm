@@ -50,7 +50,7 @@ const Reparaciones = {
             <div style="font-size:13px;font-weight:700">Órdenes</div>
             <div id="rep-list-count" style="font-size:11px;color:var(--text-secondary)"></div>
           </div>
-          <button class="btn btn-sm btn-primary" onclick="Reparaciones.openNewForm()"><i class="ti ti-plus"></i> Nueva</button>
+          <button class="btn btn-sm btn-primary" onclick="Reparaciones.openNewForm()">➕ Nueva</button>
         </div>
         <div style="padding:8px 10px;border-bottom:1px solid var(--border)">
           <input type="text" id="rep-search" placeholder="Buscar por cliente, equipo, ID…" oninput="Reparaciones.renderList()"
@@ -65,7 +65,7 @@ const Reparaciones = {
         <div style="flex:1;overflow-y:auto" id="rep-list"></div>
       </div>
       <div class="rep-detail-panel" style="flex:1;display:flex;flex-direction:column;overflow:hidden;min-width:0;background:var(--bg-elevated)">
-        <button class="btn btn-sm rep-back-btn" onclick="Reparaciones.backToList()" style="display:none;margin:10px 14px 0;align-self:flex-start"><i class="ti ti-arrow-left"></i> Órdenes</button>
+        <button class="btn btn-sm rep-back-btn" onclick="Reparaciones.backToList()" style="display:none;margin:10px 14px 0;align-self:flex-start">← Órdenes</button>
         <div id="rep-detail" style="flex:1;overflow-y:auto;padding:18px 20px"></div>
       </div>
     `;
@@ -222,11 +222,11 @@ const Reparaciones = {
           <div style="font-size:11px;color:var(--text-secondary);margin-top:3px">Ingreso: ${o.fechaIngreso} · ${dias === 0 ? 'hoy' : dias + ' día' + (dias !== 1 ? 's' : '')} en taller${o.tecnico ? ` · Técnico: ${o.tecnico}` : ''}</div>
         </div>
         <div style="display:flex;gap:6px;flex-shrink:0;flex-wrap:wrap">
-          <button class="btn btn-sm" onclick="Reparaciones.imprimirOrden()" title="Imprimir orden"><i class="ti ti-printer"></i></button>
-          ${o.tokenSeguimiento ? `<button class="btn btn-sm" onclick="Reparaciones.copiarLinkSeguimiento()" title="Copiar link de seguimiento para el cliente"><i class="ti ti-link"></i></button>` : ''}
-          ${o.tel ? `<button class="btn btn-sm" onclick="Reparaciones.whatsappRecordatorio()" title="WhatsApp recordatorio" style="color:#25D366;border-color:#25D366"><i class="ti ti-brand-whatsapp"></i></button>` : ''}
-          <button class="btn btn-sm" onclick="Reparaciones.openEditForm()" title="Editar datos"><i class="ti ti-pencil"></i></button>
-          ${o.estado === 'listo' ? `<button class="btn btn-sm" onclick="Reparaciones.whatsappListo()" style="background:#25D366;color:#fff;border-color:#25D366"><i class="ti ti-brand-whatsapp"></i> Avisar</button><button class="btn btn-sm btn-green" onclick="Reparaciones.entregarYCobrar()"><i class="ti ti-check"></i> Entregar</button>` : ''}
+          <button class="btn btn-sm" onclick="Reparaciones.imprimirOrden()" title="Imprimir orden">🖨️</button>
+          ${o.tokenSeguimiento ? `<button class="btn btn-sm" onclick="Reparaciones.copiarLinkSeguimiento()" title="Copiar link de seguimiento para el cliente">🔗</button>` : ''}
+          ${o.tel ? `<button class="btn btn-sm" onclick="Reparaciones.whatsappRecordatorio()" title="WhatsApp recordatorio" style="color:#25D366;border-color:#25D366">💬</button>` : ''}
+          <button class="btn btn-sm" onclick="Reparaciones.openEditForm()" title="Editar datos">✏️</button>
+          ${o.estado === 'listo' ? `<button class="btn btn-sm" onclick="Reparaciones.whatsappListo()" style="background:#25D366;color:#fff;border-color:#25D366">💬 Avisar</button><button class="btn btn-sm btn-green" onclick="Reparaciones.entregarYCobrar()">✅ Entregar</button>` : ''}
         </div>
       </div>
 
@@ -277,7 +277,7 @@ const Reparaciones = {
       <div class="card" style="margin-bottom:10px">
         <div class="card-title" style="justify-content:space-between">
           <span><i class="ti ti-tool"></i> Repuestos utilizados</span>
-          <button class="btn btn-sm" onclick="Reparaciones.openAddRepuestoModal()"><i class="ti ti-plus"></i> Agregar</button>
+          <button class="btn btn-sm" onclick="Reparaciones.openAddRepuestoModal()">➕ Agregar</button>
         </div>
         ${(o.repuestos || []).length ? `
           <div style="border:1px solid var(--border);border-radius:8px;overflow:hidden;margin-bottom:4px">
@@ -298,7 +298,7 @@ const Reparaciones = {
       <div class="card" style="margin-bottom:10px">
         <div class="card-title" style="justify-content:space-between">
           <span><i class="ti ti-credit-card"></i> Pagos / señas</span>
-          <button class="btn btn-sm" onclick="Reparaciones.openAddPagoModal()"><i class="ti ti-plus"></i> Registrar</button>
+          <button class="btn btn-sm" onclick="Reparaciones.openAddPagoModal()">➕ Registrar</button>
         </div>
         ${(o.pagos || []).length ? `
           <div style="border:1px solid var(--border);border-radius:8px;overflow:hidden;margin-bottom:4px">
@@ -356,7 +356,7 @@ const Reparaciones = {
       <div class="card" style="margin-bottom:10px" id="seguimiento-msgs-card">
         <div class="card-title" style="justify-content:space-between">
           <span><i class="ti ti-messages" style="color:var(--blue)"></i> Mensajes del cliente</span>
-          ${o.tokenSeguimiento ? `<button class="btn btn-sm" onclick="Reparaciones.copiarLinkSeguimiento()" style="font-size:11px"><i class="ti ti-link"></i> Copiar link</button>` : ''}
+          ${o.tokenSeguimiento ? `<button class="btn btn-sm" onclick="Reparaciones.copiarLinkSeguimiento()" style="font-size:11px">🔗 Copiar link</button>` : ''}
         </div>
         ${!o.tokenSeguimiento ? `
           <div style="font-size:12px;color:var(--text-secondary);background:var(--bg-secondary);border-radius:8px;padding:10px 12px">
@@ -368,7 +368,7 @@ const Reparaciones = {
           <div style="display:flex;flex-direction:column;gap:6px">
             <textarea id="msg-tecnico-texto" rows="2" placeholder="Escribí una nota para el cliente (la va a ver en su página de seguimiento)…"
               style="width:100%;font-size:12.5px;padding:8px 10px;background:var(--bg-secondary);border:1px solid var(--border-strong);border-radius:8px;color:var(--text);resize:vertical;font-family:var(--font)"></textarea>
-            <button class="btn btn-primary btn-sm" onclick="Reparaciones.enviarMsgTecnico()"><i class="ti ti-send"></i> Enviar nota al cliente</button>
+            <button class="btn btn-primary btn-sm" onclick="Reparaciones.enviarMsgTecnico()">📤 Enviar nota al cliente</button>
           </div>
         `}
       </div>
@@ -376,9 +376,9 @@ const Reparaciones = {
       <!-- Acciones -->
       <div style="display:flex;gap:8px;justify-content:space-between;align-items:center;flex-wrap:wrap;margin-top:4px;padding-bottom:20px">
         <div>
-          ${!isTerminal || this.hasMovimientos(o) ? `<button class="btn btn-red btn-sm" onclick="Reparaciones.cancelarConReversion()"><i class="ti ti-trash"></i> Cancelar orden</button>` : ''}
+          ${!isTerminal || this.hasMovimientos(o) ? `<button class="btn btn-red btn-sm" onclick="Reparaciones.cancelarConReversion()">🗑️ Cancelar orden</button>` : ''}
         </div>
-        <button class="btn btn-primary" onclick="Reparaciones.saveOrder()"><i class="ti ti-check"></i> Guardar cambios</button>
+        <button class="btn btn-primary" onclick="Reparaciones.saveOrder()">✅ Guardar cambios</button>
       </div>
     `;
     setTimeout(() => this._cargarMsgsSeguimiento(), 0);
@@ -416,11 +416,11 @@ const Reparaciones = {
     const banner = document.createElement('div');
     banner.style.cssText = 'position:fixed;bottom:80px;right:20px;background:var(--bg-elevated);border:1px solid #25D366;border-radius:var(--radius-lg);padding:12px 16px;z-index:9000;box-shadow:var(--shadow-md);max-width:300px';
     banner.innerHTML = `
-      <div style="font-size:12px;font-weight:600;color:#25D366;margin-bottom:6px"><i class="ti ti-brand-whatsapp"></i> ¿Avisar al cliente?</div>
+      <div style="font-size:12px;font-weight:600;color:#25D366;margin-bottom:6px">💬 ¿Avisar al cliente?</div>
       <div style="font-size:11px;color:var(--text-secondary);margin-bottom:10px">El equipo de <b>${o.cliente}</b> está listo. Enviá el aviso por WhatsApp.</div>
       <div style="display:flex;gap:6px">
         <button onclick="this.closest('div[style]').remove()" style="flex:1;font-size:11px;padding:5px;border:1px solid var(--border);border-radius:6px;background:transparent;color:var(--text-secondary);cursor:pointer">Ahora no</button>
-        <button onclick="Reparaciones.whatsappListo('${o.id}');this.closest('div[style]').remove()" style="flex:2;font-size:11px;padding:5px;border:none;border-radius:6px;background:#25D366;color:#fff;cursor:pointer;font-weight:600"><i class="ti ti-brand-whatsapp"></i> Enviar aviso</button>
+        <button onclick="Reparaciones.whatsappListo('${o.id}');this.closest('div[style]').remove()" style="flex:2;font-size:11px;padding:5px;border:none;border-radius:6px;background:#25D366;color:#fff;cursor:pointer;font-weight:600">💬 Enviar aviso</button>
       </div>`;
     document.body.appendChild(banner);
     setTimeout(() => banner.remove(), 12000);
@@ -616,7 +616,7 @@ const Reparaciones = {
             <div style="font-size:16px;font-weight:700">${isEdit ? 'Editar orden' : 'Nueva orden de reparación'}</div>
             ${isEdit ? `<div style="font-size:12px;color:var(--text-secondary)">${o.id}</div>` : ''}
           </div>
-          <button onclick="Reparaciones._closeOrderModal()" style="background:var(--bg-secondary);border:1px solid var(--border);border-radius:8px;width:30px;height:30px;cursor:pointer;color:var(--text);display:flex;align-items:center;justify-content:center;font-size:16px"><i class="ti ti-x"></i></button>
+          <button onclick="Reparaciones._closeOrderModal()" style="background:var(--bg-secondary);border:1px solid var(--border);border-radius:8px;width:30px;height:30px;cursor:pointer;color:var(--text);display:flex;align-items:center;justify-content:center;font-size:16px">✕</button>
         </div>
         <div style="padding:20px;overflow-y:auto;flex:1;display:flex;flex-direction:column;gap:14px">
 
@@ -727,7 +727,7 @@ const Reparaciones = {
         <div style="padding:14px 20px;border-top:1px solid var(--border);display:flex;justify-content:flex-end;gap:8px;flex-shrink:0">
           <button class="btn" onclick="Reparaciones._closeOrderModal()">Cancelar</button>
           <button class="btn btn-primary" onclick="Reparaciones._submitOrderForm(${isEdit})">
-            <i class="ti ti-${isEdit?'check':'plus'}"></i> ${isEdit ? 'Guardar cambios' : 'Crear orden'}
+            ${isEdit ? '✅' : '➕'} ${isEdit ? 'Guardar cambios' : 'Crear orden'}
           </button>
         </div>
       </div>
@@ -836,7 +836,7 @@ const Reparaciones = {
       <div style="background:var(--bg-elevated);border:1px solid var(--border-strong);border-radius:var(--radius-xl);width:min(400px,96vw);overflow:hidden">
         <div style="padding:14px 18px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center">
           <div style="font-size:14px;font-weight:700">Agregar repuesto</div>
-          <button onclick="document.getElementById('rep-repuesto-overlay').remove()" style="background:none;border:none;cursor:pointer;color:var(--text-secondary);font-size:18px"><i class="ti ti-x"></i></button>
+          <button onclick="document.getElementById('rep-repuesto-overlay').remove()" style="background:none;border:none;cursor:pointer;color:var(--text-secondary);font-size:18px">✕</button>
         </div>
         <div style="padding:18px;display:flex;flex-direction:column;gap:12px">
           <div>
@@ -860,7 +860,7 @@ const Reparaciones = {
         </div>
         <div style="padding:12px 18px;border-top:1px solid var(--border);display:flex;justify-content:flex-end;gap:8px">
           <button class="btn" onclick="document.getElementById('rep-repuesto-overlay').remove()">Cancelar</button>
-          <button class="btn btn-primary" onclick="Reparaciones.submitAddRepuesto()"><i class="ti ti-plus"></i> Agregar</button>
+          <button class="btn btn-primary" onclick="Reparaciones.submitAddRepuesto()">➕ Agregar</button>
         </div>
       </div>
     `;
@@ -895,7 +895,7 @@ const Reparaciones = {
       <div style="background:var(--bg-elevated);border:1px solid var(--border-strong);border-radius:var(--radius-xl);width:min(400px,96vw);overflow:hidden">
         <div style="padding:14px 18px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center">
           <div style="font-size:14px;font-weight:700">Registrar pago / seña</div>
-          <button onclick="document.getElementById('rep-pago-overlay').remove()" style="background:none;border:none;cursor:pointer;color:var(--text-secondary);font-size:18px"><i class="ti ti-x"></i></button>
+          <button onclick="document.getElementById('rep-pago-overlay').remove()" style="background:none;border:none;cursor:pointer;color:var(--text-secondary);font-size:18px">✕</button>
         </div>
         <div style="padding:18px;display:flex;flex-direction:column;gap:12px">
           <div>
@@ -920,7 +920,7 @@ const Reparaciones = {
         </div>
         <div style="padding:12px 18px;border-top:1px solid var(--border);display:flex;justify-content:flex-end;gap:8px">
           <button class="btn" onclick="document.getElementById('rep-pago-overlay').remove()">Cancelar</button>
-          <button class="btn btn-primary" onclick="Reparaciones.submitAddPago()"><i class="ti ti-cash"></i> Registrar</button>
+          <button class="btn btn-primary" onclick="Reparaciones.submitAddPago()">💵 Registrar</button>
         </div>
       </div>
     `;
@@ -957,7 +957,7 @@ const Reparaciones = {
     overlay.innerHTML = `
       <div style="background:var(--bg-elevated);border:1px solid var(--border-strong);border-radius:var(--radius-xl);width:min(380px,96vw);overflow:hidden">
         <div style="padding:14px 18px;border-bottom:1px solid var(--border)">
-          <div style="font-size:15px;font-weight:700;color:var(--green)"><i class="ti ti-check-circle"></i> Entregar equipo</div>
+          <div style="font-size:15px;font-weight:700;color:var(--green)">✅ Entregar equipo</div>
           <div style="font-size:12px;color:var(--text-secondary)">${o.id} — ${o.equipo} — ${o.cliente}</div>
         </div>
         <div style="padding:18px;display:flex;flex-direction:column;gap:10px">
@@ -984,7 +984,7 @@ const Reparaciones = {
         </div>
         <div style="padding:12px 18px;border-top:1px solid var(--border);display:flex;justify-content:flex-end;gap:8px">
           <button class="btn" onclick="document.getElementById('rep-entrega-overlay').remove()">Cancelar</button>
-          <button class="btn btn-green" onclick="Reparaciones._confirmarEntrega(${saldo})"><i class="ti ti-check"></i> Confirmar entrega</button>
+          <button class="btn btn-green" onclick="Reparaciones._confirmarEntrega(${saldo})">✅ Confirmar entrega</button>
         </div>
       </div>
     `;

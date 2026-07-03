@@ -368,12 +368,21 @@ const Ventas = {
     const disponibles = State.stock.filter(s => State.getStock(s) > 0);
     return `
       <div style="font-size:11px;color:var(--text-secondary);margin-bottom:8px">${disponibles.length} productos con stock disponible</div>
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;max-height:240px;overflow-y:auto">
+      <div style="display:flex;flex-direction:column;gap:8px;max-height:260px;overflow-y:auto">
         ${disponibles.map(s => {
           const sel = this.selectedStockIds.includes(s.id);
-          return `<div onclick="Ventas.toggleStockSel('${s.id}')" style="border:${sel?'2px solid var(--blue)':'1px solid var(--border)'};background:${sel?'var(--blue-light)':'var(--bg)'};border-radius:8px;padding:9px 11px;cursor:pointer;font-size:11.5px">
-            <b style="font-size:12px">${s.nombre}</b><br>
-            <span style="color:var(--text-secondary)">Costo: USD ${s.costoUSD} · Venta: ${State.fmtARS(s.precioARS)}</span>
+          const precioUSD = s.precioARS && s.cotiz ? +(s.precioARS / s.cotiz).toFixed(2) : 0;
+          return `<div style="border:${sel?'2px solid var(--blue)':'1px solid var(--border)'};background:${sel?'var(--blue-light)':'var(--bg)'};border-radius:8px;padding:9px 11px;font-size:11.5px">
+            <div onclick="Ventas.toggleStockSel('${s.id}')" style="cursor:pointer;margin-bottom:${sel?'8px':'0'}">
+              <b style="font-size:12px">${s.nombre}</b><br>
+              <span style="color:var(--text-secondary)">Costo: USD ${s.costoUSD}${precioUSD ? ' · Precio sugerido: USD ' + precioUSD : ''}</span>
+            </div>
+            ${sel ? `<div style="display:flex;align-items:center;gap:8px;margin-top:4px">
+              <label style="font-size:10px;color:var(--text-secondary);white-space:nowrap">Precio venta (USD):</label>
+              <input type="number" id="inv-precio-${s.id}" value="${precioUSD || ''}" min="0" step="0.01" placeholder="0"
+                style="font-size:13px;font-weight:700;padding:4px 8px;border:1px solid var(--border-strong);border-radius:6px;width:110px;color:var(--text);background:var(--bg-secondary)"
+                onclick="event.stopPropagation()">
+            </div>` : ''}
           </div>`;
         }).join('')}
       </div>
@@ -390,7 +399,10 @@ const Ventas = {
       const s = State.stock.find(x => x.id === id);
       if (!s) return;
       const imei = s.imeis && s.imeis.length ? s.imeis[0] : null;
-      this.draft.items.push({ nombre: s.nombre, precio: s.precioARS / State.refBlue, costo: s.costoUSD, stockId: id, imei });
+      // Leer precio ingresado por el usuario; si vacío usar el precio del stock en USD
+      const precioIngresado = parseFloat(document.getElementById(`inv-precio-${id}`)?.value);
+      const precioUSD = precioIngresado > 0 ? precioIngresado : (s.precioARS && s.cotiz ? +(s.precioARS / s.cotiz).toFixed(2) : 0);
+      this.draft.items.push({ nombre: s.nombre, precio: precioUSD, costo: s.costoUSD, stockId: id, imei });
     });
     this.selectedStockIds = [];
     document.getElementById('venta-step-body').innerHTML = this.stepItems();

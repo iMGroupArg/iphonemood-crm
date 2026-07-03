@@ -31,6 +31,7 @@ const Stock = {
 
   render() {
     const c = document.createElement('div');
+    c.style.cssText = 'display:flex;flex-direction:column;flex:1;overflow:hidden;min-height:0';
     c.innerHTML = `
       <div style="padding:16px 22px;border-bottom:1px solid var(--border)">
         <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px;flex-wrap:wrap;margin-bottom:14px">
@@ -122,7 +123,7 @@ const Stock = {
         </div>
         <div class="body-pad" style="padding-top:0">
           <table class="stock-table-desktop"><thead><tr>
-            <th>Producto</th><th>Rubro</th><th>Proveedor</th><th>Custodio</th><th>Costo USD</th><th>Precio venta USD</th><th>Margen</th><th>Stock</th><th>Estado</th><th></th>
+            <th>Producto</th><th>Color</th><th>Batería</th><th>Costo USD</th><th>Precio venta USD</th><th>Margen</th><th>Stock</th><th>IMEI</th><th>Estado</th><th></th>
           </tr></thead><tbody id="stock-tbody"></tbody></table>
           <div class="stock-cards-mobile" id="stock-cards"></div>
         </div>
@@ -211,14 +212,18 @@ const Stock = {
     tbody.innerHTML = rows.map(p => {
       const { margin, precioUSD, detalleStock, statusBadge } = filaTabla(p);
       return `<tr>
-        <td><b>${p.nombre}</b>${p.cat === 'repuesto' && p.modelo ? `<div style="font-size:10.5px;color:var(--amber)"><i class="ti ti-device-mobile" style="font-size:9px"></i> ${p.modelo}</div>` : ''}${p.notas ? `<div style="font-size:10.5px;color:var(--text-secondary)">${p.notas}</div>` : ''}</td>
-        <td><span class="badge ${this.CAT_CLASS[p.cat]||'b-gray'}">${this.CAT_LABELS[p.cat]||p.cat}</span></td>
-        <td style="color:var(--text-secondary);font-size:11.5px">${p.proveedor}</td>
-        <td style="font-size:11.5px">${p.custodio||'—'}</td>
+        <td>
+          <b>${p.nombre.replace(/ ?${p.color||'XXXXXXX'}/,'').replace(/ ?${p.storage||'XXXXXXX'}/,'').trim()}</b>
+          ${p.cat === 'repuesto' && p.modelo ? `<div style="font-size:10px;color:var(--amber)"><i class="ti ti-device-mobile" style="font-size:9px"></i> ${p.modelo}</div>` : ''}
+          ${p.notas ? `<div style="font-size:10px;color:var(--text-secondary)">${p.notas}</div>` : ''}
+        </td>
+        <td style="font-size:11.5px">${p.color||'—'}</td>
+        <td style="font-size:11.5px">${p.bateriaPct != null ? `<span style="color:${p.bateriaPct>=80?'var(--green)':p.bateriaPct>=60?'var(--amber)':'var(--red)'}">${p.bateriaPct}%</span>` : '—'}</td>
         <td>USD ${p.costoUSD}</td>
-        <td>${State.fmtUSD(precioUSD)}<div style="font-size:10px;color:var(--text-secondary)">${State.fmtARS(p.precioARS)}</div></td>
-        <td style="color:${margin>=0?'var(--green)':'var(--red)'}">${margin>=0?'+':''}${margin}%</td>
+        <td>${precioUSD ? State.fmtUSD(precioUSD) + `<div style="font-size:10px;color:var(--text-secondary)">${State.fmtARS(p.precioARS)}</div>` : '<span style="color:var(--text-secondary)">—</span>'}</td>
+        <td style="color:${margin>=0?'var(--green)':'var(--red)'}">${precioUSD ? (margin>=0?'+':'') + margin + '%' : '—'}</td>
         <td>${detalleStock}</td>
+        <td style="font-size:10.5px;color:var(--text-secondary)">${esIMEI ? (p.imeis||[]).join('<br>') || '—' : '—'}</td>
         <td>${statusBadge}</td>
         <td><button class="btn btn-sm" onclick="Stock.openDrawer('edit','${p.id}')"><i class="ti ti-edit"></i></button></td>
       </tr>`;

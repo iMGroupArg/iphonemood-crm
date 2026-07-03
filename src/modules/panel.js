@@ -20,6 +20,7 @@ const Panel = {
       ['cotizaciones', 'ti ti-currency-dollar', 'Cotizaciones'],
       ['formas-pago', 'ti ti-credit-card', 'Formas de pago'],
       ['garantias', 'ti ti-shield', 'Garantías'],
+      ['categorias-gasto', 'ti ti-tag', 'Categorías gasto'],
       ['personas', 'ti ti-users', 'Cajas y personas'],
       ['usuarios', 'ti ti-lock', 'Usuarios y accesos'],
       ['negocio', 'ti ti-building-store', 'Datos del negocio'],
@@ -36,6 +37,7 @@ const Panel = {
     if (this.activeTab === 'cotizaciones') body.innerHTML = this.cotizacionesView();
     else if (this.activeTab === 'formas-pago') { body.innerHTML = this.formasPagoView(); this.renderFormasPagoList(); }
     else if (this.activeTab === 'garantias') body.innerHTML = this.garantiasView();
+    else if (this.activeTab === 'categorias-gasto') body.innerHTML = this.categoriasGastoView();
     else if (this.activeTab === 'personas') body.innerHTML = this.personasView();
     else if (this.activeTab === 'usuarios') { body.innerHTML = this.usuariosView(); this.cargarUsuarios(); }
     else if (this.activeTab === 'exportar') body.innerHTML = this.exportarView();
@@ -73,6 +75,82 @@ const Panel = {
     await DB.borrarGarantia(id);
     State.garantias = State.garantias.filter(x => x.id !== id);
     this.renderBody();
+  },
+
+  categoriasGastoView() {
+    const cats = State.categoriasGasto || [];
+    const COLORS = ['#FF453A','#FF9F0A','#FFD60A','#30D158','#0A84FF','#5E5CE6','#BF5AF2','#6C6C70'];
+    return `
+      <h3 style="font-size:13px;font-weight:600;color:var(--text-secondary);text-transform:uppercase;letter-spacing:.4px;margin-bottom:12px;border-bottom:1px solid var(--border);padding-bottom:8px">Categorías de gasto</h3>
+      <div id="cats-gasto-list">
+        ${cats.map(c => {
+          const enUso = (State.gastos||[]).some(g => g.cat === c.id);
+          return `<div style="display:flex;align-items:center;gap:10px;background:var(--bg-elevated);border:1px solid var(--border);border-radius:10px;padding:12px 14px;margin-bottom:8px">
+            <span style="width:12px;height:12px;border-radius:50%;background:${c.color};flex-shrink:0"></span>
+            <div style="flex:1;font-size:13px;font-weight:600">${c.nombre}</div>
+            ${enUso ? `<span class="badge b-gray" style="font-size:10px">En uso (${(State.gastos||[]).filter(g=>g.cat===c.id).length})</span>` : ''}
+            <button class="btn btn-sm" onclick="Panel.editCatGasto('${c.id}')"><i class="ti ti-pencil"></i></button>
+            <button class="btn btn-sm" style="color:${enUso?'var(--text-secondary)':'var(--red)'}" ${enUso?'disabled title="Tiene gastos asociados, no se puede eliminar"':''} onclick="Panel.delCatGasto('${c.id}')"><i class="ti ti-trash"></i></button>
+          </div>`;
+        }).join('')}
+      </div>
+      <div style="background:var(--bg-elevated);border:1px solid var(--border);border-radius:10px;padding:14px;margin-top:14px">
+        <div style="font-size:12px;font-weight:600;margin-bottom:10px">Nueva categoría</div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end">
+          <div style="flex:1;min-width:160px">
+            <label style="font-size:10px;color:var(--text-secondary);display:block;margin-bottom:4px">Nombre *</label>
+            <input id="nueva-cat-nombre" type="text" placeholder="ej: Servicios, Insumos…"
+              style="width:100%;font-size:13px;padding:7px 10px;border:1px solid var(--border-strong);border-radius:8px;color:var(--text);background:var(--bg-secondary)">
+          </div>
+          <div>
+            <label style="font-size:10px;color:var(--text-secondary);display:block;margin-bottom:4px">Color</label>
+            <div style="display:flex;gap:5px;flex-wrap:wrap">
+              ${COLORS.map((col,i) => `<span onclick="Panel._selColorCat('${col}')" id="cc-${col.replace('#','')}" style="width:22px;height:22px;border-radius:50%;background:${col};cursor:pointer;border:2px solid transparent;transition:border .12s"></span>`).join('')}
+            </div>
+            <input type="hidden" id="nueva-cat-color" value="${COLORS[0]}">
+          </div>
+          <button class="btn btn-primary" onclick="Panel.addCatGasto()"><i class="ti ti-plus"></i> Agregar</button>
+        </div>
+      </div>
+    `;
+  },
+  _selColorCat(col) {
+    document.querySelectorAll('[id^="cc-"]').forEach(el => el.style.borderColor = 'transparent');
+    const el = document.getElementById('cc-' + col.replace('#',''));
+    if (el) el.style.borderColor = '#fff';
+    const inp = document.getElementById('nueva-cat-color');
+    if (inp) inp.value = col;
+  },
+  async addCatGasto() {
+    const nombre = document.getElementById('nueva-cat-nombre')?.value.trim();
+    const color = document.getElementById('nueva-cat-color')?.value || '#0A84FF';
+    if (!nombre) { toast('Escribí un nombre para la categoría.'); return; }
+    if ((State.categoriasGasto||[]).some(c => c.nombre.toLowerCase() === nombre.toLowerCase())) {
+      toast('Ya existe una categoría con ese nombre.'); return;
+    }
+    const nueva = await DB.agregarCategoriaGasto(nombre, color);
+    if (nueva) { if (!State.categoriasGasto) State.categoriasGasto = []; State.categoriasGasto.push({ id: nueva.id, nombre, color }); }
+    toast(`Categoría "${nombre}" creada.`);
+    this.renderBody();
+  },
+  async editCatGasto(id) {
+    const c = (State.categoriasGasto||[]).find(x => x.id === id);
+    if (!c) return;
+    const nombre = prompt(`Nuevo nombre para "${c.nombre}":`, c.nombre);
+    if (!nombre || nombre === c.nombre) return;
+    await DB.editarCategoriaGasto(id, { nombre });
+    c.nombre = nombre;
+    this.renderBody();
+    toast('Categoría actualizada.');
+  },
+  async delCatGasto(id) {
+    const enUso = (State.gastos||[]).some(g => g.cat === id);
+    if (enUso) { toast('No se puede eliminar: tiene gastos asociados.'); return; }
+    if (!confirm('¿Eliminar esta categoría?')) return;
+    await DB.borrarCategoriaGasto(id);
+    State.categoriasGasto = (State.categoriasGasto||[]).filter(x => x.id !== id);
+    this.renderBody();
+    toast('Categoría eliminada.');
   },
 
   personasView() {

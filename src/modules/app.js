@@ -10,6 +10,7 @@ import './cajas.js';
 import './cashflow.js';
 import './panel.js';
 import './capital.js';
+import './clientes.js';
 
 const App = {
   PAGES: {
@@ -22,6 +23,7 @@ const App = {
     cajas: { title: 'Cajas', module: Cajas },
     cashflow: { title: 'Cash flow', module: CashFlow },
     capital: { title: 'Capital & Inversiones', module: Capital },
+    clientes: { title: 'Clientes', module: Clientes },
     panel: { title: 'Panel de control', module: Panel },
   },
 

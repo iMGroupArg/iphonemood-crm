@@ -85,9 +85,9 @@ const Proveedores = {
       }, 0);
       const enStock = (State.stock || []).filter(s => s.proveedor === p.nombre).length;
       const retrasado = activos.some(l => l.fechaLlegadaEsperada && new Date(l.fechaLlegadaEsperada) < new Date());
-      return `<tr style="border-bottom:1px solid var(--border)">
+      return `<tr style="border-bottom:1px solid var(--border);cursor:pointer" onclick="Proveedores.verProveedor('${p.id}')" onmouseenter="this.style.background='var(--bg-secondary)'" onmouseleave="this.style.background=''">
         <td style="padding:10px 6px">
-          <a href="#" onclick="Proveedores.verProveedor('${p.id}');return false" style="color:var(--blue);font-weight:600;text-decoration:none">${p.nombre}</a>
+          <span style="color:var(--blue);font-weight:600">${p.nombre}</span>
           ${retrasado ? ' <span style="color:var(--red);font-size:10px;font-weight:600">⚠️ retrasado</span>' : ''}
         </td>
         <td style="padding:10px 6px;font-size:12px;color:var(--text-secondary)">${p.contacto || '—'}${p.telefono ? `<br>${p.telefono}` : ''}</td>
@@ -95,7 +95,7 @@ const Proveedores = {
         <td style="padding:10px 6px;font-weight:600">${State.fmtUSD(totalGastado)}</td>
         <td style="padding:10px 6px;font-weight:600">${pendiente > 0 ? `<span style="color:var(--red)">${State.fmtUSD(pendiente)}</span>` : '<span style="color:var(--green)">Al día</span>'}</td>
         <td style="padding:10px 6px">${enStock > 0 ? `<span style="background:var(--blue-light);color:var(--blue);border-radius:12px;padding:2px 8px;font-size:11px;font-weight:600">📦 ${enStock}</span>` : '—'}</td>
-        <td style="padding:10px 6px">
+        <td style="padding:10px 6px" onclick="event.stopPropagation()">
           <button class="btn btn-sm" onclick="Proveedores.openNuevoLote('${p.id}')" title="Nueva orden">🛒</button>
           <button class="btn btn-sm" onclick="Proveedores.openEditarProveedor('${p.id}')" title="Editar">✏️</button>
           <button class="btn btn-sm" onclick="Proveedores.borrarProveedor('${p.id}')" title="Eliminar" style="color:var(--red)">🗑️</button>

@@ -48,7 +48,7 @@ const Stock = {
       </div>
 
       <div style="padding:10px 22px;border-bottom:1px solid var(--border);display:flex;gap:4px" id="stock-view-tabs"></div>
-      <div id="stock-view-host" style="flex:1;display:flex;flex-direction:column;overflow:hidden;min-height:0"></div>
+      <div id="stock-view-host" style="flex:1;display:flex;flex-direction:column;overflow-y:auto;-webkit-overflow-scrolling:touch;min-height:0"></div>
       <div id="stock-drawer-host"></div>
     `;
     setTimeout(() => this.renderView(), 0);
@@ -116,14 +116,31 @@ const Stock = {
         </div>
         <div style="padding:0 22px 12px;display:flex;gap:8px;flex-wrap:wrap;align-items:center">
           <input type="text" id="stock-search" placeholder="Buscar producto..." oninput="Stock.renderTable()" style="font-size:12px;padding:6px 10px;border:1px solid var(--border-strong);border-radius:8px;flex:1;min-width:160px">
-          <select id="stock-filter-modelo" onchange="Stock.renderTable()" style="font-size:12px;padding:6px 10px;border:1px solid var(--border-strong);border-radius:8px;min-width:180px">
-            <option value="">Todos los modelos</option>
-            ${Object.entries(this.MODELOS_POR_CAT).map(([cat, modelos]) =>
-              `<optgroup label="${this.CAT_LABELS[cat]||cat}">${modelos.map(m=>`<option value="${m}">${m}</option>`).join('')}</optgroup>`
-            ).join('')}
-          </select>
+          ${this.currentGroup === 'perfumeria' ? `
+            <select id="pf-cat" onchange="Stock.onPerfumeFilterChange()" style="font-size:12px;padding:6px 10px;border:1px solid var(--border-strong);border-radius:8px">
+              <option value="">Todas las categorías</option>
+              ${this.PERFUME_CATEGORIAS.map(c=>`<option>${c}</option>`).join('')}
+            </select>
+            <select id="pf-conc" onchange="Stock.renderTable()" style="font-size:12px;padding:6px 10px;border:1px solid var(--border-strong);border-radius:8px">
+              <option value="">Todas las concentraciones</option>
+              ${this.PERFUME_CONCENTRACIONES.map(c=>`<option>${c}</option>`).join('')}
+            </select>
+            <select id="pf-marca" onchange="Stock.renderTable()" style="font-size:12px;padding:6px 10px;border:1px solid var(--border-strong);border-radius:8px;min-width:150px">
+              <option value="">Todas las marcas</option>
+              ${Object.entries(this.PERFUME_MARCAS).map(([cat, marcas])=>
+                `<optgroup label="${cat}">${marcas.map(m=>`<option>${m}</option>`).join('')}</optgroup>`
+              ).join('')}
+            </select>
+          ` : `
+            <select id="stock-filter-modelo" onchange="Stock.renderTable()" style="font-size:12px;padding:6px 10px;border:1px solid var(--border-strong);border-radius:8px;min-width:180px">
+              <option value="">Todos los modelos</option>
+              ${Object.entries(this.MODELOS_POR_CAT).map(([cat, modelos]) =>
+                `<optgroup label="${this.CAT_LABELS[cat]||cat}">${modelos.map(m=>`<option value="${m}">${m}</option>`).join('')}</optgroup>`
+              ).join('')}
+            </select>
+          `}
         </div>
-        <div class="body-pad" style="padding-top:0">
+        <div class="body-pad" style="padding-top:0;overflow-y:auto;-webkit-overflow-scrolling:touch;flex:1;min-height:0">
           <table class="stock-table-desktop"><thead><tr>
             <th>Producto</th><th>Color</th><th>Batería</th><th>Costo USD</th><th>Precio venta USD</th><th>Margen</th><th>Stock</th><th>IMEI</th><th>Estado</th><th></th>
           </tr></thead><tbody id="stock-tbody"></tbody></table>
@@ -177,9 +194,43 @@ const Stock = {
   },
   setTab(c) { this.currentTab = c; this.renderTabs(); this.renderTable(); },
 
+  actualizarMarcasPerfume() {
+    const cat = document.getElementById('f-pf-cat')?.value || '';
+    const marcaSelect = document.getElementById('f-pf-marca');
+    if (!marcaSelect) return;
+    const prev = marcaSelect.value;
+    marcaSelect.innerHTML = '<option value="">— Elegir —</option>';
+    const fuentes = cat ? { [cat]: this.PERFUME_MARCAS[cat] || [] } : this.PERFUME_MARCAS;
+    Object.entries(fuentes).forEach(([grupo, marcas]) => {
+      const og = document.createElement('optgroup');
+      og.label = grupo;
+      marcas.forEach(m => { const opt = document.createElement('option'); opt.value = m; opt.textContent = m; if (m === prev) opt.selected = true; og.appendChild(opt); });
+      marcaSelect.appendChild(og);
+    });
+  },
+
+  onPerfumeFilterChange() {
+    const cat = document.getElementById('pf-cat')?.value || '';
+    const marcaSelect = document.getElementById('pf-marca');
+    if (!marcaSelect) return;
+    const prev = marcaSelect.value;
+    marcaSelect.innerHTML = '<option value="">Todas las marcas</option>';
+    const fuentes = cat ? { [cat]: this.PERFUME_MARCAS[cat] || [] } : this.PERFUME_MARCAS;
+    Object.entries(fuentes).forEach(([grupo, marcas]) => {
+      const og = document.createElement('optgroup');
+      og.label = grupo;
+      marcas.forEach(m => { const opt = document.createElement('option'); opt.value = m; opt.textContent = m; if (m === prev) opt.selected = true; og.appendChild(opt); });
+      marcaSelect.appendChild(og);
+    });
+    this.renderTable();
+  },
+
   renderTable() {
     const q = (document.getElementById('stock-search')?.value || '').toLowerCase();
     const modeloFiltro = document.getElementById('stock-filter-modelo')?.value || '';
+    const pfCat = document.getElementById('pf-cat')?.value || '';
+    const pfConc = document.getElementById('pf-conc')?.value || '';
+    const pfMarca = document.getElementById('pf-marca')?.value || '';
     const catsDelGrupo = this.GRUPOS[this.currentGroup]?.cats || [];
     let rows = State.stock.filter(s => {
       if (!catsDelGrupo.includes(s.cat)) return false;
@@ -187,6 +238,10 @@ const Stock = {
       if (this.currentEstado !== 'todos' && (s.estadoInventario||'disponible') !== this.currentEstado) return false;
       if (q && !s.nombre.toLowerCase().includes(q)) return false;
       if (modeloFiltro && (s.modelo || '') !== modeloFiltro) return false;
+      // Filtros exclusivos de perfumería (color=categoria, storage=concentracion, modelo=marca)
+      if (pfCat && (s.color || '') !== pfCat) return false;
+      if (pfConc && (s.storage || '') !== pfConc) return false;
+      if (pfMarca && (s.modelo || '') !== pfMarca) return false;
       return true;
     });
     const tbody = document.getElementById('stock-tbody');
@@ -240,6 +295,7 @@ const Stock = {
               <div class="stock-card-name">${p.nombre}</div>
               <span class="badge ${this.CAT_CLASS[p.cat]||'b-gray'}" style="margin-top:4px">${this.CAT_LABELS[p.cat]||p.cat}</span>
               ${p.cat === 'repuesto' && p.modelo ? `<div style="font-size:10.5px;color:var(--amber);margin-top:3px"><i class="ti ti-device-mobile" style="font-size:9px"></i> ${p.modelo}</div>` : ''}
+              ${p.cat === 'perfumeria' ? `<div style="font-size:10.5px;color:var(--text-secondary);margin-top:3px">${[p.modelo,p.storage,p.color].filter(Boolean).join(' · ')}</div>` : ''}
             </div>
             ${statusBadge}
           </div>
@@ -323,6 +379,14 @@ const Stock = {
   ESTADO_OPCIONES: ['Nuevo / Sellado','Excelente','Muy bueno','Bueno','Con detalles'],
   GRADO_OPCIONES: ['Sin grado','A+','A','B','C'],
   RAM_OPCIONES: ['8GB','16GB','18GB','24GB','32GB','36GB'],
+
+  PERFUME_CATEGORIAS: ['Árabe', 'Nicho', 'Diseñador'],
+  PERFUME_CONCENTRACIONES: ['EDP', 'EDT', 'EDC', 'Parfum', 'Elixir', 'Otro'],
+  PERFUME_MARCAS: {
+    'Árabe': ['Armaf', 'Lattafa', 'Ard Al Zaafaran', 'Arabian Oud', 'Ajmal', 'Rasasi', 'Orientica', 'Al Haramain', 'Swiss Arabian', 'Afnan', 'Paris Corner', 'Maison Asrar', 'My Perfumes', 'Fragrance World', 'FA Paris', 'Otoori', 'Abdul Samad Al Qurashi', 'Nabeel', 'Al-Rehab', 'Khadlaj', 'Maison Alhambra', 'Emper', 'Asdaaf', 'Al Wataniah', 'Surrati', 'Zahoor Al Madina'],
+    'Nicho': ['Amouage', 'Creed', 'Maison Francis Kurkdjian', 'Byredo', 'Le Labo', 'Nishane', 'Initio', 'Xerjoff', 'Orto Parisi', 'Memo Paris', 'Mancera', 'Montale', 'By Kilian', 'Diptyque', 'Serge Lutens', 'Penhaligon\'s', 'Nasomatto', 'Acqua di Parma', 'Histoires de Parfums', 'Juliette Has a Gun'],
+    'Diseñador': ['Dior', 'Chanel', 'Tom Ford', 'YSL', 'Givenchy', 'Paco Rabanne', 'Versace', 'Dolce & Gabbana', 'Burberry', 'Gucci', 'Valentino', 'Armani', 'Hugo Boss', 'Calvin Klein', 'Davidoff', 'Jean Paul Gaultier', 'Issey Miyake', 'Hermès', 'Thierry Mugler', 'Carolina Herrera', 'Viktor & Rolf', 'Narciso Rodriguez', 'Cartier', 'Bulgari', 'Montblanc', 'Lacoste', 'Ralph Lauren'],
+  },
 
   // ===== FORMULARIO =====
 
@@ -420,6 +484,35 @@ const Stock = {
                 <div id="f-nombre-libre-wrap" style="display:${['perfumeria','accesorio','repuesto','herramienta','otro'].includes(p.cat)?'block':'none'};margin-bottom:12px">
                   <label style="font-size:11px;color:var(--text-secondary);font-weight:600;display:block;margin-bottom:4px">Nombre ${p.cat==='herramienta'?'de la herramienta':p.cat==='repuesto'?'del repuesto':'del producto'} *</label>
                   <input type="text" id="f-nombre-libre" value="${['perfumeria','accesorio','repuesto','herramienta','otro'].includes(p.cat) ? (p.nombre||'') : ''}" placeholder="${p.cat==='herramienta'?'ej: Pistola de calor, iSclack, destornillador pentalobe…':p.cat==='repuesto'?'ej: Batería, Pantalla, Flex de carga…':'ej: Dior Sauvage 100ml'}" style="width:100%;font-size:12px;padding:7px 10px;border:1px solid var(--border-strong);border-radius:8px">
+                </div>
+
+                <!-- CAMPOS ESPECÍFICOS DE PERFUMERÍA -->
+                <div id="f-perfume-wrap" style="display:${p.cat==='perfumeria'?'block':'none'};margin-bottom:12px">
+                  <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px">
+                    <div>
+                      <label style="font-size:11px;color:var(--text-secondary);font-weight:600;display:block;margin-bottom:4px">Categoría</label>
+                      <select id="f-pf-cat" onchange="Stock.actualizarMarcasPerfume()" style="width:100%;font-size:12px;padding:7px 10px;border:1px solid var(--border-strong);border-radius:8px">
+                        <option value="">— Elegir —</option>
+                        ${this.PERFUME_CATEGORIAS.map(c=>`<option ${p.color===c?'selected':''}>${c}</option>`).join('')}
+                      </select>
+                    </div>
+                    <div>
+                      <label style="font-size:11px;color:var(--text-secondary);font-weight:600;display:block;margin-bottom:4px">Concentración</label>
+                      <select id="f-pf-conc" style="width:100%;font-size:12px;padding:7px 10px;border:1px solid var(--border-strong);border-radius:8px">
+                        <option value="">— Elegir —</option>
+                        ${this.PERFUME_CONCENTRACIONES.map(c=>`<option ${p.storage===c?'selected':''}>${c}</option>`).join('')}
+                      </select>
+                    </div>
+                  </div>
+                  <div>
+                    <label style="font-size:11px;color:var(--text-secondary);font-weight:600;display:block;margin-bottom:4px">Marca</label>
+                    <select id="f-pf-marca" style="width:100%;font-size:12px;padding:7px 10px;border:1px solid var(--border-strong);border-radius:8px">
+                      <option value="">— Elegir —</option>
+                      ${Object.entries(this.PERFUME_MARCAS).map(([grupo, marcas])=>
+                        `<optgroup label="${grupo}">${marcas.map(m=>`<option value="${m}" ${p.modelo===m?'selected':''}>${m}</option>`).join('')}</optgroup>`
+                      ).join('')}
+                    </select>
+                  </div>
                 </div>
 
                 <div id="f-modelo-repuesto-wrap" style="display:${p.cat==='repuesto'?'block':'none'};margin-bottom:12px">
@@ -692,6 +785,7 @@ const Stock = {
     set('f-serie-wrap', esMac ? 'block' : 'none');
     set('f-modelo-wrap', tieneModeloFijo ? 'block' : 'none');
     set('f-nombre-libre-wrap', esLibre ? 'block' : 'none');
+    set('f-perfume-wrap', cat === 'perfumeria' ? 'block' : 'none');
     set('f-modelo-repuesto-wrap', cat === 'repuesto' ? 'block' : 'none');
     set('f-specs-grid', tieneStorageColor ? 'grid' : 'none');
     set('f-bateria-wrap', tieneBateria ? 'grid' : 'none');
@@ -714,6 +808,10 @@ const Stock = {
   },
 
   async save(id) {
+    const saveBtn = document.querySelector('#stock-drawer-host button.btn-primary');
+    if (saveBtn) { saveBtn.disabled = true; saveBtn.innerHTML = 'Guardando...'; }
+    const restoreBtn = () => { if (saveBtn) { saveBtn.disabled = false; saveBtn.innerHTML = '<i class="ti ti-check"></i> Guardar'; } };
+
     const cat = document.getElementById('f-cat').value;
     const esIMEI = this.CATS_IMEI.includes(cat);
     const tieneModeloFijo = ['iphone','android','mac','ipad','watch','audio'].includes(cat);
@@ -721,20 +819,29 @@ const Stock = {
 
     // Resolver el modelo (de la lista o "otro" escrito a mano)
     let modelo = '';
-    if (tieneModeloFijo) {
+    let storage = '';
+    let color = '';
+    if (cat === 'perfumeria') {
+      modelo = document.getElementById('f-pf-marca')?.value || '';
+      storage = document.getElementById('f-pf-conc')?.value || '';
+      color = document.getElementById('f-pf-cat')?.value || '';
+    } else if (tieneModeloFijo) {
       const modeloSel = document.getElementById('f-modelo')?.value || '';
       modelo = modeloSel === '__otro__' ? (document.getElementById('f-modelo-otro')?.value.trim() || '') : modeloSel;
+      storage = document.getElementById('f-storage')?.value || '';
+      color = document.getElementById('f-color')?.value || '';
     } else if (cat === 'repuesto') {
       const modeloSel = document.getElementById('f-modelo-repuesto')?.value || '';
       modelo = modeloSel === '__otro__' ? (document.getElementById('f-modelo-repuesto-otro')?.value.trim() || '') : modeloSel;
+    } else {
+      storage = document.getElementById('f-storage')?.value || '';
+      color = document.getElementById('f-color')?.value || '';
     }
     const nombreLibre = esLibre ? (document.getElementById('f-nombre-libre')?.value.trim() || '') : '';
-    const storage = document.getElementById('f-storage')?.value || '';
-    const color = document.getElementById('f-color')?.value || '';
 
-    if (tieneModeloFijo && !modelo) { toast('Seleccioná o escribí el modelo del producto.'); return; }
-    if (esLibre && !nombreLibre) { toast('Completá el nombre del producto.'); return; }
-    if (cat === 'mac' && !document.getElementById('f-numero-serie')?.value.trim()) { toast('Completá el número de serie.'); return; }
+    if (tieneModeloFijo && !modelo) { toast('Seleccioná o escribí el modelo del producto.'); restoreBtn(); return; }
+    if (esLibre && !nombreLibre) { toast('Completá el nombre del producto.'); restoreBtn(); return; }
+    if (cat === 'mac' && !document.getElementById('f-numero-serie')?.value.trim()) { toast('Completá el número de serie.'); restoreBtn(); return; }
 
     // Armamos el nombre final que se muestra en toda la app
     const nombre = esLibre ? nombreLibre : [modelo, storage, color].filter(Boolean).join(' ');
@@ -742,7 +849,7 @@ const Stock = {
     const costoUSD = parseFloat(document.getElementById('f-costo').value) || 0;
     const cotiz = parseFloat(document.getElementById('f-cotiz').value) || State.refBlue;
     const precioUSD = parseFloat(document.getElementById('f-precio-usd').value) || 0;
-    if (!nombre || !costoUSD) { toast('Completá los campos obligatorios: producto y costo.'); return; }
+    if (!nombre || !costoUSD) { toast('Completá los campos obligatorios: producto y costo.'); restoreBtn(); return; }
 
     const cantidadNueva = parseInt(document.getElementById('f-cantidad').value, 10) || 0;
     const precioReventa = parseFloat(document.getElementById('f-precio-reventa')?.value) || null;
@@ -778,7 +885,7 @@ const Stock = {
 
     toast('Guardando producto...');
     const { id: newId, error } = await DB.guardarProductoStock(obj, id);
-    if (error) { toast('Hubo un problema guardando el producto.'); console.error(error); return; }
+    if (error) { toast('Hubo un problema guardando el producto.'); console.error(error); restoreBtn(); return; }
 
     const finalId = id || newId;
     const cantidadDespues = this.stockReal(obj);

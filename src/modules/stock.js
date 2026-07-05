@@ -32,23 +32,21 @@ const Stock = {
   render() {
     const c = document.createElement('div');
     c.style.cssText = 'display:flex;flex-direction:column;flex:1;overflow:hidden;min-height:0';
+    const mobile = this.isMobile();
     c.innerHTML = `
-      <div style="padding:16px 22px;border-bottom:1px solid var(--border)">
-        <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px;flex-wrap:wrap;margin-bottom:14px">
-          <div>
-            <h2 style="font-size:19px;font-weight:700;display:flex;align-items:center;gap:8px"><i class="ti ti-box" style="color:var(--blue)"></i> Inventario</h2>
-            <p style="font-size:12px;color:var(--text-secondary);margin-top:2px">Gestión de stock de dispositivos, accesorios y perfumería</p>
-          </div>
-          <div style="display:flex;gap:8px;flex-wrap:wrap">
-            <button class="btn" onclick="Stock.exportarExcel()"><i class="ti ti-file-spreadsheet"></i> Exportar a Excel</button>
-            <button class="btn btn-primary" onclick="Stock.openDrawer('new')"><i class="ti ti-plus"></i> Agregar producto</button>
+      <div style="padding:${mobile?'10px 14px':'16px 22px'};border-bottom:1px solid var(--border)">
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;${mobile?'margin-bottom:8px':'margin-bottom:14px'}">
+          <h2 style="font-size:${mobile?'16px':'19px'};font-weight:700;display:flex;align-items:center;gap:6px"><i class="ti ti-box" style="color:var(--blue)"></i> Stock</h2>
+          <div style="display:flex;gap:6px">
+            ${mobile ? '' : `<button class="btn" onclick="Stock.exportarExcel()"><i class="ti ti-file-spreadsheet"></i> Exportar</button>`}
+            <button class="btn btn-primary" onclick="Stock.openDrawer('new')"><i class="ti ti-plus"></i> ${mobile?'Agregar':'Agregar producto'}</button>
           </div>
         </div>
-        <div id="stock-kpis" style="display:grid;grid-template-columns:repeat(5,1fr);gap:10px" class="stock-kpi-grid"></div>
+        <div id="stock-kpis"></div>
       </div>
 
-      <div style="padding:10px 22px;border-bottom:1px solid var(--border);display:flex;gap:4px" id="stock-view-tabs"></div>
-      <div id="stock-view-host" style="flex:1;display:flex;flex-direction:column;overflow-y:auto;-webkit-overflow-scrolling:touch;min-height:0"></div>
+      <div style="padding:${mobile?'8px 12px':'10px 22px'};border-bottom:1px solid var(--border);display:flex;gap:4px" id="stock-view-tabs"></div>
+      <div id="stock-view-host" style="flex:1;display:flex;flex-direction:column;overflow:hidden;min-height:0;position:relative"></div>
       <div id="stock-drawer-host"></div>
     `;
     setTimeout(() => this.renderView(), 0);
@@ -59,7 +57,44 @@ const Stock = {
 
   renderKpis() {
     const grupo = this.productosDelGrupo(this.currentGroup);
+    const mobile = this.isMobile();
 
+    if (mobile) {
+      // Tira compacta de estadísticas en una sola línea
+      let stats;
+      if (this.currentGroup === 'taller') {
+        const herramientas = grupo.filter(p => p.cat === 'herramienta');
+        const repuestos = grupo.filter(p => p.cat === 'repuesto');
+        const valorTotal = grupo.reduce((a,p) => a + p.costoUSD * Math.max(this.stockReal(p), 1), 0);
+        stats = [
+          { label: 'Herr.', val: herramientas.length, color: 'var(--amber)' },
+          { label: 'Repuestos', val: repuestos.length, color: 'var(--blue)' },
+          { label: 'Valor', val: State.fmtUSD(valorTotal), color: 'var(--green)' },
+        ];
+      } else {
+        const total = grupo.length;
+        const disponibles = grupo.filter(p => (p.estadoInventario||'disponible') === 'disponible' && this.stockReal(p) > 0).length;
+        const valorDisponible = grupo.filter(p => (p.estadoInventario||'disponible')!=='vendido').reduce((a,p)=>a + p.costoUSD * this.stockReal(p), 0);
+        stats = [
+          { label: 'Total', val: total, color: 'var(--blue)' },
+          { label: 'Disponibles', val: disponibles, color: 'var(--green)' },
+          { label: 'Inventario', val: State.fmtUSD(valorDisponible), color: 'var(--text)' },
+        ];
+      }
+      document.getElementById('stock-kpis').innerHTML = `
+        <div style="display:flex;gap:0;overflow-x:auto;-webkit-overflow-scrolling:touch">
+          ${stats.map((s, i) => `
+            <div style="flex:1;min-width:80px;padding:6px 10px;${i>0?'border-left:1px solid var(--border)':''}">
+              <div style="font-size:10px;color:var(--text-secondary);margin-bottom:2px">${s.label}</div>
+              <div style="font-size:16px;font-weight:700;color:${s.color}">${s.val}</div>
+            </div>
+          `).join('')}
+        </div>
+      `;
+      return;
+    }
+
+    // Desktop: cards completas
     let kpis;
     if (this.currentGroup === 'taller') {
       const herramientas = grupo.filter(p => p.cat === 'herramienta');
@@ -92,12 +127,16 @@ const Stock = {
       ];
     }
 
-    document.getElementById('stock-kpis').innerHTML = kpis.map(([label,val,emoji,color,bg]) => `
-      <div class="card" style="padding:12px 14px;margin-bottom:0;display:flex;justify-content:space-between;align-items:flex-start;gap:8px;min-height:90px">
-        <div style="min-width:0;flex:1"><label style="font-size:11px;color:var(--text-secondary);display:block;margin-bottom:4px">${label}</label><div style="font-size:19px;font-weight:700;color:${color};word-break:break-word">${val}</div></div>
-        <div style="width:34px;height:34px;border-radius:8px;background:${bg};display:flex;align-items:center;justify-content:center;flex-shrink:0;font-size:18px">${emoji}</div>
+    document.getElementById('stock-kpis').innerHTML = `
+      <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:10px" class="stock-kpi-grid">
+        ${kpis.map(([label,val,emoji,color,bg]) => `
+          <div class="card" style="padding:12px 14px;margin-bottom:0;display:flex;justify-content:space-between;align-items:flex-start;gap:8px;min-height:90px">
+            <div style="min-width:0;flex:1"><label style="font-size:11px;color:var(--text-secondary);display:block;margin-bottom:4px">${label}</label><div style="font-size:19px;font-weight:700;color:${color};word-break:break-word">${val}</div></div>
+            <div style="width:34px;height:34px;border-radius:8px;background:${bg};display:flex;align-items:center;justify-content:center;flex-shrink:0;font-size:18px">${emoji}</div>
+          </div>
+        `).join('')}
       </div>
-    `).join('');
+    `;
   },
 
   renderView() {
@@ -107,32 +146,35 @@ const Stock = {
       <button class="btn btn-sm ${this.currentView==='historial'?'btn-primary':''}" onclick="Stock.setView('historial')"><i class="ti ti-history"></i> Historial de movimientos</button>
     `;
     const host = document.getElementById('stock-view-host');
+    const mobile = this.isMobile();
+    const px = mobile ? '10px 12px' : '10px 22px';
+    const pxS = mobile ? '8px 12px' : '12px 22px';
     if (this.currentView === 'productos') {
       host.innerHTML = `
-        <div style="padding:10px 22px;border-bottom:1px solid var(--border);display:flex;gap:4px;flex-wrap:wrap" id="stock-grupo-tabs"></div>
-        <div style="padding:10px 22px;border-bottom:1px solid var(--border);display:flex;gap:6px;flex-wrap:wrap;align-items:center" id="stock-estado-tabs"></div>
-        <div style="padding:12px 22px;border-bottom:1px solid var(--border);display:flex;gap:8px;flex-wrap:wrap" id="stock-tabs-wrap">
-          <div style="display:flex;gap:4px;flex-wrap:wrap" id="stock-tabs"></div>
+        <div style="padding:${px};border-bottom:1px solid var(--border);display:flex;gap:4px;overflow-x:auto;-webkit-overflow-scrolling:touch;white-space:nowrap;flex-shrink:0" id="stock-grupo-tabs"></div>
+        <div style="padding:${px};border-bottom:1px solid var(--border);display:flex;gap:6px;overflow-x:auto;-webkit-overflow-scrolling:touch;white-space:nowrap;flex-shrink:0;align-items:center" id="stock-estado-tabs"></div>
+        <div style="padding:${pxS};border-bottom:1px solid var(--border);display:flex;gap:6px;overflow-x:auto;-webkit-overflow-scrolling:touch;white-space:nowrap;flex-shrink:0" id="stock-tabs-wrap">
+          <div style="display:flex;gap:4px" id="stock-tabs"></div>
         </div>
-        <div style="padding:0 22px 12px;display:flex;gap:8px;flex-wrap:wrap;align-items:center">
-          <input type="text" id="stock-search" placeholder="Buscar producto..." oninput="Stock.renderTable()" style="font-size:12px;padding:6px 10px;border:1px solid var(--border-strong);border-radius:8px;flex:1;min-width:160px">
+        <div style="padding:${mobile?'8px 12px':'0 22px 12px'};display:flex;gap:8px;flex-wrap:wrap;align-items:center;flex-shrink:0">
+          <input type="text" id="stock-search" placeholder="Buscar..." oninput="Stock.renderTable()" style="font-size:12px;padding:6px 10px;border:1px solid var(--border-strong);border-radius:8px;flex:1;min-width:120px">
           ${this.currentGroup === 'perfumeria' ? `
-            <select id="pf-cat" onchange="Stock.onPerfumeFilterChange()" style="font-size:12px;padding:6px 10px;border:1px solid var(--border-strong);border-radius:8px">
-              <option value="">Todas las categorías</option>
+            <select id="pf-cat" onchange="Stock.onPerfumeFilterChange()" style="font-size:12px;padding:6px 8px;border:1px solid var(--border-strong);border-radius:8px;max-width:130px">
+              <option value="">Categoría</option>
               ${this.PERFUME_CATEGORIAS.map(c=>`<option>${c}</option>`).join('')}
             </select>
-            <select id="pf-conc" onchange="Stock.renderTable()" style="font-size:12px;padding:6px 10px;border:1px solid var(--border-strong);border-radius:8px">
-              <option value="">Todas las concentraciones</option>
+            <select id="pf-conc" onchange="Stock.renderTable()" style="font-size:12px;padding:6px 8px;border:1px solid var(--border-strong);border-radius:8px;max-width:100px">
+              <option value="">Conc.</option>
               ${this.PERFUME_CONCENTRACIONES.map(c=>`<option>${c}</option>`).join('')}
             </select>
-            <select id="pf-marca" onchange="Stock.renderTable()" style="font-size:12px;padding:6px 10px;border:1px solid var(--border-strong);border-radius:8px;min-width:150px">
-              <option value="">Todas las marcas</option>
+            <select id="pf-marca" onchange="Stock.renderTable()" style="font-size:12px;padding:6px 8px;border:1px solid var(--border-strong);border-radius:8px;max-width:140px">
+              <option value="">Marca</option>
               ${Object.entries(this.PERFUME_MARCAS).map(([cat, marcas])=>
                 `<optgroup label="${cat}">${marcas.map(m=>`<option>${m}</option>`).join('')}</optgroup>`
               ).join('')}
             </select>
           ` : `
-            <select id="stock-filter-modelo" onchange="Stock.renderTable()" style="font-size:12px;padding:6px 10px;border:1px solid var(--border-strong);border-radius:8px;min-width:180px">
+            <select id="stock-filter-modelo" onchange="Stock.renderTable()" style="font-size:12px;padding:6px 8px;border:1px solid var(--border-strong);border-radius:8px;max-width:160px">
               <option value="">Todos los modelos</option>
               ${Object.entries(this.MODELOS_POR_CAT).map(([cat, modelos]) =>
                 `<optgroup label="${this.CAT_LABELS[cat]||cat}">${modelos.map(m=>`<option value="${m}">${m}</option>`).join('')}</optgroup>`
@@ -140,7 +182,7 @@ const Stock = {
             </select>
           `}
         </div>
-        <div class="body-pad" style="padding-top:0;overflow-y:auto;-webkit-overflow-scrolling:touch;flex:1;min-height:0">
+        <div class="body-pad" style="padding:0;overflow-y:auto;-webkit-overflow-scrolling:touch;flex:1;min-height:0">
           <table class="stock-table-desktop"><thead><tr>
             <th>Producto</th><th>Color</th><th>Batería</th><th>Costo USD</th><th>Precio venta USD</th><th>Margen</th><th>Stock</th><th>IMEI</th><th>Estado</th><th></th>
           </tr></thead><tbody id="stock-tbody"></tbody></table>
@@ -152,7 +194,7 @@ const Stock = {
       this.renderTabs();
       this.renderTable();
     } else {
-      host.innerHTML = `<div class="body-pad" id="historial-general-host"></div>`;
+      host.innerHTML = `<div class="body-pad" style="overflow-y:auto;-webkit-overflow-scrolling:touch;flex:1;min-height:0" id="historial-general-host"></div>`;
       this.renderHistorialGeneral();
     }
   },
@@ -160,11 +202,12 @@ const Stock = {
   setView(v) { this.currentView = v; this.renderView(); },
 
   renderGrupoTabs() {
+    const mobile = this.isMobile();
     document.getElementById('stock-grupo-tabs').innerHTML = Object.entries(this.GRUPOS).map(([k,g]) => {
       const count = this.productosDelGrupo(k).length;
       const active = this.currentGroup === k;
-      return `<button onclick="Stock.setGrupo('${k}')" style="display:flex;align-items:center;gap:6px;padding:8px 14px;border-radius:8px;border:1.5px solid ${active?'var(--blue)':'var(--border)'};background:${active?'var(--blue-light)':'var(--bg)'};color:${active?'var(--blue)':'var(--text-secondary)'};font-size:12.5px;font-weight:${active?'600':'400'};cursor:pointer">
-        <i class="ti ${g.icon}"></i> ${g.label} <span style="background:${active?'#fff':'var(--bg-secondary)'};padding:1px 6px;border-radius:10px;font-size:10.5px">${count}</span>
+      return `<button onclick="Stock.setGrupo('${k}')" style="display:inline-flex;align-items:center;gap:5px;padding:${mobile?'6px 10px':'8px 14px'};border-radius:8px;border:1.5px solid ${active?'var(--blue)':'var(--border)'};background:${active?'var(--blue-light)':'var(--bg)'};color:${active?'var(--blue)':'var(--text-secondary)'};font-size:${mobile?'12px':'12.5px'};font-weight:${active?'600':'400'};cursor:pointer;white-space:nowrap;flex-shrink:0">
+        <i class="ti ${g.icon}"></i> ${g.label} <span style="background:${active?'#fff':'var(--bg-secondary)'};padding:1px 5px;border-radius:10px;font-size:10px">${count}</span>
       </button>`;
     }).join('');
   },
@@ -180,7 +223,6 @@ const Stock = {
       return `<span onclick="Stock.setEstadoFiltro('${e}')" style="cursor:pointer;font-size:12px;padding:5px 11px;border-radius:20px;border-bottom:2px solid ${active?'var(--blue)':'transparent'};color:${active?'var(--blue)':'var(--text-secondary)'};font-weight:${active?'600':'400'};display:inline-flex;align-items:center;gap:5px">${label} <span style="background:var(--bg-secondary);padding:1px 6px;border-radius:10px;font-size:10px">${count}</span></span>`;
     }).join('');
   },
-  setEstadoFiltro(e) { this.currentEstado = e; this.renderEstadoTabs(); this.renderTable(); },
   setEstadoFiltro(e) { this.currentEstado = e; this.renderEstadoTabs(); this.renderTable(); },
 
   renderTabs() {

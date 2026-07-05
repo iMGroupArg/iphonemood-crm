@@ -253,8 +253,8 @@ const Proveedores = {
           </div>
         </div>
         ${!isTerminal ? `<div style="display:flex;gap:6px;flex-wrap:wrap">
-          ${!conv ? `<button class="btn btn-sm btn-primary" onclick="Proveedores.modalConversion(${l.id})">💱 Registrar conversión</button>` : ''}
-          ${conv && pagadoProveedor === 0 ? `<button class="btn btn-sm btn-primary" onclick="Proveedores.modalPago(${l.id})">💸 Registrar pago</button>` : ''}
+          ${!conv ? `<button class="btn btn-sm" onclick="Proveedores.modalConversion(${l.id})">💱 Conversión USD→USDT</button>` : ''}
+          <button class="btn btn-sm btn-primary" onclick="Proveedores.modalPago(${l.id})">💸 Registrar pago</button>
           <button class="btn btn-sm" onclick="Proveedores.modalEnvio(${l.id})">🚚 Agregar envío</button>
           ${pagadoProveedor > 0 && l.estado !== 'recibido' ? `<button class="btn btn-sm btn-green" onclick="Proveedores.modalRecepcion(${l.id})">📦 Confirmar recepción</button>` : ''}
         </div>` : ''}
@@ -300,7 +300,7 @@ const Proveedores = {
               const desc = pg.tipo === 'conversion'
                 ? `${State.fmtUSD(pg.montoUsd)} USD desde <b>${pg.persona}</b> (${pg.bolsillo}) → <b>${pg.montoUsdt.toFixed(2)} USDT</b> en ${pg.personaDest || pg.persona} · Comisión ${pg.comisionPct}% = ${State.fmtUSD(pg.comisionUsd)}`
                 : pg.tipo === 'pago_proveedor'
-                ? `${pg.montoUsdt?.toFixed(2) || pg.montoUsd.toFixed(2)} USDT desde <b>${pg.persona}</b> (${pg.bolsillo})`
+                ? `${pg.moneda === 'ARS' ? State.fmtARS(pg.montoUsd * (State.refBlue||1)) : (pg.moneda === 'USDT' ? pg.montoUsdt?.toFixed(2) : pg.montoUsd.toFixed(2))} ${pg.moneda} desde <b>${pg.persona}</b> (${pg.bolsillo})${pg.moneda === 'ARS' ? ` ≈ ${State.fmtUSD(pg.montoUsd)}` : ''}`
                 : `${State.fmtUSD(pg.montoUsd)} ${pg.moneda} desde <b>${pg.persona}</b> (${pg.bolsillo})`;
               return `<div style="display:flex;gap:10px;align-items:flex-start;padding:9px 0;border-bottom:1px solid var(--border)">
                 <div style="font-size:20px;flex-shrink:0;line-height:1;padding-top:2px">${pagoIcons[pg.tipo]}</div>
@@ -679,41 +679,75 @@ const Proveedores = {
   modalPago(loteId) {
     const conv = (State.lotePagos || []).find(p => p.loteId === loteId && p.tipo === 'conversion');
     const personas = State.personas || [];
+    const BOLSILLOS_POR_MONEDA = {
+      'USDT':  ['USDT'],
+      'USD':   ['USD cash', 'USD transferencia'],
+      'ARS':   ['ARS cash', 'ARS transferencia'],
+    };
     const overlay = document.createElement('div');
     overlay.id = 'prov-pago-overlay';
-    overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.65);backdrop-filter:blur(4px);z-index:900;display:flex;align-items:center;justify-content:center;padding:20px';
+    overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.65);backdrop-filter:blur(4px);z-index:900;display:flex;align-items:center;justify-content:center;padding:20px;overflow-y:auto';
+    const monedaDefault = conv ? 'USDT' : 'USDT';
     overlay.innerHTML = `
-      <div style="background:var(--bg-elevated);border:1px solid var(--border-strong);border-radius:var(--radius-xl);width:min(400px,96vw);overflow:hidden">
+      <div style="background:var(--bg-elevated);border:1px solid var(--border-strong);border-radius:var(--radius-xl);width:min(420px,96vw);overflow:hidden">
         <div style="padding:14px 18px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center">
           <div style="font-size:15px;font-weight:700">💸 Pago al proveedor</div>
           <button onclick="document.getElementById('prov-pago-overlay').remove()" style="background:none;border:none;cursor:pointer;color:var(--text-secondary);font-size:18px">✕</button>
         </div>
         <div style="padding:18px;display:flex;flex-direction:column;gap:12px">
-          <div>
-            <label style="font-size:11px;color:var(--text-secondary);display:block;margin-bottom:4px">Monto USDT</label>
-            <input id="pago-monto" type="number" min="0" step="0.01" value="${conv ? conv.montoUsdt.toFixed(2) : ''}" style="width:100%;font-size:14px;padding:8px 10px;background:var(--bg-secondary);border:1px solid var(--border-strong);border-radius:8px;color:var(--text)">
-          </div>
+
+          ${conv ? `
+            <div style="background:rgba(52,199,89,.1);border:1px solid rgba(52,199,89,.3);border-radius:8px;padding:10px 14px;font-size:13px;color:var(--green)">
+              ✅ Conversión registrada: <b>${conv.montoUsdt.toFixed(2)} USDT</b> disponibles
+            </div>` : `
+            <div style="background:rgba(255,179,0,.1);border:1px solid rgba(255,179,0,.3);border-radius:8px;padding:10px 14px;font-size:13px;color:var(--amber)">
+              ℹ️ Pago directo — sin conversión previa. El monto en USD se usa para el cálculo de costo.
+            </div>`}
+
           <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
             <div>
-              <label style="font-size:11px;color:var(--text-secondary);display:block;margin-bottom:4px">Desde (persona)</label>
+              <label style="font-size:11px;color:var(--text-secondary);display:block;margin-bottom:4px">MONEDA</label>
+              <select id="pago-moneda" onchange="Proveedores._onPagoMonedaChange()" style="width:100%;font-size:13px;padding:7px 10px;background:var(--bg-secondary);border:1px solid var(--border-strong);border-radius:8px;color:var(--text)">
+                <option value="USDT" ${monedaDefault==='USDT'?'selected':''}>USDT</option>
+                <option value="USD">USD</option>
+                <option value="ARS">ARS</option>
+              </select>
+            </div>
+            <div>
+              <label style="font-size:11px;color:var(--text-secondary);display:block;margin-bottom:4px">MONTO</label>
+              <input id="pago-monto" type="number" min="0" step="0.01"
+                value="${conv ? conv.montoUsdt.toFixed(2) : ''}"
+                oninput="Proveedores._calcPagoEquiv()"
+                style="width:100%;font-size:14px;padding:8px 10px;background:var(--bg-secondary);border:1px solid var(--border-strong);border-radius:8px;color:var(--text)">
+            </div>
+          </div>
+
+          <div id="pago-equiv-row" style="display:none;background:var(--bg-secondary);border-radius:8px;padding:8px 12px;font-size:13px;color:var(--text-secondary)">
+            Equivalente: <span id="pago-equiv-val" style="font-weight:700;color:var(--text)">—</span>
+          </div>
+
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+            <div>
+              <label style="font-size:11px;color:var(--text-secondary);display:block;margin-bottom:4px">DESDE (persona)</label>
               <select id="pago-persona" style="width:100%;font-size:13px;padding:7px 10px;background:var(--bg-secondary);border:1px solid var(--border-strong);border-radius:8px;color:var(--text)">
                 ${personas.map(p => `<option>${p}</option>`).join('')}
               </select>
             </div>
             <div>
-              <label style="font-size:11px;color:var(--text-secondary);display:block;margin-bottom:4px">Bolsillo</label>
+              <label style="font-size:11px;color:var(--text-secondary);display:block;margin-bottom:4px">BOLSILLO</label>
               <select id="pago-bolsillo" style="width:100%;font-size:13px;padding:7px 10px;background:var(--bg-secondary);border:1px solid var(--border-strong);border-radius:8px;color:var(--text)">
                 <option>USDT</option>
               </select>
             </div>
           </div>
+
           <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
             <div>
-              <label style="font-size:11px;color:var(--text-secondary);display:block;margin-bottom:4px">Fecha</label>
+              <label style="font-size:11px;color:var(--text-secondary);display:block;margin-bottom:4px">FECHA</label>
               <input id="pago-fecha" type="date" value="${new Date().toISOString().slice(0, 10)}" style="width:100%;font-size:13px;padding:7px 10px;background:var(--bg-secondary);border:1px solid var(--border-strong);border-radius:8px;color:var(--text)">
             </div>
             <div>
-              <label style="font-size:11px;color:var(--text-secondary);display:block;margin-bottom:4px">Notas</label>
+              <label style="font-size:11px;color:var(--text-secondary);display:block;margin-bottom:4px">NOTAS</label>
               <input id="pago-notas" type="text" placeholder="Opcional..." style="width:100%;font-size:13px;padding:7px 10px;background:var(--bg-secondary);border:1px solid var(--border-strong);border-radius:8px;color:var(--text)">
             </div>
           </div>
@@ -725,25 +759,65 @@ const Proveedores = {
       </div>
     `;
     document.body.appendChild(overlay);
+    // Inicializar bolsillos según moneda default
+    this._onPagoMonedaChange();
+  },
+
+  _onPagoMonedaChange() {
+    const moneda = document.getElementById('pago-moneda')?.value || 'USDT';
+    const bolsilloSel = document.getElementById('pago-bolsillo');
+    const equivRow = document.getElementById('pago-equiv-row');
+    if (!bolsilloSel) return;
+    const BOLSILLOS = {
+      USDT: ['USDT'],
+      USD: ['USD cash', 'USD transferencia'],
+      ARS: ['ARS cash', 'ARS transferencia'],
+    };
+    bolsilloSel.innerHTML = (BOLSILLOS[moneda] || ['USDT']).map(b => `<option>${b}</option>`).join('');
+    if (equivRow) equivRow.style.display = moneda === 'ARS' ? 'block' : 'none';
+    this._calcPagoEquiv();
+  },
+
+  _calcPagoEquiv() {
+    const moneda = document.getElementById('pago-moneda')?.value || 'USDT';
+    const monto = parseFloat(document.getElementById('pago-monto')?.value) || 0;
+    const equivRow = document.getElementById('pago-equiv-row');
+    const equivVal = document.getElementById('pago-equiv-val');
+    if (!equivRow || !equivVal) return;
+    if (moneda === 'ARS' && monto > 0) {
+      const usd = monto / (State.refBlue || 1);
+      equivVal.textContent = `≈ USD ${usd.toFixed(2)} al blue actual`;
+      equivRow.style.display = 'block';
+    } else {
+      equivRow.style.display = 'none';
+    }
   },
 
   async _confirmarPago(loteId) {
+    const moneda = document.getElementById('pago-moneda')?.value || 'USDT';
     const monto = parseFloat(document.getElementById('pago-monto')?.value) || 0;
     const persona = document.getElementById('pago-persona')?.value;
     const bolsillo = document.getElementById('pago-bolsillo')?.value;
     const fecha = document.getElementById('pago-fecha')?.value;
     const notas = document.getElementById('pago-notas')?.value.trim();
-    if (!monto || monto <= 0) { toast('Ingresá un monto válido', 'error'); return; }
+    if (!monto || monto <= 0) { toast('Ingresá un monto válido'); return; }
+
+    // Calcular equivalente en USD para el costo del lote
+    let montoUsd = monto;
+    if (moneda === 'ARS') montoUsd = monto / (State.refBlue || 1);
 
     const saldo = (State.cajas[persona]?.[bolsillo]) || 0;
     State.cajas[persona] = State.cajas[persona] || {};
     State.cajas[persona][bolsillo] = saldo - monto;
     await DB.actualizarSaldoCaja(persona, bolsillo, saldo - monto);
-    await DB.guardarLotePago(loteId, { tipo: 'pago_proveedor', montoUsd: monto, montoUsdt: monto, moneda: 'USDT', persona, bolsillo, personaDest: '', bolsilloDestino: '', fecha, notas });
+    await DB.guardarLotePago(loteId, {
+      tipo: 'pago_proveedor', montoUsd, montoUsdt: moneda === 'USDT' ? monto : montoUsd,
+      moneda, persona, bolsillo, personaDest: '', bolsilloDestino: '', fecha, notas
+    });
     await DB.actualizarEstadoLote(loteId, 'pagado');
 
     document.getElementById('prov-pago-overlay')?.remove();
-    toast('Pago al proveedor registrado', 'success');
+    toast('✅ Pago al proveedor registrado');
     this.renderKpis();
     this.renderContent();
   },

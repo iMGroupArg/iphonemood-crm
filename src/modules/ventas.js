@@ -15,27 +15,25 @@ const Ventas = {
 
   periodoVentas: 'mes',
   periodoDesde: '', periodoHasta: '',
+  isMobile() { return window.innerWidth <= 768; },
 
   render() {
     const c = document.createElement('div');
+    c.style.cssText = 'display:flex;flex-direction:column;flex:1;overflow:hidden;min-height:0';
+    const mobile = this.isMobile();
     c.innerHTML = `
-      <div style="padding:12px 22px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;flex-shrink:0">
-        <div style="display:flex;gap:4px;flex-wrap:wrap" id="ventas-periodo-tabs"></div>
-        <button class="btn btn-primary" onclick="Ventas.openNew()"><i class="ti ti-plus"></i> Nueva venta</button>
+      <div style="padding:${mobile?'8px 12px':'12px 22px'};border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;gap:8px;flex-shrink:0">
+        <div style="display:flex;gap:4px;overflow-x:auto;-webkit-overflow-scrolling:touch;white-space:nowrap" id="ventas-periodo-tabs"></div>
+        <button class="btn btn-primary" style="flex-shrink:0" onclick="Ventas.openNew()"><i class="ti ti-plus"></i>${mobile?' Nueva':' Nueva venta'}</button>
       </div>
-      <div id="ventas-rango-libre" style="display:none;padding:8px 22px;border-bottom:1px solid var(--border);gap:8px;align-items:center;flex-wrap:wrap">
-        <input type="date" id="ventas-desde" style="font-size:12px;padding:5px 8px;border:1px solid var(--border-strong);border-radius:8px">
+      <div id="ventas-rango-libre" style="display:none;padding:8px ${mobile?'12':'22'}px;border-bottom:1px solid var(--border);gap:8px;align-items:center;flex-wrap:wrap">
+        <input type="date" id="ventas-desde" style="font-size:12px;padding:5px 8px;border:1px solid var(--border-strong);border-radius:8px;flex:1">
         <span style="font-size:12px;color:var(--text-secondary)">hasta</span>
-        <input type="date" id="ventas-hasta" style="font-size:12px;padding:5px 8px;border:1px solid var(--border-strong);border-radius:8px">
+        <input type="date" id="ventas-hasta" style="font-size:12px;padding:5px 8px;border:1px solid var(--border-strong);border-radius:8px;flex:1">
         <button class="btn btn-sm btn-primary" onclick="Ventas.aplicarRangoLibre()">Aplicar</button>
       </div>
-      <div id="ventas-metricas" style="padding:14px 22px;border-bottom:1px solid var(--border);display:grid;grid-template-columns:repeat(5,1fr);gap:10px"></div>
-      <div class="body-pad" style="padding-top:0;overflow-y:auto">
-        <table><thead><tr>
-          <th>#</th><th>Fecha</th><th>Cliente</th><th>Tipo</th><th>Ítems</th><th>Total</th><th>Pagos</th><th>Estado</th><th></th>
-        </tr></thead>
-        <tbody id="ventas-tbody"></tbody></table>
-      </div>
+      <div id="ventas-metricas" style="flex-shrink:0"></div>
+      <div class="body-pad" style="padding:0;overflow-y:auto;-webkit-overflow-scrolling:touch;flex:1;min-height:0" id="ventas-list-host"></div>
       <div id="venta-modal-host"></div>
     `;
     setTimeout(() => { this.renderPeriodoTabs(); this.renderMetricas(); this.renderList(); }, 0);
@@ -82,22 +80,35 @@ const Ventas = {
     const el=document.getElementById('ventas-metricas');
     if (!el) return;
     const ventas=this.ventasDelPeriodo();
-    const dispCats=['iphone','android','mac','ipad','watch'];
 
-    // Volumen = suma de precios de todos los ítems vendidos
     const volumen = ventas.reduce((s,v) => s + v.items.reduce((a,i) => a + i.precio, 0), 0);
-
-    // Margen total = precio venta − costo de cada ítem
     const margenTotal = ventas.reduce((s,v) => s + v.items.reduce((a,i) => a + (i.precio - (i.costo||0)), 0), 0);
-
-    // Margen por equipo = margen total / cantidad de ventas del período
     const margenXEquipo = ventas.length ? margenTotal / ventas.length : 0;
-
-    // Diferencial tarjeta = ganancia financiera generada por el recargo de tarjeta
     const diferencial = ventas.reduce((s,v) => s + (v.pagos||[]).filter(p=>p.esTarjeta).reduce((a,p) => a + (p.diferencialArs ? (p.diferencialArs/(p.cotizacionDiferencial||State.refBlue)) : 0), 0), 0);
-
-    // Ticket promedio = volumen total / cantidad de ventas
     const ticketProm = ventas.length ? volumen / ventas.length : 0;
+
+    if (this.isMobile()) {
+      // Tira compacta de 3 métricas clave + scrollable
+      el.innerHTML = `
+        <div style="display:flex;border-bottom:1px solid var(--border);overflow-x:auto;-webkit-overflow-scrolling:touch">
+          <div style="flex:1;min-width:100px;padding:10px 12px;border-right:1px solid var(--border)">
+            <div style="font-size:10px;color:var(--text-secondary);margin-bottom:2px">${ventas.length} venta(s)</div>
+            <div style="font-size:15px;font-weight:700;color:var(--blue)">${State.fmtUSD(volumen)}</div>
+            <div style="font-size:9px;color:var(--text-secondary)">Volumen</div>
+          </div>
+          <div style="flex:1;min-width:100px;padding:10px 12px;border-right:1px solid var(--border)">
+            <div style="font-size:10px;color:var(--text-secondary);margin-bottom:2px">Margen</div>
+            <div style="font-size:15px;font-weight:700;color:${margenTotal>=0?'var(--green)':'var(--red)'}">${State.fmtUSD(margenTotal)}</div>
+            <div style="font-size:9px;color:var(--text-secondary)">x venta: ${State.fmtUSD(margenXEquipo)}</div>
+          </div>
+          <div style="flex:1;min-width:90px;padding:10px 12px">
+            <div style="font-size:10px;color:var(--text-secondary);margin-bottom:2px">Ticket prom.</div>
+            <div style="font-size:15px;font-weight:700;color:var(--text)">${State.fmtUSD(ticketProm)}</div>
+            ${diferencial>0?`<div style="font-size:9px;color:var(--purple)">+${State.fmtUSD(diferencial)} tarjeta</div>`:'<div style="font-size:9px;color:var(--text-secondary)"> </div>'}
+          </div>
+        </div>`;
+      return;
+    }
 
     const kpis = [
       { label:'Volumen vendido',   val:State.fmtUSD(volumen),      sub:`${ventas.length} venta(s) en el período`, emoji:'💰', color:'var(--blue)' },
@@ -106,7 +117,7 @@ const Ventas = {
       { label:'Diferencial tarjeta',val:State.fmtUSD(diferencial), sub:'Ganancia financiera por recargo',         emoji:'💳', color:'var(--purple)' },
       { label:'Ticket promedio',   val:State.fmtUSD(ticketProm),   sub:'Volumen ÷ cantidad de ventas',            emoji:'🧾', color:'var(--text)' },
     ];
-
+    el.style.cssText = 'padding:14px 22px;border-bottom:1px solid var(--border);display:grid;grid-template-columns:repeat(5,1fr);gap:10px';
     el.innerHTML = kpis.map(k=>`
       <div class="card" style="padding:12px 14px;margin-bottom:0;display:flex;justify-content:space-between;align-items:flex-start;gap:8px;min-height:90px">
         <div style="min-width:0;flex:1">
@@ -121,29 +132,62 @@ const Ventas = {
   },
 
   renderList() {
-    const tbody=document.getElementById('ventas-tbody');
-    if (!tbody) return;
+    const host=document.getElementById('ventas-list-host');
+    if (!host) return;
     const ventas=this.ventasDelPeriodo();
     const TIPO={minorista:'Minorista',mayorista:'Mayorista',revendedor:'Revendedor'};
-    if (!ventas.length) { tbody.innerHTML=`<tr><td colspan="9"><div class="empty-state"><i class="ti ti-receipt-off"></i>Sin ventas en este período</div></td></tr>`; return; }
-    tbody.innerHTML=ventas.map(v=>{
-      const total=v.items.reduce((s,i)=>s+i.precio,0);
-      const cerrada=v.estado==='cerrada';
-      const pagosHtml=v.pagos.length
-        ? v.pagos.map(p=>`<div style="font-size:10.5px;color:var(--text-secondary);white-space:nowrap">${p.persona} · ${(p.bolsillo||'').replace('transferencia','transf.')}${p.esTarjeta?' <span class="badge b-purple" style="font-size:8px">Tarjeta</span>':''} — <b>${State.fmtUSD(p.monto)}</b></div>`).join('')
-        : `<span style="font-size:10.5px;color:var(--text-secondary)">Sin pagos</span>`;
-      return `<tr>
-        <td style="font-weight:600">#${v.id}</td>
-        <td style="font-size:11.5px">${v.fecha}</td>
-        <td>${v.cliente}${v.clienteTel?`<div style="font-size:10px;color:var(--text-secondary)">${v.clienteTel}</div>`:''}</td>
-        <td><span class="badge b-blue" style="font-size:10px">${TIPO[v.tipoVenta]||'Minorista'}</span></td>
-        <td style="font-size:11.5px;max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${v.items.map(i=>i.nombre).join(', ')}</td>
-        <td><b>${State.fmtUSD(total)}</b></td>
-        <td style="min-width:160px">${pagosHtml}</td>
-        <td>${this.estadoToggle(cerrada)}</td>
-        <td><button class="btn btn-sm" onclick="Ventas.viewSale(${v.id})"><i class="ti ti-eye"></i> Ver</button></td>
-      </tr>`;
-    }).join('');
+    if (!ventas.length) {
+      host.innerHTML=`<div class="empty-state"><i class="ti ti-receipt-off"></i>Sin ventas en este período</div>`;
+      return;
+    }
+    if (this.isMobile()) {
+      host.innerHTML = `<div style="display:flex;flex-direction:column;gap:8px;padding:10px 12px">` +
+        ventas.map(v => {
+          const total=v.items.reduce((s,i)=>s+i.precio,0);
+          const cerrada=v.estado==='cerrada';
+          const itemsStr=v.items.map(i=>i.nombre).join(', ');
+          return `<div class="card" style="margin-bottom:0;padding:12px 14px" onclick="Ventas.viewSale(${v.id})">
+            <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;margin-bottom:6px">
+              <div style="min-width:0">
+                <div style="font-size:13px;font-weight:700">${v.cliente}</div>
+                <div style="font-size:11px;color:var(--text-secondary);margin-top:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${itemsStr}</div>
+              </div>
+              <div style="text-align:right;flex-shrink:0">
+                <div style="font-size:15px;font-weight:700;color:var(--blue)">${State.fmtUSD(total)}</div>
+                <div style="font-size:10px;color:var(--text-secondary)">${v.fecha}</div>
+              </div>
+            </div>
+            <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
+              <span class="badge b-blue" style="font-size:10px">${TIPO[v.tipoVenta]||'Minorista'}</span>
+              <span class="badge ${cerrada?'b-green':'b-amber'}" style="font-size:10px">${cerrada?'Cerrada':'Abierta'}</span>
+              <span style="font-size:10px;color:var(--text-secondary);margin-left:auto">#${v.id}</span>
+            </div>
+          </div>`;
+        }).join('') + `</div>`;
+      return;
+    }
+    host.innerHTML = `<div style="overflow-x:auto;-webkit-overflow-scrolling:touch;padding:0 16px 12px">
+      <table><thead><tr>
+        <th>#</th><th>Fecha</th><th>Cliente</th><th>Tipo</th><th>Ítems</th><th>Total</th><th>Pagos</th><th>Estado</th><th></th>
+      </tr></thead><tbody>` +
+      ventas.map(v=>{
+        const total=v.items.reduce((s,i)=>s+i.precio,0);
+        const cerrada=v.estado==='cerrada';
+        const pagosHtml=v.pagos.length
+          ? v.pagos.map(p=>`<div style="font-size:10.5px;color:var(--text-secondary);white-space:nowrap">${p.persona} · ${(p.bolsillo||'').replace('transferencia','transf.')}${p.esTarjeta?' <span class="badge b-purple" style="font-size:8px">Tarjeta</span>':''} — <b>${State.fmtUSD(p.monto)}</b></div>`).join('')
+          : `<span style="font-size:10.5px;color:var(--text-secondary)">Sin pagos</span>`;
+        return `<tr>
+          <td style="font-weight:600">#${v.id}</td>
+          <td style="font-size:11.5px">${v.fecha}</td>
+          <td>${v.cliente}${v.clienteTel?`<div style="font-size:10px;color:var(--text-secondary)">${v.clienteTel}</div>`:''}</td>
+          <td><span class="badge b-blue" style="font-size:10px">${TIPO[v.tipoVenta]||'Minorista'}</span></td>
+          <td style="font-size:11.5px;max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${v.items.map(i=>i.nombre).join(', ')}</td>
+          <td><b>${State.fmtUSD(total)}</b></td>
+          <td style="min-width:160px">${pagosHtml}</td>
+          <td>${this.estadoToggle(cerrada)}</td>
+          <td><button class="btn btn-sm" onclick="Ventas.viewSale(${v.id})"><i class="ti ti-eye"></i> Ver</button></td>
+        </tr>`;
+      }).join('') + `</tbody></table></div>`;
   },
 
   // Toggle visual de estado, como el de CocosCRM: dos píldoras, una resaltada según el estado actual.
@@ -235,16 +279,23 @@ const Ventas = {
 
   showModal() {
     const host = document.getElementById('venta-modal-host');
+    const mobile = this.isMobile();
+    const overlay = mobile
+      ? 'position:fixed;inset:0;background:var(--bg-elevated);z-index:200;display:flex;flex-direction:column'
+      : 'position:fixed;inset:0;background:rgba(0,0,0,.4);display:flex;align-items:center;justify-content:center;z-index:200';
+    const card = mobile
+      ? 'display:flex;flex-direction:column;flex:1;overflow:hidden'
+      : 'width:600px;max-width:94vw;max-height:88vh;background:var(--bg-elevated);border-radius:14px;display:flex;flex-direction:column;overflow:hidden';
     host.innerHTML = `
-      <div style="position:fixed;inset:0;background:rgba(0,0,0,.4);display:flex;align-items:center;justify-content:center;z-index:200" onkeydown="if(event.key==='Enter'){event.preventDefault();}">
-        <div style="width:600px;max-width:94vw;max-height:88vh;background:var(--bg-elevated);border-radius:14px;display:flex;flex-direction:column;overflow:hidden">
-          <div style="padding:14px 20px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center">
-            <h3 style="font-size:15px;font-weight:600">Nueva venta</h3>
+      <div style="${overlay}" onkeydown="if(event.key==='Enter'){event.preventDefault();}">
+        <div style="${card}">
+          <div style="padding:${mobile?'10px 14px':'14px 20px'};border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;flex-shrink:0">
+            <h3 style="font-size:${mobile?'14px':'15px'};font-weight:600">Nueva venta</h3>
             <button class="btn btn-sm" onclick="Ventas.closeModal()"><i class="ti ti-x"></i></button>
           </div>
-          <div style="padding:14px 20px;border-bottom:1px solid var(--border);display:flex;gap:4px" id="venta-stepper"></div>
-          <div style="flex:1;overflow-y:auto;padding:18px 20px" id="venta-step-body"></div>
-          <div style="padding:13px 20px;border-top:1px solid var(--border);display:flex;justify-content:space-between">
+          <div style="padding:${mobile?'10px 14px':'14px 20px'};border-bottom:1px solid var(--border);display:flex;gap:${mobile?'2px':'4px'};flex-shrink:0" id="venta-stepper"></div>
+          <div style="flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;padding:${mobile?'14px':'18px 20px'}" id="venta-step-body"></div>
+          <div style="padding:${mobile?'10px 14px':'13px 20px'};border-top:1px solid var(--border);display:flex;justify-content:space-between;flex-shrink:0">
             <button class="btn" id="venta-btn-prev" onclick="Ventas.prevStep()">Anterior</button>
             <button class="btn btn-primary" id="venta-btn-next" onclick="Ventas.nextStep()">Siguiente</button>
           </div>
@@ -259,12 +310,12 @@ const Ventas = {
   },
 
   renderStep() {
+    const mobile = this.isMobile();
     document.getElementById('venta-stepper').innerHTML = this.STEPS.map((s, i) => {
       const done = i < this.step, active = i === this.step;
-      const color = done || active ? 'var(--blue)' : 'var(--border-strong)';
       return `<div style="flex:1;text-align:center">
-        <div style="width:24px;height:24px;border-radius:50%;background:${done||active?'var(--blue)':'var(--bg-secondary)'};color:${done||active?'#fff':'var(--text-secondary)'};display:inline-flex;align-items:center;justify-content:center;font-size:11px;font-weight:600">${done?'✓':i+1}</div>
-        <div style="font-size:9.5px;color:${active?'var(--blue)':'var(--text-secondary)'};margin-top:2px;font-weight:${active?'600':'400'}">${s}</div>
+        <div style="width:${mobile?'22px':'24px'};height:${mobile?'22px':'24px'};border-radius:50%;background:${done||active?'var(--blue)':'var(--bg-secondary)'};color:${done||active?'#fff':'var(--text-secondary)'};display:inline-flex;align-items:center;justify-content:center;font-size:11px;font-weight:600">${done?'✓':i+1}</div>
+        ${mobile?`<div style="font-size:8px;color:${active?'var(--blue)':'var(--text-secondary)'};margin-top:1px;font-weight:${active?'600':'400'}">${s}</div>` : `<div style="font-size:9.5px;color:${active?'var(--blue)':'var(--text-secondary)'};margin-top:2px;font-weight:${active?'600':'400'}">${s}</div>`}
       </div>`;
     }).join('');
     document.getElementById('venta-btn-prev').style.opacity = this.step === 0 ? '0.4' : '1';
@@ -278,30 +329,33 @@ const Ventas = {
     else body.innerHTML = this.stepConfirm();
   },
 
+  _formRow(cols) {
+    const mobile = this.isMobile();
+    return `<div style="display:grid;grid-template-columns:${mobile?'1fr':cols};gap:10px;margin-bottom:10px">`;
+  },
+  _lbl(text) { return `<label style="font-size:11px;color:var(--text-secondary);font-weight:600;display:block;margin-bottom:4px">${text}</label>`; },
+  _inp(style='') { return `width:100%;font-size:${this.isMobile()?'14px':'12px'};padding:${this.isMobile()?'9px 10px':'7px 10px'};border:1px solid var(--border-strong);border-radius:8px;${style}`; },
+  _sel(style='') { return `width:100%;font-size:${this.isMobile()?'14px':'12px'};padding:${this.isMobile()?'9px 10px':'7px 10px'};border:1px solid var(--border-strong);border-radius:8px;background:var(--bg-secondary);color:var(--text);${style}`; },
+
   stepCliente() {
     const d = this.draft;
     return `
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px">
-        <div><label style="font-size:11px;color:var(--text-secondary);font-weight:600;display:block;margin-bottom:4px">Nombre del cliente</label>
-          <input type="text" id="vf-cliente" value="${d.cliente||''}" placeholder="Consumidor final si se deja vacío" style="width:100%;font-size:12px;padding:7px 10px;border:1px solid var(--border-strong);border-radius:8px"></div>
-        <div><label style="font-size:11px;color:var(--text-secondary);font-weight:600;display:block;margin-bottom:4px">Teléfono</label>
-          <input type="text" id="vf-cliente-tel" value="${d.clienteTel||''}" placeholder="ej: 3413686909" style="width:100%;font-size:12px;padding:7px 10px;border:1px solid var(--border-strong);border-radius:8px"></div>
+      ${this._formRow('1fr 1fr')}
+        <div>${this._lbl('Nombre del cliente')}<input type="text" id="vf-cliente" value="${d.cliente||''}" placeholder="Consumidor final" style="${this._inp()}"></div>
+        <div>${this._lbl('Teléfono')}<input type="text" id="vf-cliente-tel" value="${d.clienteTel||''}" placeholder="ej: 3413686909" style="${this._inp()}" inputmode="tel"></div>
       </div>
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px">
-        <div><label style="font-size:11px;color:var(--text-secondary);font-weight:600;display:block;margin-bottom:4px">DNI</label>
-          <input type="text" id="vf-cliente-dni" value="${d.clienteDni||''}" placeholder="ej: 34139974" style="width:100%;font-size:12px;padding:7px 10px;border:1px solid var(--border-strong);border-radius:8px"></div>
-        <div><label style="font-size:11px;color:var(--text-secondary);font-weight:600;display:block;margin-bottom:4px">Tipo de venta</label>
-          <select id="vf-tipo-venta" style="width:100%;font-size:12px;padding:7px 10px;border:1px solid var(--border-strong);border-radius:8px">
-            <option value="minorista" ${(d.tipoVenta||'minorista')==='minorista'?'selected':''}>Minorista</option>
-            <option value="mayorista" ${d.tipoVenta==='mayorista'?'selected':''}>Mayorista</option>
-            <option value="revendedor" ${d.tipoVenta==='revendedor'?'selected':''}>Revendedor</option>
-          </select></div>
-      </div>
-      <div><label style="font-size:11px;color:var(--text-secondary);font-weight:600;display:block;margin-bottom:4px">Vendedor</label>
-        <select id="vf-vendedor" style="width:100%;font-size:12px;padding:7px 10px;border:1px solid var(--border-strong);border-radius:8px">
-          <option value="">Seleccionar</option>
-          ${State.personas.map(p=>`<option ${d.vendedor===p?'selected':''}>${p}</option>`).join('')}
+      ${this._formRow('1fr 1fr')}
+        <div>${this._lbl('DNI')}<input type="text" id="vf-cliente-dni" value="${d.clienteDni||''}" placeholder="ej: 34139974" style="${this._inp()}" inputmode="numeric"></div>
+        <div>${this._lbl('Tipo de venta')}<select id="vf-tipo-venta" style="${this._sel()}">
+          <option value="minorista" ${(d.tipoVenta||'minorista')==='minorista'?'selected':''}>Minorista</option>
+          <option value="mayorista" ${d.tipoVenta==='mayorista'?'selected':''}>Mayorista</option>
+          <option value="revendedor" ${d.tipoVenta==='revendedor'?'selected':''}>Revendedor</option>
         </select></div>
+      </div>
+      <div style="margin-bottom:10px">${this._lbl('Vendedor')}<select id="vf-vendedor" style="${this._sel()}">
+        <option value="">Seleccionar</option>
+        ${State.personas.map(p=>`<option ${d.vendedor===p?'selected':''}>${p}</option>`).join('')}
+      </select></div>
     `;
   },
 
@@ -552,12 +606,14 @@ const Ventas = {
   setInvMode(m) { this.invMode = m; document.getElementById('venta-step-body').innerHTML = this.stepItems(); },
 
   manualItemForm() {
+    const mobile = this.isMobile();
+    const inp = `font-size:${mobile?'14px':'12px'};padding:${mobile?'9px 10px':'7px 10px'};border:1px solid var(--border-strong);border-radius:8px`;
     return `
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px">
-        <input type="text" id="vf-m-nombre" placeholder="Nombre del producto" style="font-size:12px;padding:7px 10px;border:1px solid var(--border-strong);border-radius:8px">
-        <input type="number" id="vf-m-costo" placeholder="Costo USD" style="font-size:12px;padding:7px 10px;border:1px solid var(--border-strong);border-radius:8px">
+      <div style="display:grid;grid-template-columns:${mobile?'1fr':'1fr 1fr'};gap:8px;margin-bottom:8px">
+        <input type="text" id="vf-m-nombre" placeholder="Nombre del producto" style="width:100%;${inp}">
+        <input type="number" id="vf-m-costo" placeholder="Costo USD" style="width:100%;${inp}" inputmode="decimal">
       </div>
-      <input type="number" id="vf-m-precio" placeholder="Precio de venta (USD)" style="width:100%;font-size:12px;padding:7px 10px;border:1px solid var(--border-strong);border-radius:8px;margin-bottom:8px">
+      <input type="number" id="vf-m-precio" placeholder="Precio de venta (USD)" style="width:100%;${inp};margin-bottom:8px" inputmode="decimal">
       <button class="btn btn-primary" style="width:100%;justify-content:center" onclick="Ventas.addManualItem()"><i class="ti ti-plus"></i> Agregar ítem</button>
     `;
   },
@@ -631,16 +687,16 @@ const Ventas = {
         <span>${p.persona} — ${p.bolsillo} — ${State.fmtUSD(p.monto)}${p.esTarjeta?` <span class="badge b-purple" style="font-size:9px">Tarjeta +$${(p.diferencialArs||0).toLocaleString('es-AR')}</span>`:''}</span>
         <button onclick="Ventas.removePago(${idx})" style="background:none;border:none;cursor:pointer"><i class="ti ti-x"></i></button>
       </div>`).join('')}
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:10px 0">
-        <select id="vf-pago-persona" style="font-size:12px;padding:7px 10px;border:1px solid var(--border-strong);border-radius:8px">
+      <div style="display:grid;grid-template-columns:${this.isMobile()?'1fr':'1fr 1fr'};gap:8px;margin:10px 0">
+        <select id="vf-pago-persona" style="${this._sel()}">
           ${State.personas.map(p=>`<option>${p}</option>`).join('')}
         </select>
-        <select id="vf-pago-bolsillo" onchange="Ventas.toggleTarjetaWrap()" style="font-size:12px;padding:7px 10px;border:1px solid var(--border-strong);border-radius:8px">
+        <select id="vf-pago-bolsillo" onchange="Ventas.toggleTarjetaWrap()" style="${this._sel()}">
           <option>ARS cash</option><option>ARS transferencia</option><option>USD cash</option><option>USD transferencia</option><option>USDT</option>
         </select>
       </div>
       <div style="display:flex;gap:8px;margin-bottom:8px">
-        <input type="number" id="vf-pago-monto" value="${saldo.toFixed(2)}" style="flex:1;font-size:12px;padding:7px 10px;border:1px solid var(--border-strong);border-radius:8px">
+        <input type="number" id="vf-pago-monto" value="${saldo.toFixed(2)}" style="flex:1;${this._inp()}" inputmode="decimal">
         <button class="btn btn-primary" onclick="Ventas.addPago()"><i class="ti ti-plus"></i> Agregar pago</button>
       </div>
       <label style="display:flex;align-items:center;gap:7px;font-size:12.5px;cursor:pointer;margin-bottom:8px" id="vf-tarjeta-check-wrap">
@@ -650,14 +706,14 @@ const Ventas = {
         <div style="display:flex;justify-content:space-between;font-size:11.5px;color:var(--purple);margin-bottom:8px">
           <span>Precio de lista (a cubrir)</span><b>${State.fmtUSD(total)}</b>
         </div>
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px">
+        <div style="display:grid;grid-template-columns:${this.isMobile()?'1fr':'1fr 1fr'};gap:8px;margin-bottom:8px">
           <div>
             <label style="font-size:11px;color:var(--purple);font-weight:600;display:block;margin-bottom:4px">Monto cargado en posnet (ARS)</label>
-            <input type="number" id="vf-monto-posnet" placeholder="ej: 1420000" oninput="Ventas.actualizarDiferencialPreview()" style="width:100%;font-size:13px;font-weight:600;padding:8px 10px;border:1px solid var(--border-strong);border-radius:8px">
+            <input type="number" id="vf-monto-posnet" placeholder="ej: 1420000" oninput="Ventas.actualizarDiferencialPreview()" style="width:100%;font-size:13px;font-weight:600;padding:8px 10px;border:1px solid var(--border-strong);border-radius:8px" inputmode="decimal">
           </div>
           <div>
             <label style="font-size:11px;color:var(--purple);font-weight:600;display:block;margin-bottom:4px">Comisión banco (coef.)</label>
-            <input type="number" id="vf-coef-comision" placeholder="ej: 0.29" step="0.01" oninput="Ventas.actualizarDiferencialPreview()" style="width:100%;font-size:13px;font-weight:600;padding:8px 10px;border:1px solid var(--border-strong);border-radius:8px">
+            <input type="number" id="vf-coef-comision" placeholder="ej: 0.29" step="0.01" oninput="Ventas.actualizarDiferencialPreview()" style="width:100%;font-size:13px;font-weight:600;padding:8px 10px;border:1px solid var(--border-strong);border-radius:8px" inputmode="decimal">
           </div>
         </div>
         <div>

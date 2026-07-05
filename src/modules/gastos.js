@@ -3,10 +3,13 @@ const Gastos = {
   currentView: 'mes', // 'mes' | 'fijos' | 'cierre'
   mesActual: new Date().toISOString().slice(0, 7), // 'YYYY-MM'
 
+  isMobile() { return window.innerWidth <= 768; },
+
   render() {
     const c = document.createElement('div');
+    c.style.cssText = 'display:flex;flex-direction:column;flex:1;overflow:hidden;min-height:0';
     c.innerHTML = `
-      <div style="padding:12px 22px;border-bottom:1px solid var(--border);display:flex;gap:4px;flex-wrap:wrap;flex-shrink:0" id="gastos-view-tabs"></div>
+      <div style="padding:10px 14px;border-bottom:1px solid var(--border);display:flex;gap:6px;overflow-x:auto;-webkit-overflow-scrolling:touch;white-space:nowrap;flex-shrink:0" id="gastos-view-tabs"></div>
       <div id="gastos-view-host" style="flex:1;display:flex;flex-direction:column;overflow:hidden;min-height:0"></div>
       <div id="gastos-modal-host"></div>
     `;
@@ -28,23 +31,27 @@ const Gastos = {
   setView(v) { this.currentView = v; this.renderView(); },
 
   viewGastosMes() {
+    const mobile = this.isMobile();
     return `
-      <div class="kpi-row" style="grid-template-columns:repeat(4,1fr)">
+      <div class="kpi-row" style="grid-template-columns:repeat(${mobile?'2':'4'},1fr)">
         <div class="kpi"><label>Gastos ARS</label><div class="val" id="g-kpi-ars">—</div></div>
         <div class="kpi"><label>Gastos USD</label><div class="val" id="g-kpi-usd">—</div></div>
         <div class="kpi"><label>Pendientes</label><div class="val" id="g-kpi-pend">—</div></div>
-        <div class="kpi"><label>Categoría top</label><div class="val" id="g-kpi-cat" style="font-size:13px">—</div></div>
+        <div class="kpi"><label>Cat. top</label><div class="val" id="g-kpi-cat" style="font-size:13px">—</div></div>
       </div>
-      <div style="padding:10px 22px;border-bottom:1px solid var(--border);display:flex;gap:6px;align-items:center;flex-wrap:wrap">
-        <div id="gastos-chips" style="display:flex;gap:6px;flex-wrap:wrap"></div>
-        <button class="btn btn-sm" style="margin-left:auto" onclick="Gastos.manageCats()"><i class="ti ti-settings"></i> Categorías</button>
-        <button class="btn btn-primary btn-sm" onclick="Gastos.openNew()"><i class="ti ti-plus"></i> Registrar gasto</button>
-      </div>
-      <div class="body-pad" style="padding-left:0;padding-right:0">
-        <div style="overflow-x:auto;-webkit-overflow-scrolling:touch;padding:0 16px">
-        <table style="min-width:520px"><thead><tr><th>Fecha</th><th>Motivo</th><th>Categoría</th><th class="hide-mobile">Responsable</th><th class="hide-mobile">Caja</th><th>Monto</th><th>Estado</th><th></th></tr></thead>
-        <tbody id="gastos-tbody"></tbody></table>
+      <div style="padding:${mobile?'8px 12px':'10px 16px'};border-bottom:1px solid var(--border)">
+        <div style="display:flex;gap:6px;margin-bottom:8px;overflow-x:auto;-webkit-overflow-scrolling:touch;white-space:nowrap;padding-bottom:2px" id="gastos-chips"></div>
+        <div style="display:flex;gap:6px;justify-content:flex-end">
+          <button class="btn btn-sm" onclick="Gastos.manageCats()"><i class="ti ti-settings"></i>${mobile?'':' Categorías'}</button>
+          <button class="btn btn-primary btn-sm" onclick="Gastos.openNew()"><i class="ti ti-plus"></i> ${mobile?'Registrar':'Registrar gasto'}</button>
         </div>
+      </div>
+      <div class="body-pad" style="overflow-y:auto;-webkit-overflow-scrolling:touch;flex:1;min-height:0;padding:${mobile?'0':'0 0 12px'}">
+        ${mobile ? `<div id="gastos-cards" style="padding:8px 12px;display:flex;flex-direction:column;gap:8px"></div>` : `
+        <div style="overflow-x:auto;-webkit-overflow-scrolling:touch;padding:0 16px">
+          <table style="min-width:520px"><thead><tr><th>Fecha</th><th>Motivo</th><th>Categoría</th><th>Responsable</th><th>Caja</th><th>Monto</th><th>Estado</th><th></th></tr></thead>
+          <tbody id="gastos-tbody"></tbody>
+        </table></div>`}
       </div>
     `;
   },
@@ -52,8 +59,8 @@ const Gastos = {
   catObj(id) { return State.categoriasGasto.find(c => c.id === id) || { nombre: id, color: '#888' }; },
 
   renderChips() {
-    const html = [`<button class="btn btn-sm ${this.activeCat==='all'?'btn-primary':''}" onclick="Gastos.setCat('all')">Todos</button>`]
-      .concat(State.categoriasGasto.map(c => `<button class="btn btn-sm ${this.activeCat===c.id?'btn-primary':''}" onclick="Gastos.setCat('${c.id}')" style="${this.activeCat!==c.id?`border-color:${c.color}55`:''}">${c.nombre}</button>`));
+    const html = [`<button class="btn btn-sm ${this.activeCat==='all'?'btn-primary':''}" onclick="Gastos.setCat('all')" style="flex-shrink:0">Todos</button>`]
+      .concat(State.categoriasGasto.map(c => `<button class="btn btn-sm ${this.activeCat===c.id?'btn-primary':''}" onclick="Gastos.setCat('${c.id}')" style="flex-shrink:0;${this.activeCat!==c.id?`border-color:${c.color}55`:''}">${c.nombre}</button>`));
     const el = document.getElementById('gastos-chips');
     if (el) el.innerHTML = html.join('');
   },
@@ -76,6 +83,32 @@ const Gastos = {
 
   renderTable() {
     const rows = (this.activeCat === 'all' ? State.gastos : State.gastos.filter(g => g.cat === this.activeCat));
+    if (this.isMobile()) {
+      const host = document.getElementById('gastos-cards');
+      if (!host) return;
+      if (!rows.length) { host.innerHTML = `<div class="empty-state"><i class="ti ti-receipt"></i><p>Sin gastos este mes</p></div>`; return; }
+      host.innerHTML = rows.map(g => {
+        const c = this.catObj(g.cat);
+        const pagado = g.estado === 'pagado';
+        return `<div class="card" style="margin-bottom:0;padding:12px 14px" onclick="Gastos.openEdit('${g.id}')">
+          <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;margin-bottom:6px">
+            <div style="min-width:0">
+              <div style="font-size:13px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${g.motivo}</div>
+              <div style="font-size:11px;color:var(--text-secondary);margin-top:1px">${g.fecha} · ${g.responsable}</div>
+            </div>
+            <div style="font-size:15px;font-weight:700;color:var(--text);white-space:nowrap">${g.moneda==='USD'?State.fmtUSD(g.monto):State.fmtARS(g.monto)}</div>
+          </div>
+          <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
+            <span class="badge" style="background:${c.color}22;color:${c.color};font-size:10px">${c.nombre}</span>
+            <span class="badge ${pagado?'b-green':'b-amber'}" style="font-size:10px">${pagado?'Pagado':'Pendiente'}</span>
+            ${g.esFijo?'<span class="badge b-blue" style="font-size:9px">Fijo</span>':''}
+            ${g.esSueldoSocio?`<span class="badge b-purple" style="font-size:9px">Sueldo</span>`:''}
+            <span style="font-size:10px;color:var(--text-secondary);margin-left:auto">${g.caja||''}</span>
+          </div>
+        </div>`;
+      }).join('');
+      return;
+    }
     const tbody = document.getElementById('gastos-tbody');
     if (!tbody) return;
     tbody.innerHTML = rows.map(g => {
@@ -93,36 +126,52 @@ const Gastos = {
     }).join('');
   },
 
+  _labelInp(label, inp) {
+    return `<div style="margin-bottom:10px"><label style="font-size:11px;color:var(--text-secondary);font-weight:600;display:block;margin-bottom:4px">${label}</label>${inp}</div>`;
+  },
+  _sel(style='') { return `width:100%;font-size:13px;padding:8px 10px;border:1px solid var(--border-strong);border-radius:8px;background:var(--bg-secondary);color:var(--text);${style}`; },
+  _inp(style='') { return `width:100%;font-size:13px;padding:8px 10px;border:1px solid var(--border-strong);border-radius:8px;${style}`; },
+
   openNew() {
+    const mobile = this.isMobile();
     const host = document.getElementById('gastos-modal-host');
+    const wrapStyle = mobile
+      ? 'position:fixed;inset:0;background:var(--bg-elevated);z-index:200;display:flex;flex-direction:column;overflow-y:auto;-webkit-overflow-scrolling:touch;padding:16px'
+      : 'position:fixed;inset:0;background:rgba(0,0,0,.4);display:flex;align-items:center;justify-content:center;z-index:200';
+    const cardStyle = mobile
+      ? 'width:100%'
+      : 'width:380px;max-width:92vw;background:var(--bg-elevated);border-radius:14px;padding:18px';
     host.innerHTML = `
-      <div style="position:fixed;inset:0;background:rgba(0,0,0,.4);display:flex;align-items:center;justify-content:center;z-index:200" onclick="if(event.target===this) Gastos.close()">
-        <div style="width:380px;max-width:92vw;background:var(--bg-elevated);border-radius:14px;padding:18px" onclick="event.stopPropagation()">
-          <h3 style="font-size:15px;font-weight:600;margin-bottom:14px">Registrar gasto</h3>
-          <div style="margin-bottom:10px"><label style="font-size:11px;color:var(--text-secondary);font-weight:600;display:block;margin-bottom:4px">Motivo</label><input type="text" id="gf-motivo" style="width:100%;font-size:12px;padding:7px 10px;border:1px solid var(--border-strong);border-radius:8px"></div>
-          <div style="display:grid;grid-template-columns:1fr 1fr;gap:9px;margin-bottom:10px">
-            <div><label style="font-size:11px;color:var(--text-secondary);font-weight:600;display:block;margin-bottom:4px">Categoría</label>
-              <select id="gf-cat" style="width:100%;font-size:12px;padding:7px 10px;border:1px solid var(--border-strong);border-radius:8px">${State.categoriasGasto.map(c=>`<option value="${c.id}">${c.nombre}</option>`).join('')}</select></div>
-            <div><label style="font-size:11px;color:var(--text-secondary);font-weight:600;display:block;margin-bottom:4px">Responsable</label>
-              <select id="gf-resp" style="width:100%;font-size:12px;padding:7px 10px;border:1px solid var(--border-strong);border-radius:8px">${State.personas.map(p=>`<option>${p}</option>`).join('')}</select></div>
+      <div style="${wrapStyle}" ${mobile?'':'onclick="if(event.target===this) Gastos.close()"'}>
+        <div style="${cardStyle}" onclick="event.stopPropagation()">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">
+            <h3 style="font-size:16px;font-weight:700">Registrar gasto</h3>
+            <button class="btn btn-sm" onclick="Gastos.close()">✕ ${mobile?'Cancelar':''}</button>
           </div>
-          <div style="display:grid;grid-template-columns:1fr 1fr;gap:9px;margin-bottom:10px">
-            <div><label style="font-size:11px;color:var(--text-secondary);font-weight:600;display:block;margin-bottom:4px">Moneda</label>
-              <select id="gf-moneda" style="width:100%;font-size:12px;padding:7px 10px;border:1px solid var(--border-strong);border-radius:8px"><option value="ARS">ARS</option><option value="USD">USD</option></select></div>
-            <div><label style="font-size:11px;color:var(--text-secondary);font-weight:600;display:block;margin-bottom:4px">Monto</label>
-              <input type="number" id="gf-monto" style="width:100%;font-size:12px;padding:7px 10px;border:1px solid var(--border-strong);border-radius:8px"></div>
+          ${this._labelInp('Motivo', `<input type="text" id="gf-motivo" style="${this._inp()}" placeholder="ej: Alquiler, nafta…">`)}
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:9px">
+            ${this._labelInp('Categoría', `<select id="gf-cat" style="${this._sel()}">${State.categoriasGasto.map(c=>`<option value="${c.id}">${c.nombre}</option>`).join('')}</select>`)}
+            ${this._labelInp('Responsable', `<select id="gf-resp" style="${this._sel()}">${State.personas.map(p=>`<option>${p}</option>`).join('')}</select>`)}
           </div>
-          <div style="margin-bottom:14px"><label style="font-size:11px;color:var(--text-secondary);font-weight:600;display:block;margin-bottom:4px">Caja que paga</label>
-            <select id="gf-caja-persona" style="width:48%;font-size:12px;padding:7px 10px;border:1px solid var(--border-strong);border-radius:8px">${State.personas.map(p=>`<option>${p}</option>`).join('')}</select>
-            <select id="gf-caja-bolsillo" style="width:48%;font-size:12px;padding:7px 10px;border:1px solid var(--border-strong);border-radius:8px;margin-left:4%"><option>ARS cash</option><option>ARS transferencia</option><option>USD cash</option><option>USD transferencia</option></select>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:9px">
+            ${this._labelInp('Moneda', `<select id="gf-moneda" style="${this._sel()}"><option value="ARS">ARS</option><option value="USD">USD</option></select>`)}
+            ${this._labelInp('Monto', `<input type="number" id="gf-monto" style="${this._inp()}" inputmode="decimal">`)}
           </div>
-          <div style="display:flex;gap:8px;justify-content:flex-end">
-            <button class="btn" onclick="Gastos.close()">Cancelar</button>
-            <button class="btn btn-primary" onclick="Gastos.save()"><i class="ti ti-check"></i> Guardar</button>
+          <div style="margin-bottom:14px">
+            <label style="font-size:11px;color:var(--text-secondary);font-weight:600;display:block;margin-bottom:4px">Caja que paga</label>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+              <select id="gf-caja-persona" style="${this._sel()}">${State.personas.map(p=>`<option>${p}</option>`).join('')}</select>
+              <select id="gf-caja-bolsillo" style="${this._sel()}"><option>ARS cash</option><option>ARS transferencia</option><option>USD cash</option><option>USD transferencia</option><option>USDT</option></select>
+            </div>
+          </div>
+          <div style="display:flex;gap:8px;${mobile?'':'justify-content:flex-end'}">
+            ${mobile?'':'<button class="btn" onclick="Gastos.close()">Cancelar</button>'}
+            <button class="btn btn-primary" style="${mobile?'flex:1;justify-content:center':''}" onclick="Gastos.save()"><i class="ti ti-check"></i> Guardar</button>
           </div>
         </div>
       </div>
     `;
+    setTimeout(() => document.getElementById('gf-motivo')?.focus(), 50);
   },
   close() { document.getElementById('gastos-modal-host').innerHTML = ''; },
 
@@ -250,14 +299,15 @@ const Gastos = {
   },
 
   viewGastosFijos() {
+    const mobile = this.isMobile();
     return `
-      <div style="padding:12px 22px;background:var(--blue-light);font-size:12px;color:var(--blue)">
-        <i class="ti ti-info-circle"></i> Esta es tu plantilla de gastos fijos (Alquiler, Monotributos, CRM, etc). Editá los conceptos y montos sugeridos acá una vez, y cada mes los "cargás" con un clic en Cierre de mes — sin tener que escribirlos de nuevo.
+      <div style="padding:10px ${mobile?'12':'22'}px;background:var(--blue-light);font-size:12px;color:var(--blue);flex-shrink:0">
+        <i class="ti ti-info-circle"></i> Plantilla de gastos fijos — editá una vez, cargalos cada mes desde Cierre de mes.
       </div>
-      <div style="padding:12px 22px;display:flex;justify-content:flex-end">
+      <div style="padding:10px ${mobile?'12':'22'}px;display:flex;justify-content:flex-end;flex-shrink:0">
         <button class="btn btn-primary btn-sm" onclick="Gastos.addFijo()"><i class="ti ti-plus"></i> Agregar gasto fijo</button>
       </div>
-      <div class="body-pad" style="padding-top:0" id="fijos-list"></div>
+      <div class="body-pad" style="overflow-y:auto;-webkit-overflow-scrolling:touch;flex:1;min-height:0;padding-top:0" id="fijos-list"></div>
     `;
   },
 
@@ -265,6 +315,30 @@ const Gastos = {
     const host = document.getElementById('fijos-list');
     if (!host) return;
     if (!State.gastosFijosPlantilla.length) { host.innerHTML = `<div class="empty-state"><i class="ti ti-repeat"></i>Todavía no tenés gastos fijos cargados</div>`; return; }
+    if (this.isMobile()) {
+      host.innerHTML = `<div style="display:flex;flex-direction:column;gap:8px;padding:8px 12px">
+        ${State.gastosFijosPlantilla.map((g,i) => `
+          <div class="card" style="margin-bottom:0;padding:12px 14px">
+            <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
+              <input type="text" value="${g.motivo}" onchange="Gastos.editarFijoMotivo(${i}, this.value)" style="flex:1;font-size:13px;font-weight:600;padding:5px 8px;border:1px solid var(--border-strong);border-radius:6px;background:var(--bg-secondary);color:var(--text)">
+              <button class="btn btn-sm" style="color:var(--red)" onclick="Gastos.delFijo(${i})"><i class="ti ti-trash"></i></button>
+            </div>
+            <div style="display:grid;grid-template-columns:1fr 90px 70px;gap:6px">
+              <select onchange="Gastos.editarFijoCat(${i}, this.value)" style="font-size:12px;padding:5px 8px;border:1px solid var(--border-strong);border-radius:6px;background:var(--bg-secondary);color:var(--text)">
+                <option value="">Sin categoría</option>
+                ${State.categoriasGasto.map(c=>`<option value="${c.id}" ${g.cat===c.id?'selected':''}>${c.nombre}</option>`).join('')}
+              </select>
+              <input type="number" value="${g.montoSugerido}" onchange="Gastos.editarFijoMonto(${i}, this.value)" placeholder="Monto" style="font-size:12px;padding:5px 8px;border:1px solid var(--border-strong);border-radius:6px;background:var(--bg-secondary);color:var(--text)">
+              <select onchange="Gastos.editarFijoMoneda(${i}, this.value)" style="font-size:12px;padding:5px 8px;border:1px solid var(--border-strong);border-radius:6px;background:var(--bg-secondary);color:var(--text)">
+                <option value="ARS" ${g.moneda==='ARS'?'selected':''}>ARS</option>
+                <option value="USD" ${g.moneda==='USD'?'selected':''}>USD</option>
+              </select>
+            </div>
+          </div>
+        `).join('')}
+      </div>`;
+      return;
+    }
     host.innerHTML = `
       <table><thead><tr><th>Concepto</th><th>Categoría</th><th>Monto sugerido</th><th>Moneda</th><th></th></tr></thead>
       <tbody>

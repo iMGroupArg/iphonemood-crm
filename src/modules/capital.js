@@ -51,7 +51,7 @@ const Capital = {
       return s + (p.costoUSD || 0) * qty;
     }, 0);
 
-    // Cajas equivalente en USD
+    // Cajas equivalente en USD (incluye todos los bolsillos de todas las personas)
     let cajasUSD = 0;
     Object.values(State.cajas || {}).forEach(c => {
       cajasUSD += ((c['USD cash']||0) + (c['USD transferencia']||0));
@@ -59,15 +59,19 @@ const Capital = {
       cajasUSD += (c['USDT'] || 0) * (State.refUsdt || 1) / (State.refBlue || 1);
     });
 
-    // Activos taller (herramientas + repuestos de stock)
-    const valorTaller = (State.stock || []).filter(p => ['herramienta','repuesto'].includes(p.cat))
-      .reduce((s, p) => s + (p.costoUSD || 0) * Math.max(State.getStock(p), 1), 0);
+    // Pedidos en tránsito: lotes pagados pero aún no recibidos
+    // El dinero ya salió de las cajas, pero el stock no entró todavía
+    const pedidosEnTransito = (State.lotePagos || []).reduce((s, p) => {
+      const lote = (State.lotesCompra || []).find(l => l.id === p.loteId);
+      if (!lote || lote.estado === 'recibido') return s;
+      return s + (p.montoUsd || 0);
+    }, 0);
 
     // Activos fijos
     const valorActivosFijos = (State.activosFijos || []).reduce((s, a) => s + (a.valorUSD || 0), 0);
 
     // Capital bruto
-    const capitalBruto = valorStock + cajasUSD + valorActivosFijos;
+    const capitalBruto = valorStock + cajasUSD + pedidosEnTransito + valorActivosFijos;
 
     // Inversores
     const capitalInvertido = (State.inversores || []).reduce((s, i) => s + (i.capitalInicialUSD || 0), 0);
@@ -76,7 +80,7 @@ const Capital = {
     // Capital neto
     const capitalNeto = capitalBruto - capitalInvertido - totalPagadoInversores;
 
-    return { valorStock, cajasUSD, valorTaller, valorActivosFijos, capitalBruto, capitalInvertido, totalPagadoInversores, capitalNeto };
+    return { valorStock, cajasUSD, pedidosEnTransito, valorActivosFijos, capitalBruto, capitalInvertido, totalPagadoInversores, capitalNeto };
   },
 
   // ── RESUMEN ───────────────────────────────────────────────
@@ -116,9 +120,10 @@ const Capital = {
         <div class="card" style="margin-bottom:0">
           <div class="card-title"><i class="ti ti-calculator"></i> Composición del capital bruto</div>
           ${[
-            ['Stock de productos',    r.valorStock,       'var(--blue)'],
-            ['Cajas (ARS+USD+USDT)',  r.cajasUSD,         'var(--green)'],
-            ['Activos fijos',         r.valorActivosFijos,'var(--amber)'],
+            ['Stock de productos',    r.valorStock,          'var(--blue)'],
+            ['Cajas (ARS+USD+USDT)',  r.cajasUSD,            'var(--green)'],
+            ...(r.pedidosEnTransito > 0 ? [['Pedidos en tránsito', r.pedidosEnTransito, 'var(--amber)']] : []),
+            ['Activos fijos',         r.valorActivosFijos,   'var(--amber)'],
           ].map(([label, val, color]) => `
             <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid var(--border)">
               <span style="font-size:12px;color:var(--text-secondary)">${label}</span>

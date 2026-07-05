@@ -3,14 +3,14 @@ const Stock = {
   currentView: 'productos', // 'productos' | 'historial'
   currentGroup: 'dispositivos', // 'dispositivos' | 'accesorios' | 'perfumeria'
   currentEstado: 'todos', // 'todos' | 'disponible' | 'vendido' | 'reservado' | 'en_reparacion'
-  CAT_LABELS: { iphone:'iPhone', android:'Android', mac:'Mac', ipad:'iPad', watch:'Watch', audio:'Audio', perfumeria:'Perfumería', accesorio:'Accesorio', repuesto:'Repuesto', herramienta:'Herramienta', otro:'Otro' },
-  CAT_CLASS: { iphone:'b-blue', android:'b-teal', mac:'b-blue', ipad:'b-blue', watch:'b-blue', audio:'b-purple', perfumeria:'b-green', accesorio:'b-purple', repuesto:'b-amber', herramienta:'b-amber', otro:'b-gray' },
+  CAT_LABELS: { iphone:'iPhone', android:'Android', mac:'Mac', ipad:'iPad', watch:'Watch', audio:'Audio', perfumeria:'Perfumería', decant:'Decant', accesorio:'Accesorio', repuesto:'Repuesto', herramienta:'Herramienta', otro:'Otro' },
+  CAT_CLASS: { iphone:'b-blue', android:'b-teal', mac:'b-blue', ipad:'b-blue', watch:'b-blue', audio:'b-purple', perfumeria:'b-green', decant:'b-teal', accesorio:'b-purple', repuesto:'b-amber', herramienta:'b-amber', otro:'b-gray' },
   CATS_IMEI: ['iphone','android','mac','ipad'],
   // Agrupación de rubros para las pestañas grandes del panel
   GRUPOS: {
     dispositivos: { label: 'Dispositivos', icon: 'ti-device-mobile', cats: ['iphone','android','mac','ipad','watch','audio'] },
     accesorios: { label: 'Accesorios', icon: 'ti-plug', cats: ['accesorio'] },
-    perfumeria: { label: 'Perfumería', icon: 'ti-droplet', cats: ['perfumeria'] },
+    perfumeria: { label: 'Perfumería', icon: 'ti-droplet', cats: ['perfumeria', 'decant'] },
     taller: { label: 'Taller', icon: 'ti-tool', cats: ['herramienta','repuesto'] },
   },
   ESTADO_INV_LABEL: { disponible:'Disponible', vendido:'Vendido', reservado:'Reservado', en_reparacion:'En reparación' },
@@ -295,7 +295,7 @@ const Stock = {
               <div class="stock-card-name">${p.nombre}</div>
               <span class="badge ${this.CAT_CLASS[p.cat]||'b-gray'}" style="margin-top:4px">${this.CAT_LABELS[p.cat]||p.cat}</span>
               ${p.cat === 'repuesto' && p.modelo ? `<div style="font-size:10.5px;color:var(--amber);margin-top:3px"><i class="ti ti-device-mobile" style="font-size:9px"></i> ${p.modelo}</div>` : ''}
-              ${p.cat === 'perfumeria' ? `<div style="font-size:10.5px;color:var(--text-secondary);margin-top:3px">${[p.modelo,p.storage,p.color].filter(Boolean).join(' · ')}</div>` : ''}
+              ${['perfumeria','decant'].includes(p.cat) ? `<div style="font-size:10.5px;color:var(--text-secondary);margin-top:3px">${[p.modelo,p.storage,p.color].filter(Boolean).join(' · ')}</div>` : ''}
             </div>
             ${statusBadge}
           </div>
@@ -365,7 +365,7 @@ const Stock = {
     return d.toLocaleDateString('es-AR', { day:'2-digit', month:'2-digit' }) + ' ' + d.toLocaleTimeString('es-AR', { hour:'2-digit', minute:'2-digit' });
   },
 
-  CAT_ICONS: { iphone:'ti-device-mobile', android:'ti-device-mobile', mac:'ti-device-laptop', ipad:'ti-device-ipad', watch:'ti-device-watch', audio:'ti-headphones', perfumeria:'ti-droplet', accesorio:'ti-plug', repuesto:'ti-components', herramienta:'ti-tool', otro:'ti-box' },
+  CAT_ICONS: { iphone:'ti-device-mobile', android:'ti-device-mobile', mac:'ti-device-laptop', ipad:'ti-device-ipad', watch:'ti-device-watch', audio:'ti-headphones', perfumeria:'ti-droplet', decant:'ti-flask', accesorio:'ti-plug', repuesto:'ti-components', herramienta:'ti-tool', otro:'ti-box' },
   MODELOS_POR_CAT: {
     iphone: ['iPhone 11','iPhone 12','iPhone 12 Pro','iPhone 13','iPhone 13 Pro','iPhone 14','iPhone 14 Pro','iPhone 14 Pro Max','iPhone 15','iPhone 15 Plus','iPhone 15 Pro','iPhone 15 Pro Max','iPhone 16','iPhone 16 Pro','iPhone 16 Pro Max','iPhone 17','iPhone 17 Pro','iPhone 17 Pro Max'],
     android: ['Samsung Galaxy S23','Samsung Galaxy S24','Samsung Galaxy S24+','Samsung Galaxy S24 Ultra','Samsung Galaxy A54','Samsung Galaxy A34','Motorola G84','Motorola G54','Motorola Edge 40','Xiaomi 13'],
@@ -483,11 +483,11 @@ const Stock = {
 
                 <div id="f-nombre-libre-wrap" style="display:${['perfumeria','accesorio','repuesto','herramienta','otro'].includes(p.cat)?'block':'none'};margin-bottom:12px">
                   <label style="font-size:11px;color:var(--text-secondary);font-weight:600;display:block;margin-bottom:4px">Nombre ${p.cat==='herramienta'?'de la herramienta':p.cat==='repuesto'?'del repuesto':'del producto'} *</label>
-                  <input type="text" id="f-nombre-libre" value="${['perfumeria','accesorio','repuesto','herramienta','otro'].includes(p.cat) ? (p.nombre||'') : ''}" placeholder="${p.cat==='herramienta'?'ej: Pistola de calor, iSclack, destornillador pentalobe…':p.cat==='repuesto'?'ej: Batería, Pantalla, Flex de carga…':'ej: Dior Sauvage 100ml'}" style="width:100%;font-size:12px;padding:7px 10px;border:1px solid var(--border-strong);border-radius:8px">
+                  <input type="text" id="f-nombre-libre" value="${['perfumeria','decant','accesorio','repuesto','herramienta','otro'].includes(p.cat) ? (p.nombre||'') : ''}" placeholder="${p.cat==='herramienta'?'ej: Pistola de calor, iSclack, destornillador pentalobe…':p.cat==='repuesto'?'ej: Batería, Pantalla, Flex de carga…':p.cat==='decant'?'ej: Decant Lattafa Asad 5ml':'ej: Dior Sauvage 100ml'}" style="width:100%;font-size:12px;padding:7px 10px;border:1px solid var(--border-strong);border-radius:8px">
                 </div>
 
-                <!-- CAMPOS ESPECÍFICOS DE PERFUMERÍA -->
-                <div id="f-perfume-wrap" style="display:${p.cat==='perfumeria'?'block':'none'};margin-bottom:12px">
+                <!-- CAMPOS ESPECÍFICOS DE PERFUMERÍA / DECANT -->
+                <div id="f-perfume-wrap" style="display:${['perfumeria','decant'].includes(p.cat)?'block':'none'};margin-bottom:12px">
                   <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px">
                     <div>
                       <label style="font-size:11px;color:var(--text-secondary);font-weight:600;display:block;margin-bottom:4px">Categoría</label>
@@ -775,7 +775,7 @@ const Stock = {
     if (!cat) return;
     const esIMEI = this.CATS_IMEI.includes(cat);
     const tieneModeloFijo = ['iphone','android','mac','ipad','watch','audio'].includes(cat);
-    const esLibre = ['perfumeria','accesorio','repuesto','herramienta','otro'].includes(cat);
+    const esLibre = ['perfumeria','decant','accesorio','repuesto','herramienta','otro'].includes(cat);
     const tieneStorageColor = ['iphone','android','mac','ipad'].includes(cat);
     const tieneBateria = ['iphone','android','ipad'].includes(cat);
     const esMac = cat === 'mac';
@@ -785,7 +785,7 @@ const Stock = {
     set('f-serie-wrap', esMac ? 'block' : 'none');
     set('f-modelo-wrap', tieneModeloFijo ? 'block' : 'none');
     set('f-nombre-libre-wrap', esLibre ? 'block' : 'none');
-    set('f-perfume-wrap', cat === 'perfumeria' ? 'block' : 'none');
+    set('f-perfume-wrap', ['perfumeria','decant'].includes(cat) ? 'block' : 'none');
     set('f-modelo-repuesto-wrap', cat === 'repuesto' ? 'block' : 'none');
     set('f-specs-grid', tieneStorageColor ? 'grid' : 'none');
     set('f-bateria-wrap', tieneBateria ? 'grid' : 'none');
@@ -812,16 +812,17 @@ const Stock = {
     if (saveBtn) { saveBtn.disabled = true; saveBtn.innerHTML = 'Guardando...'; }
     const restoreBtn = () => { if (saveBtn) { saveBtn.disabled = false; saveBtn.innerHTML = '<i class="ti ti-check"></i> Guardar'; } };
 
+    try {
     const cat = document.getElementById('f-cat').value;
     const esIMEI = this.CATS_IMEI.includes(cat);
     const tieneModeloFijo = ['iphone','android','mac','ipad','watch','audio'].includes(cat);
-    const esLibre = ['perfumeria','accesorio','repuesto','herramienta','otro'].includes(cat);
+    const esLibre = ['perfumeria','decant','accesorio','repuesto','herramienta','otro'].includes(cat);
 
     // Resolver el modelo (de la lista o "otro" escrito a mano)
     let modelo = '';
     let storage = '';
     let color = '';
-    if (cat === 'perfumeria') {
+    if (['perfumeria','decant'].includes(cat)) {
       modelo = document.getElementById('f-pf-marca')?.value || '';
       storage = document.getElementById('f-pf-conc')?.value || '';
       color = document.getElementById('f-pf-cat')?.value || '';
@@ -904,6 +905,11 @@ const Stock = {
     Sheets.stock(obj);
     this.closeDrawer();
     this.renderView();
+    } catch (err) {
+      console.error('Error al guardar producto:', err);
+      toast('Error al guardar. Revisá la conexión e intentá de nuevo.');
+      restoreBtn();
+    }
   },
 
   async deleteProduct(id) {

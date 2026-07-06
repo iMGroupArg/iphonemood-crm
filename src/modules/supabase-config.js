@@ -20,7 +20,8 @@ const DB = {
            reparacionesRes, repRepuestosRes, repPagosRes, catGastoRes, gastosRes, cambiosRes,
            gastosFijosRes, cierresRes, inversoresRes, inversorPagosRes, activosFijosRes,
            proveedoresRes, lotesRes, loteItemsRes, lotePagosRes,
-           turnosSlotsRes, turnosReservasRes] = await Promise.all([
+           turnosSlotsRes, turnosReservasRes,
+           deudasRes, deudaPagosRes] = await Promise.all([
       supa.from('personas').select('*'),
       supa.from('cajas').select('*'),
       supa.from('stock').select('*'),
@@ -45,6 +46,8 @@ const DB = {
       supa.from('lote_pagos').select('*').order('id', { ascending: true }),
       supa.from('turnos_slots').select('*').order('fecha').order('hora_inicio'),
       supa.from('turnos_reservas').select('*').order('creado_en', { ascending: false }),
+      supa.from('deudas_manuales').select('*').order('creado_en', { ascending: false }),
+      supa.from('deuda_pagos').select('*').order('creado_en', { ascending: false }),
     ]);
 
     // mapa de personas (id <-> nombre), lo usamos todo el tiempo para traducir
@@ -219,6 +222,19 @@ const DB = {
       id: r.id, slotId: r.slot_id, nombre: r.nombre, telefono: r.telefono,
       email: r.email || '', equipo: r.equipo || '', comentarios: r.comentarios || '',
       estado: r.estado, encargado: r.encargado || '', token: r.token,
+    }));
+
+    // cuenta corriente
+    State.deudas = (deudasRes.data || []).map(d => ({
+      id: d.id, cliente: d.cliente, clienteTel: d.cliente_tel || '',
+      descripcion: d.descripcion, concepto: d.concepto || null,
+      moneda: d.moneda, monto: Number(d.monto), montoPagado: Number(d.monto_pagado) || 0,
+      estado: d.estado, notas: d.notas || '', creadoEn: d.creado_en,
+    }));
+    State.deudaPagos = (deudaPagosRes.data || []).map(p => ({
+      id: p.id, deudaId: p.deuda_id, monto: Number(p.monto), moneda: p.moneda,
+      persona: p.persona || '', bolsillo: p.bolsillo || '', notas: p.notas || '',
+      fecha: p.fecha || '',
     }));
   },
 

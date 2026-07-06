@@ -70,8 +70,13 @@ const Capital = {
     // Activos fijos
     const valorActivosFijos = (State.activosFijos || []).reduce((s, a) => s + (a.valorUSD || 0), 0);
 
+    // Cuentas por cobrar (ventas abiertas + deudas manuales activas)
+    const cuentasPorCobrar = typeof CuentaCorriente !== 'undefined'
+      ? CuentaCorriente.totalCuentasPorCobrar()
+      : 0;
+
     // Capital bruto
-    const capitalBruto = valorStock + cajasUSD + pedidosEnTransito + valorActivosFijos;
+    const capitalBruto = valorStock + cajasUSD + pedidosEnTransito + valorActivosFijos + cuentasPorCobrar;
 
     // Inversores
     const capitalInvertido = (State.inversores || []).reduce((s, i) => s + (i.capitalInicialUSD || 0), 0);
@@ -80,7 +85,7 @@ const Capital = {
     // Capital neto
     const capitalNeto = capitalBruto - capitalInvertido - totalPagadoInversores;
 
-    return { valorStock, cajasUSD, pedidosEnTransito, valorActivosFijos, capitalBruto, capitalInvertido, totalPagadoInversores, capitalNeto };
+    return { valorStock, cajasUSD, pedidosEnTransito, valorActivosFijos, cuentasPorCobrar, capitalBruto, capitalInvertido, totalPagadoInversores, capitalNeto };
   },
 
   // ── RESUMEN ───────────────────────────────────────────────
@@ -124,6 +129,7 @@ const Capital = {
             ['Cajas (ARS+USD+USDT)',  r.cajasUSD,            'var(--green)'],
             ...(r.pedidosEnTransito > 0 ? [['Pedidos en tránsito', r.pedidosEnTransito, 'var(--amber)']] : []),
             ['Activos fijos',         r.valorActivosFijos,   'var(--amber)'],
+            ...(r.cuentasPorCobrar > 0 ? [['Cuentas por cobrar', r.cuentasPorCobrar, 'var(--text-secondary)']] : []),
           ].map(([label, val, color]) => `
             <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid var(--border)">
               <span style="font-size:12px;color:var(--text-secondary)">${label}</span>

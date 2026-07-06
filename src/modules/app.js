@@ -13,6 +13,7 @@ import './capital.js';
 import './clientes.js';
 import './proveedores.js';
 import './turnos.js';
+import './cuentacorriente.js';
 
 const App = {
   PAGES: {
@@ -28,6 +29,7 @@ const App = {
     clientes: { title: 'Clientes', module: Clientes },
     proveedores: { title: 'Proveedores', module: Proveedores },
     turnos: { title: 'Turnos', module: Turnos },
+    cuentacorriente: { title: 'Cuenta Corriente', module: CuentaCorriente },
     panel: { title: 'Panel de control', module: Panel },
   },
 
@@ -230,6 +232,12 @@ const App = {
       } else {
         badgeVentas.style.display = 'none';
       }
+    }
+    const badgeCC = document.getElementById('badge-cc');
+    if (badgeCC && typeof CuentaCorriente !== 'undefined') {
+      const con = CuentaCorriente.getClientesConDeuda().length;
+      if (con > 0) { badgeCC.textContent = con; badgeCC.style.display = 'inline-flex'; }
+      else { badgeCC.style.display = 'none'; }
     }
   }
 };

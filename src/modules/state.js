@@ -47,6 +47,10 @@ const State = {
   turnosSlots: [],
   turnosReservas: [],
 
+  // CUENTA CORRIENTE — se carga desde Supabase
+  deudas: [],
+  deudaPagos: [],
+
   // CASH FLOW — log de movimientos para el módulo de cash flow
   movimientos: [],
 

@@ -185,47 +185,28 @@ const CuentaCorriente = {
     </thead><tbody id="cc-tbody"></tbody>`;
 
     const tbody = table.querySelector('#cc-tbody');
-    clientes.forEach(c => {
+    clientes.forEach((c, i) => {
       const saldo = this.totalSaldoCliente(c);
       const dias  = c.ventasAbiertas.length ? Math.max(...c.ventasAbiertas.map(v => this.antiguedadDias(v))) : 0;
-      const color = dias > 30 ? 'var(--red)' : dias > 15 ? 'var(--amber)' : 'var(--text-secondary)';
+      const dcolor = dias > 30 ? 'var(--red)' : dias > 15 ? 'var(--amber)' : 'var(--text-secondary)';
       const tr = document.createElement('tr');
       tr.style.cssText = 'border-bottom:1px solid var(--border);cursor:pointer;transition:background .1s';
-      tr.onmouseover  = () => tr.style.background = 'var(--bg-elevated)';
-      tr.onmouseout   = () => tr.style.background = '';
-
-      // Celda nombre + lápiz
-      const tdNombre = document.createElement('td');
-      tdNombre.style.cssText = 'padding:12px 8px;font-weight:600';
-      tdNombre.style.display = 'table-cell'; // asegura display correcto
-      const nombreSpan = document.createElement('span');
-      nombreSpan.textContent = c.nombre;
-      const btnLapiz = document.createElement('button');
-      btnLapiz.title = 'Editar nombre';
-      btnLapiz.style.cssText = 'background:none;border:none;cursor:pointer;color:var(--text-secondary);font-size:13px;padding:2px 4px;margin-left:6px;vertical-align:middle';
-      btnLapiz.innerHTML = '<i class="ti ti-pencil"></i>';
-      btnLapiz.addEventListener('click', e => { e.stopPropagation(); this.openEditarCliente(c); });
-      tr.onmouseover = () => { tr.style.background = 'var(--bg-elevated)'; };
-      tr.onmouseout  = () => { tr.style.background = ''; };
-      tdNombre.appendChild(nombreSpan);
-      tdNombre.appendChild(btnLapiz);
-      tr.appendChild(tdNombre);
-
-      tr.insertAdjacentHTML('beforeend', `
+      tr.onmouseover = () => tr.style.background = 'var(--bg-elevated)';
+      tr.onmouseout  = () => tr.style.background = '';
+      tr.innerHTML = `
+        <td style="padding:12px 8px;font-weight:600">
+          ${c.nombre}
+          <button data-edit="${i}" title="Editar" style="background:var(--bg-elevated);border:1px solid var(--border);border-radius:4px;cursor:pointer;color:var(--text);font-size:11px;padding:2px 6px;margin-left:8px;vertical-align:middle;line-height:1">✏️</button>
+        </td>
         <td style="padding:12px 8px;color:var(--text-secondary)">${c.tel || '—'}</td>
         <td style="padding:12px 8px;text-align:center">${c.ventasAbiertas.length + c.deudasManuales.length}</td>
         <td style="padding:12px 8px;text-align:right;font-weight:700;color:var(--amber)">USD ${saldo.toFixed(2)}</td>
-        <td style="padding:12px 8px;text-align:center;color:${color}">${dias > 0 ? `${dias}d` : '—'}</td>
-        <td style="padding:12px 8px;text-align:right;white-space:nowrap"></td>`);
-
-      // Botón Ver
-      const tdAcc = tr.lastElementChild;
-      const btnVer = document.createElement('button');
-      btnVer.style.cssText = 'background:var(--blue);color:#fff;border:none;border-radius:var(--radius-sm);padding:5px 14px;font-size:12px;font-weight:600;cursor:pointer;margin-right:4px';
-      btnVer.textContent = 'Ver';
-      btnVer.addEventListener('click', e => { e.stopPropagation(); this.verDetalle(c); });
-      tdAcc.appendChild(btnVer);
-
+        <td style="padding:12px 8px;text-align:center;color:${dcolor}">${dias > 0 ? `${dias}d` : '—'}</td>
+        <td style="padding:12px 8px;text-align:right">
+          <button data-ver="${i}" style="background:var(--blue);color:#fff;border:none;border-radius:var(--radius-sm);padding:5px 14px;font-size:12px;font-weight:600;cursor:pointer">Ver</button>
+        </td>`;
+      tr.querySelector(`[data-edit="${i}"]`).addEventListener('click', e => { e.stopPropagation(); this.openEditarCliente(c); });
+      tr.querySelector(`[data-ver="${i}"]`).addEventListener('click',  e => { e.stopPropagation(); this.verDetalle(c); });
       tr.addEventListener('click', () => this.verDetalle(c));
       tbody.appendChild(tr);
     });

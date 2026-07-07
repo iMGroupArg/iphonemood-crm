@@ -18,9 +18,15 @@ const CuentaCorriente = {
 
   saldoDeuda(d) { return Math.max(0, d.monto - d.montoPagado); },
 
+  toUSD(monto, moneda) {
+    if (moneda === 'ARS') return monto / (State.refBlue || 1);
+    return monto; // USD o USDT ya están en USD
+  },
+
   totalSaldoCliente(c) {
     return c.ventasAbiertas.reduce((s, v) => s + this.saldoVenta(v), 0)
-         + c.deudasManuales.filter(d => d.estado === 'activa').reduce((s, d) => s + this.saldoDeuda(d), 0);
+         + c.deudasManuales.filter(d => d.estado === 'activa')
+             .reduce((s, d) => s + this.toUSD(this.saldoDeuda(d), d.moneda), 0);
   },
 
   antiguedadDias(v) {
@@ -339,7 +345,9 @@ const CuentaCorriente = {
   },
 
   _cardDeudaManual(d) {
-    const saldo = this.saldoDeuda(d);
+    const saldo    = this.saldoDeuda(d);
+    const saldoUSD = this.toUSD(saldo, d.moneda);
+    const esARS    = d.moneda === 'ARS';
     return `
       <div style="background:var(--bg-elevated);border-radius:var(--radius);padding:12px;border:1px solid var(--border);margin-bottom:8px">
         <div style="display:flex;justify-content:space-between;align-items:flex-start">
@@ -348,8 +356,9 @@ const CuentaCorriente = {
             ${d.concepto ? `<div style="font-size:12px;color:var(--text-secondary)">${d.concepto}</div>` : ''}
           </div>
           <div style="text-align:right">
-            <div style="font-weight:700;color:var(--amber)">${d.moneda} ${saldo.toFixed(2)}</div>
-            <div style="font-size:11px;color:var(--text-secondary)">${d.moneda} ${d.monto.toFixed(2)} total</div>
+            <div style="font-weight:700;color:var(--amber)">${d.moneda} ${saldo.toLocaleString('es-AR', {maximumFractionDigits:2})}</div>
+            ${esARS ? `<div style="font-size:11px;color:var(--text-secondary)">≈ USD ${saldoUSD.toFixed(2)}</div>` : ''}
+            <div style="font-size:11px;color:var(--text-secondary)">${d.moneda} ${d.monto.toLocaleString('es-AR', {maximumFractionDigits:2})} total</div>
           </div>
         </div>
         ${d.notas ? `<div style="margin-top:6px;font-size:12px;color:var(--text-secondary)">${d.notas}</div>` : ''}

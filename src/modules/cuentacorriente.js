@@ -243,10 +243,19 @@ const CuentaCorriente = {
     header.appendChild(btnBack);
 
     const headerInfo = document.createElement('div');
-    headerInfo.style.cssText = 'flex:1;min-width:0';
-    headerInfo.innerHTML = `
+    headerInfo.style.cssText = 'flex:1;min-width:0;display:flex;align-items:center;gap:8px';
+    const headerTexts = document.createElement('div');
+    headerTexts.style.cssText = 'min-width:0';
+    headerTexts.innerHTML = `
       <div style="font-weight:700;font-size:${mob?'16px':'18px'};white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${c.nombre}</div>
       ${c.tel ? `<div style="font-size:12px;color:var(--text-secondary)">${c.tel}</div>` : ''}`;
+    const btnEditar = document.createElement('button');
+    btnEditar.title = 'Editar nombre';
+    btnEditar.style.cssText = 'background:none;border:none;cursor:pointer;color:var(--text-secondary);font-size:16px;padding:4px;display:flex;align-items:center;flex-shrink:0';
+    btnEditar.innerHTML = '<i class="ti ti-pencil"></i>';
+    btnEditar.addEventListener('click', () => this.openEditarCliente(c));
+    headerInfo.appendChild(headerTexts);
+    headerInfo.appendChild(btnEditar);
     header.appendChild(headerInfo);
 
     const headerSaldo = document.createElement('div');
@@ -386,6 +395,101 @@ const CuentaCorriente = {
       `Hola ${c.nombre}! Te recordamos que tenés un saldo pendiente de USD ${saldoTotal.toFixed(2)} con iPhoneMood. Cualquier consulta estamos a disposición!`
     );
     window.open(`https://wa.me/${(c.tel || '').replace(/\D/g, '')}?text=${msg}`, '_blank');
+  },
+
+  // ── Modal: Editar nombre/teléfono del cliente ────────────────────────────────
+
+  openEditarCliente(c) {
+    const mob = this.isMobile();
+    const overlay = document.createElement('div');
+    overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:400;display:flex;align-items:center;justify-content:center';
+
+    const box = document.createElement('div');
+    box.style.cssText = mob
+      ? 'background:var(--bg-elevated);border-radius:16px;width:calc(100% - 32px);padding:24px'
+      : 'background:var(--bg-elevated);border-radius:var(--radius-lg);width:400px;padding:24px;box-shadow:0 20px 60px rgba(0,0,0,.4)';
+
+    box.innerHTML = `
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px">
+        <h3 style="margin:0;font-size:17px;font-weight:700">Editar cliente</h3>
+        <button id="cc-edit-close" style="background:none;border:none;cursor:pointer;font-size:22px;color:var(--text-secondary);display:flex;align-items:center"><i class="ti ti-x"></i></button>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:14px">
+        <div>
+          <label style="font-size:12px;font-weight:600;color:var(--text-secondary);text-transform:uppercase;letter-spacing:.5px;display:block;margin-bottom:6px">Nombre *</label>
+          <input id="cc-edit-nombre" value="${c.nombre}" style="width:100%;padding:10px;border:1px solid var(--border);border-radius:var(--radius);background:var(--bg);color:var(--text);font-size:15px;box-sizing:border-box;font-family:var(--font)">
+        </div>
+        <div>
+          <label style="font-size:12px;font-weight:600;color:var(--text-secondary);text-transform:uppercase;letter-spacing:.5px;display:block;margin-bottom:6px">Teléfono</label>
+          <input id="cc-edit-tel" value="${c.tel || ''}" inputmode="tel" placeholder="Ej: 3413001234" style="width:100%;padding:10px;border:1px solid var(--border);border-radius:var(--radius);background:var(--bg);color:var(--text);font-size:15px;box-sizing:border-box;font-family:var(--font)">
+        </div>
+        <div id="cc-edit-error" style="display:none;color:var(--red);font-size:13px"></div>
+        <button id="cc-edit-guardar" style="background:var(--blue);color:#fff;border:none;border-radius:var(--radius);padding:12px;font-size:15px;font-weight:700;cursor:pointer">Guardar cambios</button>
+      </div>`;
+
+    overlay.appendChild(box);
+    document.body.appendChild(overlay);
+
+    const close = () => overlay.remove();
+    overlay.addEventListener('click', e => { if (e.target === overlay) close(); });
+    box.querySelector('#cc-edit-close').addEventListener('click', close);
+
+    box.querySelector('#cc-edit-guardar').addEventListener('click', async () => {
+      const nuevoNombre = box.querySelector('#cc-edit-nombre').value.trim();
+      const nuevoTel    = box.querySelector('#cc-edit-tel').value.trim();
+      const errEl       = box.querySelector('#cc-edit-error');
+
+      if (!nuevoNombre) { errEl.textContent = 'El nombre no puede estar vacío'; errEl.style.display = 'block'; return; }
+      errEl.style.display = 'none';
+
+      const btn = box.querySelector('#cc-edit-guardar');
+      btn.disabled = true;
+      btn.textContent = 'Guardando...';
+
+      try {
+        await this._actualizarNombreCliente(c, nuevoNombre, nuevoTel);
+        close();
+        // Reconstruir la referencia del cliente con los nuevos datos
+        const clientes = this.getClientesConDeuda();
+        const nuevaKey = nuevoTel ? `tel:${nuevoTel}` : `nom:${nuevoNombre}`;
+        this._clienteActual = clientes.find(x => x.key === nuevaKey) || null;
+        if (!this._clienteActual) this._vista = 'lista';
+        this._rerender();
+        State.showToast?.('Cliente actualizado');
+      } catch (e) {
+        errEl.textContent = 'Error: ' + e.message;
+        errEl.style.display = 'block';
+        btn.disabled = false;
+        btn.textContent = 'Guardar cambios';
+      }
+    });
+
+    // Foco automático en nombre
+    setTimeout(() => box.querySelector('#cc-edit-nombre').focus(), 50);
+  },
+
+  async _actualizarNombreCliente(c, nuevoNombre, nuevoTel) {
+    const { SUPABASE_URL, SUPABASE_ANON_KEY } = window.__APP_CONFIG__;
+    const supa2 = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+    // Obtener IDs de las deudas manuales de este cliente
+    const ids = c.deudasManuales.map(d => d.id);
+    if (ids.length) {
+      const { error } = await supa2.from('deudas_manuales')
+        .update({ cliente: nuevoNombre, cliente_tel: nuevoTel || null })
+        .in('id', ids);
+      if (error) throw error;
+    }
+
+    // Actualizar en memoria
+    c.deudasManuales.forEach(d => {
+      const dm = (State.deudas || []).find(x => x.id === d.id);
+      if (dm) { dm.cliente = nuevoNombre; dm.clienteTel = nuevoTel || ''; }
+      d.cliente = nuevoNombre;
+      d.clienteTel = nuevoTel || '';
+    });
+    c.nombre = nuevoNombre;
+    c.tel    = nuevoTel || '';
   },
 
   // ── Modal: Nueva deuda manual ────────────────────────────────────────────────

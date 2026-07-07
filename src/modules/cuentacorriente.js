@@ -202,11 +202,11 @@ const CuentaCorriente = {
       nombreSpan.textContent = c.nombre;
       const btnLapiz = document.createElement('button');
       btnLapiz.title = 'Editar nombre';
-      btnLapiz.style.cssText = 'background:none;border:none;cursor:pointer;color:var(--text-secondary);font-size:13px;padding:2px 4px;margin-left:6px;opacity:0;transition:opacity .15s;vertical-align:middle';
+      btnLapiz.style.cssText = 'background:none;border:none;cursor:pointer;color:var(--text-secondary);font-size:13px;padding:2px 4px;margin-left:6px;vertical-align:middle';
       btnLapiz.innerHTML = '<i class="ti ti-pencil"></i>';
       btnLapiz.addEventListener('click', e => { e.stopPropagation(); this.openEditarCliente(c); });
-      tr.onmouseover = () => { tr.style.background = 'var(--bg-elevated)'; btnLapiz.style.opacity = '1'; };
-      tr.onmouseout  = () => { tr.style.background = ''; btnLapiz.style.opacity = '0'; };
+      tr.onmouseover = () => { tr.style.background = 'var(--bg-elevated)'; };
+      tr.onmouseout  = () => { tr.style.background = ''; };
       tdNombre.appendChild(nombreSpan);
       tdNombre.appendChild(btnLapiz);
       tr.appendChild(tdNombre);

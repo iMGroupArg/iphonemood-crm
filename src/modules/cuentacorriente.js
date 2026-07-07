@@ -143,22 +143,29 @@ const CuentaCorriente = {
     const color = dias > 30 ? 'var(--red)' : dias > 15 ? 'var(--amber)' : 'var(--text-secondary)';
 
     const el = document.createElement('div');
-    el.style.cssText = 'background:var(--bg-elevated);border-radius:var(--radius);padding:14px;border:1px solid var(--border);margin-bottom:8px;cursor:pointer';
+    el.style.cssText = 'background:var(--bg-elevated);border-radius:var(--radius);padding:14px;border:1px solid var(--border);margin-bottom:8px';
     el.innerHTML = `
       <div style="display:flex;justify-content:space-between;align-items:flex-start">
-        <div>
-          <div style="font-weight:600;font-size:15px">${c.nombre}</div>
+        <div style="min-width:0;flex:1">
+          <div style="font-weight:600;font-size:15px;display:flex;align-items:center;gap:6px">
+            <span>${c.nombre}</span>
+            <button class="cc-card-edit" style="background:none;border:none;cursor:pointer;color:var(--text-secondary);font-size:14px;padding:2px;display:flex;align-items:center;flex-shrink:0"><i class="ti ti-pencil"></i></button>
+          </div>
           ${c.tel ? `<div style="font-size:12px;color:var(--text-secondary)">${c.tel}</div>` : ''}
         </div>
-        <div style="text-align:right">
+        <div style="text-align:right;flex-shrink:0;margin-left:8px">
           <div style="font-weight:700;font-size:16px;color:var(--amber)">USD ${saldo.toFixed(2)}</div>
           ${dias > 0 ? `<div style="font-size:11px;color:${color}">${dias}d atraso</div>` : ''}
         </div>
       </div>
-      <div style="margin-top:8px;display:flex;gap:6px;font-size:12px">
+      <div style="margin-top:10px;display:flex;gap:6px;font-size:12px;align-items:center">
         ${c.ventasAbiertas.length ? `<span style="background:var(--bg);border:1px solid var(--border);border-radius:20px;padding:2px 8px">${c.ventasAbiertas.length} venta${c.ventasAbiertas.length>1?'s':''}</span>` : ''}
         ${c.deudasManuales.length ? `<span style="background:var(--bg);border:1px solid var(--border);border-radius:20px;padding:2px 8px">${c.deudasManuales.length} deuda${c.deudasManuales.length>1?'s':''}</span>` : ''}
+        <button class="cc-card-ver" style="margin-left:auto;background:var(--blue);color:#fff;border:none;border-radius:var(--radius-sm);padding:5px 14px;font-size:12px;font-weight:600;cursor:pointer">Ver detalle</button>
       </div>`;
+
+    el.querySelector('.cc-card-edit').addEventListener('click', e => { e.stopPropagation(); this.openEditarCliente(c); });
+    el.querySelector('.cc-card-ver').addEventListener('click', e => { e.stopPropagation(); this.verDetalle(c); });
     el.addEventListener('click', () => this.verDetalle(c));
     return el;
   },
@@ -186,27 +193,41 @@ const CuentaCorriente = {
       tr.style.cssText = 'border-bottom:1px solid var(--border);cursor:pointer;transition:background .1s';
       tr.onmouseover  = () => tr.style.background = 'var(--bg-elevated)';
       tr.onmouseout   = () => tr.style.background = '';
-      tr.innerHTML = `
-        <td style="padding:12px 8px;font-weight:600">${c.nombre}</td>
+
+      // Celda nombre + lápiz
+      const tdNombre = document.createElement('td');
+      tdNombre.style.cssText = 'padding:12px 8px;font-weight:600';
+      tdNombre.style.display = 'table-cell'; // asegura display correcto
+      const nombreSpan = document.createElement('span');
+      nombreSpan.textContent = c.nombre;
+      const btnLapiz = document.createElement('button');
+      btnLapiz.title = 'Editar nombre';
+      btnLapiz.style.cssText = 'background:none;border:none;cursor:pointer;color:var(--text-secondary);font-size:13px;padding:2px 4px;margin-left:6px;opacity:0;transition:opacity .15s;vertical-align:middle';
+      btnLapiz.innerHTML = '<i class="ti ti-pencil"></i>';
+      btnLapiz.addEventListener('click', e => { e.stopPropagation(); this.openEditarCliente(c); });
+      tr.onmouseover = () => { tr.style.background = 'var(--bg-elevated)'; btnLapiz.style.opacity = '1'; };
+      tr.onmouseout  = () => { tr.style.background = ''; btnLapiz.style.opacity = '0'; };
+      tdNombre.appendChild(nombreSpan);
+      tdNombre.appendChild(btnLapiz);
+      tr.appendChild(tdNombre);
+
+      tr.insertAdjacentHTML('beforeend', `
         <td style="padding:12px 8px;color:var(--text-secondary)">${c.tel || '—'}</td>
         <td style="padding:12px 8px;text-align:center">${c.ventasAbiertas.length + c.deudasManuales.length}</td>
         <td style="padding:12px 8px;text-align:right;font-weight:700;color:var(--amber)">USD ${saldo.toFixed(2)}</td>
         <td style="padding:12px 8px;text-align:center;color:${color}">${dias > 0 ? `${dias}d` : '—'}</td>
-        <td style="padding:12px 8px;text-align:right">
-          <button data-k="${c.key}" class="cc-ver-btn" style="background:var(--bg-elevated);border:1px solid var(--border);border-radius:var(--radius-sm);padding:4px 12px;font-size:12px;cursor:pointer">Ver</button>
-        </td>`;
-      tbody.appendChild(tr);
-    });
+        <td style="padding:12px 8px;text-align:right;white-space:nowrap"></td>`);
 
-    table.querySelectorAll('.cc-ver-btn').forEach(btn => {
-      btn.addEventListener('click', (e) => {
-        e.stopPropagation();
-        const c = clientes.find(x => x.key === btn.dataset.k);
-        if (c) this.verDetalle(c);
-      });
-    });
-    table.querySelectorAll('tr[style]').forEach((tr, i) => {
-      tr.addEventListener('click', () => this.verDetalle(clientes[i]));
+      // Botón Ver
+      const tdAcc = tr.lastElementChild;
+      const btnVer = document.createElement('button');
+      btnVer.style.cssText = 'background:var(--blue);color:#fff;border:none;border-radius:var(--radius-sm);padding:5px 14px;font-size:12px;font-weight:600;cursor:pointer;margin-right:4px';
+      btnVer.textContent = 'Ver';
+      btnVer.addEventListener('click', e => { e.stopPropagation(); this.verDetalle(c); });
+      tdAcc.appendChild(btnVer);
+
+      tr.addEventListener('click', () => this.verDetalle(c));
+      tbody.appendChild(tr);
     });
 
     return table;

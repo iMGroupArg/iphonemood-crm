@@ -129,7 +129,7 @@ const Capital = {
             ['Cajas (ARS+USD+USDT)',  r.cajasUSD,            'var(--green)'],
             ...(r.pedidosEnTransito > 0 ? [['Pedidos en tránsito', r.pedidosEnTransito, 'var(--amber)']] : []),
             ['Activos fijos',         r.valorActivosFijos,   'var(--amber)'],
-            ...(r.cuentasPorCobrar > 0 ? [['Cuentas por cobrar', r.cuentasPorCobrar, 'var(--text-secondary)']] : []),
+            ...(r.cuentasPorCobrar > 0 ? [['Cuentas por cobrar', r.cuentasPorCobrar, 'var(--blue)']] : []),
           ].map(([label, val, color]) => `
             <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid var(--border)">
               <span style="font-size:12px;color:var(--text-secondary)">${label}</span>

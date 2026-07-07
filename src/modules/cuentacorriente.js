@@ -91,14 +91,17 @@ const CuentaCorriente = {
     // Header
     const header = document.createElement('div');
     header.style.cssText = 'padding:16px 16px 0;display:flex;align-items:center;gap:10px;flex-shrink:0';
-    header.innerHTML = `
-      <div style="flex:1">
-        <h2 style="font-size:${mob?'18px':'20px'};font-weight:700;margin:0">Cuenta Corriente</h2>
-        <div style="font-size:13px;color:var(--text-secondary);margin-top:2px">${clientes.length} cliente${clientes.length !== 1 ? 's' : ''} con saldo pendiente</div>
-      </div>
-      <button id="cc-btn-nueva-deuda" style="display:flex;align-items:center;gap:6px;background:var(--blue);color:#fff;border:none;border-radius:var(--radius);padding:${mob?'8px 12px':'9px 16px'};font-size:14px;font-weight:600;cursor:pointer">
-        <i class="ti ti-plus"></i>${mob?'':'Deuda manual'}
-      </button>`;
+    const headerTxt = document.createElement('div');
+    headerTxt.style.cssText = 'flex:1';
+    headerTxt.innerHTML = `
+      <h2 style="font-size:${mob?'18px':'20px'};font-weight:700;margin:0">Cuenta Corriente</h2>
+      <div style="font-size:13px;color:var(--text-secondary);margin-top:2px">${clientes.length} cliente${clientes.length !== 1 ? 's' : ''} con saldo pendiente</div>`;
+    const btnNuevaDeuda = document.createElement('button');
+    btnNuevaDeuda.style.cssText = `display:flex;align-items:center;gap:6px;background:var(--blue);color:#fff;border:none;border-radius:var(--radius);padding:${mob?'8px 12px':'9px 16px'};font-size:14px;font-weight:600;cursor:pointer`;
+    btnNuevaDeuda.innerHTML = `<i class="ti ti-plus"></i>${mob ? '' : ' Deuda manual'}`;
+    btnNuevaDeuda.addEventListener('click', () => this.openNuevaDeuda());
+    header.appendChild(headerTxt);
+    header.appendChild(btnNuevaDeuda);
     wrap.appendChild(header);
 
     // KPIs
@@ -131,11 +134,6 @@ const CuentaCorriente = {
       body.appendChild(this._tablaClientes(clientes));
     }
     wrap.appendChild(body);
-
-    setTimeout(() => {
-      document.getElementById('cc-btn-nueva-deuda')?.addEventListener('click', () => this.openNuevaDeuda());
-    }, 0);
-
     return wrap;
   },
 
@@ -233,25 +231,55 @@ const CuentaCorriente = {
     // Header
     const header = document.createElement('div');
     header.style.cssText = 'padding:16px;display:flex;align-items:center;gap:12px;flex-shrink:0;border-bottom:1px solid var(--border)';
-    header.innerHTML = `
-      <button id="cc-back" style="background:none;border:none;cursor:pointer;color:var(--text-secondary);font-size:22px;padding:0;display:flex;align-items:center"><i class="ti ti-arrow-left"></i></button>
-      <div style="flex:1;min-width:0">
-        <div style="font-weight:700;font-size:${mob?'16px':'18px'};white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${c.nombre}</div>
-        ${c.tel ? `<div style="font-size:12px;color:var(--text-secondary)">${c.tel}</div>` : ''}
-      </div>
-      <div style="text-align:right;flex-shrink:0">
-        <div style="font-size:${mob?'18px':'20px'};font-weight:700;color:var(--amber)">USD ${saldoTotal.toFixed(2)}</div>
-        <div style="font-size:11px;color:var(--text-secondary)">saldo total</div>
-      </div>`;
+
+    const btnBack = document.createElement('button');
+    btnBack.style.cssText = 'background:var(--bg-elevated);border:1px solid var(--border);border-radius:var(--radius);cursor:pointer;color:var(--text);font-size:14px;padding:6px 12px;display:flex;align-items:center;gap:6px;font-family:var(--font);flex-shrink:0';
+    btnBack.innerHTML = '<i class="ti ti-arrow-left"></i> Volver';
+    btnBack.addEventListener('click', () => {
+      this._vista = 'lista';
+      this._clienteActual = null;
+      this._rerender();
+    });
+    header.appendChild(btnBack);
+
+    const headerInfo = document.createElement('div');
+    headerInfo.style.cssText = 'flex:1;min-width:0';
+    headerInfo.innerHTML = `
+      <div style="font-weight:700;font-size:${mob?'16px':'18px'};white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${c.nombre}</div>
+      ${c.tel ? `<div style="font-size:12px;color:var(--text-secondary)">${c.tel}</div>` : ''}`;
+    header.appendChild(headerInfo);
+
+    const headerSaldo = document.createElement('div');
+    headerSaldo.style.cssText = 'text-align:right;flex-shrink:0';
+    headerSaldo.innerHTML = `
+      <div style="font-size:${mob?'18px':'20px'};font-weight:700;color:var(--amber)">USD ${saldoTotal.toFixed(2)}</div>
+      <div style="font-size:11px;color:var(--text-secondary)">saldo total</div>`;
+    header.appendChild(headerSaldo);
     wrap.appendChild(header);
 
     // Acciones
     const acciones = document.createElement('div');
-    acciones.style.cssText = `padding:12px 16px;display:flex;gap:8px;flex-shrink:0;flex-wrap:wrap`;
-    acciones.innerHTML = `
-      <button id="cc-btn-registrar-pago" style="display:flex;align-items:center;gap:6px;background:var(--green);color:#000;border:none;border-radius:var(--radius);padding:8px 14px;font-size:13px;font-weight:600;cursor:pointer"><i class="ti ti-cash"></i> Registrar pago</button>
-      <button id="cc-btn-nueva-deuda-det" style="display:flex;align-items:center;gap:6px;background:var(--bg-elevated);border:1px solid var(--border);border-radius:var(--radius);padding:8px 14px;font-size:13px;font-weight:600;cursor:pointer"><i class="ti ti-plus"></i> Deuda manual</button>
-      ${c.tel ? `<button id="cc-btn-wapp" style="display:flex;align-items:center;gap:6px;background:#25d366;color:#fff;border:none;border-radius:var(--radius);padding:8px 14px;font-size:13px;font-weight:600;cursor:pointer"><i class="ti ti-brand-whatsapp"></i>${mob?'':'WhatsApp'}</button>` : ''}`;
+    acciones.style.cssText = 'padding:12px 16px;display:flex;gap:8px;flex-shrink:0;flex-wrap:wrap;border-bottom:1px solid var(--border)';
+
+    const btnPago = document.createElement('button');
+    btnPago.style.cssText = 'display:flex;align-items:center;gap:6px;background:var(--green);color:#000;border:none;border-radius:var(--radius);padding:8px 14px;font-size:13px;font-weight:600;cursor:pointer';
+    btnPago.innerHTML = '<i class="ti ti-cash"></i> Registrar pago';
+    btnPago.addEventListener('click', () => this.openRegistrarPago(c));
+    acciones.appendChild(btnPago);
+
+    const btnDeuda = document.createElement('button');
+    btnDeuda.style.cssText = 'display:flex;align-items:center;gap:6px;background:var(--bg-elevated);border:1px solid var(--border);border-radius:var(--radius);padding:8px 14px;font-size:13px;font-weight:600;cursor:pointer';
+    btnDeuda.innerHTML = '<i class="ti ti-plus"></i> Deuda manual';
+    btnDeuda.addEventListener('click', () => this.openNuevaDeuda(c));
+    acciones.appendChild(btnDeuda);
+
+    if (c.tel) {
+      const btnWapp = document.createElement('button');
+      btnWapp.style.cssText = 'display:flex;align-items:center;gap:6px;background:#25d366;color:#fff;border:none;border-radius:var(--radius);padding:8px 14px;font-size:13px;font-weight:600;cursor:pointer';
+      btnWapp.innerHTML = `<i class="ti ti-brand-whatsapp"></i>${mob ? '' : ' WhatsApp'}`;
+      btnWapp.addEventListener('click', () => this._enviarWhatsapp(c, saldoTotal));
+      acciones.appendChild(btnWapp);
+    }
     wrap.appendChild(acciones);
 
     // Cuerpo scrolleable
@@ -288,27 +316,15 @@ const CuentaCorriente = {
       body.appendChild(this._seccion('Historial de pagos', items.join('')));
     }
 
+    // Botones de comprobante en ventas (eventos directos sin setTimeout)
+    wrap.querySelectorAll('[data-comprobante]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const v = c.ventasAbiertas.find(x => x.id === Number(btn.dataset.comprobante));
+        if (v) this.generarComprobante(v, c);
+      });
+    });
+
     wrap.appendChild(body);
-
-    setTimeout(() => {
-      document.getElementById('cc-back')?.addEventListener('click', () => {
-        this._vista = 'lista';
-        this._clienteActual = null;
-        this._rerender();
-      });
-      document.getElementById('cc-btn-registrar-pago')?.addEventListener('click', () => this.openRegistrarPago(c));
-      document.getElementById('cc-btn-nueva-deuda-det')?.addEventListener('click', () => this.openNuevaDeuda(c));
-      document.getElementById('cc-btn-wapp')?.addEventListener('click', () => this._enviarWhatsapp(c, saldoTotal));
-
-      // Botones de comprobante en ventas
-      wrap.querySelectorAll('[data-comprobante]').forEach(btn => {
-        btn.addEventListener('click', () => {
-          const v = c.ventasAbiertas.find(x => x.id === Number(btn.dataset.comprobante));
-          if (v) this.generarComprobante(v, c);
-        });
-      });
-    }, 0);
-
     return wrap;
   },
 

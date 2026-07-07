@@ -304,7 +304,7 @@ const CuentaCorriente = {
 
     // Deudas manuales
     if (c.deudasManuales.length) {
-      body.appendChild(this._seccion('Deudas manuales', c.deudasManuales.map(d => this._cardDeudaManual(d)).join('')));
+      body.appendChild(this._seccion('Deudas manuales', c.deudasManuales.map(d => this._cardDeudaManual(d))));
     }
 
     // Historial de pagos en deudas manuales
@@ -339,10 +339,20 @@ const CuentaCorriente = {
     return wrap;
   },
 
-  _seccion(titulo, html) {
+  _seccion(titulo, contenido) {
     const el = document.createElement('div');
     el.style.cssText = 'margin-top:16px';
-    el.innerHTML = `<div style="font-size:12px;font-weight:700;color:var(--text-secondary);text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px">${titulo}</div>${html}`;
+    const label = document.createElement('div');
+    label.style.cssText = 'font-size:12px;font-weight:700;color:var(--text-secondary);text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px';
+    label.textContent = titulo;
+    el.appendChild(label);
+    if (typeof contenido === 'string') {
+      el.insertAdjacentHTML('beforeend', contenido);
+    } else if (Array.isArray(contenido)) {
+      contenido.forEach(c => typeof c === 'string' ? el.insertAdjacentHTML('beforeend', c) : el.appendChild(c));
+    } else {
+      el.appendChild(contenido);
+    }
     return el;
   },
 
@@ -375,21 +385,26 @@ const CuentaCorriente = {
     const saldo    = this.saldoDeuda(d);
     const saldoUSD = this.toUSD(saldo, d.moneda);
     const esARS    = d.moneda === 'ARS';
-    return `
-      <div style="background:var(--bg-elevated);border-radius:var(--radius);padding:12px;border:1px solid var(--border);margin-bottom:8px">
-        <div style="display:flex;justify-content:space-between;align-items:flex-start">
-          <div>
-            <div style="font-weight:600;font-size:14px">${d.descripcion}</div>
-            ${d.concepto ? `<div style="font-size:12px;color:var(--text-secondary)">${d.concepto}</div>` : ''}
+    const el = document.createElement('div');
+    el.style.cssText = 'background:var(--bg-elevated);border-radius:var(--radius);padding:12px;border:1px solid var(--border);margin-bottom:8px';
+    el.innerHTML = `
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px">
+        <div style="min-width:0;flex:1">
+          <div style="font-weight:600;font-size:14px;display:flex;align-items:center;gap:6px;flex-wrap:wrap">
+            <span>${d.descripcion}</span>
+            <button data-editdeuda style="background:var(--bg);border:1px solid var(--border);border-radius:4px;cursor:pointer;color:var(--text);font-size:11px;padding:2px 7px;line-height:1.4">✏️ Editar</button>
           </div>
-          <div style="text-align:right">
-            <div style="font-weight:700;color:var(--amber)">${d.moneda} ${saldo.toLocaleString('es-AR', {maximumFractionDigits:2})}</div>
-            ${esARS ? `<div style="font-size:11px;color:var(--text-secondary)">≈ USD ${saldoUSD.toFixed(2)}</div>` : ''}
-            <div style="font-size:11px;color:var(--text-secondary)">${d.moneda} ${d.monto.toLocaleString('es-AR', {maximumFractionDigits:2})} total</div>
-          </div>
+          ${d.concepto ? `<div style="font-size:12px;color:var(--text-secondary);margin-top:2px">${d.concepto}</div>` : ''}
+          ${d.notas ? `<div style="margin-top:4px;font-size:12px;color:var(--text-secondary)">${d.notas}</div>` : ''}
         </div>
-        ${d.notas ? `<div style="margin-top:6px;font-size:12px;color:var(--text-secondary)">${d.notas}</div>` : ''}
+        <div style="text-align:right;flex-shrink:0">
+          <div style="font-weight:700;color:var(--amber)">${d.moneda} ${saldo.toLocaleString('es-AR', {maximumFractionDigits:2})}</div>
+          ${esARS ? `<div style="font-size:11px;color:var(--text-secondary)">≈ USD ${saldoUSD.toFixed(2)}</div>` : ''}
+          <div style="font-size:11px;color:var(--text-secondary)">${d.moneda} ${d.monto.toLocaleString('es-AR', {maximumFractionDigits:2})} total</div>
+        </div>
       </div>`;
+    el.querySelector('[data-editdeuda]').addEventListener('click', e => { e.stopPropagation(); this.openEditarDeuda(d); });
+    return el;
   },
 
   _enviarWhatsapp(c, saldoTotal) {
@@ -468,6 +483,96 @@ const CuentaCorriente = {
 
     // Foco automático en nombre
     setTimeout(() => box.querySelector('#cc-edit-nombre').focus(), 50);
+  },
+
+  // ── Modal: Editar deuda manual ────────────────────────────────────────────────
+
+  openEditarDeuda(d) {
+    const mob = this.isMobile();
+    const overlay = document.createElement('div');
+    overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:400;display:flex;align-items:center;justify-content:center';
+
+    const box = document.createElement('div');
+    box.style.cssText = mob
+      ? 'background:var(--bg-elevated);border-radius:16px;width:calc(100% - 32px);padding:24px;max-height:90vh;overflow-y:auto'
+      : 'background:var(--bg-elevated);border-radius:var(--radius-lg);width:440px;padding:24px;box-shadow:0 20px 60px rgba(0,0,0,.4)';
+
+    box.innerHTML = `
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px">
+        <h3 style="margin:0;font-size:17px;font-weight:700">Editar deuda</h3>
+        <button id="cc-ed-close" style="background:none;border:none;cursor:pointer;font-size:22px;color:var(--text-secondary);display:flex;align-items:center"><i class="ti ti-x"></i></button>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:14px">
+        <div>
+          <label style="font-size:12px;font-weight:600;color:var(--text-secondary);text-transform:uppercase;letter-spacing:.5px;display:block;margin-bottom:6px">Descripción *</label>
+          <input id="cc-ed-desc" value="${d.descripcion}" style="width:100%;padding:10px;border:1px solid var(--border);border-radius:var(--radius);background:var(--bg);color:var(--text);font-size:14px;box-sizing:border-box;font-family:var(--font)">
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 2fr;gap:10px">
+          <div>
+            <label style="font-size:12px;font-weight:600;color:var(--text-secondary);text-transform:uppercase;letter-spacing:.5px;display:block;margin-bottom:6px">Moneda</label>
+            <select id="cc-ed-moneda" style="width:100%;padding:10px;border:1px solid var(--border);border-radius:var(--radius);background:var(--bg);color:var(--text);font-size:14px">
+              <option value="USD" ${d.moneda==='USD'?'selected':''}>USD</option>
+              <option value="ARS" ${d.moneda==='ARS'?'selected':''}>ARS</option>
+            </select>
+          </div>
+          <div>
+            <label style="font-size:12px;font-weight:600;color:var(--text-secondary);text-transform:uppercase;letter-spacing:.5px;display:block;margin-bottom:6px">Monto total *</label>
+            <input id="cc-ed-monto" type="number" value="${d.monto}" inputmode="decimal" style="width:100%;padding:10px;border:1px solid var(--border);border-radius:var(--radius);background:var(--bg);color:var(--text);font-size:14px;box-sizing:border-box">
+          </div>
+        </div>
+        <div>
+          <label style="font-size:12px;font-weight:600;color:var(--text-secondary);text-transform:uppercase;letter-spacing:.5px;display:block;margin-bottom:6px">Notas</label>
+          <textarea id="cc-ed-notas" rows="2" style="width:100%;padding:10px;border:1px solid var(--border);border-radius:var(--radius);background:var(--bg);color:var(--text);font-size:14px;resize:vertical;box-sizing:border-box;font-family:var(--font)">${d.notas || ''}</textarea>
+        </div>
+        <div id="cc-ed-error" style="display:none;color:var(--red);font-size:13px"></div>
+        <button id="cc-ed-guardar" style="background:var(--blue);color:#fff;border:none;border-radius:var(--radius);padding:12px;font-size:15px;font-weight:700;cursor:pointer">Guardar cambios</button>
+      </div>`;
+
+    overlay.appendChild(box);
+    document.body.appendChild(overlay);
+
+    const close = () => overlay.remove();
+    overlay.addEventListener('click', e => { if (e.target === overlay) close(); });
+    box.querySelector('#cc-ed-close').addEventListener('click', close);
+
+    box.querySelector('#cc-ed-guardar').addEventListener('click', async () => {
+      const desc   = box.querySelector('#cc-ed-desc').value.trim();
+      const moneda = box.querySelector('#cc-ed-moneda').value;
+      const monto  = parseFloat(box.querySelector('#cc-ed-monto').value);
+      const notas  = box.querySelector('#cc-ed-notas').value.trim();
+      const errEl  = box.querySelector('#cc-ed-error');
+
+      if (!desc)          { errEl.textContent = 'La descripción no puede estar vacía'; errEl.style.display = 'block'; return; }
+      if (!monto || monto <= 0) { errEl.textContent = 'Ingresá un monto válido'; errEl.style.display = 'block'; return; }
+      errEl.style.display = 'none';
+
+      const btn = box.querySelector('#cc-ed-guardar');
+      btn.disabled = true; btn.textContent = 'Guardando...';
+
+      try {
+        const { SUPABASE_URL, SUPABASE_ANON_KEY } = window.__APP_CONFIG__;
+        const supa2 = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+        const { error } = await supa2.from('deudas_manuales')
+          .update({ descripcion: desc, moneda, monto, notas: notas || null })
+          .eq('id', d.id);
+        if (error) throw error;
+
+        // Actualizar en memoria
+        d.descripcion = desc; d.moneda = moneda; d.monto = monto; d.notas = notas;
+        const dm = (State.deudas || []).find(x => x.id === d.id);
+        if (dm) { dm.descripcion = desc; dm.moneda = moneda; dm.monto = monto; dm.notas = notas; }
+
+        close();
+        this._rerender();
+        State.showToast?.('Deuda actualizada');
+      } catch (e) {
+        errEl.textContent = 'Error: ' + e.message;
+        errEl.style.display = 'block';
+        btn.disabled = false; btn.textContent = 'Guardar cambios';
+      }
+    });
+
+    setTimeout(() => box.querySelector('#cc-ed-desc').focus(), 50);
   },
 
   async _actualizarNombreCliente(c, nuevoNombre, nuevoTel) {

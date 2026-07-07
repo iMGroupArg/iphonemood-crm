@@ -393,6 +393,7 @@ const CuentaCorriente = {
           <div style="font-weight:600;font-size:14px;display:flex;align-items:center;gap:6px;flex-wrap:wrap">
             <span>${d.descripcion}</span>
             <button data-editdeuda style="background:var(--bg);border:1px solid var(--border);border-radius:4px;cursor:pointer;color:var(--text);font-size:11px;padding:2px 7px;line-height:1.4">✏️ Editar</button>
+            <button data-deldeuda style="background:var(--bg);border:1px solid var(--border);border-radius:4px;cursor:pointer;color:var(--red);font-size:11px;padding:2px 7px;line-height:1.4">🗑️</button>
           </div>
           ${d.concepto ? `<div style="font-size:12px;color:var(--text-secondary);margin-top:2px">${d.concepto}</div>` : ''}
           ${d.notas ? `<div style="margin-top:4px;font-size:12px;color:var(--text-secondary)">${d.notas}</div>` : ''}
@@ -404,6 +405,7 @@ const CuentaCorriente = {
         </div>
       </div>`;
     el.querySelector('[data-editdeuda]').addEventListener('click', e => { e.stopPropagation(); this.openEditarDeuda(d); });
+    el.querySelector('[data-deldeuda]').addEventListener('click', e => { e.stopPropagation(); this.confirmarBorrarDeuda(d); });
     return el;
   },
 
@@ -483,6 +485,60 @@ const CuentaCorriente = {
 
     // Foco automático en nombre
     setTimeout(() => box.querySelector('#cc-edit-nombre').focus(), 50);
+  },
+
+  // ── Borrar deuda manual ───────────────────────────────────────────────────────
+
+  confirmarBorrarDeuda(d) {
+    const overlay = document.createElement('div');
+    overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:400;display:flex;align-items:center;justify-content:center';
+
+    const box = document.createElement('div');
+    box.style.cssText = 'background:var(--bg-elevated);border-radius:var(--radius-lg);width:340px;padding:24px;box-shadow:0 20px 60px rgba(0,0,0,.5)';
+    box.innerHTML = `
+      <div style="font-size:22px;margin-bottom:8px">🗑️</div>
+      <div style="font-weight:700;font-size:16px;margin-bottom:6px">Borrar deuda</div>
+      <div style="font-size:14px;color:var(--text-secondary);margin-bottom:20px">¿Seguro que querés borrar "<b style="color:var(--text)">${d.descripcion}</b>"? Esta acción no se puede deshacer.</div>
+      <div style="display:flex;gap:8px">
+        <button id="cc-del-cancel" style="flex:1;padding:10px;background:var(--bg);border:1px solid var(--border);border-radius:var(--radius);cursor:pointer;font-size:14px;font-weight:600;font-family:var(--font)">Cancelar</button>
+        <button id="cc-del-confirm" style="flex:1;padding:10px;background:var(--red);color:#fff;border:none;border-radius:var(--radius);cursor:pointer;font-size:14px;font-weight:700;font-family:var(--font)">Borrar</button>
+      </div>
+      <div id="cc-del-error" style="display:none;color:var(--red);font-size:13px;margin-top:10px"></div>`;
+
+    overlay.appendChild(box);
+    document.body.appendChild(overlay);
+
+    const close = () => overlay.remove();
+    box.querySelector('#cc-del-cancel').addEventListener('click', close);
+
+    box.querySelector('#cc-del-confirm').addEventListener('click', async () => {
+      const btn = box.querySelector('#cc-del-confirm');
+      const errEl = box.querySelector('#cc-del-error');
+      btn.disabled = true; btn.textContent = 'Borrando...';
+
+      try {
+        const { SUPABASE_URL, SUPABASE_ANON_KEY } = window.__APP_CONFIG__;
+        const supa2 = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+        const { error } = await supa2.from('deudas_manuales').delete().eq('id', d.id);
+        if (error) throw error;
+
+        // Eliminar en memoria
+        State.deudas = (State.deudas || []).filter(x => x.id !== d.id);
+
+        close();
+        // Si el cliente ya no tiene deudas ni ventas abiertas, volver a lista
+        const clientes = this.getClientesConDeuda();
+        const key = this._clienteActual?.key;
+        this._clienteActual = clientes.find(c => c.key === key) || null;
+        if (!this._clienteActual) this._vista = 'lista';
+        this._rerender();
+        State.showToast?.('Deuda eliminada');
+      } catch (e) {
+        errEl.textContent = 'Error: ' + e.message;
+        errEl.style.display = 'block';
+        btn.disabled = false; btn.textContent = 'Borrar';
+      }
+    });
   },
 
   // ── Modal: Editar deuda manual ────────────────────────────────────────────────

@@ -811,19 +811,6 @@ const CuentaCorriente = {
           <label style="font-size:12px;font-weight:600;color:var(--text-secondary);text-transform:uppercase;letter-spacing:.5px;display:block;margin-bottom:6px">Aplicar a</label>
           <select id="cc-p-aplicar" style="width:100%;padding:10px;border:1px solid var(--border);border-radius:var(--radius);background:var(--bg);color:var(--text);font-size:14px">${aplicarOpts}</select>
         </div>
-        <div style="display:grid;grid-template-columns:1fr 2fr;gap:10px">
-          <div>
-            <label style="font-size:12px;font-weight:600;color:var(--text-secondary);text-transform:uppercase;letter-spacing:.5px;display:block;margin-bottom:6px">Moneda</label>
-            <select id="cc-p-moneda" style="width:100%;padding:10px;border:1px solid var(--border);border-radius:var(--radius);background:var(--bg);color:var(--text);font-size:14px">
-              <option value="USD">USD</option>
-              <option value="ARS">ARS</option>
-            </select>
-          </div>
-          <div>
-            <label style="font-size:12px;font-weight:600;color:var(--text-secondary);text-transform:uppercase;letter-spacing:.5px;display:block;margin-bottom:6px">Monto *</label>
-            <input id="cc-p-monto" type="number" placeholder="0" inputmode="decimal" style="width:100%;padding:10px;border:1px solid var(--border);border-radius:var(--radius);background:var(--bg);color:var(--text);font-size:14px;box-sizing:border-box">
-          </div>
-        </div>
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
           <div>
             <label style="font-size:12px;font-weight:600;color:var(--text-secondary);text-transform:uppercase;letter-spacing:.5px;display:block;margin-bottom:6px">Persona (caja)</label>
@@ -831,8 +818,22 @@ const CuentaCorriente = {
           </div>
           <div>
             <label style="font-size:12px;font-weight:600;color:var(--text-secondary);text-transform:uppercase;letter-spacing:.5px;display:block;margin-bottom:6px">Bolsillo</label>
-            <select id="cc-p-bolsillo" style="width:100%;padding:10px;border:1px solid var(--border);border-radius:var(--radius);background:var(--bg);color:var(--text);font-size:14px">${bolsillosOpts}</select>
+            <select id="cc-p-bolsillo" onchange="(function(){
+              const b=document.getElementById('cc-p-bolsillo').value;
+              const esARS=b.startsWith('ARS');
+              document.getElementById('cc-p-monto-label').textContent=esARS?'Monto en ARS (blue: $'+Math.round(State.refBlue).toLocaleString('es-AR')+')':'Monto en USD';
+              const v=parseFloat(document.getElementById('cc-p-monto').value)||0;
+              const eq=document.getElementById('cc-p-equiv');
+              if(eq) eq.textContent=esARS&&v>0?'≈ USD '+(v/State.refBlue).toFixed(2):'';
+            })()" style="width:100%;padding:10px;border:1px solid var(--border);border-radius:var(--radius);background:var(--bg);color:var(--text);font-size:14px">${bolsillosOpts}</select>
           </div>
+        </div>
+        <div>
+          <label id="cc-p-monto-label" style="font-size:12px;font-weight:600;color:var(--text-secondary);text-transform:uppercase;letter-spacing:.5px;display:block;margin-bottom:6px">Monto en ARS (blue: $${Math.round(State.refBlue).toLocaleString('es-AR')})</label>
+          <input id="cc-p-monto" type="number" placeholder="0" inputmode="decimal"
+            oninput="(function(){const b=document.getElementById('cc-p-bolsillo').value;const esARS=b.startsWith('ARS');const v=parseFloat(document.getElementById('cc-p-monto').value)||0;const eq=document.getElementById('cc-p-equiv');if(eq)eq.textContent=esARS&&v>0?'≈ USD '+(v/State.refBlue).toFixed(2):'';})()"
+            style="width:100%;padding:10px;border:1px solid var(--border);border-radius:var(--radius);background:var(--bg);color:var(--text);font-size:14px;box-sizing:border-box">
+          <div id="cc-p-equiv" style="font-size:11px;color:var(--text-secondary);margin-top:4px;min-height:16px"></div>
         </div>
         <div>
           <label style="font-size:12px;font-weight:600;color:var(--text-secondary);text-transform:uppercase;letter-spacing:.5px;display:block;margin-bottom:6px">Notas</label>
@@ -850,15 +851,18 @@ const CuentaCorriente = {
     document.getElementById('cc-close-pago').addEventListener('click', close);
 
     document.getElementById('cc-p-guardar').addEventListener('click', async () => {
-      const idx     = parseInt(document.getElementById('cc-p-aplicar').value);
-      const moneda  = document.getElementById('cc-p-moneda').value;
-      const monto   = parseFloat(document.getElementById('cc-p-monto').value);
-      const persona = document.getElementById('cc-p-persona').value;
-      const bolsillo= document.getElementById('cc-p-bolsillo').value;
-      const notas   = document.getElementById('cc-p-notas').value.trim();
-      const errEl   = document.getElementById('cc-p-error');
+      const idx      = parseInt(document.getElementById('cc-p-aplicar').value);
+      const bolsillo = document.getElementById('cc-p-bolsillo').value;
+      const persona  = document.getElementById('cc-p-persona').value;
+      const notas    = document.getElementById('cc-p-notas').value.trim();
+      const montoRaw = parseFloat(document.getElementById('cc-p-monto').value);
+      const esARS    = bolsillo.startsWith('ARS');
+      const moneda   = esARS ? 'ARS' : 'USD';
+      // Convertir siempre a USD para almacenar
+      const monto    = esARS ? montoRaw / (State.refBlue || 1) : montoRaw;
+      const errEl    = document.getElementById('cc-p-error');
 
-      if (!monto || monto <= 0) { errEl.textContent = 'Ingresá un monto válido'; errEl.style.display = 'block'; return; }
+      if (!montoRaw || montoRaw <= 0) { errEl.textContent = 'Ingresá un monto válido'; errEl.style.display = 'block'; return; }
       errEl.style.display = 'none';
 
       const btn = document.getElementById('cc-p-guardar');

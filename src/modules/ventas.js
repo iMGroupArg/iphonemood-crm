@@ -592,9 +592,15 @@ const Ventas = {
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
         <b>Ítems agregados</b><span style="font-size:14px;font-weight:600;color:var(--blue)">${State.fmtUSD(Math.max(0,total))}</span>
       </div>
-      ${d.items.map((it, idx) => `<div style="display:flex;justify-content:space-between;padding:8px 10px;background:var(--bg-secondary);border-radius:8px;margin-bottom:5px;font-size:12px">
-        <span>${it.nombre} — ${State.fmtUSD(it.precio)}</span>
-        <button onclick="Ventas.removeItem(${idx})" style="background:none;border:none;cursor:pointer;color:var(--text-secondary)"><i class="ti ti-x"></i></button>
+      ${d.items.map((it, idx) => `<div style="display:flex;justify-content:space-between;align-items:center;padding:7px 10px;background:var(--bg-secondary);border-radius:8px;margin-bottom:5px;font-size:12px;gap:8px">
+        <span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${it.nombre}</span>
+        <div style="display:flex;align-items:center;gap:6px;flex-shrink:0">
+          <span style="font-size:10px;color:var(--text-secondary)">USD</span>
+          <input type="number" value="${it.precio}" min="0" step="0.01"
+            onchange="Ventas.editItemPrecio(${idx},this.value)"
+            style="width:72px;font-size:12px;font-weight:600;padding:3px 6px;border:1px solid var(--border-strong);border-radius:6px;background:var(--bg);color:var(--text);text-align:right">
+          <button onclick="Ventas.removeItem(${idx})" style="background:none;border:none;cursor:pointer;color:var(--text-secondary)"><i class="ti ti-x"></i></button>
+        </div>
       </div>`).join('')}
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:10px 0">
         <button class="btn ${this.invMode==='manual'?'btn-primary':''}" onclick="Ventas.setInvMode('manual')">Carga manual</button>
@@ -680,11 +686,22 @@ const Ventas = {
       const imei = s.imeis && s.imeis.length ? s.imeis[0] : null;
       // Leer precio ingresado por el usuario; si vacío usar el precio del stock en USD
       const precioIngresado = parseFloat(document.getElementById(`inv-precio-${id}`)?.value);
-      const precioUSD = precioIngresado > 0 ? precioIngresado : (s.precioARS && s.cotiz ? +(s.precioARS / s.cotiz).toFixed(2) : 0);
+      const precioUSD = (!isNaN(precioIngresado) && precioIngresado >= 0) ? precioIngresado : (s.precioARS && s.cotiz ? +(s.precioARS / s.cotiz).toFixed(2) : 0);
       this.draft.items.push({ nombre: s.nombre, precio: precioUSD, costo: s.costoUSD, stockId: id, imei });
     });
     this.selectedStockIds = [];
     document.getElementById('venta-step-body').innerHTML = this.stepItems();
+    this.guardarBorrador();
+  },
+  editItemPrecio(idx, val) {
+    const precio = parseFloat(val);
+    if (isNaN(precio) || precio < 0) return;
+    this.draft.items[idx].precio = precio;
+    // Actualizar solo el total visible sin re-render completo
+    const totalEl = document.querySelector('#venta-step-body b + span');
+    const total = this.draft.items.reduce((s, i) => s + i.precio, 0) - (this.draft.tradeIn?.valor || 0);
+    const totDiv = document.getElementById('venta-step-body').querySelector('span[style*="blue"]');
+    if (totDiv) totDiv.textContent = State.fmtUSD(Math.max(0, total));
     this.guardarBorrador();
   },
   removeItem(idx) { this.draft.items.splice(idx, 1); document.getElementById('venta-step-body').innerHTML = this.stepItems(); this.guardarBorrador(); },

@@ -603,7 +603,7 @@ const Ventas = {
       <div id="vf-item-form">${this.invMode === 'manual' ? this.manualItemForm() : this.inventoryForm()}</div>
     `;
   },
-  setInvMode(m) { this.invMode = m; document.getElementById('venta-step-body').innerHTML = this.stepItems(); },
+  setInvMode(m) { this.invMode = m; this._invFiltro = ''; document.getElementById('venta-step-body').innerHTML = this.stepItems(); },
 
   manualItemForm() {
     const mobile = this.isMobile();
@@ -627,11 +627,18 @@ const Ventas = {
     this.guardarBorrador();
   },
 
+  _invFiltro: '',
+
   inventoryForm() {
-    const disponibles = State.stock.filter(s => State.getStock(s) > 0);
+    const q = (this._invFiltro || '').toLowerCase().trim();
+    const disponibles = State.stock.filter(s => State.getStock(s) > 0
+      && (!q || s.nombre.toLowerCase().includes(q)));
     return `
-      <div style="font-size:11px;color:var(--text-secondary);margin-bottom:8px">${disponibles.length} productos con stock disponible</div>
-      <div style="display:flex;flex-direction:column;gap:8px;max-height:260px;overflow-y:auto">
+      <input id="inv-buscar" type="search" placeholder="Buscar producto..." value="${this._invFiltro || ''}"
+        oninput="Ventas._invFiltro=this.value;document.getElementById('vf-item-form').innerHTML=Ventas.inventoryForm()"
+        style="width:100%;padding:9px 12px;border:1px solid var(--border-strong);border-radius:var(--radius);background:var(--bg);color:var(--text);font-size:14px;box-sizing:border-box;margin-bottom:8px;font-family:var(--font)">
+      <div style="font-size:11px;color:var(--text-secondary);margin-bottom:8px">${disponibles.length} producto${disponibles.length!==1?'s':''} con stock disponible</div>
+      <div style="display:flex;flex-direction:column;gap:8px;max-height:240px;overflow-y:auto">
         ${disponibles.map(s => {
           const sel = this.selectedStockIds.includes(s.id);
           const precioUSD = s.precioARS && s.cotiz ? +(s.precioARS / s.cotiz).toFixed(2) : 0;

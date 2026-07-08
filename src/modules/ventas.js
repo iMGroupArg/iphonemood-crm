@@ -863,6 +863,14 @@ const Ventas = {
       <div style="margin-bottom:14px"><b>Cliente:</b> ${d.cliente || 'Consumidor final'} ${d.vendedor?`· Vendedor: ${d.vendedor}`:''}</div>
       <div style="margin-bottom:14px"><b>Ítems (${d.items.length})</b>
         ${d.items.map(i=>`<div style="display:flex;justify-content:space-between;font-size:12px;padding:3px 0">${i.nombre}<span>${State.fmtUSD(i.precio)}</span></div>`).join('')}
+        ${d.tradeIn?.valor > 0 ? `
+        <div style="display:flex;justify-content:space-between;font-size:12px;padding:5px 0;margin-top:4px;border-top:1px dashed var(--border)">
+          <span style="color:var(--green)">🔄 Trade-In: ${d.tradeIn.modelo || 'Equipo'}</span>
+          <span style="color:var(--green);font-weight:600">− ${State.fmtUSD(d.tradeIn.valor)}</span>
+        </div>
+        <div style="display:flex;justify-content:space-between;font-size:12px;padding:3px 0;font-weight:600">
+          <span>Subtotal (con descuento trade-in)</span><span>${State.fmtUSD(Math.max(0, d.items.reduce((s,i)=>s+i.precio,0) - d.tradeIn.valor))}</span>
+        </div>` : ''}
       </div>
       <div style="margin-bottom:14px"><b>Pagos (${d.pagos.length})</b>
         ${d.pagos.map(p=>`<div style="display:flex;justify-content:space-between;font-size:12px;padding:3px 0">${p.persona} — ${p.bolsillo}${p.esTarjeta?' <span class="badge b-purple" style="font-size:9px">Tarjeta</span>':''}<span>${State.fmtUSD(p.monto)}</span></div>`).join('')}

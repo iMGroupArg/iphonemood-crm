@@ -691,21 +691,25 @@ const Ventas = {
         <div><div style="font-size:11px;color:var(--text-secondary)">Saldo restante</div><div style="font-size:16px;font-weight:600;color:${saldo>0?'var(--red)':'var(--green)'}">${State.fmtUSD(saldo)}</div></div>
       </div>
       ${d.pagos.map((p, idx) => `<div style="display:flex;justify-content:space-between;align-items:center;padding:7px 10px;background:var(--bg-secondary);border-radius:8px;margin-bottom:5px;font-size:12px">
-        <span>${p.persona} — ${p.bolsillo} — ${State.fmtUSD(p.monto)}${p.esTarjeta?` <span class="badge b-purple" style="font-size:9px">Tarjeta +$${(p.diferencialArs||0).toLocaleString('es-AR')}</span>`:''}</span>
+        <span>${p.persona} — ${p.bolsillo} — ${p.bolsillo?.startsWith('ARS') ? `$${Math.round(p.monto*(State.refBlue||1)).toLocaleString('es-AR')} ARS <span style="color:var(--text-secondary);font-size:10px">(≈ ${State.fmtUSD(p.monto)})</span>` : State.fmtUSD(p.monto)}${p.esTarjeta?` <span class="badge b-purple" style="font-size:9px">Tarjeta +$${(p.diferencialArs||0).toLocaleString('es-AR')}</span>`:''}</span>
         <button onclick="Ventas.removePago(${idx})" style="background:none;border:none;cursor:pointer"><i class="ti ti-x"></i></button>
       </div>`).join('')}
       <div style="display:grid;grid-template-columns:${this.isMobile()?'1fr':'1fr 1fr'};gap:8px;margin:10px 0">
         <select id="vf-pago-persona" style="${this._sel()}">
           ${State.personas.map(p=>`<option>${p}</option>`).join('')}
         </select>
-        <select id="vf-pago-bolsillo" onchange="Ventas.toggleTarjetaWrap()" style="${this._sel()}">
+        <select id="vf-pago-bolsillo" onchange="Ventas.toggleTarjetaWrap();Ventas.actualizarLabelMonto()" style="${this._sel()}">
           <option>ARS cash</option><option>ARS transferencia</option><option>USD cash</option><option>USD transferencia</option><option>USDT</option>
         </select>
       </div>
-      <div style="display:flex;gap:8px;margin-bottom:8px">
-        <input type="number" id="vf-pago-monto" value="${saldo.toFixed(2)}" style="flex:1;${this._inp()}" inputmode="decimal">
+      <div style="margin-bottom:4px">
+        <label id="vf-pago-monto-label" style="font-size:11px;color:var(--text-secondary);font-weight:600">Monto en ARS</label>
+      </div>
+      <div style="display:flex;gap:8px;margin-bottom:4px">
+        <input type="number" id="vf-pago-monto" value="" placeholder="0" oninput="Ventas.actualizarLabelMonto()" style="flex:1;${this._inp()}" inputmode="decimal">
         <button class="btn btn-primary" onclick="Ventas.addPago()"><i class="ti ti-plus"></i> Agregar pago</button>
       </div>
+      <div id="vf-pago-equiv" style="font-size:11px;color:var(--text-secondary);margin-bottom:8px;min-height:16px"></div>
       <label style="display:flex;align-items:center;gap:7px;font-size:12.5px;cursor:pointer;margin-bottom:8px" id="vf-tarjeta-check-wrap">
         <input type="checkbox" id="vf-es-tarjeta" onchange="Ventas.toggleDiferencialWrap()"> Pago con tarjeta de crédito (posnet)
       </label>
@@ -780,18 +784,34 @@ const Ventas = {
       preview.innerHTML = filas + `<div style="font-size:11px;color:var(--purple);padding-top:4px">Cubre exacto el precio de lista, sin diferencial.</div>`;
     }
   },
+  actualizarLabelMonto() {
+    const bolsillo = document.getElementById('vf-pago-bolsillo')?.value || '';
+    const label    = document.getElementById('vf-pago-monto-label');
+    const equiv    = document.getElementById('vf-pago-equiv');
+    const input    = document.getElementById('vf-pago-monto');
+    const esARS    = bolsillo.startsWith('ARS');
+    if (label) label.textContent = esARS ? `Monto en ARS (blue: $${State.refBlue.toLocaleString('es-AR')})` : 'Monto en USD';
+    if (equiv && input) {
+      const val = parseFloat(input.value) || 0;
+      equiv.textContent = esARS && val > 0 ? `≈ USD ${(val / State.refBlue).toFixed(2)}` : '';
+    }
+  },
+
   addPago() {
     const persona = document.getElementById('vf-pago-persona').value;
     const bolsillo = document.getElementById('vf-pago-bolsillo').value;
     const esTarjeta = document.getElementById('vf-es-tarjeta')?.checked || false;
-    let monto = parseFloat(document.getElementById('vf-pago-monto').value) || 0;
+    const esARS = bolsillo.startsWith('ARS');
+    let montoIngresado = parseFloat(document.getElementById('vf-pago-monto').value) || 0;
+    // Convertir siempre a USD para almacenar
+    let monto = esARS ? montoIngresado / (State.refBlue || 1) : montoIngresado;
     let diferencialArs = 0;
     let cotizacionDiferencial = null;
 
     if (esTarjeta) {
       const { montoPosnet, netoArs, precioVentaRealUSD, diferencialUSD, cotiz } = this.calcularVentaTarjeta();
       if (!montoPosnet) { toast('Ingresá el monto cargado en el posnet.'); return; }
-      monto = precioVentaRealUSD; // lo que efectivamente cubre del precio de la venta
+      monto = precioVentaRealUSD;
       diferencialArs = diferencialUSD > 0 ? diferencialUSD * cotiz : 0;
       cotizacionDiferencial = cotiz;
     }

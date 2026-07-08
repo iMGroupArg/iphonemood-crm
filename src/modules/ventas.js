@@ -1006,7 +1006,8 @@ const Ventas = {
     const v = State.ventas.find(x => x.id === id);
     if (!v) return;
     App.closeSidebar();
-    const total = v.items.reduce((s, i) => s + i.precio, 0);
+    const subtotalItems = v.items.reduce((s, i) => s + i.precio, 0);
+    const total = Math.max(0, subtotalItems - (v.tradeIn?.valor || 0));
     const pagado = v.pagos.reduce((s, p) => s + p.monto, 0);
     const saldo = pagado - total;
     const cerrada = v.estado === 'cerrada';
@@ -1036,7 +1037,7 @@ const Ventas = {
             </div>
             <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
               ${this.estadoToggle(cerrada)}
-              <span style="font-size:20px;font-weight:700">${State.fmtUSD(total)}</span>
+              <span style="font-size:20px;font-weight:700">${State.fmtUSD(total)}${v.tradeIn?.valor>0?`<span style="font-size:11px;color:var(--green);font-weight:500;margin-left:6px">−${State.fmtUSD(v.tradeIn.valor)} trade-in</span>`:''}</span>
               <button class="btn btn-sm btn-primary" onclick="Ventas.generarRecibo(${id})"><i class="ti ti-download"></i> Recibo</button>
               <button class="btn btn-sm" onclick="Ventas.generarDetallePDF(${id})"><i class="ti ti-download"></i> Detalle PDF</button>
               <button class="btn btn-sm" onclick="Ventas.closeModal()"><i class="ti ti-x"></i></button>
@@ -1127,7 +1128,8 @@ const Ventas = {
               <div style="text-align:right">
                 <div style="font-size:12px;color:var(--text-secondary)">Subtotal Dispositivos: ${State.fmtUSD(itemsDispositivos.reduce((s,i)=>s+i.precio,0))}</div>
                 <div style="font-size:12px;color:var(--text-secondary)">Subtotal Accesorios: ${State.fmtUSD(itemsAccesorios.reduce((s,i)=>s+i.precio,0))}</div>
-                <div style="font-size:16px;font-weight:700;margin-top:6px">Subtotal: ${State.fmtUSD(total)}</div>
+                ${v.tradeIn?.valor > 0 ? `<div style="font-size:12px;color:var(--green)">🔄 Trade-In (${v.tradeIn.modelo||'equipo'}): − ${State.fmtUSD(v.tradeIn.valor)}</div>` : ''}
+                <div style="font-size:16px;font-weight:700;margin-top:6px">Total: ${State.fmtUSD(total)}</div>
                 ${(()=>{ const pt = v.items.reduce((s,i)=>s+(i.precio-(i.costo||0)),0); return `<div style="font-size:12px;color:${pt>=0?'var(--green)':'var(--red)'}">Profit: ${pt>=0?'+':''}${State.fmtUSD(pt)}</div>`; })()}
               </div>
             </div>

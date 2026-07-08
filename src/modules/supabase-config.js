@@ -329,7 +329,7 @@ const DB = {
     const pagosToInsert = draft.pagos.map(p => ({
       venta_id: ventaRow.id, persona_id: this.personaId(p.persona), bolsillo: p.bolsillo, monto: p.monto,
       es_tarjeta: !!p.esTarjeta, diferencial_ars: p.diferencialArs || 0,
-      cotizacion_diferencial: p.esTarjeta ? (p.cotizacionDiferencial || State.refBlue) : null
+      cotizacion_diferencial: p.bolsillo?.startsWith('ARS') ? (p.cotizacionDiferencial || State.refBlue) : null
     }));
     if (pagosToInsert.length) await supa.from('venta_pagos').insert(pagosToInsert);
 

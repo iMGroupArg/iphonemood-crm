@@ -1125,7 +1125,7 @@ const Ventas = {
               <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:12px">
                 <div><label style="font-size:11px;color:var(--text-secondary)">Total Venta</label><div style="font-size:17px;font-weight:700">${State.fmtUSD(total)}</div></div>
                 <div><label style="font-size:11px;color:var(--text-secondary)">Total Pagos</label><div style="font-size:17px;font-weight:700">${State.fmtUSD(pagado)}</div></div>
-                <div><label style="font-size:11px;color:var(--text-secondary)">Saldo</label><div style="font-size:17px;font-weight:700;color:${saldo<=0?'var(--text)':'var(--red)'}">${State.fmtUSD(saldo)}</div></div>
+                <div><label style="font-size:11px;color:var(--text-secondary)">Saldo</label><div style="font-size:17px;font-weight:700;color:${saldo>=0?'var(--green)':'var(--red)'}">${saldo>=0?'✓ Pagado':State.fmtUSD(-saldo)+' pendiente'}</div></div>
               </div>
               ${v.pagos.map(p => `
                 <div style="display:flex;justify-content:space-between;align-items:center;background:var(--bg-secondary);border-radius:8px;padding:10px 12px;margin-bottom:6px">
@@ -1138,7 +1138,7 @@ const Ventas = {
                   </div>
                   <div style="text-align:right">
                     <div style="font-size:13px;font-weight:600">${State.fmtUSD(p.monto)}</div>
-                    ${p.bolsillo?.startsWith('ARS')&&p.cotizacionDiferencial ? `<div style="font-size:10px;color:var(--text-secondary)">(USD ${p.monto} @ $${(p.cotizacionDiferencial||State.refBlue).toLocaleString('es-AR')})</div>` : ''}
+                    ${p.bolsillo?.startsWith('ARS') ? `<div style="font-size:10px;color:var(--text-secondary)">$${Math.round(p.monto*(p.cotizacionDiferencial||State.refBlue)).toLocaleString('es-AR')} ARS @ $${(p.cotizacionDiferencial||State.refBlue).toLocaleString('es-AR')}</div>` : ''}
                   </div>
                 </div>
               `).join('')}

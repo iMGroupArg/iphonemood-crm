@@ -630,13 +630,22 @@ const Ventas = {
   _invFiltro: '',
 
   inventoryForm() {
+    return `
+      <input id="inv-buscar" type="search" placeholder="Buscar producto..." value="${this._invFiltro || ''}"
+        oninput="Ventas._invFiltro=this.value;Ventas._renderInvLista()"
+        style="width:100%;padding:9px 12px;border:1px solid var(--border-strong);border-radius:var(--radius);background:var(--bg);color:var(--text);font-size:14px;box-sizing:border-box;margin-bottom:8px;font-family:var(--font)">
+      <div id="inv-lista">${this._invListaHTML()}</div>
+    `;
+  },
+  _renderInvLista() {
+    const el = document.getElementById('inv-lista');
+    if (el) el.innerHTML = this._invListaHTML();
+  },
+  _invListaHTML() {
     const q = (this._invFiltro || '').toLowerCase().trim();
     const disponibles = State.stock.filter(s => State.getStock(s) > 0
       && (!q || s.nombre.toLowerCase().includes(q)));
     return `
-      <input id="inv-buscar" type="search" placeholder="Buscar producto..." value="${this._invFiltro || ''}"
-        oninput="Ventas._invFiltro=this.value;document.getElementById('vf-item-form').innerHTML=Ventas.inventoryForm()"
-        style="width:100%;padding:9px 12px;border:1px solid var(--border-strong);border-radius:var(--radius);background:var(--bg);color:var(--text);font-size:14px;box-sizing:border-box;margin-bottom:8px;font-family:var(--font)">
       <div style="font-size:11px;color:var(--text-secondary);margin-bottom:8px">${disponibles.length} producto${disponibles.length!==1?'s':''} con stock disponible</div>
       <div style="display:flex;flex-direction:column;gap:8px;max-height:240px;overflow-y:auto">
         ${disponibles.map(s => {
@@ -662,7 +671,7 @@ const Ventas = {
   toggleStockSel(id) {
     const i = this.selectedStockIds.indexOf(id);
     if (i >= 0) this.selectedStockIds.splice(i, 1); else this.selectedStockIds.push(id);
-    document.getElementById('vf-item-form').innerHTML = this.inventoryForm();
+    this._renderInvLista();
   },
   addStockItems() {
     this.selectedStockIds.forEach(id => {
@@ -893,7 +902,8 @@ const Ventas = {
     const d = this.draft;
     const total = Math.max(0, d.items.reduce((s, i) => s + i.precio, 0) - (d.tradeIn?.valor || 0));
     const pagado = d.pagos.reduce((s, p) => s + Ventas.montoSinDiferencial(p), 0);
-    const estado = pagado >= total ? 'cerrada' : 'abierta';
+    // Tolerancia de hasta $0.50 USD para diferencias por conversión ARS
+    const estado = (total - pagado) <= 0.5 ? 'cerrada' : 'abierta';
 
     toast('Guardando venta...');
 
@@ -1135,6 +1145,7 @@ const Ventas = {
             <div style="display:flex;gap:8px;flex-wrap:wrap">
               ${v.clienteTel ? `<button class="btn btn-sm" onclick="Ventas._whatsappVenta(${id})" style="color:#25D366;border-color:#25D366"><i class="ti ti-brand-whatsapp"></i> WhatsApp</button>` : ''}
               ${!cerrada ? `<button class="btn btn-sm btn-primary" onclick="Ventas.abrirCobro(${id})"><i class="ti ti-cash"></i> Registrar cobro</button>` : ''}
+              ${!cerrada ? `<button class="btn btn-sm" onclick="Ventas.cerrarVentaManual(${id})" style="color:var(--green);border-color:var(--green)"><i class="ti ti-lock"></i> Cerrar venta</button>` : ''}
               <button class="btn btn-sm" onclick="Ventas.closeModal()">Cerrar</button>
             </div>
           </div>
@@ -1632,12 +1643,26 @@ const Ventas = {
     this.viewSale(id);
   },
 
+  async cerrarVentaManual(id) {
+    const v = State.ventas.find(x => x.id === id);
+    if (!v) return;
+    if (!confirm(`¿Marcar la venta #${id} como cerrada/pagada?`)) return;
+    v.estado = 'cerrada';
+    await DB.actualizarEstadoVenta(id, 'cerrada');
+    toast(`Venta #${id} marcada como cerrada ✓`);
+    this.renderList();
+    this.viewSale(id);
+  },
+
   async anular(id) {
     const v = State.ventas.find(x => x.id === id);
     if (!v) return;
     if (!confirm(`¿Anular la venta #${v.id}? Esto revertirá el stock y los pagos en las cajas correspondientes.`)) return;
-    // Revertir stock (memoria + base de datos)
-    for (const m of (v.stockMovs || [])) {
+    // Revertir stock — si stockMovs no existe (ventas cargadas de DB), usar los items con stockId
+    const movsARestaurar = (v.stockMovs && v.stockMovs.length)
+      ? v.stockMovs
+      : v.items.filter(i => i.stockId).map(i => ({ stockId: i.stockId, imei: i.imei || null }));
+    for (const m of movsARestaurar) {
       State.restaurarStock(m.stockId, m.imei);
       const item = State.stock.find(s => s.id === m.stockId);
       if (item) {

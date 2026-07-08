@@ -231,7 +231,7 @@ const Ventas = {
       this.mostrarRecuperarBorrador(pendiente);
       return;
     }
-    this.draft = { cliente: '', clienteTel: '', clienteDni: '', tipoVenta: 'minorista', vendedor: '', tradeIn: null, items: [], pagos: [], comisionVendedor: 0 };
+    this.draft = { cliente: '', clienteTel: '', clienteDni: '', clienteEmail: '', tipoVenta: 'minorista', vendedor: '', tradeIn: null, items: [], pagos: [], comisionVendedor: 0 };
     this.step = 0;
     this.selectedStockIds = [];
     this.invMode = 'manual';
@@ -270,7 +270,7 @@ const Ventas = {
   },
   descartarBorradorYEmpezarNueva() {
     this.borrarBorrador();
-    this.draft = { cliente: '', clienteTel: '', clienteDni: '', tipoVenta: 'minorista', vendedor: '', tradeIn: null, items: [], pagos: [], comisionVendedor: 0 };
+    this.draft = { cliente: '', clienteTel: '', clienteDni: '', clienteEmail: '', tipoVenta: 'minorista', vendedor: '', tradeIn: null, items: [], pagos: [], comisionVendedor: 0 };
     this.step = 0;
     this.selectedStockIds = [];
     this.invMode = 'manual';
@@ -346,16 +346,19 @@ const Ventas = {
       </div>
       ${this._formRow('1fr 1fr')}
         <div>${this._lbl('DNI')}<input type="text" id="vf-cliente-dni" value="${d.clienteDni||''}" placeholder="ej: 34139974" style="${this._inp()}" inputmode="numeric"></div>
+        <div>${this._lbl('Email <span style="font-weight:400;color:var(--text-secondary)">(opcional)</span>')}<input type="email" id="vf-cliente-email" value="${d.clienteEmail||''}" placeholder="ej: cliente@gmail.com" style="${this._inp()}" inputmode="email"></div>
+      </div>
+      ${this._formRow('1fr 1fr')}
         <div>${this._lbl('Tipo de venta')}<select id="vf-tipo-venta" style="${this._sel()}">
           <option value="minorista" ${(d.tipoVenta||'minorista')==='minorista'?'selected':''}>Minorista</option>
           <option value="mayorista" ${d.tipoVenta==='mayorista'?'selected':''}>Mayorista</option>
           <option value="revendedor" ${d.tipoVenta==='revendedor'?'selected':''}>Revendedor</option>
         </select></div>
+        <div>${this._lbl('Vendedor')}<select id="vf-vendedor" style="${this._sel()}">
+          <option value="">Seleccionar</option>
+          ${State.personas.map(p=>`<option ${d.vendedor===p?'selected':''}>${p}</option>`).join('')}
+        </select></div>
       </div>
-      <div style="margin-bottom:10px">${this._lbl('Vendedor')}<select id="vf-vendedor" style="${this._sel()}">
-        <option value="">Seleccionar</option>
-        ${State.personas.map(p=>`<option ${d.vendedor===p?'selected':''}>${p}</option>`).join('')}
-      </select></div>
     `;
   },
 
@@ -900,6 +903,7 @@ const Ventas = {
         this.draft.cliente = document.getElementById('vf-cliente').value.trim() || 'Consumidor final';
         this.draft.clienteTel = document.getElementById('vf-cliente-tel')?.value.trim() || '';
         this.draft.clienteDni = document.getElementById('vf-cliente-dni')?.value.trim() || '';
+        this.draft.clienteEmail = document.getElementById('vf-cliente-email')?.value.trim() || '';
         this.draft.tipoVenta = document.getElementById('vf-tipo-venta')?.value || 'minorista';
         this.draft.vendedor = document.getElementById('vf-vendedor').value;
       }
@@ -1056,6 +1060,7 @@ const Ventas = {
                 <div><label style="font-size:11px;color:var(--text-secondary)">Nombre</label><div style="font-size:13px;font-weight:500">${v.cliente}</div></div>
                 <div><label style="font-size:11px;color:var(--text-secondary)">Teléfono</label><div style="font-size:13px">${v.clienteTel||'—'}</div></div>
                 <div><label style="font-size:11px;color:var(--text-secondary)">DNI</label><div style="font-size:13px">${v.clienteDni||'—'}</div></div>
+                <div><label style="font-size:11px;color:var(--text-secondary)">Email</label><div style="font-size:13px">${v.clienteEmail ? `<a href="mailto:${v.clienteEmail}" style="color:var(--blue)">${v.clienteEmail}</a>` : '—'}</div></div>
                 <div><label style="font-size:11px;color:var(--text-secondary)">Vendedor</label>
                   <div style="font-size:13px;font-weight:600">${v.vendedor||'—'}</div>
                   <div style="font-size:11px;color:var(--green)">Comisión: ${State.fmtUSD(v.comisionVendedor||0)}</div>

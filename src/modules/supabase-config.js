@@ -157,7 +157,7 @@ const DB = {
     });
     State.ventas = (ventasRes.data || []).map(v => ({
       id: v.id, fecha: this.fmtFecha(v.creado_en), fechaISO: v.creado_en, cliente: v.cliente,
-      clienteDni: v.cliente_dni || '', clienteTel: v.cliente_tel || '',
+      clienteDni: v.cliente_dni || '', clienteTel: v.cliente_tel || '', clienteEmail: v.cliente_email || '',
       tipoVenta: v.tipo_venta || 'minorista',
       comisionVendedor: Number(v.comision_vendedor) || 0,
       vendedor: this.personasIdToNombre[v.vendedor_id] || '',
@@ -315,7 +315,7 @@ const DB = {
     const { data: ventaRow, error } = await supa.from('ventas').insert({
       cliente: draft.cliente, vendedor_id: this.personaId(draft.vendedor) || null, estado,
       trade_in_modelo: draft.tradeIn?.modelo || null, trade_in_valor: draft.tradeIn?.valor || 0,
-      cliente_dni: draft.clienteDni || null, cliente_tel: draft.clienteTel || null,
+      cliente_dni: draft.clienteDni || null, cliente_tel: draft.clienteTel || null, cliente_email: draft.clienteEmail || null,
       tipo_venta: draft.tipoVenta || 'minorista', comision_vendedor: draft.comisionVendedor || 0
     }).select().single();
     if (error || !ventaRow) { console.error(error); return null; }

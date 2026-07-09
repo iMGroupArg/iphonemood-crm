@@ -946,19 +946,21 @@ const Ventas = {
         ${d.tradeIn?.valor > 0 ? `<div style="display:flex;justify-content:space-between;font-size:12px;padding:3px 0;color:var(--green)">🔄 Trade-In: ${d.tradeIn.modelo||'Equipo'}<span style="font-weight:600">${State.fmtUSD(d.tradeIn.valor)}</span></div>` : ''}
         ${d.pagos.map(p=>`<div style="display:flex;justify-content:space-between;font-size:12px;padding:3px 0">${p.persona} — ${p.bolsillo}${p.esTarjeta?' <span class="badge b-purple" style="font-size:9px">Tarjeta</span>':''}<span>${State.fmtUSD(p.monto)}</span></div>`).join('')}
       </div>
-      ${pagosTarjeta.length ? `
-      <div style="background:var(--purple-light);border-radius:8px;padding:10px 12px;margin-bottom:14px">
-        <div style="font-size:11px;color:var(--purple);font-weight:600;margin-bottom:6px"><i class="ti ti-credit-card"></i> Detalle del cálculo de tarjeta</div>
-        ${pagosTarjeta.map(p => {
-          const cotiz = p.cotizacionDiferencial || State.refBlue;
-          const precioVentaRealUSD = p.monto;
-          return `
-            <div style="font-size:11px;color:var(--purple);padding:2px 0;display:flex;justify-content:space-between"><span>Cotización usada</span><b>$${cotiz.toLocaleString('es-AR')}</b></div>
-            <div style="font-size:11px;color:var(--purple);padding:2px 0;display:flex;justify-content:space-between"><span>Precio de venta real</span><b>${State.fmtUSD(precioVentaRealUSD)}</b></div>
-            <div style="font-size:12px;color:var(--green);font-weight:600;padding-top:4px;display:flex;justify-content:space-between"><span>Diferencial ganado</span><span>+$${(p.diferencialArs||0).toLocaleString('es-AR')} (${State.fmtUSD((p.diferencialArs||0)/cotiz)})</span></div>
-          `;
-        }).join('<div style="height:1px;background:#fff;margin:6px 0"></div>')}
-      </div>` : ''}
+      ${(()=>{
+        const totalPagado = d.pagos.reduce((s,p) => s + p.monto, 0) + (d.tradeIn?.valor||0);
+        const costoRegalos = d.items.filter(i=>i.regalo).reduce((s,i) => s+(i.costo||0), 0);
+        const diferencial = totalPagado - total;
+        const diferencialReal = diferencial - costoRegalos;
+        return pagosTarjeta.length ? `
+        <div style="background:var(--purple-light);border-radius:8px;padding:10px 12px;margin-bottom:14px">
+          <div style="font-size:11px;color:var(--purple);font-weight:600;margin-bottom:8px">💳 Detalle del diferencial</div>
+          <div style="font-size:11px;color:var(--purple);padding:2px 0;display:flex;justify-content:space-between"><span>Precio pactado de venta</span><b>${State.fmtUSD(total)}</b></div>
+          <div style="font-size:11px;color:var(--purple);padding:2px 0;display:flex;justify-content:space-between"><span>Total cobrado</span><b>${State.fmtUSD(totalPagado)}</b></div>
+          ${costoRegalos > 0 ? `<div style="font-size:11px;color:var(--text-secondary);padding:2px 0;display:flex;justify-content:space-between"><span>Costo regalos incluidos</span><span>−${State.fmtUSD(costoRegalos)}</span></div>` : ''}
+          <div style="height:1px;background:rgba(139,92,246,.3);margin:6px 0"></div>
+          <div style="font-size:12px;color:${diferencialReal>=0?'var(--green)':'var(--red)'};font-weight:600;display:flex;justify-content:space-between"><span>Diferencial ganado</span><span>${diferencialReal>=0?'+':''}${State.fmtUSD(diferencialReal)}</span></div>
+        </div>` : '';
+      })()}
       <div style="margin-bottom:12px">
         <label style="font-size:11px;color:var(--text-secondary);font-weight:600;display:block;margin-bottom:4px">Comisión del vendedor (USD) <span style="font-weight:400">— opcional</span></label>
         <input type="number" id="vf-comision-vendedor" value="${d.comisionVendedor||''}" placeholder="0" oninput="Ventas.draft.comisionVendedor=parseFloat(this.value)||0" style="width:100%;font-size:12px;padding:7px 10px;border:1px solid var(--border-strong);border-radius:8px">

@@ -325,7 +325,14 @@ const DB = {
       nombre: it.nombre, costo_usd: it.costo || 0, precio_usd: it.precio,
       es_regalo: !!it.regalo
     }));
-    if (itemsToInsert.length) await supa.from('venta_items').insert(itemsToInsert);
+    if (itemsToInsert.length) {
+      const { error: itemsErr } = await supa.from('venta_items').insert(itemsToInsert);
+      if (itemsErr) {
+        // Fallback: reintentar sin es_regalo si la columna no existe aún
+        const itemsFallback = itemsToInsert.map(({ es_regalo, ...rest }) => rest);
+        await supa.from('venta_items').insert(itemsFallback);
+      }
+    }
 
     const pagosToInsert = draft.pagos.map(p => ({
       venta_id: ventaRow.id, persona_id: this.personaId(p.persona), bolsillo: p.bolsillo, monto: p.monto,

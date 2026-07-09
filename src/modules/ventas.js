@@ -1123,6 +1123,23 @@ const Ventas = {
               }).join('')}</tbody></table>
             </div>` : ''}
 
+            <!-- TRADE-IN RECIBIDO -->
+            ${v.tradeIn?.valor > 0 ? `
+            <div class="card" style="margin-bottom:14px;border-left:3px solid var(--green)">
+              <div class="card-title"><i class="ti ti-arrows-exchange"></i> Equipo Recibido como Trade-In</div>
+              <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px">
+                <div><label style="font-size:11px;color:var(--text-secondary)">Modelo</label><div style="font-size:13px;font-weight:600">${v.tradeIn.modelo||'—'}</div></div>
+                <div><label style="font-size:11px;color:var(--text-secondary)">Color</label><div style="font-size:13px">${v.tradeIn.color||'—'}</div></div>
+                <div><label style="font-size:11px;color:var(--text-secondary)">Storage</label><div style="font-size:13px">${v.tradeIn.storage||'—'}</div></div>
+                <div><label style="font-size:11px;color:var(--text-secondary)">IMEI</label><div style="font-size:12px;font-family:monospace">${v.tradeIn.imei||'—'}</div></div>
+                <div><label style="font-size:11px;color:var(--text-secondary)">Batería</label><div style="font-size:13px;color:var(--green)">${v.tradeIn.bateriaPct!=null?v.tradeIn.bateriaPct+'%':'—'}</div></div>
+                <div><label style="font-size:11px;color:var(--text-secondary)">Estado</label><div style="font-size:13px">${v.tradeIn.estadoProducto||'—'}</div></div>
+                <div><label style="font-size:11px;color:var(--text-secondary)">Grado</label><div style="font-size:13px">${v.tradeIn.grado||'—'}</div></div>
+                <div><label style="font-size:11px;color:var(--text-secondary)">Valor tomado</label><div style="font-size:15px;font-weight:700;color:var(--green)">− ${State.fmtUSD(v.tradeIn.valor)}</div></div>
+                ${v.tradeIn.notas?`<div style="grid-column:1/-1"><label style="font-size:11px;color:var(--text-secondary)">Notas</label><div style="font-size:12px;color:var(--text-secondary)">${v.tradeIn.notas}</div></div>`:''}
+              </div>
+            </div>` : ''}
+
             <!-- SUBTOTAL -->
             <div style="display:flex;justify-content:flex-end;margin-bottom:14px;gap:20px;flex-wrap:wrap">
               <div style="text-align:right">

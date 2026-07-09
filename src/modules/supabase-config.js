@@ -162,7 +162,7 @@ const DB = {
       comisionVendedor: Number(v.comision_vendedor) || 0,
       vendedor: this.personasIdToNombre[v.vendedor_id] || '',
       items: itemsPorVenta[v.id] || [], pagos: pagosPorVenta[v.id] || [],
-      estado: v.estado, tradeIn: v.trade_in_modelo ? { modelo: v.trade_in_modelo, valor: Number(v.trade_in_valor) } : null,
+      estado: v.estado, tradeIn: v.trade_in_data ? { ...v.trade_in_data, valor: Number(v.trade_in_valor), modelo: v.trade_in_modelo } : (v.trade_in_modelo ? { modelo: v.trade_in_modelo, valor: Number(v.trade_in_valor) } : null),
       notas: []
     }));
     State.nextVentaId = State.ventas.length ? Math.max(...State.ventas.map(v => v.id)) + 1 : 1;
@@ -315,6 +315,7 @@ const DB = {
     const { data: ventaRow, error } = await supa.from('ventas').insert({
       cliente: draft.cliente, vendedor_id: this.personaId(draft.vendedor) || null, estado,
       trade_in_modelo: draft.tradeIn?.modelo || null, trade_in_valor: draft.tradeIn?.valor || 0,
+      trade_in_data: draft.tradeIn ? draft.tradeIn : null,
       cliente_dni: draft.clienteDni || null, cliente_tel: draft.clienteTel || null, cliente_email: draft.clienteEmail || null,
       tipo_venta: draft.tipoVenta || 'minorista', comision_vendedor: draft.comisionVendedor || 0
     }).select().single();

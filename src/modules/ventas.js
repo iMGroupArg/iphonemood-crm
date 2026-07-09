@@ -610,7 +610,7 @@ const Ventas = {
           <input type="number" value="${it.precio}" min="0" step="0.01"
             onchange="Ventas.editItemPrecio(${idx},this.value)"
             style="width:72px;font-size:12px;font-weight:600;padding:3px 6px;border:1px solid var(--border-strong);border-radius:6px;background:var(--bg);color:var(--text);text-align:right">`}
-          <button onclick="Ventas.removeItem(${idx})" title="Quitar" style="background:none;border:none;cursor:pointer;color:var(--red);font-size:16px;padding:2px 4px;border-radius:5px;opacity:0.75" onmouseover="this.style.opacity=1;this.style.background='rgba(239,68,68,.1)'" onmouseout="this.style.opacity=0.75;this.style.background='none'"><i class="ti ti-trash"></i></button>
+          <button onclick="Ventas.removeItem(${idx})" title="Quitar" style="background:none;border:none;cursor:pointer;font-size:17px;padding:2px 4px;border-radius:5px;opacity:0.75;line-height:1" onmouseover="this.style.opacity=1" onmouseout="this.style.opacity=0.75">🗑️</button>
         </div>
       </div>`).join('')}
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:10px 0">
@@ -799,7 +799,7 @@ const Ventas = {
       </div>` : ''}
       ${d.pagos.map((p, idx) => `<div style="display:flex;justify-content:space-between;align-items:center;padding:7px 10px;background:var(--bg-secondary);border-radius:8px;margin-bottom:5px;font-size:12px">
         <span>${p.persona} — ${p.bolsillo} — ${p.bolsillo?.startsWith('ARS') ? `$${Math.round(p.monto*(State.refBlue||1)).toLocaleString('es-AR')} ARS <span style="color:var(--text-secondary);font-size:10px">(≈ ${State.fmtUSD(p.monto)})</span>` : State.fmtUSD(p.monto)}${p.esTarjeta?` <span class="badge b-purple" style="font-size:9px">Tarjeta +$${(p.diferencialArs||0).toLocaleString('es-AR')}</span>`:''}</span>
-        <button onclick="Ventas.removePago(${idx})" title="Quitar pago" style="background:none;border:none;cursor:pointer;color:var(--red);font-size:16px;padding:2px 4px;border-radius:5px;opacity:0.75;flex-shrink:0" onmouseover="this.style.opacity=1;this.style.background='rgba(239,68,68,.1)'" onmouseout="this.style.opacity=0.75;this.style.background='none'"><i class="ti ti-trash"></i></button>
+        <button onclick="Ventas.removePago(${idx})" title="Quitar pago" style="background:none;border:none;cursor:pointer;font-size:17px;padding:2px 4px;border-radius:5px;opacity:0.75;flex-shrink:0;line-height:1" onmouseover="this.style.opacity=1" onmouseout="this.style.opacity=0.75">🗑️</button>
       </div>`).join('')}
       <div style="display:grid;grid-template-columns:${this.isMobile()?'1fr':'1fr 1fr'};gap:8px;margin:10px 0">
         <select id="vf-pago-persona" style="${this._sel()}">
@@ -1266,7 +1266,7 @@ const Ventas = {
                       <div style="font-size:13px;font-weight:600">${State.fmtUSD(p.monto)}</div>
                       ${p.bolsillo?.startsWith('ARS') ? `<div style="font-size:10px;color:var(--text-secondary)">$${Math.round(p.monto*(p.cotizacionDiferencial||State.refBlue)).toLocaleString('es-AR')} ARS @ $${(p.cotizacionDiferencial||State.refBlue).toLocaleString('es-AR')}</div>` : ''}
                     </div>
-                    ${p.id ? `<button onclick="Ventas.eliminarPago(${id},${p.id})" title="Eliminar pago" style="background:none;border:none;cursor:pointer;color:var(--red);padding:4px;font-size:16px;opacity:0.6;transition:opacity .15s" onmouseover="this.style.opacity=1" onmouseout="this.style.opacity=0.6"><i class="ti ti-trash"></i></button>` : ''}
+                    ${p.id ? `<button onclick="Ventas.eliminarPago(${id},${p.id})" title="Eliminar pago" style="background:none;border:none;cursor:pointer;font-size:17px;padding:4px;opacity:0.6;line-height:1" onmouseover="this.style.opacity=1" onmouseout="this.style.opacity=0.6">🗑️</button>` : ''}
                   </div>
                 </div>
               `).join('')}

@@ -645,6 +645,7 @@ const Ventas = {
 
   _invFiltro: '',
   _invCatFiltro: 'todos',
+  _invCondicion: 'todos', // 'todos' | 'nuevo' | 'usado'
 
   _CATS_ACCESORIO: ['accesorio', 'audio', 'repuesto', 'herramienta', 'perfumeria', 'decant', 'otro'],
   _CATS_DISPOSITIVO: ['iphone', 'android', 'mac', 'ipad', 'watch'],
@@ -667,9 +668,13 @@ const Ventas = {
 
   inventoryForm() {
     return `
-      <div style="display:flex;gap:6px;margin-bottom:8px;overflow-x:auto;-webkit-overflow-scrolling:touch;padding-bottom:2px;scrollbar-width:none">
+      <div style="display:flex;gap:6px;margin-bottom:6px;overflow-x:auto;-webkit-overflow-scrolling:touch;padding-bottom:2px;scrollbar-width:none">
         ${this._INV_CHIPS.map(c => `<button onclick="Ventas._invCatFiltro='${c.key}';Ventas._renderInvLista()"
           style="padding:5px 12px;border-radius:20px;border:1px solid ${this._invCatFiltro===c.key?'var(--blue)':'var(--border)'};background:${this._invCatFiltro===c.key?'var(--blue)':'var(--bg-secondary)'};color:${this._invCatFiltro===c.key?'#fff':'var(--text)'};font-size:12px;cursor:pointer;white-space:nowrap;flex-shrink:0">${c.label}</button>`).join('')}
+      </div>
+      <div style="display:flex;gap:6px;margin-bottom:8px">
+        ${[{k:'todos',l:'Todos'},{k:'nuevo',l:'✨ Nuevo'},{k:'usado',l:'🔄 Usado'}].map(c=>`<button onclick="Ventas._invCondicion='${c.k}';Ventas._renderInvLista()"
+          style="padding:4px 10px;border-radius:20px;border:1px solid ${this._invCondicion===c.k?'var(--blue)':'var(--border)'};background:${this._invCondicion===c.k?'var(--blue)':'var(--bg-secondary)'};color:${this._invCondicion===c.k?'#fff':'var(--text)'};font-size:11px;cursor:pointer;white-space:nowrap">${c.l}</button>`).join('')}
       </div>
       <input id="inv-buscar" type="search" placeholder="Buscar producto..." value="${this._invFiltro || ''}"
         oninput="Ventas._invFiltro=this.value;Ventas._renderInvLista()"
@@ -701,6 +706,10 @@ const Ventas = {
       if (estado === 'vendido' || estado === 'eliminado') return false;
       if (q && !s.nombre.toLowerCase().includes(q)) return false;
       if (cat !== 'todos') return s.cat === cat;
+      return true;
+    }).filter(s => {
+      if (this._invCondicion === 'nuevo') return (s.estadoProducto || '') === 'Nuevo / Sellado';
+      if (this._invCondicion === 'usado') return (s.estadoProducto || '') !== 'Nuevo / Sellado';
       return true;
     });
     return `

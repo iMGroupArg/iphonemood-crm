@@ -3,6 +3,7 @@ const Stock = {
   currentView: 'productos', // 'productos' | 'historial'
   currentGroup: 'dispositivos', // 'dispositivos' | 'accesorios' | 'perfumeria'
   currentEstado: 'todos', // 'todos' | 'disponible' | 'vendido' | 'reservado' | 'en_reparacion'
+  currentCondicion: 'todos', // 'todos' | 'nuevo' | 'usado'
   CAT_LABELS: { iphone:'iPhone', android:'Android', mac:'Mac', ipad:'iPad', watch:'Watch', audio:'Audio', perfumeria:'Perfumería', decant:'Decant', accesorio:'Accesorio', repuesto:'Repuesto', herramienta:'Herramienta', otro:'Otro' },
   CAT_CLASS: { iphone:'b-blue', android:'b-teal', mac:'b-blue', ipad:'b-blue', watch:'b-blue', audio:'b-purple', perfumeria:'b-green', decant:'b-teal', accesorio:'b-purple', repuesto:'b-amber', herramienta:'b-amber', otro:'b-gray' },
   CATS_IMEI: ['iphone','android','mac','ipad'],
@@ -153,6 +154,7 @@ const Stock = {
       host.innerHTML = `
         <div style="padding:${px};border-bottom:1px solid var(--border);display:flex;gap:4px;overflow-x:auto;-webkit-overflow-scrolling:touch;white-space:nowrap;flex-shrink:0" id="stock-grupo-tabs"></div>
         <div style="padding:${px};border-bottom:1px solid var(--border);display:flex;gap:6px;overflow-x:auto;-webkit-overflow-scrolling:touch;white-space:nowrap;flex-shrink:0;align-items:center" id="stock-estado-tabs"></div>
+        <div style="padding:${px};border-bottom:1px solid var(--border);display:flex;gap:6px;overflow-x:auto;-webkit-overflow-scrolling:touch;white-space:nowrap;flex-shrink:0;align-items:center" id="stock-condicion-tabs"></div>
         <div style="padding:${pxS};border-bottom:1px solid var(--border);display:flex;gap:6px;overflow-x:auto;-webkit-overflow-scrolling:touch;white-space:nowrap;flex-shrink:0" id="stock-tabs-wrap">
           <div style="display:flex;gap:4px" id="stock-tabs"></div>
         </div>
@@ -191,6 +193,7 @@ const Stock = {
       `;
       this.renderGrupoTabs();
       this.renderEstadoTabs();
+      this.renderCondicionTabs();
       this.renderTabs();
       this.renderTable();
     } else {
@@ -211,7 +214,7 @@ const Stock = {
       </button>`;
     }).join('');
   },
-  setGrupo(g) { this.currentGroup = g; this.currentTab = 'all'; this.currentEstado = 'todos'; this.renderKpis(); this.renderGrupoTabs(); this.renderEstadoTabs(); this.renderTabs(); this.renderTable(); },
+  setGrupo(g) { this.currentGroup = g; this.currentTab = 'all'; this.currentEstado = 'todos'; this.currentCondicion = 'todos'; this.renderKpis(); this.renderGrupoTabs(); this.renderEstadoTabs(); this.renderCondicionTabs(); this.renderTabs(); this.renderTable(); },
 
   renderEstadoTabs() {
     const grupo = this.productosDelGrupo(this.currentGroup);
@@ -224,6 +227,22 @@ const Stock = {
     }).join('');
   },
   setEstadoFiltro(e) { this.currentEstado = e; this.renderEstadoTabs(); this.renderTable(); },
+
+  renderCondicionTabs() {
+    const grupo = this.productosDelGrupo(this.currentGroup);
+    const esNuevo = p => (p.estadoProducto || '') === 'Nuevo / Sellado';
+    const counts = {
+      todos: grupo.length,
+      nuevo: grupo.filter(esNuevo).length,
+      usado: grupo.filter(p => !esNuevo(p)).length,
+    };
+    const labels = { todos: '📦 Todos', nuevo: '✨ Nuevo / Sellado', usado: '🔄 Usado' };
+    document.getElementById('stock-condicion-tabs').innerHTML = Object.entries(labels).map(([key, label]) => {
+      const active = this.currentCondicion === key;
+      return `<span onclick="Stock.setCondicionFiltro('${key}')" style="cursor:pointer;font-size:12px;padding:5px 11px;border-radius:20px;border-bottom:2px solid ${active?'var(--blue)':'transparent'};color:${active?'var(--blue)':'var(--text-secondary)'};font-weight:${active?'600':'400'};display:inline-flex;align-items:center;gap:5px">${label} <span style="background:var(--bg-secondary);padding:1px 6px;border-radius:10px;font-size:10px">${counts[key]}</span></span>`;
+    }).join('');
+  },
+  setCondicionFiltro(c) { this.currentCondicion = c; this.renderCondicionTabs(); this.renderTable(); },
 
   renderTabs() {
     const catsDelGrupo = this.GRUPOS[this.currentGroup]?.cats || [];
@@ -278,6 +297,8 @@ const Stock = {
       if (!catsDelGrupo.includes(s.cat)) return false;
       if (this.currentTab !== 'all' && s.cat !== this.currentTab) return false;
       if (this.currentEstado !== 'todos' && (s.estadoInventario||'disponible') !== this.currentEstado) return false;
+      if (this.currentCondicion === 'nuevo' && (s.estadoProducto || '') !== 'Nuevo / Sellado') return false;
+      if (this.currentCondicion === 'usado' && (s.estadoProducto || '') === 'Nuevo / Sellado') return false;
       if (q && !s.nombre.toLowerCase().includes(q)) return false;
       if (modeloFiltro && (s.modelo || '') !== modeloFiltro) return false;
       // Filtros exclusivos de perfumería (color=categoria, storage=concentracion, modelo=marca)

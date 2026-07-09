@@ -649,16 +649,27 @@ const Ventas = {
   _CATS_ACCESORIO: ['accesorio', 'audio', 'repuesto', 'herramienta', 'perfumeria', 'decant', 'otro'],
   _CATS_DISPOSITIVO: ['iphone', 'android', 'mac', 'ipad', 'watch'],
 
+  _INV_CHIPS: [
+    { key:'todos',       label:'Todos' },
+    { key:'iphone',      label:'🍎 iPhone' },
+    { key:'android',     label:'🤖 Android' },
+    { key:'mac',         label:'💻 Mac' },
+    { key:'ipad',        label:'📱 iPad' },
+    { key:'watch',       label:'⌚ Watch' },
+    { key:'audio',       label:'🎧 Audio' },
+    { key:'accesorio',   label:'🔌 Accesorios' },
+    { key:'repuesto',    label:'🔧 Repuestos' },
+    { key:'herramienta', label:'🛠 Herramientas' },
+    { key:'perfumeria',  label:'🌸 Perfumería' },
+    { key:'decant',      label:'🧪 Decants' },
+    { key:'otro',        label:'📦 Otro' },
+  ],
+
   inventoryForm() {
-    const chips = [
-      { key:'todos', label:'Todos' },
-      { key:'dispositivos', label:'📱 Dispositivos' },
-      { key:'accesorios', label:'🎧 Accesorios' },
-    ];
     return `
-      <div style="display:flex;gap:6px;margin-bottom:8px">
-        ${chips.map(c => `<button onclick="Ventas._invCatFiltro='${c.key}';Ventas._renderInvLista()"
-          style="padding:5px 12px;border-radius:20px;border:1px solid ${this._invCatFiltro===c.key?'var(--blue)':'var(--border)'};background:${this._invCatFiltro===c.key?'var(--blue)':'var(--bg-secondary)'};color:${this._invCatFiltro===c.key?'#fff':'var(--text)'};font-size:12px;cursor:pointer;white-space:nowrap">${c.label}</button>`).join('')}
+      <div style="display:flex;gap:6px;margin-bottom:8px;overflow-x:auto;-webkit-overflow-scrolling:touch;padding-bottom:2px;scrollbar-width:none">
+        ${this._INV_CHIPS.map(c => `<button onclick="Ventas._invCatFiltro='${c.key}';Ventas._renderInvLista()"
+          style="padding:5px 12px;border-radius:20px;border:1px solid ${this._invCatFiltro===c.key?'var(--blue)':'var(--border)'};background:${this._invCatFiltro===c.key?'var(--blue)':'var(--bg-secondary)'};color:${this._invCatFiltro===c.key?'#fff':'var(--text)'};font-size:12px;cursor:pointer;white-space:nowrap;flex-shrink:0">${c.label}</button>`).join('')}
       </div>
       <input id="inv-buscar" type="search" placeholder="Buscar producto..." value="${this._invFiltro || ''}"
         oninput="Ventas._invFiltro=this.value;Ventas._renderInvLista()"
@@ -673,9 +684,8 @@ const Ventas = {
     const form = document.getElementById('vf-item-form');
     if (form) {
       const chipBtns = form.querySelectorAll('button[onclick*="_invCatFiltro"]');
-      const chips = [{ key:'todos' }, { key:'dispositivos' }, { key:'accesorios' }];
       chipBtns.forEach((btn, i) => {
-        const active = chips[i] && this._invCatFiltro === chips[i].key;
+        const active = this._INV_CHIPS[i] && this._invCatFiltro === this._INV_CHIPS[i].key;
         btn.style.borderColor = active ? 'var(--blue)' : 'var(--border)';
         btn.style.background = active ? 'var(--blue)' : 'var(--bg-secondary)';
         btn.style.color = active ? '#fff' : 'var(--text)';
@@ -690,8 +700,7 @@ const Ventas = {
       const estado = s.estadoInventario || 'disponible';
       if (estado === 'vendido' || estado === 'eliminado') return false;
       if (q && !s.nombre.toLowerCase().includes(q)) return false;
-      if (cat === 'dispositivos') return this._CATS_DISPOSITIVO.includes(s.cat);
-      if (cat === 'accesorios') return this._CATS_ACCESORIO.includes(s.cat);
+      if (cat !== 'todos') return s.cat === cat;
       return true;
     });
     return `

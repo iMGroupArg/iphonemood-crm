@@ -295,7 +295,7 @@ const Ventas = {
         <div style="${card}">
           <div style="padding:${mobile?'10px 14px':'14px 20px'};border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;flex-shrink:0">
             <h3 style="font-size:${mobile?'14px':'15px'};font-weight:600">Nueva venta</h3>
-            <button class="btn btn-sm" onclick="Ventas.closeModal()"><i class="ti ti-x"></i></button>
+            <button onclick="Ventas.closeModal()" style="background:none;border:none;cursor:pointer;color:var(--red);font-size:22px;line-height:1;padding:2px 6px;border-radius:6px;transition:background .15s" onmouseover="this.style.background='rgba(239,68,68,.12)'" onmouseout="this.style.background='none'"><i class="ti ti-x"></i></button>
           </div>
           <div style="padding:${mobile?'10px 14px':'14px 20px'};border-bottom:1px solid var(--border);display:flex;gap:${mobile?'2px':'4px'};flex-shrink:0" id="venta-stepper"></div>
           <div style="flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;padding:${mobile?'14px':'18px 20px'}" id="venta-step-body"></div>
@@ -1110,7 +1110,7 @@ const Ventas = {
               <span style="font-size:20px;font-weight:700">${State.fmtUSD(total)}</span>
               <button class="btn btn-sm btn-primary" onclick="Ventas.generarRecibo(${id})"><i class="ti ti-download"></i> Recibo</button>
               <button class="btn btn-sm" onclick="Ventas.generarDetallePDF(${id})"><i class="ti ti-download"></i> Detalle PDF</button>
-              <button class="btn btn-sm" onclick="Ventas.closeModal()"><i class="ti ti-x"></i></button>
+              <button onclick="Ventas.closeModal()" style="background:none;border:none;cursor:pointer;color:var(--red);font-size:22px;line-height:1;padding:2px 6px;border-radius:6px;transition:background .15s" onmouseover="this.style.background='rgba(239,68,68,.12)'" onmouseout="this.style.background='none'"><i class="ti ti-x"></i></button>
             </div>
           </div>
 

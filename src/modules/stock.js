@@ -15,8 +15,8 @@ const Stock = {
   },
   ESTADO_INV_LABEL: { disponible:'Disponible', vendido:'Vendido', reservado:'Reservado', en_reparacion:'En reparación' },
   ESTADO_INV_CLASS: { disponible:'b-green', vendido:'b-gray', reservado:'b-amber', en_reparacion:'b-purple' },
-  TIPO_MOV_LABEL: { alta:'Alta', baja_venta:'Baja por venta', ajuste_cantidad:'Ajuste de cantidad', imei_agregado:'IMEI agregado', imei_quitado:'IMEI quitado', edicion:'Edición' },
-  TIPO_MOV_CLASS: { alta:'b-green', baja_venta:'b-red', ajuste_cantidad:'b-amber', imei_agregado:'b-blue', imei_quitado:'b-gray', edicion:'b-purple' },
+  TIPO_MOV_LABEL: { alta:'Alta', baja_venta:'Baja por venta', ajuste_cantidad:'Ajuste de cantidad', imei_agregado:'IMEI agregado', imei_quitado:'IMEI quitado', edicion:'Edición', trade_in:'Trade-In Recibido' },
+  TIPO_MOV_CLASS: { alta:'b-green', baja_venta:'b-red', ajuste_cantidad:'b-amber', imei_agregado:'b-blue', imei_quitado:'b-gray', edicion:'b-purple', trade_in:'b-green' },
   pendingImeis: [],
 
   // El stock real de un producto se calcula en State.getStock (compartido con
@@ -387,18 +387,24 @@ const Stock = {
     host.innerHTML = `<div class="empty-state" style="padding:20px"><i class="ti ti-loader-2"></i>Cargando...</div>`;
     const movs = await DB.listarMovimientosStock(stockId);
     if (!movs.length) { host.innerHTML = `<div class="hint" style="font-size:11.5px;color:var(--text-secondary);padding:8px 0">Sin movimientos registrados todavía para este producto.</div>`; return; }
-    host.innerHTML = movs.map(m => `
+    host.innerHTML = movs.map(m => {
+      let extraLink = '';
+      if (m.tipo === 'trade_in' && m.datos?.ventaId) {
+        extraLink = `<a href="#" onclick="event.preventDefault();document.getElementById('historial-producto-host').closest('.drawer').querySelector('.close-btn')?.click();setTimeout(()=>Ventas.viewSale(${m.datos.ventaId}),200)" style="font-size:11px;color:var(--green);text-decoration:underline;margin-left:6px">Ver venta #${m.datos.ventaId}</a>`;
+      }
+      return `
       <div style="display:flex;justify-content:space-between;align-items:center;padding:7px 0;border-bottom:1px solid var(--border);font-size:11.5px">
         <div>
           <span class="badge ${this.TIPO_MOV_CLASS[m.tipo]||'b-gray'}">${this.TIPO_MOV_LABEL[m.tipo]||m.tipo}</span>
-          <span style="color:var(--text-secondary);margin-left:6px">${m.detalle || ''}</span>
+          <span style="color:var(--text-secondary);margin-left:6px">${m.detalle || ''}</span>${extraLink}
         </div>
         <div style="text-align:right;color:var(--text-secondary)">
           <div>${this.fmtFechaHora(m.creado_en)}</div>
           <div>${m.usuario_nombre || ''}</div>
         </div>
       </div>
-    `).join('');
+    `;
+    }).join('');
   },
 
   fmtFechaHora(iso) {

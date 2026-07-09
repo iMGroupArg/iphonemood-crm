@@ -84,7 +84,11 @@ const Ventas = {
     const volumen = ventas.reduce((s,v) => s + v.items.reduce((a,i) => a + i.precio, 0), 0);
     const margenTotal = ventas.reduce((s,v) => s + v.items.reduce((a,i) => a + (i.precio - (i.costo||0)), 0), 0);
     const margenXEquipo = ventas.length ? margenTotal / ventas.length : 0;
-    const diferencial = ventas.reduce((s,v) => s + (v.pagos||[]).filter(p=>p.esTarjeta).reduce((a,p) => a + (p.diferencialArs ? (p.diferencialArs/(p.cotizacionDiferencial||State.refBlue)) : 0), 0), 0);
+    const diferencial = ventas.reduce((s,v) => {
+      const totalVenta = v.items.reduce((a,i) => a + i.precio, 0);
+      const totalPagado = (v.pagos||[]).reduce((a,p) => a + p.monto, 0) + (v.tradeIn?.valor||0);
+      return s + Math.max(0, totalPagado - totalVenta);
+    }, 0);
     const ticketProm = ventas.length ? volumen / ventas.length : 0;
 
     if (this.isMobile()) {
@@ -950,6 +954,7 @@ const Ventas = {
     }
 
     // Ingresar el equipo del Trade-In al stock
+    let savedTradeInId = null;
     if (d.tradeIn?.modelo && d.tradeIn?.valor > 0) {
       const ti = d.tradeIn;
       const imeis = ti.imei ? [ti.imei] : [];
@@ -968,6 +973,7 @@ const Ventas = {
       if (!tiErr && tiId) {
         tiObj.id = tiId;
         State.stock.push(tiObj);
+        savedTradeInId = tiId;
       }
     }
 
@@ -982,9 +988,19 @@ const Ventas = {
     const ventaId = await DB.crearVenta(d, estado);
     if (!ventaId) { toast('Hubo un problema guardando la venta. Probá de nuevo.'); return; }
 
+    if (savedTradeInId && d.tradeIn) {
+      const ti = d.tradeIn;
+      DB.registrarMovimientoStock(
+        savedTradeInId, 'trade_in',
+        `Recibido como trade-in de ${d.cliente} en venta #${ventaId}`,
+        0, ti.imei ? 0 : 1,
+        { ventaId, cliente: d.cliente, valor: ti.valor }
+      );
+    }
+
     const venta = {
       id: ventaId, fecha: 'Hoy', cliente: d.cliente, vendedor: d.vendedor,
-      items: d.items, pagos: d.pagos.map(p => ({ caja: `${p.persona}-${p.bolsillo}`, monto: p.monto, persona: p.persona, bolsillo: p.bolsillo, esTarjeta: !!p.esTarjeta, diferencialArs: p.diferencialArs || 0, cotizacionDiferencial: p.cotizacionDiferencial || null })),
+      items: d.items, pagos: d.pagos.map(p => ({ id: p.id || null, caja: `${p.persona}-${p.bolsillo}`, monto: p.monto, persona: p.persona, bolsillo: p.bolsillo, esTarjeta: !!p.esTarjeta, diferencialArs: p.diferencialArs || 0, cotizacionDiferencial: p.cotizacionDiferencial || null })),
       estado, tradeIn: d.tradeIn, stockMovs
     };
     State.ventas.unshift(venta);
@@ -1149,6 +1165,7 @@ const Ventas = {
             <!-- PAGOS -->
             <div class="card" style="margin-bottom:14px">
               <div class="card-title"><i class="ti ti-credit-card"></i> Pagos</div>
+              ${(()=>{ const dif = pagado - total; return dif > 0.01 ? `<div style="display:flex;justify-content:space-between;align-items:center;background:rgba(139,92,246,0.08);border:1px solid var(--purple);border-radius:8px;padding:7px 12px;margin-bottom:10px;font-size:12px"><span style="color:var(--purple);font-weight:600"><i class="ti ti-credit-card"></i> Diferencial cobrado</span><span style="color:var(--purple);font-weight:700">+${State.fmtUSD(dif)}</span></div>` : ''; })()}
               <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:12px">
                 <div><label style="font-size:11px;color:var(--text-secondary)">Total Venta</label><div style="font-size:17px;font-weight:700">${State.fmtUSD(total)}</div></div>
                 <div><label style="font-size:11px;color:var(--text-secondary)">Total Pagos</label><div style="font-size:17px;font-weight:700">${State.fmtUSD(pagado)}</div></div>
@@ -1174,9 +1191,12 @@ const Ventas = {
                       <div style="font-size:11px;color:var(--text-secondary)">${v.fecha}</div>
                     </div>
                   </div>
-                  <div style="text-align:right">
-                    <div style="font-size:13px;font-weight:600">${State.fmtUSD(p.monto)}</div>
-                    ${p.bolsillo?.startsWith('ARS') ? `<div style="font-size:10px;color:var(--text-secondary)">$${Math.round(p.monto*(p.cotizacionDiferencial||State.refBlue)).toLocaleString('es-AR')} ARS @ $${(p.cotizacionDiferencial||State.refBlue).toLocaleString('es-AR')}</div>` : ''}
+                  <div style="display:flex;align-items:center;gap:10px">
+                    <div style="text-align:right">
+                      <div style="font-size:13px;font-weight:600">${State.fmtUSD(p.monto)}</div>
+                      ${p.bolsillo?.startsWith('ARS') ? `<div style="font-size:10px;color:var(--text-secondary)">$${Math.round(p.monto*(p.cotizacionDiferencial||State.refBlue)).toLocaleString('es-AR')} ARS @ $${(p.cotizacionDiferencial||State.refBlue).toLocaleString('es-AR')}</div>` : ''}
+                    </div>
+                    ${p.id ? `<button onclick="Ventas.eliminarPago(${id},${p.id})" title="Eliminar pago" style="background:none;border:none;cursor:pointer;color:var(--red);padding:4px;font-size:16px;opacity:0.6;transition:opacity .15s" onmouseover="this.style.opacity=1" onmouseout="this.style.opacity=0.6"><i class="ti ti-trash"></i></button>` : ''}
                   </div>
                 </div>
               `).join('')}
@@ -1707,6 +1727,26 @@ const Ventas = {
     toast(`Venta #${id} marcada como cerrada ✓`);
     this.renderList();
     this.viewSale(id);
+  },
+
+  async eliminarPago(ventaId, pagoId) {
+    if (!confirm('¿Eliminar este pago? El saldo de la venta se actualizará.')) return;
+    const ok = await DB.eliminarPagoVenta(pagoId);
+    if (!ok) { toast('Error al eliminar el pago'); return; }
+    const v = State.ventas.find(x => x.id === ventaId);
+    if (v) {
+      v.pagos = v.pagos.filter(p => p.id !== pagoId);
+      const total = v.items.reduce((s, i) => s + i.precio, 0);
+      const pagado = v.pagos.reduce((s, p) => s + p.monto, 0) + (v.tradeIn?.valor || 0);
+      const nuevoEstado = (total - pagado) <= 0.5 ? 'cerrada' : 'abierta';
+      if (nuevoEstado !== v.estado) {
+        v.estado = nuevoEstado;
+        await DB.actualizarEstadoVenta(ventaId, nuevoEstado);
+      }
+    }
+    toast('Pago eliminado ✓');
+    this.renderList();
+    this.viewSale(ventaId);
   },
 
   async anular(id) {

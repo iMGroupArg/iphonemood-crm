@@ -168,17 +168,14 @@ const State = {
   resultadoFinancieroMes() {
     return this.cambios.reduce((a, o) => a + this.calcSpreadARS(o), 0);
   },
-  // Suma de diferenciales de tarjeta cobrados, convertidos a USD con la cotización
-  // que tenía cada pago al momento de cobrarse (igual criterio que los gastos en ARS).
+  // Diferencial financiero: lo cobrado en pagos menos el precio de lista de los items.
+  // Captura tanto el recargo tarjeta como la diferencia de tipo de cambio.
   resultadoDiferencialTarjetaMes() {
     let totalUSD = 0;
     this.ventas.forEach(v => {
-      (v.pagos || []).forEach(p => {
-        if (p.esTarjeta && p.diferencialArs) {
-          const cotiz = p.cotizacionDiferencial || this.refBlue;
-          totalUSD += p.diferencialArs / cotiz;
-        }
-      });
+      const totalVenta = (v.items || []).reduce((s, i) => s + i.precio, 0);
+      const totalPagado = (v.pagos || []).reduce((s, p) => s + p.monto, 0) + (v.tradeIn?.valor || 0);
+      totalUSD += Math.max(0, totalPagado - totalVenta);
     });
     return totalUSD;
   },

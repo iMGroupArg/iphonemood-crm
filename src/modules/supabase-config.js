@@ -150,7 +150,7 @@ const DB = {
       if (!pagosPorVenta[p.venta_id]) pagosPorVenta[p.venta_id] = [];
       const persona = this.personasIdToNombre[p.persona_id] || '';
       pagosPorVenta[p.venta_id].push({
-        caja: `${persona}-${p.bolsillo}`, monto: Number(p.monto), persona, bolsillo: p.bolsillo,
+        id: p.id, caja: `${persona}-${p.bolsillo}`, monto: Number(p.monto), persona, bolsillo: p.bolsillo,
         esTarjeta: !!p.es_tarjeta, diferencialArs: Number(p.diferencial_ars) || 0,
         cotizacionDiferencial: p.cotizacion_diferencial ? Number(p.cotizacion_diferencial) : null
       });
@@ -277,14 +277,13 @@ const DB = {
     }
   },
 
-  async registrarMovimientoStock(stockId, tipo, detalle, cantidadAntes, cantidadDespues) {
-    // Guardamos quién hizo el cambio usando el usuario logueado en la app (no necesariamente
-    // coincide con las "personas" de cajas del negocio — son dos conceptos distintos).
+  async registrarMovimientoStock(stockId, tipo, detalle, cantidadAntes, cantidadDespues, datos = null) {
     const usuarioNombre = Auth.usuario?.nombre || Auth.usuario?.email || 'Desconocido';
     await supa.from('stock_movimientos').insert({
       stock_id: stockId, tipo, detalle,
       cantidad_antes: cantidadAntes, cantidad_despues: cantidadDespues,
-      usuario_nombre: usuarioNombre
+      usuario_nombre: usuarioNombre,
+      ...(datos ? { datos } : {})
     });
   },
 
@@ -332,7 +331,12 @@ const DB = {
       es_tarjeta: !!p.esTarjeta, diferencial_ars: p.diferencialArs || 0,
       cotizacion_diferencial: p.bolsillo?.startsWith('ARS') ? (p.cotizacionDiferencial || State.refBlue) : null
     }));
-    if (pagosToInsert.length) await supa.from('venta_pagos').insert(pagosToInsert);
+    if (pagosToInsert.length) {
+      const { data: pagosInserted } = await supa.from('venta_pagos').insert(pagosToInsert).select();
+      if (pagosInserted) {
+        draft.pagos.forEach((p, i) => { if (pagosInserted[i]) p.id = pagosInserted[i].id; });
+      }
+    }
 
     return ventaRow.id;
   },
@@ -360,6 +364,11 @@ const DB = {
       bolsillo: pago.bolsillo, monto: pago.monto,
       es_tarjeta: false, diferencial_ars: 0
     });
+  },
+
+  async eliminarPagoVenta(pagoId) {
+    const { error } = await supa.from('venta_pagos').delete().eq('id', pagoId);
+    return !error;
   },
 
   async actualizarEstadoVenta(ventaId, estado) {

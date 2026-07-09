@@ -687,6 +687,8 @@ const Ventas = {
     const cat = this._invCatFiltro || 'todos';
     const disponibles = State.stock.filter(s => {
       if (State.getStock(s) <= 0) return false;
+      const estado = s.estadoInventario || 'disponible';
+      if (estado === 'vendido' || estado === 'eliminado') return false;
       if (q && !s.nombre.toLowerCase().includes(q)) return false;
       if (cat === 'dispositivos') return this._CATS_DISPOSITIVO.includes(s.cat);
       if (cat === 'accesorios') return this._CATS_ACCESORIO.includes(s.cat);

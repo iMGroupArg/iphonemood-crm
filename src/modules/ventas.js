@@ -600,12 +600,15 @@ const Ventas = {
         <b>Ítems agregados</b><span style="font-size:14px;font-weight:600;color:var(--blue)">${State.fmtUSD(Math.max(0,total))}</span>
       </div>
       ${d.items.map((it, idx) => `<div style="display:flex;justify-content:space-between;align-items:center;padding:7px 10px;background:var(--bg-secondary);border-radius:8px;margin-bottom:5px;font-size:12px;gap:8px">
-        <span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${it.nombre}</span>
+        <div style="flex:1;min-width:0">
+          <div style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${it.nombre}${it.regalo?` <span style="font-size:10px;color:var(--green)">🎁 regalo</span>`:''}</div>
+          ${it.regalo?`<div style="font-size:10px;color:var(--text-secondary)">Costo: USD ${it.costo||0} (impacta en margen)</div>`:''}
+        </div>
         <div style="display:flex;align-items:center;gap:6px;flex-shrink:0">
-          <span style="font-size:10px;color:var(--text-secondary)">USD</span>
+          ${it.regalo ? `<span style="font-size:12px;font-weight:600;color:var(--green)">Gratis</span>` : `<span style="font-size:10px;color:var(--text-secondary)">USD</span>
           <input type="number" value="${it.precio}" min="0" step="0.01"
             onchange="Ventas.editItemPrecio(${idx},this.value)"
-            style="width:72px;font-size:12px;font-weight:600;padding:3px 6px;border:1px solid var(--border-strong);border-radius:6px;background:var(--bg);color:var(--text);text-align:right">
+            style="width:72px;font-size:12px;font-weight:600;padding:3px 6px;border:1px solid var(--border-strong);border-radius:6px;background:var(--bg);color:var(--text);text-align:right">`}
           <button onclick="Ventas.removeItem(${idx})" style="background:none;border:none;cursor:pointer;color:var(--text-secondary)"><i class="ti ti-x"></i></button>
         </div>
       </div>`).join('')}
@@ -641,9 +644,22 @@ const Ventas = {
   },
 
   _invFiltro: '',
+  _invCatFiltro: 'todos',
+
+  _CATS_ACCESORIO: ['accesorio', 'audio', 'repuesto', 'herramienta', 'perfumeria', 'decant', 'otro'],
+  _CATS_DISPOSITIVO: ['iphone', 'android', 'mac', 'ipad', 'watch'],
 
   inventoryForm() {
+    const chips = [
+      { key:'todos', label:'Todos' },
+      { key:'dispositivos', label:'📱 Dispositivos' },
+      { key:'accesorios', label:'🎧 Accesorios' },
+    ];
     return `
+      <div style="display:flex;gap:6px;margin-bottom:8px">
+        ${chips.map(c => `<button onclick="Ventas._invCatFiltro='${c.key}';Ventas._renderInvLista()"
+          style="padding:5px 12px;border-radius:20px;border:1px solid ${this._invCatFiltro===c.key?'var(--blue)':'var(--border)'};background:${this._invCatFiltro===c.key?'var(--blue)':'var(--bg-secondary)'};color:${this._invCatFiltro===c.key?'#fff':'var(--text)'};font-size:12px;cursor:pointer;white-space:nowrap">${c.label}</button>`).join('')}
+      </div>
       <input id="inv-buscar" type="search" placeholder="Buscar producto..." value="${this._invFiltro || ''}"
         oninput="Ventas._invFiltro=this.value;Ventas._renderInvLista()"
         style="width:100%;padding:9px 12px;border:1px solid var(--border-strong);border-radius:var(--radius);background:var(--bg);color:var(--text);font-size:14px;box-sizing:border-box;margin-bottom:8px;font-family:var(--font)">
@@ -653,26 +669,49 @@ const Ventas = {
   _renderInvLista() {
     const el = document.getElementById('inv-lista');
     if (el) el.innerHTML = this._invListaHTML();
+    // Re-render chips to update active state
+    const form = document.getElementById('vf-item-form');
+    if (form) {
+      const chipBtns = form.querySelectorAll('button[onclick*="_invCatFiltro"]');
+      const chips = [{ key:'todos' }, { key:'dispositivos' }, { key:'accesorios' }];
+      chipBtns.forEach((btn, i) => {
+        const active = chips[i] && this._invCatFiltro === chips[i].key;
+        btn.style.borderColor = active ? 'var(--blue)' : 'var(--border)';
+        btn.style.background = active ? 'var(--blue)' : 'var(--bg-secondary)';
+        btn.style.color = active ? '#fff' : 'var(--text)';
+      });
+    }
   },
   _invListaHTML() {
     const q = (this._invFiltro || '').toLowerCase().trim();
-    const disponibles = State.stock.filter(s => State.getStock(s) > 0
-      && (!q || s.nombre.toLowerCase().includes(q)));
+    const cat = this._invCatFiltro || 'todos';
+    const disponibles = State.stock.filter(s => {
+      if (State.getStock(s) <= 0) return false;
+      if (q && !s.nombre.toLowerCase().includes(q)) return false;
+      if (cat === 'dispositivos') return this._CATS_DISPOSITIVO.includes(s.cat);
+      if (cat === 'accesorios') return this._CATS_ACCESORIO.includes(s.cat);
+      return true;
+    });
     return `
       <div style="font-size:11px;color:var(--text-secondary);margin-bottom:8px">${disponibles.length} producto${disponibles.length!==1?'s':''} con stock disponible</div>
       <div style="display:flex;flex-direction:column;gap:8px;max-height:240px;overflow-y:auto">
         ${disponibles.map(s => {
           const sel = this.selectedStockIds.includes(s.id);
           const precioUSD = s.precioARS && s.cotiz ? +(s.precioARS / s.cotiz).toFixed(2) : 0;
+          const esAccesorio = this._CATS_ACCESORIO.includes(s.cat);
           return `<div style="border:${sel?'2px solid var(--blue)':'1px solid var(--border)'};background:${sel?'var(--blue-light)':'var(--bg)'};border-radius:8px;padding:9px 11px;font-size:11.5px">
             <div onclick="Ventas.toggleStockSel('${s.id}')" style="cursor:pointer;margin-bottom:${sel?'8px':'0'}">
               <b style="font-size:12px">${s.nombre}</b><br>
               <span style="color:var(--text-secondary)">Costo: USD ${s.costoUSD}${precioUSD ? ' · Precio sugerido: USD ' + precioUSD : ''}</span>
             </div>
-            ${sel ? `<div style="display:flex;align-items:center;gap:8px;margin-top:4px">
-              <label style="font-size:10px;color:var(--text-secondary);white-space:nowrap">Precio venta (USD):</label>
+            ${sel ? `<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:4px">
+              ${esAccesorio ? `<label style="display:flex;align-items:center;gap:5px;font-size:11px;cursor:pointer;padding:3px 8px;border-radius:6px;border:1px solid var(--border);background:var(--bg-secondary)" onclick="event.stopPropagation()">
+                <input type="checkbox" id="inv-regalo-${s.id}" onchange="Ventas._toggleRegalo('${s.id}',this.checked)" style="accent-color:var(--green);cursor:pointer">
+                <span>🎁 Regalo (gratis)</span>
+              </label>` : ''}
+              <label style="font-size:10px;color:var(--text-secondary);white-space:nowrap">Precio (USD):</label>
               <input type="number" id="inv-precio-${s.id}" value="${precioUSD || ''}" min="0" step="0.01" placeholder="0"
-                style="font-size:13px;font-weight:700;padding:4px 8px;border:1px solid var(--border-strong);border-radius:6px;width:110px;color:var(--text);background:var(--bg-secondary)"
+                style="font-size:13px;font-weight:700;padding:4px 8px;border:1px solid var(--border-strong);border-radius:6px;width:100px;color:var(--text);background:var(--bg-secondary)"
                 onclick="event.stopPropagation()">
             </div>` : ''}
           </div>`;
@@ -680,6 +719,14 @@ const Ventas = {
       </div>
       ${this.selectedStockIds.length ? `<button class="btn btn-green" style="width:100%;justify-content:center;margin-top:10px" onclick="Ventas.addStockItems()"><i class="ti ti-check"></i> Agregar ${this.selectedStockIds.length} seleccionado(s)</button>` : ''}
     `;
+  },
+  _toggleRegalo(id, isRegalo) {
+    const precioInput = document.getElementById(`inv-precio-${id}`);
+    if (precioInput) {
+      precioInput.value = isRegalo ? '0' : '';
+      precioInput.disabled = isRegalo;
+      precioInput.style.opacity = isRegalo ? '0.4' : '1';
+    }
   },
   toggleStockSel(id) {
     const i = this.selectedStockIds.indexOf(id);
@@ -691,10 +738,10 @@ const Ventas = {
       const s = State.stock.find(x => x.id === id);
       if (!s) return;
       const imei = s.imeis && s.imeis.length ? s.imeis[0] : null;
-      // Leer precio ingresado por el usuario; si vacío usar el precio del stock en USD
+      const esRegalo = document.getElementById(`inv-regalo-${id}`)?.checked || false;
       const precioIngresado = parseFloat(document.getElementById(`inv-precio-${id}`)?.value);
-      const precioUSD = (!isNaN(precioIngresado) && precioIngresado >= 0) ? precioIngresado : (s.precioARS && s.cotiz ? +(s.precioARS / s.cotiz).toFixed(2) : 0);
-      this.draft.items.push({ nombre: s.nombre, precio: precioUSD, costo: s.costoUSD, stockId: id, imei });
+      const precioUSD = esRegalo ? 0 : ((!isNaN(precioIngresado) && precioIngresado >= 0) ? precioIngresado : (s.precioARS && s.cotiz ? +(s.precioARS / s.cotiz).toFixed(2) : 0));
+      this.draft.items.push({ nombre: s.nombre, precio: precioUSD, costo: s.costoUSD, stockId: id, imei, regalo: esRegalo || undefined });
     });
     this.selectedStockIds = [];
     document.getElementById('venta-step-body').innerHTML = this.stepItems();
@@ -1125,10 +1172,10 @@ const Ventas = {
                 const p = State.stock.find(s => s.id === i.stockId);
                 const profit = i.precio - (i.costo||0);
                 return `<tr>
-                  <td>${i.nombre}</td>
+                  <td>${i.nombre}${i.regalo?` <span style="font-size:10px;color:var(--green)">🎁 regalo</span>`:''}</td>
                   <td style="font-size:11px;color:var(--text-secondary)">${p?.storage||p?.notas||'N/A'}</td>
                   <td>1</td>
-                  <td>${State.fmtUSD(i.precio)}</td>
+                  <td>${i.regalo?`<span style="color:var(--green)">Gratis</span>`:State.fmtUSD(i.precio)}</td>
                   <td style="color:${profit>=0?'var(--green)':'var(--red)'}">${profit>=0?'+':''}${State.fmtUSD(profit)}</td>
                   <td>$0</td>
                 </tr>`;

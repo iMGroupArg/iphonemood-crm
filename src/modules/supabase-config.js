@@ -144,7 +144,7 @@ const DB = {
     const itemsPorVenta = {}, pagosPorVenta = {};
     (ventaItemsRes.data || []).forEach(i => {
       if (!itemsPorVenta[i.venta_id]) itemsPorVenta[i.venta_id] = [];
-      itemsPorVenta[i.venta_id].push({ nombre: i.nombre, precio: Number(i.precio_usd), costo: Number(i.costo_usd), stockId: i.stock_id, imei: i.imei });
+      itemsPorVenta[i.venta_id].push({ nombre: i.nombre, precio: Number(i.precio_usd), costo: Number(i.costo_usd), stockId: i.stock_id, imei: i.imei, regalo: i.es_regalo || false });
     });
     (ventaPagosRes.data || []).forEach(p => {
       if (!pagosPorVenta[p.venta_id]) pagosPorVenta[p.venta_id] = [];
@@ -322,7 +322,8 @@ const DB = {
 
     const itemsToInsert = draft.items.map(it => ({
       venta_id: ventaRow.id, stock_id: it.stockId || null, imei: it.imei || null,
-      nombre: it.nombre, costo_usd: it.costo || 0, precio_usd: it.precio
+      nombre: it.nombre, costo_usd: it.costo || 0, precio_usd: it.precio,
+      es_regalo: !!it.regalo
     }));
     if (itemsToInsert.length) await supa.from('venta_items').insert(itemsToInsert);
 

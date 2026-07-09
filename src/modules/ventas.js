@@ -3,6 +3,7 @@ const Ventas = {
   STEPS: ['Cliente', 'Trade-In', 'Ítems', 'Pagos', 'Confirm.'],
   draft: null,
   selectedStockIds: [],
+  _selectedRegalo: {}, // id -> bool
   invMode: 'manual',
   manualCat: 'iphone',
 
@@ -237,7 +238,7 @@ const Ventas = {
     }
     this.draft = { cliente: '', clienteTel: '', clienteDni: '', clienteEmail: '', tipoVenta: 'minorista', vendedor: '', tradeIn: null, items: [], pagos: [], comisionVendedor: 0 };
     this.step = 0;
-    this.selectedStockIds = [];
+    this.selectedStockIds = []; this._selectedRegalo = {};
     this.invMode = 'manual';
     this.showModal();
   },
@@ -267,7 +268,7 @@ const Ventas = {
     if (!pendiente) { this.openNew(); return; }
     this.draft = pendiente.draft;
     this.step = pendiente.step || 0;
-    this.selectedStockIds = [];
+    this.selectedStockIds = []; this._selectedRegalo = {};
     this.invMode = 'manual';
     this.showModal();
     toast('Venta recuperada. Revisá los datos antes de continuar.');
@@ -276,7 +277,7 @@ const Ventas = {
     this.borrarBorrador();
     this.draft = { cliente: '', clienteTel: '', clienteDni: '', clienteEmail: '', tipoVenta: 'minorista', vendedor: '', tradeIn: null, items: [], pagos: [], comisionVendedor: 0 };
     this.step = 0;
-    this.selectedStockIds = [];
+    this.selectedStockIds = []; this._selectedRegalo = {};
     this.invMode = 'manual';
     this.showModal();
   },
@@ -724,16 +725,17 @@ const Ventas = {
               <b style="font-size:12px">${s.nombre}</b><br>
               <span style="color:var(--text-secondary)">Costo: USD ${s.costoUSD}${precioUSD ? ' · Precio sugerido: USD ' + precioUSD : ''}</span>
             </div>
-            ${sel ? `<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:4px">
-              ${esAccesorio ? `<label style="display:flex;align-items:center;gap:5px;font-size:11px;cursor:pointer;padding:3px 8px;border-radius:6px;border:1px solid var(--border);background:var(--bg-secondary)" onclick="event.stopPropagation()">
-                <input type="checkbox" id="inv-regalo-${s.id}" onchange="Ventas._toggleRegalo('${s.id}',this.checked)" style="accent-color:var(--green);cursor:pointer">
+            ${sel ? (()=>{ const esRegalo = !!this._selectedRegalo[s.id]; return `<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:4px">
+              ${esAccesorio ? `<label style="display:flex;align-items:center;gap:5px;font-size:11px;cursor:pointer;padding:3px 8px;border-radius:6px;border:1px solid ${esRegalo?'var(--green)':'var(--border)'};background:${esRegalo?'rgba(34,197,94,.1)':'var(--bg-secondary)'}" onclick="event.stopPropagation()">
+                <input type="checkbox" id="inv-regalo-${s.id}" ${esRegalo?'checked':''} onchange="Ventas._toggleRegalo('${s.id}',this.checked)" style="accent-color:var(--green);cursor:pointer">
                 <span>🎁 Regalo (gratis)</span>
               </label>` : ''}
               <label style="font-size:10px;color:var(--text-secondary);white-space:nowrap">Precio (USD):</label>
-              <input type="number" id="inv-precio-${s.id}" value="${precioUSD || ''}" min="0" step="0.01" placeholder="0"
-                style="font-size:13px;font-weight:700;padding:4px 8px;border:1px solid var(--border-strong);border-radius:6px;width:100px;color:var(--text);background:var(--bg-secondary)"
+              <input type="number" id="inv-precio-${s.id}" value="${esRegalo ? 0 : (precioUSD || '')}" min="0" step="0.01" placeholder="0"
+                ${esRegalo ? 'disabled' : ''}
+                style="font-size:13px;font-weight:700;padding:4px 8px;border:1px solid var(--border-strong);border-radius:6px;width:100px;color:var(--text);background:var(--bg-secondary);opacity:${esRegalo?'0.4':'1'}"
                 onclick="event.stopPropagation()">
-            </div>` : ''}
+            </div>`; })() : ''}
           </div>`;
         }).join('')}
       </div>
@@ -741,6 +743,7 @@ const Ventas = {
     `;
   },
   _toggleRegalo(id, isRegalo) {
+    this._selectedRegalo[id] = isRegalo;
     const precioInput = document.getElementById(`inv-precio-${id}`);
     if (precioInput) {
       precioInput.value = isRegalo ? '0' : '';
@@ -758,12 +761,12 @@ const Ventas = {
       const s = State.stock.find(x => x.id === id);
       if (!s) return;
       const imei = s.imeis && s.imeis.length ? s.imeis[0] : null;
-      const esRegalo = document.getElementById(`inv-regalo-${id}`)?.checked || false;
+      const esRegalo = !!this._selectedRegalo[id];
       const precioIngresado = parseFloat(document.getElementById(`inv-precio-${id}`)?.value);
       const precioUSD = esRegalo ? 0 : ((!isNaN(precioIngresado) && precioIngresado >= 0) ? precioIngresado : (s.precioARS && s.cotiz ? +(s.precioARS / s.cotiz).toFixed(2) : 0));
       this.draft.items.push({ nombre: s.nombre, precio: precioUSD, costo: s.costoUSD, stockId: id, imei, regalo: esRegalo || undefined });
     });
-    this.selectedStockIds = [];
+    this.selectedStockIds = []; this._selectedRegalo = {};
     document.getElementById('venta-step-body').innerHTML = this.stepItems();
     this.guardarBorrador();
   },

@@ -609,7 +609,7 @@ const Ventas = {
           <input type="number" value="${it.precio}" min="0" step="0.01"
             onchange="Ventas.editItemPrecio(${idx},this.value)"
             style="width:72px;font-size:12px;font-weight:600;padding:3px 6px;border:1px solid var(--border-strong);border-radius:6px;background:var(--bg);color:var(--text);text-align:right">`}
-          <button onclick="Ventas.removeItem(${idx})" style="background:none;border:none;cursor:pointer;color:var(--text-secondary)"><i class="ti ti-x"></i></button>
+          <button onclick="Ventas.removeItem(${idx})" title="Quitar" style="background:none;border:none;cursor:pointer;color:var(--red);font-size:16px;padding:2px 4px;border-radius:5px;opacity:0.75" onmouseover="this.style.opacity=1;this.style.background='rgba(239,68,68,.1)'" onmouseout="this.style.opacity=0.75;this.style.background='none'"><i class="ti ti-trash"></i></button>
         </div>
       </div>`).join('')}
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:10px 0">

@@ -702,7 +702,7 @@ const Ventas = {
     this.draft.items[idx].precio = precio;
     // Actualizar solo el total visible sin re-render completo
     const totalEl = document.querySelector('#venta-step-body b + span');
-    const total = this.draft.items.reduce((s, i) => s + i.precio, 0) - (this.draft.tradeIn?.valor || 0);
+    const total = this.draft.items.reduce((s, i) => s + i.precio, 0);
     const totDiv = document.getElementById('venta-step-body').querySelector('span[style*="blue"]');
     if (totDiv) totDiv.textContent = State.fmtUSD(Math.max(0, total));
     this.guardarBorrador();
@@ -711,14 +711,18 @@ const Ventas = {
 
   stepPagos() {
     const d = this.draft;
-    const total = Math.max(0, d.items.reduce((s, i) => s + i.precio, 0) - (d.tradeIn?.valor || 0));
-    const pagado = d.pagos.reduce((s, p) => s + Ventas.montoSinDiferencial(p), 0);
+    const total = d.items.reduce((s, i) => s + i.precio, 0);
+    const pagado = d.pagos.reduce((s, p) => s + Ventas.montoSinDiferencial(p), 0) + (d.tradeIn?.valor || 0);
     const saldo = Math.max(0, total - pagado);
     return `
       <div style="display:flex;gap:16px;padding:10px 0;border-bottom:1px solid var(--border);margin-bottom:12px">
         <div><div style="font-size:11px;color:var(--text-secondary)">Total venta</div><div style="font-size:16px;font-weight:600">${State.fmtUSD(total)}</div></div>
         <div><div style="font-size:11px;color:var(--text-secondary)">Saldo restante</div><div style="font-size:16px;font-weight:600;color:${saldo>0?'var(--red)':'var(--green)'}">${State.fmtUSD(saldo)}</div></div>
       </div>
+      ${d.tradeIn?.valor > 0 ? `<div style="display:flex;justify-content:space-between;align-items:center;padding:7px 10px;background:var(--bg-secondary);border:1px solid var(--green);border-radius:8px;margin-bottom:5px;font-size:12px">
+        <span style="color:var(--green)">🔄 Trade-In: ${d.tradeIn.modelo||'Equipo'}</span>
+        <span style="color:var(--green);font-weight:600">${State.fmtUSD(d.tradeIn.valor)}</span>
+      </div>` : ''}
       ${d.pagos.map((p, idx) => `<div style="display:flex;justify-content:space-between;align-items:center;padding:7px 10px;background:var(--bg-secondary);border-radius:8px;margin-bottom:5px;font-size:12px">
         <span>${p.persona} — ${p.bolsillo} — ${p.bolsillo?.startsWith('ARS') ? `$${Math.round(p.monto*(State.refBlue||1)).toLocaleString('es-AR')} ARS <span style="color:var(--text-secondary);font-size:10px">(≈ ${State.fmtUSD(p.monto)})</span>` : State.fmtUSD(p.monto)}${p.esTarjeta?` <span class="badge b-purple" style="font-size:9px">Tarjeta +$${(p.diferencialArs||0).toLocaleString('es-AR')}</span>`:''}</span>
         <button onclick="Ventas.removePago(${idx})" style="background:none;border:none;cursor:pointer"><i class="ti ti-x"></i></button>
@@ -854,8 +858,8 @@ const Ventas = {
 
   stepConfirm() {
     const d = this.draft;
-    const total = Math.max(0, d.items.reduce((s, i) => s + i.precio, 0) - (d.tradeIn?.valor || 0));
-    const pagado = d.pagos.reduce((s, p) => s + Ventas.montoSinDiferencial(p), 0);
+    const total = d.items.reduce((s, i) => s + i.precio, 0);
+    const pagado = d.pagos.reduce((s, p) => s + Ventas.montoSinDiferencial(p), 0) + (d.tradeIn?.valor || 0);
     const saldo = Math.max(0, total - pagado);
     const pagosTarjeta = d.pagos.filter(p => p.esTarjeta);
     const totalDiferencialArs = pagosTarjeta.reduce((s, p) => s + (p.diferencialArs || 0), 0);
@@ -863,16 +867,9 @@ const Ventas = {
       <div style="margin-bottom:14px"><b>Cliente:</b> ${d.cliente || 'Consumidor final'} ${d.vendedor?`· Vendedor: ${d.vendedor}`:''}</div>
       <div style="margin-bottom:14px"><b>Ítems (${d.items.length})</b>
         ${d.items.map(i=>`<div style="display:flex;justify-content:space-between;font-size:12px;padding:3px 0">${i.nombre}<span>${State.fmtUSD(i.precio)}</span></div>`).join('')}
-        ${d.tradeIn?.valor > 0 ? `
-        <div style="display:flex;justify-content:space-between;font-size:12px;padding:5px 0;margin-top:4px;border-top:1px dashed var(--border)">
-          <span style="color:var(--green)">🔄 Trade-In: ${d.tradeIn.modelo || 'Equipo'}</span>
-          <span style="color:var(--green);font-weight:600">− ${State.fmtUSD(d.tradeIn.valor)}</span>
-        </div>
-        <div style="display:flex;justify-content:space-between;font-size:12px;padding:3px 0;font-weight:600">
-          <span>Subtotal (con descuento trade-in)</span><span>${State.fmtUSD(Math.max(0, d.items.reduce((s,i)=>s+i.precio,0) - d.tradeIn.valor))}</span>
-        </div>` : ''}
       </div>
-      <div style="margin-bottom:14px"><b>Pagos (${d.pagos.length})</b>
+      <div style="margin-bottom:14px"><b>Pagos</b>
+        ${d.tradeIn?.valor > 0 ? `<div style="display:flex;justify-content:space-between;font-size:12px;padding:3px 0;color:var(--green)">🔄 Trade-In: ${d.tradeIn.modelo||'Equipo'}<span style="font-weight:600">${State.fmtUSD(d.tradeIn.valor)}</span></div>` : ''}
         ${d.pagos.map(p=>`<div style="display:flex;justify-content:space-between;font-size:12px;padding:3px 0">${p.persona} — ${p.bolsillo}${p.esTarjeta?' <span class="badge b-purple" style="font-size:9px">Tarjeta</span>':''}<span>${State.fmtUSD(p.monto)}</span></div>`).join('')}
       </div>
       ${pagosTarjeta.length ? `
@@ -929,8 +926,8 @@ const Ventas = {
 
   async confirmSale() {
     const d = this.draft;
-    const total = Math.max(0, d.items.reduce((s, i) => s + i.precio, 0) - (d.tradeIn?.valor || 0));
-    const pagado = d.pagos.reduce((s, p) => s + Ventas.montoSinDiferencial(p), 0);
+    const total = d.items.reduce((s, i) => s + i.precio, 0);
+    const pagado = d.pagos.reduce((s, p) => s + Ventas.montoSinDiferencial(p), 0) + (d.tradeIn?.valor || 0);
     // Tolerancia de hasta $0.50 USD para diferencias por conversión ARS
     const estado = (total - pagado) <= 0.5 ? 'cerrada' : 'abierta';
 
@@ -1006,9 +1003,8 @@ const Ventas = {
     const v = State.ventas.find(x => x.id === id);
     if (!v) return;
     App.closeSidebar();
-    const subtotalItems = v.items.reduce((s, i) => s + i.precio, 0);
-    const total = Math.max(0, subtotalItems - (v.tradeIn?.valor || 0));
-    const pagado = v.pagos.reduce((s, p) => s + p.monto, 0);
+    const total = v.items.reduce((s, i) => s + i.precio, 0);
+    const pagado = v.pagos.reduce((s, p) => s + p.monto, 0) + (v.tradeIn?.valor || 0);
     const saldo = pagado - total;
     const cerrada = v.estado === 'cerrada';
     const TIPO_LABEL = { minorista: 'Minorista', mayorista: 'Mayorista', revendedor: 'Revendedor' };
@@ -1037,7 +1033,7 @@ const Ventas = {
             </div>
             <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
               ${this.estadoToggle(cerrada)}
-              <span style="font-size:20px;font-weight:700">${State.fmtUSD(total)}${v.tradeIn?.valor>0?`<span style="font-size:11px;color:var(--green);font-weight:500;margin-left:6px">−${State.fmtUSD(v.tradeIn.valor)} trade-in</span>`:''}</span>
+              <span style="font-size:20px;font-weight:700">${State.fmtUSD(total)}</span>
               <button class="btn btn-sm btn-primary" onclick="Ventas.generarRecibo(${id})"><i class="ti ti-download"></i> Recibo</button>
               <button class="btn btn-sm" onclick="Ventas.generarDetallePDF(${id})"><i class="ti ti-download"></i> Detalle PDF</button>
               <button class="btn btn-sm" onclick="Ventas.closeModal()"><i class="ti ti-x"></i></button>
@@ -1145,8 +1141,7 @@ const Ventas = {
               <div style="text-align:right">
                 <div style="font-size:12px;color:var(--text-secondary)">Subtotal Dispositivos: ${State.fmtUSD(itemsDispositivos.reduce((s,i)=>s+i.precio,0))}</div>
                 <div style="font-size:12px;color:var(--text-secondary)">Subtotal Accesorios: ${State.fmtUSD(itemsAccesorios.reduce((s,i)=>s+i.precio,0))}</div>
-                ${v.tradeIn?.valor > 0 ? `<div style="font-size:12px;color:var(--green)">🔄 Trade-In (${v.tradeIn.modelo||'equipo'}): − ${State.fmtUSD(v.tradeIn.valor)}</div>` : ''}
-                <div style="font-size:16px;font-weight:700;margin-top:6px">Total: ${State.fmtUSD(total)}</div>
+                <div style="font-size:16px;font-weight:700;margin-top:6px">Subtotal: ${State.fmtUSD(total)}</div>
                 ${(()=>{ const pt = v.items.reduce((s,i)=>s+(i.precio-(i.costo||0)),0); return `<div style="font-size:12px;color:${pt>=0?'var(--green)':'var(--red)'}">Profit: ${pt>=0?'+':''}${State.fmtUSD(pt)}</div>`; })()}
               </div>
             </div>
@@ -1159,6 +1154,17 @@ const Ventas = {
                 <div><label style="font-size:11px;color:var(--text-secondary)">Total Pagos</label><div style="font-size:17px;font-weight:700">${State.fmtUSD(pagado)}</div></div>
                 <div><label style="font-size:11px;color:var(--text-secondary)">Saldo</label><div style="font-size:17px;font-weight:700;color:${saldo>=0?'var(--green)':'var(--red)'}">${saldo>=0?'✓ Pagado':State.fmtUSD(-saldo)+' pendiente'}</div></div>
               </div>
+              ${v.tradeIn?.valor > 0 ? `
+                <div style="display:flex;justify-content:space-between;align-items:center;background:var(--bg-secondary);border:1px solid var(--green);border-radius:8px;padding:10px 12px;margin-bottom:6px">
+                  <div style="display:flex;align-items:center;gap:10px">
+                    <i class="ti ti-arrows-exchange" style="font-size:20px;color:var(--green)"></i>
+                    <div>
+                      <div style="font-size:12.5px;font-weight:600;color:var(--green)">Trade-In: ${v.tradeIn.modelo||'Equipo'}</div>
+                      <div style="font-size:11px;color:var(--text-secondary)">${v.tradeIn.color||''} ${v.tradeIn.storage||''} ${v.tradeIn.bateriaPct!=null?'· '+v.tradeIn.bateriaPct+'%':''}</div>
+                    </div>
+                  </div>
+                  <div style="font-size:13px;font-weight:600;color:var(--green)">${State.fmtUSD(v.tradeIn.valor)}</div>
+                </div>` : ''}
               ${v.pagos.map(p => `
                 <div style="display:flex;justify-content:space-between;align-items:center;background:var(--bg-secondary);border-radius:8px;padding:10px 12px;margin-bottom:6px">
                   <div style="display:flex;align-items:center;gap:10px">

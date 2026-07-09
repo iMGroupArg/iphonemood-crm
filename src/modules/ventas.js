@@ -247,17 +247,20 @@ const Ventas = {
     const host = document.getElementById('venta-modal-host');
     const minsAtras = Math.round((Date.now() - pendiente.guardadoEn) / 60000);
     host.innerHTML = `
-      <div style="position:fixed;inset:0;background:rgba(0,0,0,.4);display:flex;align-items:center;justify-content:center;z-index:200">
+      <div style="position:fixed;inset:0;background:rgba(0,0,0,.4);display:flex;align-items:center;justify-content:center;z-index:200" onclick="if(event.target===this)Ventas.closeModal()">
         <div style="width:380px;max-width:92vw;background:var(--bg-elevated);border-radius:14px;padding:20px" onclick="event.stopPropagation()">
-          <h3 style="font-size:15px;font-weight:600;margin-bottom:8px"><i class="ti ti-alert-circle" style="color:var(--amber)"></i> Encontramos una venta sin terminar</h3>
+          <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:8px">
+            <h3 style="font-size:15px;font-weight:600">⚠️ Venta sin terminar</h3>
+            <button onclick="Ventas.closeModal()" style="background:none;border:none;cursor:pointer;font-size:20px;color:var(--red);line-height:1;padding:0 2px">✕</button>
+          </div>
           <p style="font-size:12.5px;color:var(--text-secondary);margin-bottom:14px">
-            Parece que la página se recargó mientras estabas cargando una venta para <b>${pendiente.draft.cliente || 'un cliente'}</b>
+            Había una venta en progreso para <b>${pendiente.draft.cliente || 'un cliente'}</b>
             (${pendiente.draft.items?.length || 0} ítem(s)), hace ${minsAtras < 1 ? 'menos de un minuto' : minsAtras + ' min'}.
-            ¿Querés continuarla donde la dejaste, o empezar una venta nueva?
+            ¿Querés continuarla o empezar de cero?
           </p>
           <div style="display:flex;gap:8px;justify-content:flex-end">
             <button class="btn" onclick="Ventas.descartarBorradorYEmpezarNueva()">Empezar de cero</button>
-            <button class="btn btn-primary" onclick="Ventas.recuperarBorrador()"><i class="ti ti-history"></i> Continuar venta</button>
+            <button class="btn btn-primary" onclick="Ventas.recuperarBorrador()">▶ Continuar</button>
           </div>
         </div>
       </div>
@@ -296,7 +299,7 @@ const Ventas = {
         <div style="${card}">
           <div style="padding:${mobile?'10px 14px':'14px 20px'};border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;flex-shrink:0">
             <h3 style="font-size:${mobile?'14px':'15px'};font-weight:600">Nueva venta</h3>
-            <button onclick="Ventas.closeModal()" style="background:none;border:none;cursor:pointer;color:var(--red);font-size:22px;line-height:1;padding:2px 6px;border-radius:6px;transition:background .15s" onmouseover="this.style.background='rgba(239,68,68,.12)'" onmouseout="this.style.background='none'"><i class="ti ti-x"></i></button>
+            <button onclick="Ventas.closeModal()" style="background:none;border:none;cursor:pointer;color:var(--red);font-size:22px;line-height:1;padding:2px 6px;border-radius:6px;transition:background .15s" onmouseover="this.style.background='rgba(239,68,68,.12)'" onmouseout="this.style.background='none'">✕</button>
           </div>
           <div style="padding:${mobile?'10px 14px':'14px 20px'};border-bottom:1px solid var(--border);display:flex;gap:${mobile?'2px':'4px'};flex-shrink:0" id="venta-stepper"></div>
           <div style="flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;padding:${mobile?'14px':'18px 20px'}" id="venta-step-body"></div>
@@ -1124,7 +1127,7 @@ const Ventas = {
               <span style="font-size:20px;font-weight:700">${State.fmtUSD(total)}</span>
               <button class="btn btn-sm btn-primary" onclick="Ventas.generarRecibo(${id})"><i class="ti ti-download"></i> Recibo</button>
               <button class="btn btn-sm" onclick="Ventas.generarDetallePDF(${id})"><i class="ti ti-download"></i> Detalle PDF</button>
-              <button onclick="Ventas.closeModal()" style="background:none;border:none;cursor:pointer;color:var(--red);font-size:22px;line-height:1;padding:2px 6px;border-radius:6px;transition:background .15s" onmouseover="this.style.background='rgba(239,68,68,.12)'" onmouseout="this.style.background='none'"><i class="ti ti-x"></i></button>
+              <button onclick="Ventas.closeModal()" style="background:none;border:none;cursor:pointer;color:var(--red);font-size:22px;line-height:1;padding:2px 6px;border-radius:6px;transition:background .15s" onmouseover="this.style.background='rgba(239,68,68,.12)'" onmouseout="this.style.background='none'">✕</button>
             </div>
           </div>
 

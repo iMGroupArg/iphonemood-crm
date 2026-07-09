@@ -796,7 +796,7 @@ const Ventas = {
       </div>` : ''}
       ${d.pagos.map((p, idx) => `<div style="display:flex;justify-content:space-between;align-items:center;padding:7px 10px;background:var(--bg-secondary);border-radius:8px;margin-bottom:5px;font-size:12px">
         <span>${p.persona} — ${p.bolsillo} — ${p.bolsillo?.startsWith('ARS') ? `$${Math.round(p.monto*(State.refBlue||1)).toLocaleString('es-AR')} ARS <span style="color:var(--text-secondary);font-size:10px">(≈ ${State.fmtUSD(p.monto)})</span>` : State.fmtUSD(p.monto)}${p.esTarjeta?` <span class="badge b-purple" style="font-size:9px">Tarjeta +$${(p.diferencialArs||0).toLocaleString('es-AR')}</span>`:''}</span>
-        <button onclick="Ventas.removePago(${idx})" style="background:none;border:none;cursor:pointer"><i class="ti ti-x"></i></button>
+        <button onclick="Ventas.removePago(${idx})" title="Quitar pago" style="background:none;border:none;cursor:pointer;color:var(--red);font-size:16px;padding:2px 4px;border-radius:5px;opacity:0.75;flex-shrink:0" onmouseover="this.style.opacity=1;this.style.background='rgba(239,68,68,.1)'" onmouseout="this.style.opacity=0.75;this.style.background='none'"><i class="ti ti-trash"></i></button>
       </div>`).join('')}
       <div style="display:grid;grid-template-columns:${this.isMobile()?'1fr':'1fr 1fr'};gap:8px;margin:10px 0">
         <select id="vf-pago-persona" style="${this._sel()}">

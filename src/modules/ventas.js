@@ -1834,10 +1834,18 @@ const Ventas = {
       : v.items.filter(i => i.stockId).map(i => ({ stockId: i.stockId, imei: i.imei || null }));
     for (const m of movsARestaurar) {
       State.restaurarStock(m.stockId, m.imei);
-      const item = State.stock.find(s => s.id === m.stockId);
+      const item = State.stock.find(s => s.id === m.stockId || s.id == m.stockId);
       if (item) {
-        if (item.imeis) await DB.actualizarImeisStock(m.stockId, item.imeis);
-        else await DB.actualizarCantidadStock(m.stockId, item.cantidad);
+        if (item.imeis) {
+          await DB.actualizarImeisStock(m.stockId, item.imeis);
+        } else {
+          await DB.actualizarCantidadStock(m.stockId, item.cantidad);
+        }
+        // Siempre restaurar el estado a disponible si tiene stock
+        if (State.getStock(item) > 0 && item.estadoInventario !== 'disponible') {
+          item.estadoInventario = 'disponible';
+          await DB.actualizarEstadoInventario(m.stockId, 'disponible');
+        }
       }
     }
     // Revertir cajas

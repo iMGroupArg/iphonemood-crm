@@ -106,7 +106,7 @@ const State = {
   // Descuenta del stock cuando se confirma una venta. Devuelve lo removido (para poder revertir si se anula).
   // Si el producto llega a 0 unidades, se marca automáticamente como 'vendido'.
   descontarStock(stockId, imei) {
-    const item = this.stock.find(s => s.id === stockId);
+    const item = this.stock.find(s => s.id === stockId || s.id == stockId);
     if (!item) return null;
     let removed = null;
     if (item.imeis && imei) {
@@ -124,7 +124,7 @@ const State = {
     return removed;
   },
   restaurarStock(stockId, imei) {
-    const item = this.stock.find(s => s.id === stockId);
+    const item = this.stock.find(s => s.id === stockId || s.id == stockId);
     if (!item) return;
     if (item.imeis && imei) item.imeis.push(imei);
     else if (item.cantidad !== undefined) {

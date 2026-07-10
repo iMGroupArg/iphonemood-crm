@@ -311,14 +311,26 @@ const DB = {
   },
 
   async crearVenta(draft, estado) {
-    const { data: ventaRow, error } = await supa.from('ventas').insert({
+    const ventaBase = {
       cliente: draft.cliente, vendedor_id: this.personaId(draft.vendedor) || null, estado,
+      cliente_dni: draft.clienteDni || null, cliente_tel: draft.clienteTel || null,
+    };
+    const ventaFull = {
+      ...ventaBase,
       trade_in_modelo: draft.tradeIn?.modelo || null, trade_in_valor: draft.tradeIn?.valor || 0,
       trade_in_data: draft.tradeIn ? draft.tradeIn : null,
-      cliente_dni: draft.clienteDni || null, cliente_tel: draft.clienteTel || null, cliente_email: draft.clienteEmail || null,
+      cliente_email: draft.clienteEmail || null,
       tipo_venta: draft.tipoVenta || 'minorista', comision_vendedor: draft.comisionVendedor || 0
-    }).select().single();
-    if (error || !ventaRow) { console.error(error); return null; }
+    };
+    let { data: ventaRow, error } = await supa.from('ventas').insert(ventaFull).select().single();
+    if (error) {
+      // Fallback: intentar solo con columnas base si alguna columna nueva no existe aún
+      console.warn('crearVenta full insert falló, reintentando con base:', error.message);
+      const res2 = await supa.from('ventas').insert(ventaBase).select().single();
+      ventaRow = res2.data;
+      if (res2.error || !ventaRow) { console.error(res2.error); return null; }
+    }
+    if (!ventaRow) return null;
 
     const itemsToInsert = draft.items.map(it => ({
       venta_id: ventaRow.id, stock_id: it.stockId || null, imei: it.imei || null,

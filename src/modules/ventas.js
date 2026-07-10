@@ -1110,7 +1110,29 @@ const Ventas = {
 
     // Guardar la venta en Supabase
     const ventaId = await DB.crearVenta(d, estado);
-    if (!ventaId) { toast('Hubo un problema guardando la venta. Probá de nuevo.'); return; }
+    if (!ventaId) {
+      // Revertir stock descontado
+      for (const mov of stockMovs) {
+        State.restaurarStock(mov.stockId, mov.imei);
+        const item = State.stock.find(s => s.id === mov.stockId || s.id == mov.stockId);
+        if (item) {
+          if (item.imeis) await DB.actualizarImeisStock(mov.stockId, item.imeis);
+          else await DB.actualizarCantidadStock(mov.stockId, item.cantidad);
+          if (State.getStock(item) > 0 && item.estadoInventario !== 'disponible') {
+            item.estadoInventario = 'disponible';
+            await DB.actualizarEstadoInventario(mov.stockId, 'disponible');
+          }
+        }
+      }
+      // Revertir pagos acreditados
+      d.pagos.forEach(p => {
+        let montoEnBolsillo = p.monto;
+        if (p.bolsillo.startsWith('ARS')) montoEnBolsillo = p.monto * State.refBlue;
+        State.debitarCaja(p.persona, p.bolsillo, montoEnBolsillo);
+      });
+      toast('Hubo un problema guardando la venta. Probá de nuevo.');
+      return;
+    }
 
     if (savedTradeInId && d.tradeIn) {
       const ti = d.tradeIn;

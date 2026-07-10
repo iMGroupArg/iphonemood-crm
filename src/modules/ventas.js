@@ -345,11 +345,29 @@ const Ventas = {
   _inp(style='') { return `width:100%;font-size:${this.isMobile()?'14px':'12px'};padding:${this.isMobile()?'9px 10px':'7px 10px'};border:1px solid var(--border-strong);border-radius:8px;${style}`; },
   _sel(style='') { return `width:100%;font-size:${this.isMobile()?'14px':'12px'};padding:${this.isMobile()?'9px 10px':'7px 10px'};border:1px solid var(--border-strong);border-radius:8px;background:var(--bg-secondary);color:var(--text);${style}`; },
 
+  _clientesGuardados() {
+    const mapa = {};
+    [...State.ventas].sort((a,b) => (b.id||0)-(a.id||0)).forEach(v => {
+      const nombre = (v.cliente||'').trim();
+      if (!nombre || nombre === 'Consumidor final') return;
+      if (!mapa[nombre.toLowerCase()]) mapa[nombre.toLowerCase()] = { nombre, tel: v.clienteTel||'', dni: v.clienteDni||'', email: v.clienteEmail||'' };
+    });
+    return Object.values(mapa);
+  },
+
   stepCliente() {
     const d = this.draft;
     return `
+      <style>
+        #vf-cliente-wrap { position:relative; }
+        #vf-cliente-suggestions { position:absolute; top:100%; left:0; right:0; background:var(--card-bg,#1e1e1e); border:1px solid var(--border,#333); border-radius:8px; z-index:999; max-height:200px; overflow-y:auto; display:none; box-shadow:0 4px 16px rgba(0,0,0,.4); }
+        #vf-cliente-suggestions div { padding:10px 14px; cursor:pointer; font-size:13px; border-bottom:1px solid var(--border,#2a2a2a); }
+        #vf-cliente-suggestions div:last-child { border-bottom:none; }
+        #vf-cliente-suggestions div:hover { background:var(--blue,.2); background-color:rgba(59,130,246,.15); }
+        #vf-cliente-suggestions .sug-sub { font-size:11px; color:var(--text-secondary,#999); margin-top:2px; }
+      </style>
       ${this._formRow('1fr 1fr')}
-        <div>${this._lbl('Nombre del cliente')}<input type="text" id="vf-cliente" value="${d.cliente||''}" placeholder="Consumidor final" style="${this._inp()}"></div>
+        <div>${this._lbl('Nombre del cliente')}<div id="vf-cliente-wrap"><input type="text" id="vf-cliente" value="${d.cliente||''}" placeholder="Consumidor final" style="${this._inp()}" autocomplete="off" oninput="Ventas._filtrarClientes(this.value)"><div id="vf-cliente-suggestions"></div></div></div>
         <div>${this._lbl('Teléfono')}<input type="text" id="vf-cliente-tel" value="${d.clienteTel||''}" placeholder="ej: 3413686909" style="${this._inp()}" inputmode="tel"></div>
       </div>
       ${this._formRow('1fr 1fr')}
@@ -368,6 +386,37 @@ const Ventas = {
         </select></div>
       </div>
     `;
+  },
+
+  _filtrarClientes(query) {
+    const box = document.getElementById('vf-cliente-suggestions');
+    if (!box) return;
+    const q = query.trim().toLowerCase();
+    if (!q) { box.style.display = 'none'; return; }
+    const matches = this._clientesGuardados().filter(c => c.nombre.toLowerCase().includes(q)).slice(0, 8);
+    if (!matches.length) { box.style.display = 'none'; return; }
+    box.innerHTML = matches.map(c => `
+      <div onclick="Ventas._seleccionarCliente(${JSON.stringify(c).replace(/"/g,'&quot;')})">
+        ${c.nombre}
+        ${c.tel || c.dni ? `<div class="sug-sub">${[c.tel, c.dni ? 'DNI: '+c.dni : ''].filter(Boolean).join(' · ')}</div>` : ''}
+      </div>`).join('');
+    box.style.display = 'block';
+    // Cerrar al hacer click fuera
+    const cerrar = (e) => { if (!box.contains(e.target) && e.target.id !== 'vf-cliente') { box.style.display='none'; document.removeEventListener('click', cerrar); } };
+    document.addEventListener('click', cerrar);
+  },
+
+  _seleccionarCliente(c) {
+    const inp = document.getElementById('vf-cliente');
+    const tel = document.getElementById('vf-cliente-tel');
+    const dni = document.getElementById('vf-cliente-dni');
+    const email = document.getElementById('vf-cliente-email');
+    if (inp) inp.value = c.nombre;
+    if (tel && c.tel) tel.value = c.tel;
+    if (dni && c.dni) dni.value = c.dni;
+    if (email && c.email) email.value = c.email;
+    const box = document.getElementById('vf-cliente-suggestions');
+    if (box) box.style.display = 'none';
   },
 
   _TI_CATS: [

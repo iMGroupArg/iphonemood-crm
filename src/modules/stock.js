@@ -436,7 +436,7 @@ const Stock = {
 
   CAT_ICONS: { iphone:'ti-device-mobile', android:'ti-device-mobile', mac:'ti-device-laptop', ipad:'ti-device-ipad', watch:'ti-device-watch', audio:'ti-headphones', perfumeria:'ti-droplet', decant:'ti-flask', accesorio:'ti-plug', repuesto:'ti-components', herramienta:'ti-tool', otro:'ti-box' },
   MODELOS_POR_CAT: {
-    iphone: ['iPhone 11','iPhone 12','iPhone 12 Pro','iPhone 13','iPhone 13 Pro','iPhone 14','iPhone 14 Pro','iPhone 14 Pro Max','iPhone 15','iPhone 15 Plus','iPhone 15 Pro','iPhone 15 Pro Max','iPhone 16','iPhone 16 Pro','iPhone 16 Pro Max','iPhone 17','iPhone 17 Pro','iPhone 17 Pro Max'],
+    iphone: ['iPhone 11','iPhone 12','iPhone 12 Pro','iPhone 12 Pro Max','iPhone 13','iPhone 13 Mini','iPhone 13 Pro','iPhone 13 Pro Max','iPhone 14','iPhone 14 Plus','iPhone 14 Pro','iPhone 14 Pro Max','iPhone 15','iPhone 15 Plus','iPhone 15 Pro','iPhone 15 Pro Max','iPhone 16','iPhone 16 Plus','iPhone 16 Pro','iPhone 16 Pro Max','iPhone 16e','iPhone 17','iPhone 17 Plus','iPhone 17 Pro','iPhone 17 Pro Max'],
     android: ['Samsung Galaxy S23','Samsung Galaxy S24','Samsung Galaxy S24+','Samsung Galaxy S24 Ultra','Samsung Galaxy A54','Samsung Galaxy A34','Motorola G84','Motorola G54','Motorola Edge 40','Xiaomi 13'],
     mac: ['MacBook Air M1','MacBook Air M2','MacBook Air M3','MacBook Pro 14" M3','MacBook Pro 16" M3','Mac Mini M2','iMac M3'],
     ipad: ['iPad 9ª gen','iPad 10ª gen','iPad Air M2','iPad Mini 6ª gen','iPad Pro 11"','iPad Pro 13"'],
@@ -445,6 +445,55 @@ const Stock = {
   },
   STORAGE_OPCIONES: ['32GB','64GB','128GB','256GB','512GB','1TB','2TB'],
   COLOR_OPCIONES: ['Negro','Blanco','Azul','Verde','Rosa','Rojo','Titanio Natural','Titanio Azul','Titanio Negro','Plata','Dorado','Gris Espacial','Otro'],
+
+  SPECS_POR_MODELO: {
+    // ── iPhone ──────────────────────────────────────────────────
+    'iPhone 11':          { s:['64GB','128GB','256GB'],          c:['Negro','Blanco','Rojo','Verde','Amarillo','Violeta'] },
+    'iPhone 12':          { s:['64GB','128GB','256GB'],          c:['Negro','Blanco','Rojo','Azul','Verde','Violeta'] },
+    'iPhone 12 Pro':      { s:['128GB','256GB','512GB'],         c:['Plata','Grafito','Dorado','Azul Pacífico'] },
+    'iPhone 12 Pro Max':  { s:['128GB','256GB','512GB'],         c:['Plata','Grafito','Dorado','Azul Pacífico'] },
+    'iPhone 13':          { s:['128GB','256GB','512GB'],         c:['Medianoche','Blanco Estrella','Rojo','Azul','Rosa','Verde'] },
+    'iPhone 13 Mini':     { s:['128GB','256GB','512GB'],         c:['Medianoche','Blanco Estrella','Rojo','Azul','Rosa','Verde'] },
+    'iPhone 13 Pro':      { s:['128GB','256GB','512GB','1TB'],   c:['Grafito','Dorado','Plata','Sierra Azul','Verde Alpino'] },
+    'iPhone 13 Pro Max':  { s:['128GB','256GB','512GB','1TB'],   c:['Grafito','Dorado','Plata','Sierra Azul','Verde Alpino'] },
+    'iPhone 14':          { s:['128GB','256GB','512GB'],         c:['Medianoche','Blanco Estrella','Rojo','Azul','Amarillo','Morado'] },
+    'iPhone 14 Plus':     { s:['128GB','256GB','512GB'],         c:['Medianoche','Blanco Estrella','Rojo','Azul','Amarillo','Morado'] },
+    'iPhone 14 Pro':      { s:['128GB','256GB','512GB','1TB'],   c:['Negro Espacial','Plata','Dorado','Morado Profundo'] },
+    'iPhone 14 Pro Max':  { s:['128GB','256GB','512GB','1TB'],   c:['Negro Espacial','Plata','Dorado','Morado Profundo'] },
+    'iPhone 15':          { s:['128GB','256GB','512GB'],         c:['Negro','Rosa','Amarillo','Verde','Azul'] },
+    'iPhone 15 Plus':     { s:['128GB','256GB','512GB'],         c:['Negro','Rosa','Amarillo','Verde','Azul'] },
+    'iPhone 15 Pro':      { s:['128GB','256GB','512GB','1TB'],   c:['Titanio Negro','Titanio Blanco','Titanio Azul','Titanio Natural'] },
+    'iPhone 15 Pro Max':  { s:['256GB','512GB','1TB'],           c:['Titanio Negro','Titanio Blanco','Titanio Azul','Titanio Natural'] },
+    'iPhone 16':          { s:['128GB','256GB','512GB'],         c:['Negro','Blanco','Azul','Verde Azulado','Rosa','Ultramarino'] },
+    'iPhone 16 Plus':     { s:['128GB','256GB','512GB'],         c:['Negro','Blanco','Azul','Verde Azulado','Rosa','Ultramarino'] },
+    'iPhone 16 Pro':      { s:['128GB','256GB','512GB','1TB'],   c:['Titanio Negro','Titanio Blanco','Titanio Desierto','Titanio Natural'] },
+    'iPhone 16 Pro Max':  { s:['256GB','512GB','1TB'],           c:['Titanio Negro','Titanio Blanco','Titanio Desierto','Titanio Natural'] },
+    'iPhone 16e':         { s:['128GB','256GB','512GB'],         c:['Negro','Blanco'] },
+    'iPhone 17':          { s:['128GB','256GB','512GB'],         c:['Negro','Blanco','Azul','Verde','Rosa'] },
+    'iPhone 17 Plus':     { s:['128GB','256GB','512GB'],         c:['Negro','Blanco','Azul','Verde','Rosa'] },
+    'iPhone 17 Pro':      { s:['256GB','512GB','1TB'],           c:['Titanio Negro','Titanio Blanco','Titanio Natural','Titanio Desierto'] },
+    'iPhone 17 Pro Max':  { s:['256GB','512GB','1TB'],           c:['Titanio Negro','Titanio Blanco','Titanio Natural','Titanio Desierto'] },
+    // ── Mac ─────────────────────────────────────────────────────
+    'MacBook Air M1':     { s:['256GB','512GB','1TB','2TB'],     c:['Plata','Gris Espacial','Dorado'] },
+    'MacBook Air M2':     { s:['256GB','512GB','1TB','2TB'],     c:['Plata','Gris Espacial','Dorado','Medianoche'] },
+    'MacBook Air M3':     { s:['256GB','512GB','1TB','2TB'],     c:['Plata','Gris Espacial','Dorado','Medianoche'] },
+    'MacBook Pro 14" M3': { s:['512GB','1TB','2TB'],             c:['Plata','Negro Espacial'] },
+    'MacBook Pro 16" M3': { s:['512GB','1TB','2TB'],             c:['Plata','Negro Espacial'] },
+    'Mac Mini M2':        { s:['256GB','512GB','1TB','2TB'],     c:['Plata'] },
+    'iMac M3':            { s:['256GB','512GB','1TB','2TB'],     c:['Plata','Azul','Verde','Rosa','Amarillo','Naranja','Violeta'] },
+    // ── iPad ────────────────────────────────────────────────────
+    'iPad 9ª gen':        { s:['64GB','256GB'],                  c:['Plata','Gris Espacial'] },
+    'iPad 10ª gen':       { s:['64GB','256GB'],                  c:['Plata','Azul','Rosa','Amarillo'] },
+    'iPad Air M2':        { s:['128GB','256GB','512GB','1TB'],   c:['Plata','Azul','Violeta','Rosa'] },
+    'iPad Mini 6ª gen':   { s:['64GB','256GB'],                  c:['Plata','Gris Espacial','Rosa','Violeta'] },
+    'iPad Pro 11"':       { s:['256GB','512GB','1TB','2TB'],     c:['Plata','Negro Espacial'] },
+    'iPad Pro 13"':       { s:['256GB','512GB','1TB','2TB'],     c:['Plata','Negro Espacial'] },
+  },
+
+  specsParaModelo(modelo) {
+    const specs = this.SPECS_POR_MODELO[modelo];
+    return specs || { s: this.STORAGE_OPCIONES, c: this.COLOR_OPCIONES };
+  },
   ESTADO_OPCIONES: ['Nuevo / Sellado','Excelente','Muy bueno','Bueno','Con detalles'],
   GRADO_OPCIONES: ['Sin grado','A+','A','B','C'],
   RAM_OPCIONES: ['8GB','16GB','18GB','24GB','32GB','36GB'],
@@ -542,7 +591,7 @@ const Stock = {
 
                 <div id="f-modelo-wrap" style="display:${['iphone','android','mac','ipad','watch','audio'].includes(p.cat)?'block':'none'};margin-bottom:12px">
                   <label style="font-size:11px;color:var(--text-secondary);font-weight:600;display:block;margin-bottom:4px">Modelo *</label>
-                  <select id="f-modelo" onchange="Stock.toggleModeloOtro()" style="width:100%;font-size:12px;padding:7px 10px;border:1px solid var(--border-strong);border-radius:8px">
+                  <select id="f-modelo" onchange="Stock.toggleModeloOtro();Stock._actualizarSpecsDropdowns(this.value==='__otro__'?'':this.value)" style="width:100%;font-size:12px;padding:7px 10px;border:1px solid var(--border-strong);border-radius:8px">
                     <option value="">Seleccionar modelo</option>
                     ${(this.MODELOS_POR_CAT[p.cat]||[]).map(m => `<option ${p.modelo===m?'selected':''}>${m}</option>`).join('')}
                     <option value="__otro__" ${p.modelo && !(this.MODELOS_POR_CAT[p.cat]||[]).includes(p.modelo) ? 'selected':''}>Otro (escribir)</option>
@@ -737,7 +786,12 @@ const Stock = {
     this.pendingImeis = [...(p.imeis || [])];
     this._destacado = !!p.destacado;
     this.renderImeiChips();
-    setTimeout(() => this.updatePricePreview(), 0);
+    setTimeout(() => {
+      this.updatePricePreview();
+      if (['iphone','android','mac','ipad'].includes(p.cat) && p.modelo && !['','__otro__'].includes(p.modelo)) {
+        this._actualizarSpecsDropdowns(p.modelo, p.storage || '', p.color || '');
+      }
+    }, 0);
     if (mode === 'edit') this.renderHistorialProducto(id);
   },
 
@@ -746,6 +800,22 @@ const Stock = {
     const otroInput = document.getElementById('f-modelo-otro');
     if (!sel || !otroInput) return;
     otroInput.style.display = sel.value === '__otro__' ? 'block' : 'none';
+    this._actualizarSpecsDropdowns(sel.value === '__otro__' ? '' : sel.value);
+  },
+
+  _actualizarSpecsDropdowns(modelo, storageActual = '', colorActual = '') {
+    const specs = this.specsParaModelo(modelo);
+    const storageSel = document.getElementById('f-storage');
+    const colorSel = document.getElementById('f-color');
+    if (storageSel) {
+      storageSel.innerHTML = '<option value="">Seleccionar</option>' +
+        specs.s.map(s => `<option ${s === storageActual ? 'selected' : ''}>${s}</option>`).join('');
+    }
+    if (colorSel) {
+      colorSel.innerHTML = '<option value="">Seleccionar color</option>' +
+        specs.c.map(c => `<option ${c === colorActual ? 'selected' : ''}>${c}</option>`).join('') +
+        '<option value="Otro">Otro</option>';
+    }
   },
 
   toggleModeloRepuestoOtro() {
@@ -868,6 +938,7 @@ const Stock = {
       modeloSelect.innerHTML = `<option value="">Seleccionar modelo</option>` +
         (this.MODELOS_POR_CAT[cat]||[]).map(m=>`<option ${actual===m?'selected':''}>${m}</option>`).join('') +
         `<option value="__otro__">Otro (escribir)</option>`;
+      if (tieneStorageColor) this._actualizarSpecsDropdowns(actual !== '__otro__' ? actual : '');
     }
 
     const cantidadHint = document.getElementById('cantidad-hint');

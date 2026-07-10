@@ -236,7 +236,7 @@ const Ventas = {
       this.mostrarRecuperarBorrador(pendiente);
       return;
     }
-    this.draft = { cliente: '', clienteTel: '', clienteDni: '', clienteEmail: '', tipoVenta: 'minorista', vendedor: '', tradeIn: null, items: [], pagos: [], comisionVendedor: 0 };
+    this.draft = { cliente: '', clienteTel: '', clienteDni: '', clienteEmail: '', tipoVenta: 'minorista', vendedor: '', fechaVenta: new Date().toISOString().slice(0,10), tradeIn: null, items: [], pagos: [], comisionVendedor: 0 };
     this.step = 0;
     this.selectedStockIds = []; this._selectedRegalo = {};
     this.invMode = 'manual';
@@ -278,7 +278,7 @@ const Ventas = {
   },
   descartarBorradorYEmpezarNueva() {
     this.borrarBorrador();
-    this.draft = { cliente: '', clienteTel: '', clienteDni: '', clienteEmail: '', tipoVenta: 'minorista', vendedor: '', tradeIn: null, items: [], pagos: [], comisionVendedor: 0 };
+    this.draft = { cliente: '', clienteTel: '', clienteDni: '', clienteEmail: '', tipoVenta: 'minorista', vendedor: '', fechaVenta: new Date().toISOString().slice(0,10), tradeIn: null, items: [], pagos: [], comisionVendedor: 0 };
     this.step = 0;
     this.selectedStockIds = []; this._selectedRegalo = {};
     this.invMode = 'manual';
@@ -374,7 +374,7 @@ const Ventas = {
         <div>${this._lbl('DNI')}<input type="text" id="vf-cliente-dni" value="${d.clienteDni||''}" placeholder="ej: 34139974" style="${this._inp()}" inputmode="numeric"></div>
         <div>${this._lbl('Email <span style="font-weight:400;color:var(--text-secondary)">(opcional)</span>')}<input type="email" id="vf-cliente-email" value="${d.clienteEmail||''}" placeholder="ej: cliente@gmail.com" style="${this._inp()}" inputmode="email"></div>
       </div>
-      ${this._formRow('1fr 1fr')}
+      ${this._formRow('1fr 1fr 1fr')}
         <div>${this._lbl('Tipo de venta')}<select id="vf-tipo-venta" style="${this._sel()}">
           <option value="minorista" ${(d.tipoVenta||'minorista')==='minorista'?'selected':''}>Minorista</option>
           <option value="mayorista" ${d.tipoVenta==='mayorista'?'selected':''}>Mayorista</option>
@@ -384,6 +384,7 @@ const Ventas = {
           <option value="">Seleccionar</option>
           ${State.personas.map(p=>`<option ${d.vendedor===p?'selected':''}>${p}</option>`).join('')}
         </select></div>
+        <div>${this._lbl('Fecha de venta')}<input type="date" id="vf-fecha-venta" value="${d.fechaVenta||new Date().toISOString().slice(0,10)}" max="${new Date().toISOString().slice(0,10)}" style="${this._inp()}"></div>
       </div>
     `;
   },
@@ -1039,6 +1040,7 @@ const Ventas = {
         this.draft.clienteEmail = document.getElementById('vf-cliente-email')?.value.trim() || '';
         this.draft.tipoVenta = document.getElementById('vf-tipo-venta')?.value || 'minorista';
         this.draft.vendedor = document.getElementById('vf-vendedor').value;
+        this.draft.fechaVenta = document.getElementById('vf-fecha-venta')?.value || new Date().toISOString().slice(0,10);
       }
       if (this.step === 2 && this.draft.items.length === 0) { toast('Agregá al menos un ítem.'); return; }
       if (this.step === 4) { this.confirmSale(); return; }

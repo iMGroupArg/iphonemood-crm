@@ -156,7 +156,7 @@ const DB = {
       });
     });
     State.ventas = (ventasRes.data || []).map(v => ({
-      id: v.id, fecha: this.fmtFecha(v.creado_en), fechaISO: v.creado_en, cliente: v.cliente,
+      id: v.id, fecha: this.fmtFecha(v.fecha_venta || v.creado_en), fechaISO: v.fecha_venta || v.creado_en, cliente: v.cliente,
       clienteDni: v.cliente_dni || '', clienteTel: v.cliente_tel || '', clienteEmail: v.cliente_email || '',
       tipoVenta: v.tipo_venta || 'minorista',
       comisionVendedor: Number(v.comision_vendedor) || 0,
@@ -320,7 +320,8 @@ const DB = {
       trade_in_modelo: draft.tradeIn?.modelo || null, trade_in_valor: draft.tradeIn?.valor || 0,
       trade_in_data: draft.tradeIn ? draft.tradeIn : null,
       cliente_email: draft.clienteEmail || null,
-      tipo_venta: draft.tipoVenta || 'minorista', comision_vendedor: draft.comisionVendedor || 0
+      tipo_venta: draft.tipoVenta || 'minorista', comision_vendedor: draft.comisionVendedor || 0,
+      fecha_venta: draft.fechaVenta || null
     };
     let { data: ventaRow, error } = await supa.from('ventas').insert(ventaFull).select().single();
     if (error) {

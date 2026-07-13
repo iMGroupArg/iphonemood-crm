@@ -726,9 +726,7 @@ const Stock = {
                   <div><label style="font-size:11px;color:var(--text-secondary);font-weight:600;display:block;margin-bottom:4px">Precio de Compra (USD) *</label>
                     <input type="number" id="f-costo" value="${p.costoUSD||''}" placeholder="800" style="width:100%;font-size:12px;padding:7px 10px;border:1px solid var(--border-strong);border-radius:8px">
                   </div>
-                  <div><label style="font-size:11px;color:var(--text-secondary);font-weight:600;display:block;margin-bottom:4px">Cotización usada</label>
-                    <input type="number" id="f-cotiz" value="${p.cotiz||State.refBlue}" oninput="Stock.updatePricePreview()" style="width:100%;font-size:12px;padding:7px 10px;border:1px solid var(--border-strong);border-radius:8px">
-                  </div>
+                  <input type="hidden" id="f-cotiz" value="${p.cotiz||State.refBlue}">
                 </div>
 
                 <div style="margin-bottom:12px"><label style="font-size:11px;color:var(--text-secondary);font-weight:600;display:block;margin-bottom:4px">Precio de Venta Sugerido (USD) *</label>

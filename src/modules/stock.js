@@ -176,11 +176,14 @@ const Stock = {
               ).join('')}
             </select>
           ` : `
-            <select id="stock-filter-modelo" onchange="Stock.renderTable()" style="font-size:12px;padding:6px 8px;border:1px solid var(--border-strong);border-radius:8px;max-width:160px">
+            <select id="stock-filter-modelo" onchange="Stock.onModeloFilterChange()" style="font-size:12px;padding:6px 8px;border:1px solid var(--border-strong);border-radius:8px;max-width:160px">
               <option value="">Todos los modelos</option>
               ${Object.entries(this.MODELOS_POR_CAT).map(([cat, modelos]) =>
                 `<optgroup label="${this.CAT_LABELS[cat]||cat}">${modelos.map(m=>`<option value="${m}">${m}</option>`).join('')}</optgroup>`
               ).join('')}
+            </select>
+            <select id="stock-filter-color" onchange="Stock.renderTable()" style="font-size:12px;padding:6px 8px;border:1px solid var(--border-strong);border-radius:8px;max-width:140px">
+              <option value="">Todos los colores</option>
             </select>
           `}
         </div>
@@ -195,6 +198,7 @@ const Stock = {
       this.renderEstadoTabs();
       this.renderCondicionTabs();
       this.renderTabs();
+      this._actualizarColoresDisponibles();
       this.renderTable();
     } else {
       host.innerHTML = `<div class="body-pad" style="overflow-y:auto;-webkit-overflow-scrolling:touch;flex:1;min-height:0" id="historial-general-host"></div>`;
@@ -214,7 +218,7 @@ const Stock = {
       </button>`;
     }).join('');
   },
-  setGrupo(g) { this.currentGroup = g; this.currentTab = 'all'; this.currentEstado = 'todos'; this.currentCondicion = 'todos'; this.renderKpis(); this.renderGrupoTabs(); this.renderEstadoTabs(); this.renderCondicionTabs(); this.renderTabs(); this.renderTable(); },
+  setGrupo(g) { this.currentGroup = g; this.currentTab = 'all'; this.currentEstado = 'todos'; this.currentCondicion = 'todos'; this.renderKpis(); this.renderGrupoTabs(); this.renderEstadoTabs(); this.renderCondicionTabs(); this.renderTabs(); this._actualizarColoresDisponibles(); this.renderTable(); },
 
   renderEstadoTabs() {
     const grupo = this.productosDelGrupo(this.currentGroup);
@@ -253,7 +257,7 @@ const Stock = {
       return `<button class="btn btn-sm ${this.currentTab===c?'btn-primary':''}" onclick="Stock.setTab('${c}')">${label} (${count})</button>`;
     }).join('');
   },
-  setTab(c) { this.currentTab = c; this.renderTabs(); this.renderTable(); },
+  setTab(c) { this.currentTab = c; this.renderTabs(); this._actualizarColoresDisponibles(); this.renderTable(); },
 
   actualizarMarcasPerfume() {
     const cat = document.getElementById('f-pf-cat')?.value || '';
@@ -286,9 +290,30 @@ const Stock = {
     this.renderTable();
   },
 
+  onModeloFilterChange() {
+    this._actualizarColoresDisponibles();
+    this.renderTable();
+  },
+
+  _actualizarColoresDisponibles() {
+    const colorSelect = document.getElementById('stock-filter-color');
+    if (!colorSelect) return;
+    const modeloFiltro = document.getElementById('stock-filter-modelo')?.value || '';
+    const catsDelGrupo = this.GRUPOS[this.currentGroup]?.cats || [];
+    const colores = [...new Set(
+      State.stock
+        .filter(s => catsDelGrupo.includes(s.cat) && s.color && (!modeloFiltro || s.modelo === modeloFiltro))
+        .map(s => s.color)
+    )].sort();
+    const valorActual = colorSelect.value;
+    colorSelect.innerHTML = `<option value="">Todos los colores</option>` +
+      colores.map(c => `<option value="${c}" ${c === valorActual ? 'selected' : ''}>${c}</option>`).join('');
+  },
+
   renderTable() {
     const q = (document.getElementById('stock-search')?.value || '').toLowerCase();
     const modeloFiltro = document.getElementById('stock-filter-modelo')?.value || '';
+    const colorFiltro = document.getElementById('stock-filter-color')?.value || '';
     const pfCat = document.getElementById('pf-cat')?.value || '';
     const pfConc = document.getElementById('pf-conc')?.value || '';
     const pfMarca = document.getElementById('pf-marca')?.value || '';
@@ -301,6 +326,7 @@ const Stock = {
       if (this.currentCondicion === 'usado' && (s.estadoProducto || '') === 'Nuevo / Sellado') return false;
       if (q && !s.nombre.toLowerCase().includes(q)) return false;
       if (modeloFiltro && (s.modelo || '') !== modeloFiltro) return false;
+      if (colorFiltro && (s.color || '') !== colorFiltro) return false;
       // Filtros exclusivos de perfumería (color=categoria, storage=concentracion, modelo=marca)
       if (pfCat && (s.color || '') !== pfCat) return false;
       if (pfConc && (s.storage || '') !== pfConc) return false;
@@ -1133,7 +1159,8 @@ const Stock = {
     }
     Sheets.stock(obj);
     this.closeDrawer();
-    this.renderView();
+    this.renderKpis();
+    this.renderTable();
     } catch (err) {
       console.error('Error al guardar producto:', err);
       toast('Error al guardar. Revisá la conexión e intentá de nuevo.');
@@ -1148,7 +1175,8 @@ const Stock = {
     await DB.eliminarProductoStock(id);
     State.stock = State.stock.filter(x => x.id !== id);
     this.closeDrawer();
-    this.renderView();
+    this.renderKpis();
+    this.renderTable();
     toast('Producto eliminado del stock.');
   },
 

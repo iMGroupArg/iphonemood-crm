@@ -44,7 +44,7 @@ const Cueva = {
         <td>${o.destinoP} (${o.destinoB})<br><b>${this.fmtByMoneda(o.recibe, t.monedaD)}</b></td>
         <td>$${o.cotiz.toLocaleString('es-AR')}</td>
         <td style="color:${spread>=0?'var(--green)':'var(--red)'};font-weight:600">${spread>=0?'+':''}${State.fmtARS(spread)}</td>
-        <td><button class="btn btn-sm" onclick="Cueva.openView('${o.id}')"><i class="ti ti-edit"></i> Ver</button></td>
+        <td><button class="btn btn-sm" onclick="Cueva.openView('${o.id}')">✏️ Ver</button></td>
       </tr>`;
     }).join('');
   },
@@ -73,7 +73,7 @@ const Cueva = {
           <div style="display:flex;justify-content:space-between;padding:8px 0;border-top:1px solid var(--border);font-size:12.5px"><span>Cotización usada</span><b>$${o.cotiz.toLocaleString('es-AR')}</b></div>
           <div style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--border);font-size:12.5px"><span>Spread</span><b style="color:${spread>=0?'var(--green)':'var(--red)'}">${spread>=0?'+':''}${State.fmtARS(spread)}</b></div>
           <div style="display:flex;justify-content:space-between;margin-top:14px">
-            <button class="btn" style="color:var(--red)" onclick="Cueva.deleteOp('${o.id}')"><i class="ti ti-trash"></i> Eliminar</button>
+            <button class="btn" style="color:var(--red)" onclick="Cueva.deleteOp('${o.id}')">🗑️ Eliminar</button>
             <button class="btn" onclick="Cueva.close()">Cerrar</button>
           </div>
         </div>
@@ -130,7 +130,7 @@ const Cueva = {
 
           <div style="display:flex;gap:8px;justify-content:flex-end">
             <button class="btn" onclick="Cueva.close()">Cancelar</button>
-            <button class="btn btn-primary" onclick="Cueva.save()"><i class="ti ti-check"></i> Guardar</button>
+            <button class="btn btn-primary" onclick="Cueva.save()">✓ Guardar</button>
           </div>
         </div>
       </div>

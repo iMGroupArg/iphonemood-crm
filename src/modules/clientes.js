@@ -111,7 +111,7 @@ const Clientes = {
         </div>
         <div style="display:flex;gap:8px">
           ${c.tel ? `<a href="https://wa.me/549${tel}" target="_blank" class="btn btn-primary" style="text-decoration:none"><i class="ti ti-brand-whatsapp"></i> WhatsApp</a>` : ''}
-          <button class="btn" style="color:var(--red)" onclick="Clientes.eliminar('${escHtml(c.tel || c.nombre)}')"><i class="ti ti-trash"></i> Eliminar</button>
+          <button class="btn" style="color:var(--red)" onclick="Clientes.eliminar('${escHtml(c.tel || c.nombre)}')">🗑️ Eliminar</button>
         </div>
       </div>
 
@@ -207,7 +207,7 @@ const Clientes = {
         </div>
         <div style="padding:12px 18px;border-top:1px solid var(--border);display:flex;justify-content:flex-end;gap:8px">
           <button class="btn" onclick="document.getElementById('cli-modal').remove()">Cancelar</button>
-          <button class="btn btn-primary" onclick="Clientes.guardarManual()"><i class="ti ti-check"></i> Guardar</button>
+          <button class="btn btn-primary" onclick="Clientes.guardarManual()">✓ Guardar</button>
         </div>
       </div>`;
     document.body.appendChild(overlay);

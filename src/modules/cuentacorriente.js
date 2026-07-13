@@ -127,7 +127,7 @@ const CuentaCorriente = {
     body.style.cssText = 'flex:1;overflow-y:auto;min-height:0;padding:0 16px 24px';
 
     if (!clientes.length) {
-      body.innerHTML = `<div style="text-align:center;padding:60px 20px;color:var(--text-secondary)"><i class="ti ti-check-circle" style="font-size:40px;display:block;margin-bottom:8px"></i>No hay deudas pendientes</div>`;
+      body.innerHTML = `<div style="text-align:center;padding:60px 20px;color:var(--text-secondary)">✅No hay deudas pendientes</div>`;
     } else if (mob) {
       clientes.forEach(c => body.appendChild(this._cardCliente(c)));
     } else {
@@ -149,7 +149,7 @@ const CuentaCorriente = {
         <div style="min-width:0;flex:1">
           <div style="font-weight:600;font-size:15px;display:flex;align-items:center;gap:6px">
             <span>${c.nombre}</span>
-            <button class="cc-card-edit" style="background:none;border:none;cursor:pointer;color:var(--text-secondary);font-size:14px;padding:2px;display:flex;align-items:center;flex-shrink:0"><i class="ti ti-pencil"></i></button>
+            <button class="cc-card-edit" style="background:none;border:none;cursor:pointer;color:var(--text-secondary);font-size:14px;padding:2px;display:flex;align-items:center;flex-shrink:0">✏️</button>
           </div>
           ${c.tel ? `<div style="font-size:12px;color:var(--text-secondary)">${c.tel}</div>` : ''}
         </div>
@@ -254,7 +254,7 @@ const CuentaCorriente = {
     const btnEditar = document.createElement('button');
     btnEditar.title = 'Editar nombre';
     btnEditar.style.cssText = 'background:none;border:none;cursor:pointer;color:var(--text-secondary);font-size:16px;padding:4px;display:flex;align-items:center;flex-shrink:0';
-    btnEditar.innerHTML = '<i class="ti ti-pencil"></i>';
+    btnEditar.innerHTML = '✏️';
     btnEditar.addEventListener('click', () => this.openEditarCliente(c));
     headerInfo.appendChild(headerTexts);
     headerInfo.appendChild(btnEditar);
@@ -431,7 +431,7 @@ const CuentaCorriente = {
     box.innerHTML = `
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px">
         <h3 style="margin:0;font-size:17px;font-weight:700">Editar cliente</h3>
-        <button id="cc-edit-close" style="background:none;border:none;cursor:pointer;font-size:22px;color:var(--text-secondary);display:flex;align-items:center"><i class="ti ti-x"></i></button>
+        <button id="cc-edit-close" style="background:none;border:none;cursor:pointer;font-size:22px;color:var(--text-secondary);display:flex;align-items:center">✕</button>
       </div>
       <div style="display:flex;flex-direction:column;gap:14px">
         <div>
@@ -556,7 +556,7 @@ const CuentaCorriente = {
     box.innerHTML = `
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px">
         <h3 style="margin:0;font-size:17px;font-weight:700">Editar deuda</h3>
-        <button id="cc-ed-close" style="background:none;border:none;cursor:pointer;font-size:22px;color:var(--text-secondary);display:flex;align-items:center"><i class="ti ti-x"></i></button>
+        <button id="cc-ed-close" style="background:none;border:none;cursor:pointer;font-size:22px;color:var(--text-secondary);display:flex;align-items:center">✕</button>
       </div>
       <div style="display:flex;flex-direction:column;gap:14px">
         <div>
@@ -670,7 +670,7 @@ const CuentaCorriente = {
     box.innerHTML = `
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px">
         <h3 style="margin:0;font-size:17px;font-weight:700">Nueva deuda manual</h3>
-        <button id="cc-close-modal" style="background:none;border:none;cursor:pointer;font-size:22px;color:var(--text-secondary);display:flex;align-items:center"><i class="ti ti-x"></i></button>
+        <button id="cc-close-modal" style="background:none;border:none;cursor:pointer;font-size:22px;color:var(--text-secondary);display:flex;align-items:center">✕</button>
       </div>
       <div style="display:flex;flex-direction:column;gap:14px">
         <div>
@@ -804,7 +804,7 @@ const CuentaCorriente = {
     box.innerHTML = `
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px">
         <h3 style="margin:0;font-size:17px;font-weight:700">Registrar pago — ${c.nombre}</h3>
-        <button id="cc-close-pago" style="background:none;border:none;cursor:pointer;font-size:22px;color:var(--text-secondary);display:flex;align-items:center"><i class="ti ti-x"></i></button>
+        <button id="cc-close-pago" style="background:none;border:none;cursor:pointer;font-size:22px;color:var(--text-secondary);display:flex;align-items:center">✕</button>
       </div>
       <div style="display:flex;flex-direction:column;gap:14px">
         <div>

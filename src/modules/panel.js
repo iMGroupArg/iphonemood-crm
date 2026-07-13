@@ -54,8 +54,8 @@ const Panel = {
           <span style="width:12px;height:12px;border-radius:50%;background:${g.color}"></span>
           <div style="flex:1"><b style="font-size:13px">${g.nombre}</b></div>
           <div style="font-size:18px;font-weight:600;color:var(--blue)">${g.dias}<span style="font-size:10px;color:var(--text-secondary);display:block;font-weight:400">días</span></div>
-          <button class="btn btn-sm" onclick="Panel.editGarantia('${g.id}')"><i class="ti ti-edit"></i></button>
-          <button class="btn btn-sm" onclick="Panel.delGarantia('${g.id}')" style="color:var(--red)"><i class="ti ti-trash"></i></button>
+          <button class="btn btn-sm" onclick="Panel.editGarantia('${g.id}')">✏️</button>
+          <button class="btn btn-sm" onclick="Panel.delGarantia('${g.id}')" style="color:var(--red)">🗑️</button>
         </div>`).join('')}</div>
       <button class="btn btn-primary" onclick="Panel.addGarantia()"><i class="ti ti-plus"></i> Nueva categoría</button>
 
@@ -107,8 +107,8 @@ const Panel = {
             <span style="width:12px;height:12px;border-radius:50%;background:${c.color};flex-shrink:0"></span>
             <div style="flex:1;font-size:13px;font-weight:600">${c.nombre}</div>
             ${enUso ? `<span class="badge b-gray" style="font-size:10px">En uso (${(State.gastos||[]).filter(g=>g.cat===c.id).length})</span>` : ''}
-            <button class="btn btn-sm" onclick="Panel.editCatGasto('${c.id}')"><i class="ti ti-pencil"></i></button>
-            <button class="btn btn-sm" style="color:${enUso?'var(--text-secondary)':'var(--red)'}" ${enUso?'disabled title="Tiene gastos asociados, no se puede eliminar"':''} onclick="Panel.delCatGasto('${c.id}')"><i class="ti ti-trash"></i></button>
+            <button class="btn btn-sm" onclick="Panel.editCatGasto('${c.id}')">✏️</button>
+            <button class="btn btn-sm" style="color:${enUso?'var(--text-secondary)':'var(--red)'}" ${enUso?'disabled title="Tiene gastos asociados, no se puede eliminar"':''} onclick="Panel.delCatGasto('${c.id}')">🗑️</button>
           </div>`;
         }).join('')}
       </div>
@@ -196,8 +196,8 @@ const Panel = {
               </div>
             </div>
             <div style="display:flex;gap:6px">
-              <button class="btn btn-sm" onclick="Panel.renombrarPersonaModal('${p}')"><i class="ti ti-edit"></i></button>
-              <button class="btn btn-sm" style="color:var(--red)" onclick="Panel.eliminarPersona('${p}')"><i class="ti ti-trash"></i></button>
+              <button class="btn btn-sm" onclick="Panel.renombrarPersonaModal('${p}')">✏️</button>
+              <button class="btn btn-sm" style="color:var(--red)" onclick="Panel.eliminarPersona('${p}')">🗑️</button>
             </div>
           </div>
           <div style="display:flex;flex-wrap:wrap;gap:5px;margin-top:10px">
@@ -240,7 +240,7 @@ const Panel = {
         </div>
         <div style="padding:12px 18px;border-top:1px solid var(--border);display:flex;justify-content:flex-end;gap:8px">
           <button class="btn" onclick="document.getElementById('persona-modal-overlay').remove()">Cancelar</button>
-          <button class="btn btn-primary" onclick="Panel.${editar ? `confirmarRenombrar('${editar}')` : 'confirmarAddPersona()'}"><i class="ti ti-check"></i> ${editar ? 'Renombrar' : 'Agregar'}</button>
+          <button class="btn btn-primary" onclick="Panel.${editar ? `confirmarRenombrar('${editar}')` : 'confirmarAddPersona()'}">✓ ${editar ? 'Renombrar' : 'Agregar'}</button>
         </div>
       </div>`;
     document.body.appendChild(overlay);
@@ -336,7 +336,7 @@ const Panel = {
             <input type="number" id="cf-usdt" value="${State.refUsdt}" style="width:100%;font-size:16px;font-weight:600;padding:9px 12px;border:1px solid var(--border-strong);border-radius:8px">
           </div>
         </div>
-        <button class="btn btn-primary" style="width:100%;justify-content:center;margin-top:14px" onclick="Panel.guardarCotizaciones()"><i class="ti ti-check"></i> Actualizar cotizaciones</button>
+        <button class="btn btn-primary" style="width:100%;justify-content:center;margin-top:14px" onclick="Panel.guardarCotizaciones()">✓ Actualizar cotizaciones</button>
       </div>
     `;
   },
@@ -367,7 +367,7 @@ const Panel = {
       <div style="display:flex;align-items:center;gap:8px;padding:7px 0;border-bottom:1px solid var(--border)">
         <i class="ti ti-grip-vertical" style="color:var(--text-secondary)"></i>
         <input type="text" value="${f}" onchange="Panel.editFormaPago(${i}, this.value)" style="flex:1;font-size:12.5px;padding:6px 10px;border:1px solid var(--border-strong);border-radius:8px">
-        <button onclick="Panel.delFormaPago(${i})" style="background:none;border:none;cursor:pointer;color:var(--red)"><i class="ti ti-trash"></i></button>
+        <button onclick="Panel.delFormaPago(${i})" style="background:none;border:none;cursor:pointer;color:var(--red)">🗑️</button>
       </div>
     `).join('');
   },
@@ -487,7 +487,7 @@ const Panel = {
           <div style="font-size:11px;color:var(--text-secondary);word-break:break-all">${u.email}</div>
         </div>
         <span class="badge ${u.activo ? 'b-green' : 'b-gray'}" style="cursor:pointer" onclick="Panel.toggleUsuario('${u.id}', ${!u.activo})">${u.activo ? 'Activo' : 'Inactivo'}</span>
-        <button class="btn btn-sm" style="color:var(--red)" onclick="Panel.quitarUsuario('${u.id}','${u.email}')"><i class="ti ti-trash"></i></button>
+        <button class="btn btn-sm" style="color:var(--red)" onclick="Panel.quitarUsuario('${u.id}','${u.email}')">🗑️</button>
       </div>
     `).join('');
   },
@@ -568,7 +568,7 @@ const Panel = {
               <i class="ti ti-upload"></i> Subir logo
               <input type="file" accept="image/png,image/jpeg,image/svg+xml,image/webp" style="display:none" onchange="Panel._subirLogo(this)">
             </label>
-            ${logoActual ? `<button class="btn" style="color:var(--red)" onclick="Panel._quitarLogo()"><i class="ti ti-trash"></i> Quitar logo</button>` : ''}
+            ${logoActual ? `<button class="btn" style="color:var(--red)" onclick="Panel._quitarLogo()">🗑️ Quitar logo</button>` : ''}
             <div style="font-size:10px;color:var(--text-secondary);max-width:220px">Máx. 2MB. Para mejores resultados usá un logo cuadrado con fondo transparente (PNG).</div>
           </div>
         </div>

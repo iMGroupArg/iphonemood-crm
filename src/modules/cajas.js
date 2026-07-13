@@ -63,7 +63,7 @@ const Cajas = {
                 <i class="ti ${BOLSILLO_ICON[b]}" style="font-size:16px;color:var(--text-secondary);width:18px;text-align:center;flex-shrink:0"></i>
                 <span style="flex:1;font-size:12px;color:var(--text-secondary)">${b}</span>
                 <b style="font-size:13px">${fmt}</b>
-                <i class="ti ti-pencil" style="font-size:12px;color:var(--text-tertiary)"></i>
+                ✏️
               </div>`;
             }).join('')}
             <div style="border-top:1px solid var(--border);margin-top:8px;padding-top:8px;display:flex;justify-content:space-between;align-items:center">
@@ -114,7 +114,7 @@ const Cajas = {
         </div>
         <div style="padding:12px 18px;border-top:1px solid var(--border);display:flex;justify-content:flex-end;gap:8px">
           <button class="btn" onclick="document.getElementById('caja-edit-overlay').remove()">Cancelar</button>
-          <button class="btn btn-primary" onclick="Cajas.guardarSaldo('${persona}','${bolsillo}')"><i class="ti ti-check"></i> Guardar</button>
+          <button class="btn btn-primary" onclick="Cajas.guardarSaldo('${persona}','${bolsillo}')">✓ Guardar</button>
         </div>
       </div>`;
     document.body.appendChild(overlay);

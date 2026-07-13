@@ -121,7 +121,7 @@ const Gastos = {
         <td>${g.responsable}</td><td style="font-size:11px;color:var(--text-secondary)">${g.caja}</td>
         <td><b>${g.moneda==='USD'?State.fmtUSD(g.monto):State.fmtARS(g.monto)}</b></td>
         <td><span class="badge ${pagado?'b-gray':'b-amber'}" style="opacity:${pagado?'0.45':'1'}">Pendiente</span> <span class="badge ${pagado?'b-green':'b-gray'}" style="opacity:${pagado?'1':'0.45'}">Pagado</span></td>
-        <td><button class="btn btn-sm" onclick="Gastos.openEdit('${g.id}')"><i class="ti ti-edit"></i> Editar</button></td>
+        <td><button class="btn btn-sm" onclick="Gastos.openEdit('${g.id}')">✏️ Editar</button></td>
       </tr>`;
     }).join('');
   },
@@ -166,7 +166,7 @@ const Gastos = {
           </div>
           <div style="display:flex;gap:8px;${mobile?'':'justify-content:flex-end'}">
             ${mobile?'':'<button class="btn" onclick="Gastos.close()">Cancelar</button>'}
-            <button class="btn btn-primary" style="${mobile?'flex:1;justify-content:center':''}" onclick="Gastos.save()"><i class="ti ti-check"></i> Guardar</button>
+            <button class="btn btn-primary" style="${mobile?'flex:1;justify-content:center':''}" onclick="Gastos.save()">✓ Guardar</button>
           </div>
         </div>
       </div>
@@ -221,10 +221,10 @@ const Gastos = {
             </select>
           </div>
           <div style="display:flex;justify-content:space-between;margin-top:6px">
-            <button class="btn" style="color:var(--red)" onclick="Gastos.deleteGasto('${g.id}')"><i class="ti ti-trash"></i> Eliminar</button>
+            <button class="btn" style="color:var(--red)" onclick="Gastos.deleteGasto('${g.id}')">🗑️ Eliminar</button>
             <div style="display:flex;gap:8px">
               <button class="btn" onclick="Gastos.close()">Cancelar</button>
-              <button class="btn btn-primary" onclick="Gastos.saveEdit('${g.id}')"><i class="ti ti-check"></i> Guardar</button>
+              <button class="btn btn-primary" onclick="Gastos.saveEdit('${g.id}')">✓ Guardar</button>
             </div>
           </div>
         </div>
@@ -273,7 +273,7 @@ const Gastos = {
       <div style="display:flex;align-items:center;gap:8px;padding:7px 0;border-bottom:1px solid var(--border)">
         <input type="color" value="${c.color}" onchange="Gastos.updateCatColor(${i}, this.value)">
         <input type="text" value="${c.nombre}" onchange="Gastos.updateCatNombre(${i}, this.value)" style="flex:1;font-size:12px;padding:5px 8px;border:1px solid var(--border-strong);border-radius:8px">
-        <button onclick="Gastos.delCat(${i})" style="background:none;border:none;cursor:pointer;color:var(--red)"><i class="ti ti-trash"></i></button>
+        <button onclick="Gastos.delCat(${i})" style="background:none;border:none;cursor:pointer;color:var(--red)">🗑️</button>
       </div>`).join('');
   },
   async updateCatColor(i, color) {
@@ -321,7 +321,7 @@ const Gastos = {
           <div class="card" style="margin-bottom:0;padding:12px 14px">
             <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
               <input type="text" value="${g.motivo}" onchange="Gastos.editarFijoMotivo(${i}, this.value)" style="flex:1;font-size:13px;font-weight:600;padding:5px 8px;border:1px solid var(--border-strong);border-radius:6px;background:var(--bg-secondary);color:var(--text)">
-              <button class="btn btn-sm" style="color:var(--red)" onclick="Gastos.delFijo(${i})"><i class="ti ti-trash"></i></button>
+              <button class="btn btn-sm" style="color:var(--red)" onclick="Gastos.delFijo(${i})">🗑️</button>
             </div>
             <div style="display:grid;grid-template-columns:1fr 90px 70px;gap:6px">
               <select onchange="Gastos.editarFijoCat(${i}, this.value)" style="font-size:12px;padding:5px 8px;border:1px solid var(--border-strong);border-radius:6px;background:var(--bg-secondary);color:var(--text)">
@@ -358,7 +358,7 @@ const Gastos = {
                 <option value="USD" ${g.moneda==='USD'?'selected':''}>USD</option>
               </select>
             </td>
-            <td><button class="btn btn-sm" style="color:var(--red)" onclick="Gastos.delFijo(${i})"><i class="ti ti-trash"></i></button></td>
+            <td><button class="btn btn-sm" style="color:var(--red)" onclick="Gastos.delFijo(${i})">🗑️</button></td>
           </tr>
         `).join('')}
       </tbody></table>

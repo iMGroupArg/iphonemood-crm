@@ -528,7 +528,7 @@ const Stock = {
             <h3 style="font-size:15px;font-weight:600;display:flex;align-items:center;gap:8px"><i class="ti ${this.CAT_ICONS[p.cat]||'ti-box'}" style="color:var(--blue)" id="drawer-icon"></i> ${mode==='new'?'Agregar producto':'Editar producto'}</h3>
             <div style="display:flex;align-items:center;gap:6px">
               <button type="button" onclick="Stock.toggleDestacado()" id="destacado-btn" title="Destacar en catálogo" style="background:none;border:none;cursor:pointer;font-size:18px;color:${p.destacado?'#854F0B':'var(--text-secondary)'}"><i class="ti ti-star${p.destacado?'-filled':''}" id="destacado-icon"></i></button>
-              <button class="btn btn-sm" onclick="Stock.closeDrawer()"><i class="ti ti-x"></i></button>
+              <button class="btn btn-sm" onclick="Stock.closeDrawer()">✕</button>
             </div>
           </div>
 
@@ -776,9 +776,9 @@ const Stock = {
 
           </div>
           <div style="padding:13px 18px;border-top:1px solid var(--border);display:flex;gap:8px;justify-content:flex-end">
-            ${mode === 'edit' ? `<button class="btn" style="color:var(--red);margin-right:auto" onclick="Stock.deleteProduct('${id}')"><i class="ti ti-trash"></i> Eliminar</button>` : ''}
+            ${mode === 'edit' ? `<button class="btn" style="color:var(--red);margin-right:auto" onclick="Stock.deleteProduct('${id}')">🗑️ Eliminar</button>` : ''}
             <button class="btn" onclick="Stock.closeDrawer()">Cancelar</button>
-            <button class="btn btn-primary" onclick="Stock.save(${mode==='edit'?`'${id}'`:'null'})"><i class="ti ti-check"></i> Guardar</button>
+            <button class="btn btn-primary" onclick="Stock.save(${mode==='edit'?`'${id}'`:'null'})">✓ Guardar</button>
           </div>
         </div>
       </div>
@@ -950,7 +950,7 @@ const Stock = {
   async save(id) {
     const saveBtn = document.querySelector('#stock-drawer-host button.btn-primary');
     if (saveBtn) { saveBtn.disabled = true; saveBtn.innerHTML = 'Guardando...'; }
-    const restoreBtn = () => { if (saveBtn) { saveBtn.disabled = false; saveBtn.innerHTML = '<i class="ti ti-check"></i> Guardar'; } };
+    const restoreBtn = () => { if (saveBtn) { saveBtn.disabled = false; saveBtn.innerHTML = '✓ Guardar'; } };
 
     try {
     const cat = document.getElementById('f-cat').value;

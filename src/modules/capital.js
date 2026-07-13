@@ -196,7 +196,7 @@ const Capital = {
             </div>
             <div style="display:flex;gap:6px">
               <button class="btn btn-sm" onclick="Capital.abrirModalPago('${inv.id}')"><i class="ti ti-cash"></i> Registrar pago</button>
-              <button class="btn btn-sm" onclick="Capital.abrirModalInversor('${inv.id}')"><i class="ti ti-pencil"></i></button>
+              <button class="btn btn-sm" onclick="Capital.abrirModalInversor('${inv.id}')">✏️</button>
             </div>
           </div>
 
@@ -281,8 +281,8 @@ const Capital = {
                 </div>
                 <b style="font-size:14px;color:var(--amber);flex-shrink:0">${State.fmtUSD(a.valorUSD)}</b>
                 <div style="display:flex;gap:4px;flex-shrink:0">
-                  <button class="btn btn-sm" onclick="Capital.abrirModalActivo('${a.id}')"><i class="ti ti-pencil"></i></button>
-                  <button class="btn btn-sm" style="color:var(--red)" onclick="Capital.eliminarActivo('${a.id}')"><i class="ti ti-trash"></i></button>
+                  <button class="btn btn-sm" onclick="Capital.abrirModalActivo('${a.id}')">✏️</button>
+                  <button class="btn btn-sm" style="color:var(--red)" onclick="Capital.eliminarActivo('${a.id}')">🗑️</button>
                 </div>
               </div>`).join('')}
           </div>
@@ -360,7 +360,7 @@ const Capital = {
         </div>
         <div style="padding:12px 18px;border-top:1px solid var(--border);display:flex;justify-content:flex-end;gap:8px">
           <button class="btn" onclick="document.getElementById('cap-modal-overlay').remove()">Cancelar</button>
-          <button class="btn btn-primary" onclick="Capital.guardarInversor('${id||''}')"><i class="ti ti-check"></i> ${inv?'Guardar':'Agregar'}</button>
+          <button class="btn btn-primary" onclick="Capital.guardarInversor('${id||''}')">✓ ${inv?'Guardar':'Agregar'}</button>
         </div>
       </div>`;
     document.body.appendChild(overlay);
@@ -446,7 +446,7 @@ const Capital = {
         </div>
         <div style="padding:12px 18px;border-top:1px solid var(--border);display:flex;justify-content:flex-end;gap:8px">
           <button class="btn" onclick="document.getElementById('cap-modal-overlay').remove()">Cancelar</button>
-          <button class="btn btn-primary" onclick="Capital.guardarPago('${invId}')"><i class="ti ti-check"></i> Registrar</button>
+          <button class="btn btn-primary" onclick="Capital.guardarPago('${invId}')">✓ Registrar</button>
         </div>
       </div>`;
     document.body.appendChild(overlay);
@@ -537,7 +537,7 @@ const Capital = {
         </div>
         <div style="padding:12px 18px;border-top:1px solid var(--border);display:flex;justify-content:flex-end;gap:8px">
           <button class="btn" onclick="document.getElementById('cap-modal-overlay').remove()">Cancelar</button>
-          <button class="btn btn-primary" onclick="Capital.guardarActivo('${id||''}')"><i class="ti ti-check"></i> ${activo?'Guardar':'Registrar compra'}</button>
+          <button class="btn btn-primary" onclick="Capital.guardarActivo('${id||''}')">✓ ${activo?'Guardar':'Registrar compra'}</button>
         </div>
       </div>`;
     document.body.appendChild(overlay);

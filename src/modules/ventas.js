@@ -190,7 +190,7 @@ const Ventas = {
           <td><b>${State.fmtUSD(total)}</b></td>
           <td style="min-width:160px">${pagosHtml}</td>
           <td>${this.estadoToggle(cerrada)}</td>
-          <td><button class="btn btn-sm" onclick="Ventas.viewSale(${v.id})"><i class="ti ti-eye"></i> Ver</button></td>
+          <td><button class="btn btn-sm" onclick="Ventas.viewSale(${v.id})">👁️ Ver</button></td>
         </tr>`;
       }).join('') + `</tbody></table></div>`;
   },
@@ -792,7 +792,7 @@ const Ventas = {
           </div>`;
         }).join('')}
       </div>
-      ${this.selectedStockIds.length ? `<button class="btn btn-green" style="width:100%;justify-content:center;margin-top:10px" onclick="Ventas.addStockItems()"><i class="ti ti-check"></i> Agregar ${this.selectedStockIds.length} seleccionado(s)</button>` : ''}
+      ${this.selectedStockIds.length ? `<button class="btn btn-green" style="width:100%;justify-content:center;margin-top:10px" onclick="Ventas.addStockItems()">✓ Agregar ${this.selectedStockIds.length} seleccionado(s)</button>` : ''}
     `;
   },
   _toggleRegalo(id, isRegalo) {
@@ -1364,7 +1364,7 @@ const Ventas = {
 
           <!-- FOOTER -->
           <div style="padding:12px 20px;border-top:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;flex-shrink:0;flex-wrap:wrap;gap:8px">
-            <button class="btn btn-sm" style="color:var(--red)" onclick="Ventas.anular(${id})"><i class="ti ti-trash"></i> Anular</button>
+            <button class="btn btn-sm" style="color:var(--red)" onclick="Ventas.anular(${id})">🗑️ Anular</button>
             <div style="display:flex;gap:8px;flex-wrap:wrap">
               ${v.clienteTel ? `<button class="btn btn-sm" onclick="Ventas._whatsappVenta(${id})" style="color:#25D366;border-color:#25D366"><i class="ti ti-brand-whatsapp"></i> WhatsApp</button>` : ''}
               ${!cerrada ? `<button class="btn btn-sm btn-primary" onclick="Ventas.abrirCobro(${id})"><i class="ti ti-cash"></i> Registrar cobro</button>` : ''}

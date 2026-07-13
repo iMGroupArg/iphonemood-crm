@@ -1065,19 +1065,51 @@ const Proveedores = {
     this.renderContent();
   },
 
+  async _revertirPagosCaja(loteId) {
+    const pagos = (State.lotePagos || []).filter(p => p.loteId === loteId);
+    for (const pg of pagos) {
+      if (pg.tipo === 'conversion') {
+        // Devolver USD al origen, quitar USDT al destino
+        if (pg.persona && pg.bolsillo) {
+          const s = State.cajas[pg.persona]?.[pg.bolsillo] || 0;
+          State.cajas[pg.persona] = State.cajas[pg.persona] || {};
+          State.cajas[pg.persona][pg.bolsillo] = s + pg.montoUsd;
+          await DB.actualizarSaldoCaja(pg.persona, pg.bolsillo, s + pg.montoUsd);
+        }
+        if (pg.personaDest && pg.bolsilloDestino) {
+          const s = State.cajas[pg.personaDest]?.[pg.bolsilloDestino] || 0;
+          State.cajas[pg.personaDest] = State.cajas[pg.personaDest] || {};
+          State.cajas[pg.personaDest][pg.bolsilloDestino] = s - pg.montoUsdt;
+          await DB.actualizarSaldoCaja(pg.personaDest, pg.bolsilloDestino, s - pg.montoUsdt);
+        }
+      } else if (['pago_proveedor', 'costo', 'envio'].includes(pg.tipo) && pg.persona && pg.bolsillo) {
+        // Devolver el monto en la moneda original al bolsillo
+        const montoOriginal = pg.moneda === 'ARS'
+          ? pg.montoUsd * (State.refBlue || 1)
+          : pg.moneda === 'USDT' ? pg.montoUsdt : pg.montoUsd;
+        const s = State.cajas[pg.persona]?.[pg.bolsillo] || 0;
+        State.cajas[pg.persona] = State.cajas[pg.persona] || {};
+        State.cajas[pg.persona][pg.bolsillo] = s + montoOriginal;
+        await DB.actualizarSaldoCaja(pg.persona, pg.bolsillo, s + montoOriginal);
+      }
+    }
+  },
+
   async cancelarLote(loteId) {
-    if (!confirm('¿Cancelar esta orden? Los movimientos de caja ya registrados no se revierten.')) return;
+    if (!confirm('¿Cancelar esta orden? Se revertirán todos los movimientos de caja registrados.')) return;
+    await this._revertirPagosCaja(loteId);
     await DB.actualizarEstadoLote(loteId, 'cancelado');
-    toast('Orden cancelada', 'info');
+    toast('Orden cancelada y movimientos de caja revertidos');
     this.renderKpis();
     this.renderContent();
   },
 
   async eliminarLote(loteId) {
-    if (!confirm('¿Eliminar esta orden definitivamente? Esta acción no se puede deshacer.')) return;
+    if (!confirm('¿Eliminar esta orden definitivamente? Se revertirán los movimientos de caja. Esta acción no se puede deshacer.')) return;
+    await this._revertirPagosCaja(loteId);
     const ok = await DB.eliminarLote(loteId);
     if (ok) {
-      toast('Orden eliminada');
+      toast('Orden eliminada y movimientos de caja revertidos');
       this._loteId = null;
       this.renderKpis();
       this.renderContent();

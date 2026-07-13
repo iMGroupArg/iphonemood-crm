@@ -518,6 +518,7 @@ const Stock = {
     };
     const host = document.getElementById('stock-drawer-host');
     const esIMEI = this.CATS_IMEI.includes(p.cat);
+    const esPhone = ['iphone','android'].includes(p.cat);
     const cantidadDeclarada = p.cantidadDeclarada ?? p.cantidad ?? (esIMEI ? 0 : 1);
 
     host.innerHTML = `
@@ -578,8 +579,9 @@ const Stock = {
                   <label style="font-size:11px;color:var(--text-secondary);font-weight:600;display:block;margin-bottom:4px">IMEI <span style="font-weight:400">(opcional)</span> <span style="font-weight:400" id="imei-count">(${(p.imeis||[]).length} cargados)</span></label>
                   <div id="imei-chips-wrap" style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:8px"></div>
                   <div style="display:flex;gap:6px">
-                    <input type="text" id="f-imei-input" placeholder="123456789012345" style="flex:1;font-size:12px;padding:7px 10px;border:1px solid var(--border-strong);border-radius:8px;font-family:monospace" onkeydown="if(event.key==='Enter'){event.preventDefault();Stock.addImei();}">
-                    <button type="button" class="btn btn-sm" onclick="Stock.addImei()"><i class="ti ti-plus"></i> Agregar</button>
+                    <input type="text" id="f-imei-input" placeholder="123456789012345" inputmode="numeric" style="flex:1;font-size:12px;padding:7px 10px;border:1px solid var(--border-strong);border-radius:8px;font-family:monospace" onkeydown="if(event.key==='Enter'){event.preventDefault();Stock.addImei();}">
+                    <button type="button" class="btn btn-sm" onclick="Stock.addImei()" title="Agregar IMEI">+ Agregar</button>
+                    <button type="button" id="imei-scan-btn" class="btn btn-sm" onclick="Stock.abrirEscaner()" title="Escanear código de barras" style="font-size:16px;padding:6px 10px;display:${esPhone?'inline-flex':'none'}">📷</button>
                   </div>
                   <div class="hint" style="font-size:10px;color:var(--text-secondary);margin-top:4px">Podés dejarlo vacío. Es independiente de la cantidad — vas completando IMEIs a medida que los identificás.</div>
                 </div>
@@ -892,6 +894,92 @@ const Stock = {
     this.renderImeiChips();
   },
 
+  _scanStream: null,
+  _scanInterval: null,
+
+  async abrirEscaner() {
+    if (!navigator.mediaDevices?.getUserMedia) {
+      toast('Tu dispositivo no soporta acceso a la cámara.');
+      return;
+    }
+
+    const overlay = document.createElement('div');
+    overlay.id = 'imei-scan-overlay';
+    overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.85);z-index:9999;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px';
+    overlay.innerHTML = `
+      <div style="color:#fff;font-size:15px;font-weight:600">Apuntá la cámara al código de barras del IMEI</div>
+      <div style="position:relative;width:min(340px,90vw)">
+        <video id="imei-scan-video" autoplay playsinline muted style="width:100%;border-radius:12px;display:block"></video>
+        <div style="position:absolute;inset:0;border:2px solid #00e0a0;border-radius:12px;pointer-events:none"></div>
+        <div id="imei-scan-line" style="position:absolute;left:8px;right:8px;height:2px;background:linear-gradient(90deg,transparent,#00e0a0,transparent);top:50%;animation:scanline 1.5s ease-in-out infinite"></div>
+      </div>
+      <div style="color:#aaa;font-size:12px">También podés escribir el IMEI manualmente</div>
+      <div style="display:flex;gap:10px;margin-top:4px">
+        <input id="imei-scan-manual" type="text" inputmode="numeric" placeholder="IMEI manual..." style="padding:8px 12px;border-radius:8px;border:none;font-size:14px;font-family:monospace;width:200px">
+        <button onclick="Stock._agregarImeiEscaneado(document.getElementById('imei-scan-manual').value)" style="padding:8px 14px;border-radius:8px;background:#00e0a0;color:#000;font-weight:700;border:none;cursor:pointer">✓ Agregar</button>
+      </div>
+      <button onclick="Stock.cerrarEscaner()" style="padding:8px 20px;border-radius:8px;background:#444;color:#fff;border:none;cursor:pointer;font-size:14px">✕ Cerrar</button>
+      <style>@keyframes scanline{0%,100%{top:20%}50%{top:80%}}</style>
+    `;
+    document.body.appendChild(overlay);
+
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: 'environment', width: { ideal: 1280 }, height: { ideal: 720 } }
+      });
+      this._scanStream = stream;
+      const video = document.getElementById('imei-scan-video');
+      if (video) { video.srcObject = stream; await video.play(); }
+
+      if ('BarcodeDetector' in window) {
+        const detector = new BarcodeDetector({ formats: ['code_128', 'ean_13', 'itf', 'qr_code', 'pdf417', 'code_39', 'aztec', 'data_matrix'] });
+        const canvas = document.createElement('canvas');
+        const ctx = canvas.getContext('2d');
+        this._scanInterval = setInterval(async () => {
+          if (!video || video.readyState < 2) return;
+          canvas.width = video.videoWidth;
+          canvas.height = video.videoHeight;
+          ctx.drawImage(video, 0, 0);
+          try {
+            const barcodes = await detector.detect(canvas);
+            if (barcodes.length > 0) {
+              const raw = barcodes[0].rawValue.replace(/\D/g, '');
+              if (raw.length >= 14 && raw.length <= 16) {
+                this._agregarImeiEscaneado(raw);
+              }
+            }
+          } catch (_) {}
+        }, 400);
+      } else {
+        const hint = document.querySelector('#imei-scan-overlay div[style*="color:#aaa"]');
+        if (hint) hint.textContent = 'La detección automática no está disponible en este navegador. Usá el campo manual.';
+      }
+    } catch (err) {
+      toast('No se pudo acceder a la cámara. Verificá los permisos.');
+      this.cerrarEscaner();
+    }
+  },
+
+  _agregarImeiEscaneado(valor) {
+    const v = (valor || '').trim().replace(/\D/g, '');
+    if (!v) { toast('Valor inválido'); return; }
+    if (this.pendingImeis.includes(v)) { toast('Ese IMEI ya está cargado.'); return; }
+    this.pendingImeis.push(v);
+    this.renderImeiChips();
+    this.cerrarEscaner();
+    toast('✅ IMEI escaneado: ' + v);
+  },
+
+  cerrarEscaner() {
+    clearInterval(this._scanInterval);
+    this._scanInterval = null;
+    if (this._scanStream) {
+      this._scanStream.getTracks().forEach(t => t.stop());
+      this._scanStream = null;
+    }
+    document.getElementById('imei-scan-overlay')?.remove();
+  },
+
   bumpQty(delta) {
     const inp = document.getElementById('f-cantidad');
     if (!inp) return;
@@ -919,6 +1007,9 @@ const Stock = {
 
     const set = (id, display) => { const el = document.getElementById(id); if (el) el.style.display = display; };
     set('f-imei-wrap', esIMEI ? 'block' : 'none');
+    const esPhone = ['iphone','android'].includes(cat);
+    const scanBtn = document.getElementById('imei-scan-btn');
+    if (scanBtn) scanBtn.style.display = esPhone ? 'inline-flex' : 'none';
     set('f-serie-wrap', esMac ? 'block' : 'none');
     set('f-modelo-wrap', tieneModeloFijo ? 'block' : 'none');
     set('f-nombre-libre-wrap', esLibre ? 'block' : 'none');

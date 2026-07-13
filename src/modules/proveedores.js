@@ -232,14 +232,14 @@ const Proveedores = {
     const totalUds = items.reduce((s, i) => s + i.cantidad, 0);
     const conv = pagos.find(p => p.tipo === 'conversion');
     const pagadoProveedor = pagos.filter(p => p.tipo === 'pago_proveedor').reduce((s, p) => s + p.montoUsd, 0);
-    const totalEnvio = pagos.filter(p => p.tipo === 'envio').reduce((s, p) => s + p.montoUsd, 0);
+    const totalEnvio = pagos.filter(p => ['envio','costo'].includes(p.tipo)).reduce((s, p) => s + p.montoUsd, 0);
     const comisionUsd = conv?.comisionUsd || 0;
     const costoTotal = totalItems + comisionUsd + totalEnvio;
     const costoUnit = totalUds > 0 ? costoTotal / totalUds : 0;
     const isTerminal = ['recibido', 'cancelado'].includes(l.estado);
 
-    const pagoIcons = { conversion: '💱', pago_proveedor: '💸', envio: '🚚' };
-    const pagoLabels = { conversion: 'Conversión USD → USDT', pago_proveedor: 'Pago al proveedor', envio: 'Costo de envío' };
+    const pagoIcons = { conversion: '💱', pago_proveedor: '💸', envio: '🚚', costo: '💰' };
+    const pagoLabels = { conversion: 'Conversión USD → USDT', pago_proveedor: 'Pago al proveedor', envio: 'Costo de envío', costo: 'Costo adicional' };
 
     host.innerHTML = `
       <button class="btn btn-sm" onclick="Proveedores.back()" style="margin-bottom:16px">← ${prov?.nombre || 'Proveedores'}</button>
@@ -255,7 +255,7 @@ const Proveedores = {
         ${!isTerminal ? `<div style="display:flex;gap:6px;flex-wrap:wrap">
           ${!conv ? `<button class="btn btn-sm" onclick="Proveedores.modalConversion(${l.id})">💱 Conversión USD→USDT</button>` : ''}
           <button class="btn btn-sm btn-primary" onclick="Proveedores.modalPago(${l.id})">💸 Registrar pago</button>
-          <button class="btn btn-sm" onclick="Proveedores.modalEnvio(${l.id})">🚚 Agregar envío</button>
+          <button class="btn btn-sm" onclick="Proveedores.modalCostoAdicional(${l.id})">💰 Agregar costo</button>
           ${pagadoProveedor > 0 && l.estado !== 'recibido' ? `<button class="btn btn-sm btn-green" onclick="Proveedores.modalRecepcion(${l.id})">📦 Confirmar recepción</button>` : ''}
         </div>` : ''}
       </div>
@@ -289,6 +289,29 @@ const Proveedores = {
             </tr>`).join('')}
           </tbody>
         </table>
+      </div>
+
+
+      <!-- Costos adicionales -->
+      <div class="card" style="padding:14px;margin-bottom:14px">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+          <div style="font-size:13px;font-weight:700">💰 Costos adicionales</div>
+          ${!isTerminal ? `<button class="btn btn-sm" onclick="Proveedores.modalCostoAdicional(${l.id})">➕ Agregar</button>` : ''}
+        </div>
+        ${pagos.filter(p => ['envio','costo'].includes(p.tipo)).length === 0
+          ? '<div style="color:var(--text-secondary);font-size:12px">Sin costos registrados. Podés agregar envío, aduana, flete nacional, etc.</div>'
+          : pagos.filter(p => ['envio','costo'].includes(p.tipo)).map(pg => `
+            <div style="display:flex;align-items:center;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--border)">
+              <div>
+                <div style="font-size:12px;font-weight:600">💰 ${pg.notas || 'Costo adicional'}</div>
+                <div style="font-size:11px;color:var(--text-secondary)">${pg.fecha}${pg.persona ? ' · ' + pg.persona + ' (' + pg.bolsillo + ')' : ''}</div>
+              </div>
+              <div style="display:flex;align-items:center;gap:10px">
+                <b style="font-size:13px">${State.fmtUSD(pg.montoUsd)}</b>
+                ${!isTerminal ? `<button onclick="Proveedores.eliminarCosto(${l.id},${pg.id})" style="background:none;border:none;cursor:pointer;color:var(--red);font-size:14px" title="Eliminar costo">🗑️</button>` : ''}
+              </div>
+            </div>`).join('')}
+        ${pagos.filter(p => ['envio','costo'].includes(p.tipo)).length > 0 ? `<div style="text-align:right;font-size:12px;color:var(--text-secondary);margin-top:8px">Total costos: <b style="color:var(--text)">${State.fmtUSD(totalEnvio)}</b> · Prorrateo: <b style="color:var(--green)">${State.fmtUSD(totalUds > 0 ? totalEnvio / totalUds : 0)}/u</b></div>` : ''}
       </div>
 
       <!-- Línea de tiempo -->
@@ -825,86 +848,107 @@ const Proveedores = {
 
   // ── MODAL ENVÍO ──────────────────────────────────────────────────
 
-  modalEnvio(loteId) {
+  modalCostoAdicional(loteId) {
     const personas = State.personas || [];
     const BOLSILLOS = ['ARS cash', 'ARS transferencia', 'USD cash', 'USD transferencia', 'USDT'];
     const overlay = document.createElement('div');
-    overlay.id = 'prov-envio-overlay';
+    overlay.id = 'prov-costo-overlay';
     overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.65);backdrop-filter:blur(4px);z-index:900;display:flex;align-items:center;justify-content:center;padding:20px';
     overlay.innerHTML = `
-      <div style="background:var(--bg-elevated);border:1px solid var(--border-strong);border-radius:var(--radius-xl);width:min(400px,96vw);overflow:hidden">
+      <div style="background:var(--bg-elevated);border:1px solid var(--border-strong);border-radius:var(--radius-xl);width:min(420px,96vw);overflow:hidden">
         <div style="padding:14px 18px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center">
-          <div style="font-size:15px;font-weight:700">🚚 Costo de envío</div>
-          <button onclick="document.getElementById('prov-envio-overlay').remove()" style="background:none;border:none;cursor:pointer;color:var(--text-secondary);font-size:18px">✕</button>
+          <div style="font-size:15px;font-weight:700">💰 Agregar costo adicional</div>
+          <button onclick="document.getElementById('prov-costo-overlay').remove()" style="background:none;border:none;cursor:pointer;color:var(--text-secondary);font-size:18px">✕</button>
         </div>
         <div style="padding:18px;display:flex;flex-direction:column;gap:12px">
+          <div style="background:var(--blue-light);border-radius:8px;padding:10px;font-size:12px;color:var(--blue)">
+            Los costos adicionales se prorratean entre todas las unidades del lote para calcular el costo real por dispositivo.
+          </div>
+          <div>
+            <label style="font-size:11px;color:var(--text-secondary);display:block;margin-bottom:4px">Descripción *</label>
+            <input id="costo-desc" type="text" placeholder="Ej: Envío USA, Envío nacional, Aduana, Flete..." style="width:100%;font-size:13px;padding:8px 10px;background:var(--bg-secondary);border:1px solid var(--border-strong);border-radius:8px;color:var(--text)">
+          </div>
           <div style="display:grid;grid-template-columns:2fr 1fr;gap:10px">
             <div>
-              <label style="font-size:11px;color:var(--text-secondary);display:block;margin-bottom:4px">Monto</label>
-              <input id="envio-monto" type="number" min="0" step="0.01" placeholder="0" style="width:100%;font-size:14px;padding:8px 10px;background:var(--bg-secondary);border:1px solid var(--border-strong);border-radius:8px;color:var(--text)">
+              <label style="font-size:11px;color:var(--text-secondary);display:block;margin-bottom:4px">Monto *</label>
+              <input id="costo-monto" type="number" min="0" step="0.01" placeholder="0" style="width:100%;font-size:14px;padding:8px 10px;background:var(--bg-secondary);border:1px solid var(--border-strong);border-radius:8px;color:var(--text)">
             </div>
             <div>
               <label style="font-size:11px;color:var(--text-secondary);display:block;margin-bottom:4px">Moneda</label>
-              <select id="envio-moneda" style="width:100%;font-size:13px;padding:7px 10px;background:var(--bg-secondary);border:1px solid var(--border-strong);border-radius:8px;color:var(--text)">
+              <select id="costo-moneda" style="width:100%;font-size:13px;padding:7px 10px;background:var(--bg-secondary);border:1px solid var(--border-strong);border-radius:8px;color:var(--text)">
                 <option>USD</option><option>ARS</option><option>USDT</option>
               </select>
             </div>
           </div>
           <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
             <div>
-              <label style="font-size:11px;color:var(--text-secondary);display:block;margin-bottom:4px">Desde (persona)</label>
-              <select id="envio-persona" style="width:100%;font-size:13px;padding:7px 10px;background:var(--bg-secondary);border:1px solid var(--border-strong);border-radius:8px;color:var(--text)">
+              <label style="font-size:11px;color:var(--text-secondary);display:block;margin-bottom:4px">Pagado por (opcional)</label>
+              <select id="costo-persona" style="width:100%;font-size:13px;padding:7px 10px;background:var(--bg-secondary);border:1px solid var(--border-strong);border-radius:8px;color:var(--text)">
+                <option value="">Sin registrar en caja</option>
                 ${personas.map(p => `<option>${p}</option>`).join('')}
               </select>
             </div>
             <div>
               <label style="font-size:11px;color:var(--text-secondary);display:block;margin-bottom:4px">Bolsillo</label>
-              <select id="envio-bolsillo" style="width:100%;font-size:13px;padding:7px 10px;background:var(--bg-secondary);border:1px solid var(--border-strong);border-radius:8px;color:var(--text)">
+              <select id="costo-bolsillo" style="width:100%;font-size:13px;padding:7px 10px;background:var(--bg-secondary);border:1px solid var(--border-strong);border-radius:8px;color:var(--text)">
                 ${BOLSILLOS.map(b => `<option>${b}</option>`).join('')}
               </select>
             </div>
           </div>
-          <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
-            <div>
-              <label style="font-size:11px;color:var(--text-secondary);display:block;margin-bottom:4px">Fecha</label>
-              <input id="envio-fecha" type="date" value="${new Date().toISOString().slice(0, 10)}" style="width:100%;font-size:13px;padding:7px 10px;background:var(--bg-secondary);border:1px solid var(--border-strong);border-radius:8px;color:var(--text)">
-            </div>
-            <div>
-              <label style="font-size:11px;color:var(--text-secondary);display:block;margin-bottom:4px">Notas</label>
-              <input id="envio-notas" type="text" placeholder="Ej: Andreani, retiro en sucursal..." style="width:100%;font-size:13px;padding:7px 10px;background:var(--bg-secondary);border:1px solid var(--border-strong);border-radius:8px;color:var(--text)">
-            </div>
+          <div>
+            <label style="font-size:11px;color:var(--text-secondary);display:block;margin-bottom:4px">Fecha</label>
+            <input id="costo-fecha" type="date" value="${new Date().toISOString().slice(0, 10)}" style="width:100%;font-size:13px;padding:7px 10px;background:var(--bg-secondary);border:1px solid var(--border-strong);border-radius:8px;color:var(--text)">
           </div>
         </div>
         <div style="padding:12px 18px;border-top:1px solid var(--border);display:flex;justify-content:flex-end;gap:8px">
-          <button class="btn" onclick="document.getElementById('prov-envio-overlay').remove()">Cancelar</button>
-          <button class="btn btn-primary" onclick="Proveedores._confirmarEnvio(${loteId})">🚚 Registrar envío</button>
+          <button class="btn" onclick="document.getElementById('prov-costo-overlay').remove()">Cancelar</button>
+          <button class="btn btn-primary" onclick="Proveedores._confirmarCosto(${loteId})">💰 Registrar costo</button>
         </div>
       </div>
     `;
     document.body.appendChild(overlay);
   },
 
-  async _confirmarEnvio(loteId) {
-    const monto = parseFloat(document.getElementById('envio-monto')?.value) || 0;
-    const moneda = document.getElementById('envio-moneda')?.value;
-    const persona = document.getElementById('envio-persona')?.value;
-    const bolsillo = document.getElementById('envio-bolsillo')?.value;
-    const fecha = document.getElementById('envio-fecha')?.value;
-    const notas = document.getElementById('envio-notas')?.value.trim();
+  async _confirmarCosto(loteId) {
+    const desc = document.getElementById('costo-desc')?.value.trim();
+    const monto = parseFloat(document.getElementById('costo-monto')?.value) || 0;
+    const moneda = document.getElementById('costo-moneda')?.value;
+    const persona = document.getElementById('costo-persona')?.value;
+    const bolsillo = document.getElementById('costo-bolsillo')?.value;
+    const fecha = document.getElementById('costo-fecha')?.value;
+    if (!desc) { toast('Ingresá una descripción', 'error'); return; }
     if (!monto || monto <= 0) { toast('Ingresá un monto válido', 'error'); return; }
 
     const montoUsd = moneda === 'ARS' ? monto / (State.refBlue || 1) : monto;
-    const saldo = (State.cajas[persona]?.[bolsillo]) || 0;
-    State.cajas[persona] = State.cajas[persona] || {};
-    State.cajas[persona][bolsillo] = saldo - monto;
-    await DB.actualizarSaldoCaja(persona, bolsillo, saldo - monto);
-    await DB.guardarLotePago(loteId, { tipo: 'envio', montoUsd, montoUsdt: 0, comisionPct: 0, comisionUsd: 0, moneda, persona, bolsillo, personaDest: '', bolsilloDestino: '', fecha, notas });
 
-    document.getElementById('prov-envio-overlay')?.remove();
-    toast('Costo de envío registrado', 'success');
+    // Solo debitar caja si se eligió una persona
+    if (persona) {
+      const saldo = (State.cajas[persona]?.[bolsillo]) || 0;
+      State.cajas[persona] = State.cajas[persona] || {};
+      State.cajas[persona][bolsillo] = saldo - monto;
+      await DB.actualizarSaldoCaja(persona, bolsillo, saldo - monto);
+    }
+
+    await DB.guardarLotePago(loteId, {
+      tipo: 'costo', montoUsd, montoUsdt: 0, comisionPct: 0, comisionUsd: 0,
+      moneda, persona: persona || '', bolsillo: persona ? bolsillo : '', personaDest: '', bolsilloDestino: '', fecha, notas: desc
+    });
+
+    document.getElementById('prov-costo-overlay')?.remove();
+    toast('Costo registrado');
     this.renderKpis();
     this.renderContent();
   },
+
+  async eliminarCosto(loteId, pagoId) {
+    if (!confirm('¿Eliminar este costo?')) return;
+    await DB.eliminarLotePago(pagoId);
+    toast('Costo eliminado');
+    this.renderContent();
+  },
+
+  // Mantener alias para compatibilidad
+  modalEnvio(loteId) { this.modalCostoAdicional(loteId); },
 
   // ── MODAL RECEPCIÓN ──────────────────────────────────────────────
 
@@ -915,7 +959,7 @@ const Proveedores = {
     const totalItems = items.reduce((s, i) => s + i.precioUsd * i.cantidad, 0);
     const totalUds = items.reduce((s, i) => s + i.cantidad, 0);
     const comision = pagos.find(p => p.tipo === 'conversion')?.comisionUsd || 0;
-    const envio = pagos.filter(p => p.tipo === 'envio').reduce((s, p) => s + p.montoUsd, 0);
+    const envio = pagos.filter(p => ['envio','costo'].includes(p.tipo)).reduce((s, p) => s + p.montoUsd, 0);
     const costoUnit = totalUds > 0 ? (totalItems + comision + envio) / totalUds : 0;
 
     const overlay = document.createElement('div');
@@ -930,7 +974,7 @@ const Proveedores = {
         <div style="padding:18px;overflow-y:auto;flex:1;display:flex;flex-direction:column;gap:12px">
           <div style="background:var(--green-light);border-radius:8px;padding:10px;font-size:12px;color:var(--green)">
             Al confirmar, los items se agregarán al inventario con costo unitario: <b>${State.fmtUSD(costoUnit)}/u</b>
-            <div style="font-size:10px;margin-top:4px;opacity:.8">= (items ${State.fmtUSD(totalItems)} + comisión ${State.fmtUSD(comision)} + envío ${State.fmtUSD(envio)}) ÷ ${totalUds} uds</div>
+            <div style="font-size:10px;margin-top:4px;opacity:.8">= (items ${State.fmtUSD(totalItems)} + comisión ${State.fmtUSD(comision)} + costos adicionales ${State.fmtUSD(envio)}) ÷ ${totalUds} uds</div>
           </div>
           <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
             <div>

@@ -536,6 +536,12 @@ const DB = {
     if (row) State.lotePagos.push({ id: row.id, loteId, tipo: p.tipo, montoUsd: Number(p.montoUsd), montoUsdt: Number(p.montoUsdt || 0), comisionPct: Number(p.comisionPct || 0), comisionUsd: Number(p.comisionUsd || 0), moneda: p.moneda || 'USD', persona: p.persona || '', bolsillo: p.bolsillo || '', personaDest: p.personaDest || '', bolsilloDestino: p.bolsilloDestino || '', fecha: p.fecha || '', notas: p.notas || '' });
   },
 
+  async eliminarLotePago(pagoId) {
+    const { error } = await supa.from('lote_pagos').delete().eq('id', pagoId);
+    if (!error) State.lotePagos = State.lotePagos.filter(p => p.id !== pagoId);
+    return !error;
+  },
+
   async actualizarEstadoLote(loteId, estado, fechaRecepcion) {
     const upd = { estado };
     if (fechaRecepcion) upd.fecha_recepcion = fechaRecepcion;

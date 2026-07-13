@@ -1011,13 +1011,14 @@ const Proveedores = {
     const l = (State.lotesCompra || []).find(x => x.id === loteId);
     const prov = (State.proveedores || []).find(p => p.id === l?.proveedorId);
 
+    let errores = 0;
     for (const item of items) {
-      await DB.guardarProductoStock({
+      const obj = {
         cat: item.cat || 'iphone',
         nombre: [item.nombre, item.storage, item.color].filter(Boolean).join(' '),
         costoUSD: parseFloat(costoUnit),
         precioARS: Math.round(parseFloat(costoUnit) * (State.refBlue || 1)),
-        cantidad: item.cantidad,
+        cantidad: Number(item.cantidad) || 1,
         imeis: [],
         cotiz: State.refBlue,
         proveedor: prov?.nombre || '',
@@ -1029,13 +1030,37 @@ const Proveedores = {
         storage: item.storage || '',
         color: item.color || '',
         bateriaPct: null,
-        estadoProducto: '',
-      });
+        estadoProducto: 'Nuevo / Sellado',
+      };
+      const { id: newId, error } = await DB.guardarProductoStock(obj, null);
+      if (error || !newId) {
+        console.error('Error al guardar stock item:', error);
+        errores++;
+      } else {
+        // Agregar a memoria inmediatamente
+        const CATS_IMEI = ['iphone','android','mac','ipad'];
+        const esIMEI = CATS_IMEI.includes(obj.cat);
+        State.stock.push({
+          id: newId, cat: obj.cat, nombre: obj.nombre, modelo: obj.modelo,
+          storage: obj.storage, color: obj.color, costoUSD: obj.costoUSD,
+          precioARS: obj.precioARS, cotiz: obj.cotiz, proveedor: obj.proveedor,
+          custodio: custodio, notas: obj.notas, estadoInventario: 'disponible',
+          grado: obj.grado, estadoProducto: obj.estadoProducto,
+          cantidad: esIMEI ? obj.cantidad : obj.cantidad,
+          cantidadDeclarada: obj.cantidad,
+          imeis: esIMEI ? [] : undefined,
+          bateriaPct: null, ciclosBateria: null,
+        });
+      }
     }
 
     await DB.actualizarEstadoLote(loteId, 'recibido', fecha);
     document.getElementById('prov-recep-overlay')?.remove();
-    toast('Lote recibido e ingresado al inventario ✅', 'success');
+    if (errores > 0) {
+      toast(`⚠️ ${errores} item(s) no se pudieron agregar al stock. Revisá el historial.`, 'error');
+    } else {
+      toast('Lote recibido e ingresado al inventario ✅', 'success');
+    }
     this.renderKpis();
     this.renderContent();
   },

@@ -272,7 +272,21 @@ const DB = {
       const { error } = await supa.from('stock').update(row).eq('id', idExistente);
       return { id: idExistente, error };
     } else {
-      const { data, error } = await supa.from('stock').insert(row).select().single();
+      let { data, error } = await supa.from('stock').insert(row).select().single();
+      if (error) {
+        // Fallback: reintentar solo con columnas base si alguna columna nueva no existe
+        console.warn('guardarProductoStock insert falló, reintentando con base:', error.message);
+        const rowBase = {
+          categoria: row.categoria, nombre: row.nombre, imeis: row.imeis, cantidad: row.cantidad,
+          costo_usd: row.costo_usd, cotizacion: row.cotizacion, precio_ars: row.precio_ars,
+          proveedor: row.proveedor, custodio_id: row.custodio_id, notas: row.notas || '',
+          modelo: row.modelo, storage: row.storage, color: row.color,
+          estado_producto: row.estado_producto, grado: row.grado,
+          estado_inventario: row.estado_inventario,
+        };
+        const res2 = await supa.from('stock').insert(rowBase).select().single();
+        data = res2.data; error = res2.error;
+      }
       return { id: data?.id, error };
     }
   },

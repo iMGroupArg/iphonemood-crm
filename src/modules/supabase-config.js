@@ -544,6 +544,18 @@ const DB = {
     if (l) { l.estado = estado; if (fechaRecepcion) l.fechaRecepcion = fechaRecepcion; }
   },
 
+  async eliminarLote(loteId) {
+    await supa.from('lote_pagos').delete().eq('lote_id', loteId);
+    await supa.from('lote_items').delete().eq('lote_id', loteId);
+    const { error } = await supa.from('lotes_compra').delete().eq('id', loteId);
+    if (!error) {
+      State.lotesCompra = State.lotesCompra.filter(l => l.id !== loteId);
+      State.loteItems = State.loteItems.filter(i => i.loteId !== loteId);
+      State.lotePagos = State.lotePagos.filter(p => p.loteId !== loteId);
+    }
+    return !error;
+  },
+
   async crearCambio(c) {
     const { data } = await supa.from('cambios').insert({
       tipo: c.tipo, entrega: c.entrega, recibe: c.recibe, cotizacion: c.cotiz,

@@ -315,8 +315,9 @@ const Proveedores = {
 
       <!-- Acciones footer -->
       ${isTerminal
-        ? `<div style="padding:10px 14px;background:${l.estado === 'recibido' ? 'var(--green-light)' : 'var(--red-light)'};border-radius:8px;font-size:13px;color:${l.estado === 'recibido' ? 'var(--green)' : 'var(--red)'};font-weight:600">
-            ${l.estado === 'recibido' ? `✅ Recibido el ${l.fechaRecepcion}` : '❌ Orden cancelada'}
+        ? `<div style="display:flex;align-items:center;justify-content:space-between;padding:10px 14px;background:${l.estado === 'recibido' ? 'var(--green-light)' : 'var(--red-light)'};border-radius:8px;font-size:13px;color:${l.estado === 'recibido' ? 'var(--green)' : 'var(--red)'};font-weight:600">
+            <span>${l.estado === 'recibido' ? `✅ Recibido el ${l.fechaRecepcion}` : '❌ Orden cancelada'}</span>
+            ${l.estado === 'cancelado' ? `<button class="btn btn-sm" onclick="Proveedores.eliminarLote(${l.id})" style="color:var(--red);border-color:var(--red);font-size:12px">🗑️ Eliminar orden</button>` : ''}
           </div>`
         : `<div style="display:flex;justify-content:space-between;align-items:center;padding-bottom:20px">
             <button class="btn btn-red btn-sm" onclick="Proveedores.cancelarLote(${l.id})">🗑️ Cancelar orden</button>
@@ -1001,6 +1002,19 @@ const Proveedores = {
     toast('Orden cancelada', 'info');
     this.renderKpis();
     this.renderContent();
+  },
+
+  async eliminarLote(loteId) {
+    if (!confirm('¿Eliminar esta orden definitivamente? Esta acción no se puede deshacer.')) return;
+    const ok = await DB.eliminarLote(loteId);
+    if (ok) {
+      toast('Orden eliminada');
+      this._loteId = null;
+      this.renderKpis();
+      this.renderContent();
+    } else {
+      toast('No se pudo eliminar la orden', 'error');
+    }
   },
 
   async borrarProveedor(id) {

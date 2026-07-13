@@ -922,6 +922,18 @@ const Stock = {
 
   _scanStream: null,
   _scanInterval: null,
+  _zxingReader: null,
+
+  _loadZXing() {
+    return new Promise((resolve, reject) => {
+      if (window.ZXingBrowser) { resolve(window.ZXingBrowser); return; }
+      const s = document.createElement('script');
+      s.src = 'https://unpkg.com/@zxing/browser@0.1.4/umd/index.min.js';
+      s.onload = () => resolve(window.ZXingBrowser);
+      s.onerror = reject;
+      document.head.appendChild(s);
+    });
+  },
 
   async abrirEscaner() {
     if (!navigator.mediaDevices?.getUserMedia) {
@@ -931,31 +943,39 @@ const Stock = {
 
     const overlay = document.createElement('div');
     overlay.id = 'imei-scan-overlay';
-    overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.85);z-index:9999;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px';
+    overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.92);z-index:9999;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;padding:16px;box-sizing:border-box';
     overlay.innerHTML = `
-      <div style="color:#fff;font-size:15px;font-weight:600">Apuntá la cámara al código de barras del IMEI</div>
-      <div style="position:relative;width:min(340px,90vw)">
-        <video id="imei-scan-video" autoplay playsinline muted style="width:100%;border-radius:12px;display:block"></video>
+      <div style="color:#fff;font-size:15px;font-weight:600;text-align:center">Apuntá la cámara al código de barras del IMEI</div>
+      <div style="position:relative;width:min(380px,95vw);aspect-ratio:4/3;background:#000;border-radius:12px;overflow:hidden">
+        <video id="imei-scan-video" autoplay playsinline muted style="width:100%;height:100%;object-fit:cover;display:block"></video>
         <div style="position:absolute;inset:0;border:2px solid #00e0a0;border-radius:12px;pointer-events:none"></div>
-        <div id="imei-scan-line" style="position:absolute;left:8px;right:8px;height:2px;background:linear-gradient(90deg,transparent,#00e0a0,transparent);top:50%;animation:scanline 1.5s ease-in-out infinite"></div>
+        <div style="position:absolute;left:0;right:0;height:2px;background:linear-gradient(90deg,transparent,#00e0a0,transparent);top:50%;animation:scanline 1.5s ease-in-out infinite"></div>
+        <div id="imei-scan-status" style="position:absolute;bottom:8px;left:0;right:0;text-align:center;color:#fff;font-size:11px;background:rgba(0,0,0,.5);padding:4px">Iniciando cámara...</div>
       </div>
-      <div style="color:#aaa;font-size:12px">También podés escribir el IMEI manualmente</div>
-      <div style="display:flex;gap:10px;margin-top:4px">
-        <input id="imei-scan-manual" type="text" inputmode="numeric" placeholder="IMEI manual..." style="padding:8px 12px;border-radius:8px;border:none;font-size:14px;font-family:monospace;width:200px">
-        <button onclick="Stock._agregarImeiEscaneado(document.getElementById('imei-scan-manual').value)" style="padding:8px 14px;border-radius:8px;background:#00e0a0;color:#000;font-weight:700;border:none;cursor:pointer">✓ Agregar</button>
+      <div style="display:flex;gap:8px;width:min(380px,95vw)">
+        <input id="imei-scan-manual" type="text" inputmode="numeric" placeholder="O escribí el IMEI acá..." style="flex:1;padding:10px 12px;border-radius:8px;border:none;font-size:14px;font-family:monospace;min-width:0">
+        <button onclick="Stock._agregarImeiEscaneado(document.getElementById('imei-scan-manual').value)" style="padding:10px 14px;border-radius:8px;background:#00e0a0;color:#000;font-weight:700;border:none;cursor:pointer;white-space:nowrap">✓ OK</button>
       </div>
-      <button onclick="Stock.cerrarEscaner()" style="padding:8px 20px;border-radius:8px;background:#444;color:#fff;border:none;cursor:pointer;font-size:14px">✕ Cerrar</button>
-      <style>@keyframes scanline{0%,100%{top:20%}50%{top:80%}}</style>
+      <button onclick="Stock.cerrarEscaner()" style="padding:8px 24px;border-radius:8px;background:#555;color:#fff;border:none;cursor:pointer;font-size:14px">✕ Cerrar</button>
+      <style>@keyframes scanline{0%,100%{top:15%}50%{top:85%}}</style>
     `;
     document.body.appendChild(overlay);
 
+    const setStatus = (msg) => {
+      const el = document.getElementById('imei-scan-status');
+      if (el) el.textContent = msg;
+    };
+
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: 'environment', width: { ideal: 1280 }, height: { ideal: 720 } }
+        video: { facingMode: { ideal: 'environment' }, width: { ideal: 1280 }, height: { ideal: 960 } }
       });
       this._scanStream = stream;
       const video = document.getElementById('imei-scan-video');
-      if (video) { video.srcObject = stream; await video.play(); }
+      if (!video) return;
+      video.srcObject = stream;
+      await video.play();
+      setStatus('Buscando código de barras...');
 
       if ('BarcodeDetector' in window) {
         const detector = new BarcodeDetector({ formats: ['code_128', 'ean_13', 'itf', 'qr_code', 'pdf417', 'code_39', 'aztec', 'data_matrix'] });
@@ -970,15 +990,32 @@ const Stock = {
             const barcodes = await detector.detect(canvas);
             if (barcodes.length > 0) {
               const raw = barcodes[0].rawValue.replace(/\D/g, '');
-              if (raw.length >= 14 && raw.length <= 16) {
-                this._agregarImeiEscaneado(raw);
-              }
+              if (raw.length >= 14 && raw.length <= 16) this._agregarImeiEscaneado(raw);
             }
           } catch (_) {}
-        }, 400);
+        }, 350);
       } else {
-        const hint = document.querySelector('#imei-scan-overlay div[style*="color:#aaa"]');
-        if (hint) hint.textContent = 'La detección automática no está disponible en este navegador. Usá el campo manual.';
+        // iOS / navegadores sin BarcodeDetector — usar ZXing
+        try {
+          setStatus('Cargando decodificador...');
+          const ZXing = await this._loadZXing();
+          const reader = new ZXing.BrowserMultiFormatReader();
+          this._zxingReader = reader;
+          setStatus('Buscando código de barras...');
+          reader.decodeFromVideoElement(video, (result, err) => {
+            if (result) {
+              const raw = result.getText().replace(/\D/g, '');
+              if (raw.length >= 14 && raw.length <= 16) {
+                this._agregarImeiEscaneado(raw);
+              } else if (raw.length > 0) {
+                setStatus('Código detectado, acercate más...');
+              }
+            }
+          });
+        } catch (zxErr) {
+          setStatus('Detección no disponible — usá el campo manual');
+          console.warn('ZXing no disponible:', zxErr);
+        }
       }
     } catch (err) {
       toast('No se pudo acceder a la cámara. Verificá los permisos.');
@@ -999,6 +1036,10 @@ const Stock = {
   cerrarEscaner() {
     clearInterval(this._scanInterval);
     this._scanInterval = null;
+    if (this._zxingReader) {
+      try { this._zxingReader.reset(); } catch (_) {}
+      this._zxingReader = null;
+    }
     if (this._scanStream) {
       this._scanStream.getTracks().forEach(t => t.stop());
       this._scanStream = null;

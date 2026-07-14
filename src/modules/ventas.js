@@ -292,10 +292,10 @@ const Ventas = {
     const host = document.getElementById('venta-modal-host');
     const mobile = this.isMobile();
     const overlay = mobile
-      ? 'position:fixed;inset:0;background:var(--bg-elevated);z-index:200;display:flex;flex-direction:column'
+      ? 'position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:200;display:flex;flex-direction:column;justify-content:flex-end'
       : 'position:fixed;inset:0;background:rgba(0,0,0,.4);display:flex;align-items:center;justify-content:center;z-index:200';
     const card = mobile
-      ? 'display:flex;flex-direction:column;flex:1;overflow:hidden'
+      ? 'display:flex;flex-direction:column;max-height:96dvh;background:var(--bg-elevated);border-radius:18px 18px 0 0;overflow:hidden'
       : 'width:600px;max-width:94vw;max-height:88vh;background:var(--bg-elevated);border-radius:14px;display:flex;flex-direction:column;overflow:hidden';
     host.innerHTML = `
       <div style="${overlay}" onkeydown="if(event.key==='Enter'){event.preventDefault();}">
@@ -1189,8 +1189,8 @@ const Ventas = {
 
     const host = document.getElementById('venta-modal-host');
     host.innerHTML = `
-      <div style="position:fixed;inset:0;background:rgba(0,0,0,.5);display:flex;align-items:center;justify-content:center;z-index:200" onclick="if(event.target===this) Ventas.closeModal()">
-        <div style="width:820px;max-width:96vw;max-height:92vh;background:var(--bg-elevated);border-radius:14px;display:flex;flex-direction:column;overflow:hidden" onclick="event.stopPropagation()">
+      <div style="position:fixed;inset:0;background:rgba(0,0,0,.5);display:flex;align-items:${this.isMobile()?'flex-end':'center'};justify-content:center;z-index:200" onclick="if(event.target===this) Ventas.closeModal()">
+        <div style="width:820px;max-width:${this.isMobile()?'100vw':'96vw'};max-height:${this.isMobile()?'95dvh':'92vh'};background:var(--bg-elevated);border-radius:${this.isMobile()?'18px 18px 0 0':'14px'};display:flex;flex-direction:column;overflow:hidden" onclick="event.stopPropagation()">
 
           <!-- HEADER -->
           <div style="padding:16px 20px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;flex-shrink:0">

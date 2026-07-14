@@ -431,6 +431,12 @@ select option { background: var(--bg-elevated); }
     width: 96vw !important; max-width: 96vw !important;
   }
 
+  /* Drawers full-height full-width on mobile */
+  [style*="width:440px;max-width:94vw"] {
+    width: 100vw !important; max-width: 100vw !important;
+    border-left: none !important; border-radius: 0 !important;
+  }
+
   /* Panel de control: nav pasa a barra horizontal en mobile */
   .panel-shell { flex-direction: column !important; }
   .panel-nav-side {
@@ -454,6 +460,9 @@ select option { background: var(--bg-elevated); }
 
   /* Buttons: full-width in forms */
   .btn-block-mobile { width: 100%; justify-content: center; }
+  /* Botones de acción en footer de modales: full-width en móvil */
+  .modal-footer-btns { flex-direction: column !important; gap: 8px !important; }
+  .modal-footer-btns .btn { width: 100%; justify-content: center; }
 
   /* Topbar: prevent overflow */
   .topbar h1 { font-size: 15px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 140px; }
@@ -464,6 +473,46 @@ select option { background: var(--bg-elevated); }
 
   /* Quick action bottom bar feel */
   .sb-foot { padding-bottom: calc(14px + env(safe-area-inset-bottom)); }
+
+  /* Inputs y selects más grandes para touch */
+  input[type="text"], input[type="number"], input[type="date"],
+  input[type="email"], input[type="tel"], select, textarea {
+    font-size: 16px !important; /* evita zoom en iOS */
+    min-height: 44px;
+  }
+
+  /* Botones más grandes para touch */
+  .btn { min-height: 40px; }
+  .btn-sm { min-height: 36px; font-size: 13px; padding: 6px 13px; }
+
+  /* Cards con tap highlight */
+  .card { -webkit-tap-highlight-color: rgba(10,132,255,.12); }
+
+  /* Tabs de filtro: scroll horizontal suave sin scrollbar visible */
+  #stock-grupo-tabs, #stock-estado-tabs, #stock-condicion-tabs,
+  #stock-tabs-wrap, #ventas-periodo-tabs {
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+  }
+  #stock-grupo-tabs::-webkit-scrollbar,
+  #stock-estado-tabs::-webkit-scrollbar,
+  #stock-condicion-tabs::-webkit-scrollbar,
+  #stock-tabs-wrap::-webkit-scrollbar,
+  #ventas-periodo-tabs::-webkit-scrollbar { display: none; }
+
+  /* Stock cards: más compactas y legibles */
+  .stock-card { padding: 12px 14px !important; }
+  .stock-card-name { font-size: 13.5px !important; }
+
+  /* Drawer del stock: bottom sheet en mobile */
+  .drawer-bg > div {
+    width: 100% !important;
+    max-width: 100% !important;
+    height: 92dvh !important;
+    border-left: none !important;
+    border-radius: var(--radius-xl) var(--radius-xl) 0 0 !important;
+    align-self: flex-end !important;
+  }
 }
 
 /* ── Móvil chico (< 480px): ocultar pills, buscador más grande ── */
@@ -471,6 +520,13 @@ select option { background: var(--bg-elevated); }
   .pill { display: none !important; }
   .search-btn { width: 36px; height: 36px; font-size: 19px; }
   .topbar h1 { max-width: 160px; }
+
+  /* 1 columna en grids de 2 en pantallas muy chicas */
+  [style*="grid-template-columns:1fr 1fr"] { grid-template-columns: 1fr !important; }
+  [style*="grid-template-columns: 1fr 1fr"] { grid-template-columns: 1fr !important; }
+
+  /* KPI 1 col en teléfonos chicos */
+  .kpi-row { grid-template-columns: 1fr 1fr !important; }
 }
 
 /* ── Tablet/mobile Reparaciones (< 1024px): lista ancho completo ── */

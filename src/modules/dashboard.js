@@ -4,6 +4,30 @@ const Dashboard = {
   fechaHasta: null,
   charts: {}, // referencias a instancias de Chart.js para poder destruirlas al re-renderizar
 
+  // Devuelve un Set de fechas ISO (YYYY-MM-DD) que entran en el rango actual
+  _enPeriodo(fechaISO) {
+    if (!fechaISO) return true;
+    const f = new Date(fechaISO); f.setHours(0,0,0,0);
+    const hoy = new Date(); hoy.setHours(0,0,0,0);
+    if (this.periodo === 'hoy') return f.getTime() === hoy.getTime();
+    if (this.periodo === 'semana') { const d = new Date(hoy); d.setDate(d.getDate()-6); return f >= d; }
+    if (this.periodo === 'mes') { const d = new Date(hoy); d.setDate(d.getDate()-29); return f >= d; }
+    if (this.periodo === 'rango') {
+      const desde = this.fechaDesde ? new Date(this.fechaDesde) : null;
+      const hasta = this.fechaHasta ? new Date(this.fechaHasta) : null;
+      if (desde) desde.setHours(0,0,0,0);
+      if (hasta) hasta.setHours(23,59,59,999);
+      if (desde && f < desde) return false;
+      if (hasta && f > hasta) return false;
+      return true;
+    }
+    return true;
+  },
+
+  ventasDelPeriodo() {
+    return State.ventas.filter(v => this._enPeriodo(v.fechaISO));
+  },
+
   getDiasRango() {
     const hoy = new Date();
     let dias = 30;
@@ -23,30 +47,41 @@ const Dashboard = {
     const container = document.createElement('div');
     container.className = 'body-pad';
 
-    const resultComercial = State.resultadoComercialMes();
+    const ventas = this.ventasDelPeriodo();
+    const PERIODO_LABEL = { hoy: 'hoy', semana: 'esta semana', mes: 'este mes', rango: 'en el rango' };
+
+    // Resultados comerciales solo del período
+    const resultComercial = ventas.reduce((a, v) => {
+      const totalVenta = v.items.reduce((s, i) => s + i.precio, 0);
+      const totalCosto = v.items.reduce((s, i) => s + (i.costo||0), 0);
+      return a + (totalVenta - totalCosto) * State.refBlue;
+    }, 0);
+
+    // Spread de cueva y diferencial de tarjeta: son globales (no dependen del período de ventas)
     const spreadCueva = State.resultadoFinancieroMes();
-    const diferencialTarjetaUSD = State.resultadoDiferencialTarjetaMes();
+    const diferencialTarjetaUSD = ventas.reduce((s, v) => {
+      const totalVenta = v.items.reduce((a, i) => a + i.precio, 0);
+      const totalPagado = (v.pagos||[]).reduce((a, p) => a + p.monto, 0) + (v.tradeIn?.valor||0);
+      return s + Math.max(0, totalPagado - totalVenta);
+    }, 0);
     const diferencialTarjetaARS = diferencialTarjetaUSD * State.refBlue;
     const resultFinanciero = spreadCueva + diferencialTarjetaARS;
     const totalResultado = resultComercial + resultFinanciero;
 
-    const totalVentasARS = State.ventas.reduce((a, v) => a + v.items.reduce((s, i) => s + i.precio, 0), 0) * State.refBlue;
+    const totalVentasUSD = ventas.reduce((a, v) => a + v.items.reduce((s, i) => s + i.precio, 0), 0);
     const repActivas = State.reparaciones.filter(r => !['entregado', 'rechazado', 'no_reparable'].includes(r.estado)).length;
     const repListas = State.reparaciones.filter(r => r.estado === 'listo').length;
     const stockCritico = State.stock.filter(s => State.getStockStatus(s) !== 'ok').length;
 
-    // KPIs reparaciones
+    // KPIs reparaciones del período
     const ahora = new Date();
-    const inicioMes = new Date(ahora.getFullYear(), ahora.getMonth(), 1);
-    const repMes = State.reparaciones.filter(r => {
+    const repPeriodo = State.reparaciones.filter(r => {
       if (!r.fecha) return false;
       const [d, m, y] = (r.fecha.includes('/') ? r.fecha.split('/') : [1, 1, ahora.getFullYear()]);
-      const f = new Date(y || ahora.getFullYear(), (m||1)-1, d||1);
-      return f >= inicioMes;
+      return this._enPeriodo(new Date(y||ahora.getFullYear(), (m||1)-1, d||1).toISOString());
     });
-    const ingresosRepMes = State.reparaciones.reduce((sum, r) => {
-      const pagado = (r.pagos || []).reduce((s, p) => s + (p.monto || 0), 0);
-      return sum + pagado;
+    const ingresosRepPeriodo = repPeriodo.reduce((sum, r) => {
+      return sum + (r.pagos || []).reduce((s, p) => s + (p.monto || 0), 0);
     }, 0);
     const entregadasConFecha = State.reparaciones.filter(r => r.estado === 'entregado' && r.fechaEntrega && r.fecha);
     const diasPromedio = entregadasConFecha.length ? Math.round(
@@ -55,8 +90,8 @@ const Dashboard = {
         return sum + Math.max(0, (parseDate(r.fechaEntrega) - parseDate(r.fecha)) / 86400000);
       }, 0) / entregadasConFecha.length
     ) : null;
-    const ventasAbiertas = State.ventas.filter(v => v.estado === 'abierta').length;
-    const ticketPromedio = State.ventas.length ? totalVentasARS / State.ventas.length : 0;
+    const ventasAbiertas = ventas.filter(v => v.estado === 'abierta').length;
+    const ticketPromedio = ventas.length ? totalVentasUSD / ventas.length : 0;
 
     let totalARSenCajas = 0, totalUSDenCajas = 0, totalUSDTenCajas = 0;
     Object.values(State.cajas).forEach(c => {
@@ -78,8 +113,8 @@ const Dashboard = {
       </div>
 
       <div class="kpi-row" style="grid-template-columns:repeat(4,1fr);padding:0 0 14px 0;border:none">
-        <div class="kpi"><label>Ventas del período</label><div class="val">${State.fmtUSD(totalVentasARS / State.refBlue)}</div><div class="sub">${State.ventas.length} ventas · ticket prom. ${State.fmtUSD(ticketPromedio / State.refBlue)}</div></div>
-        <div class="kpi"><label>Resultado comercial</label><div class="val" style="color:${resultComercial>=0?'var(--green)':'var(--red)'}">${resultComercial>=0?'+':''}${State.fmtUSD(resultComercial / State.refBlue)}</div><div class="sub">margen de ventas</div></div>
+        <div class="kpi"><label>Ventas del período</label><div class="val">${State.fmtUSD(totalVentasUSD)}</div><div class="sub">${ventas.length} ventas · ticket prom. ${State.fmtUSD(ticketPromedio)}</div></div>
+        <div class="kpi"><label>Resultado comercial</label><div class="val" style="color:${resultComercial>=0?'var(--green)':'var(--red)'}">${resultComercial>=0?'+':''}${State.fmtUSD(resultComercial / State.refBlue)}</div><div class="sub">margen sobre ventas del período</div></div>
         <div class="kpi"><label>Resultado financiero</label><div class="val" style="color:${resultFinanciero>=0?'var(--green)':'var(--red)'}">${resultFinanciero>=0?'+':''}${State.fmtUSD(resultFinanciero / State.refBlue)}</div><div class="sub">spread cueva + diferencial tarjeta</div></div>
         <div class="kpi"><label>Resultado total</label><div class="val" style="color:var(--blue)">${totalResultado>=0?'+':''}${State.fmtUSD(totalResultado / State.refBlue)}</div><div class="sub">comercial + financiero</div></div>
       </div>
@@ -88,14 +123,14 @@ const Dashboard = {
         <div class="kpi"><label>Equivalente total en caja</label><div class="val">${State.fmtUSD(equivalenteTotalARS / State.refBlue)}</div><div class="sub">ARS + USD + USDT a cotización actual</div></div>
         <div class="kpi"><label>Ventas con saldo pendiente</label><div class="val" style="color:${ventasAbiertas?'var(--amber)':'var(--green)'}">${ventasAbiertas}</div><div class="sub">requieren seguimiento de cobro</div></div>
         <div class="kpi"><label>Stock con alerta</label><div class="val" style="color:${stockCritico?'var(--red)':'var(--green)'}">${stockCritico}</div><div class="sub">productos bajos o agotados</div></div>
-        <div class="kpi"><label>Reparaciones este mes</label><div class="val">${repMes.length}</div><div class="sub">${repActivas} activa(s) · ${repListas} lista(s)</div></div>
+        <div class="kpi"><label>Reparaciones del período</label><div class="val">${repPeriodo.length}</div><div class="sub">${repActivas} activa(s) · ${repListas} lista(s)</div></div>
       </div>
 
       <div style="font-size:11px;font-weight:600;color:var(--text-secondary);text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px"><i class="ti ti-tool" style="margin-right:4px"></i>Reparaciones</div>
       <div class="kpi-row" style="grid-template-columns:repeat(4,1fr);padding:0 0 14px 0;border:none">
         <div class="kpi"><label>Órdenes activas</label><div class="val" style="color:${repActivas?'var(--blue)':'var(--text-secondary)'}">${repActivas}</div><div class="sub">en proceso ahora</div></div>
         <div class="kpi"><label>Listas para entregar</label><div class="val" style="color:${repListas?'var(--green)':'var(--text-secondary)'}">${repListas}</div><div class="sub">${repListas?'pendientes de retiro':'al día'}</div></div>
-        <div class="kpi"><label>Ingresos del mes</label><div class="val">${State.fmtUSD(ingresosRepMes)}</div><div class="sub">pagos cobrados en reparaciones</div></div>
+        <div class="kpi"><label>Ingresos reparaciones</label><div class="val">${State.fmtUSD(ingresosRepPeriodo)}</div><div class="sub">pagos cobrados en el período</div></div>
         <div class="kpi"><label>Días promedio resolución</label><div class="val">${diasPromedio !== null ? diasPromedio + ' d' : '—'}</div><div class="sub">${entregadasConFecha.length} reparacion(es) entregadas</div></div>
       </div>
 
@@ -200,8 +235,6 @@ const Dashboard = {
     App.goTo('dashboard');
   },
 
-  // Reparte las ventas reales a lo largo del rango de días elegido.
-  // Estructura lista para cuando cada venta tenga timestamp completo y se pueda agrupar por fecha real.
   construirSerieDiaria() {
     const dias = this.periodo === 'rango' && this._rangoDias
       ? Array.from({ length: this._rangoDias }, (_, i) => { const d = new Date(this.fechaDesde); d.setDate(d.getDate() + i); return d; })
@@ -210,18 +243,21 @@ const Dashboard = {
     const n = dias.length;
     const labels = dias.map(d => d.toLocaleDateString('es-AR', { day: '2-digit', month: '2-digit' }));
 
-    if (State.ventas.length === 0) {
-      return { labels, montos: new Array(n).fill(0), beneficios: new Array(n).fill(0) };
-    }
-
     const montosPorDia = new Array(n).fill(0);
     const beneficiosPorDia = new Array(n).fill(0);
-    State.ventas.forEach((v, idx) => {
-      const montoVenta = v.items.reduce((s, i) => s + i.precio, 0);
-      const costoVenta = v.items.reduce((s, i) => s + (i.costo || 0), 0);
-      const diaIdx = Math.max(0, n - 1 - (idx % n));
-      montosPorDia[diaIdx] += montoVenta * State.refBlue;
-      beneficiosPorDia[diaIdx] += (montoVenta - costoVenta) * State.refBlue;
+
+    // Clave ISO para cada día del rango
+    const isoKeys = dias.map(d => d.toISOString().slice(0, 10));
+
+    this.ventasDelPeriodo().forEach(v => {
+      if (!v.fechaISO) return;
+      const key = v.fechaISO.slice(0, 10);
+      const idx = isoKeys.indexOf(key);
+      if (idx === -1) return;
+      const monto = v.items.reduce((s, i) => s + i.precio, 0);
+      const costo = v.items.reduce((s, i) => s + (i.costo || 0), 0);
+      montosPorDia[idx] += monto * State.refBlue;
+      beneficiosPorDia[idx] += (monto - costo) * State.refBlue;
     });
 
     return { labels, montos: montosPorDia, beneficios: beneficiosPorDia };

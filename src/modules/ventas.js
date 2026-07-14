@@ -149,6 +149,8 @@ const Ventas = {
       host.innerHTML = `<div style="display:flex;flex-direction:column;gap:8px;padding:10px 12px">` +
         ventas.map(v => {
           const total=v.items.reduce((s,i)=>s+i.precio,0);
+          const pagado=v.pagos.reduce((s,p)=>s+p.monto,0)+(v.tradeIn?.valor||0);
+          const saldo=total-pagado;
           const cerrada=v.estado==='cerrada';
           const itemsStr=v.items.map(i=>i.nombre).join(', ');
           return `<div class="card" style="margin-bottom:0;padding:12px 14px" onclick="Ventas.viewSale(${v.id})">
@@ -164,7 +166,8 @@ const Ventas = {
             </div>
             <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
               <span class="badge b-blue" style="font-size:10px">${TIPO[v.tipoVenta]||'Minorista'}</span>
-              <span class="badge ${cerrada?'b-green':'b-amber'}" style="font-size:10px">${cerrada?'Cerrada':'Abierta'}</span>
+              <span class="badge ${cerrada?'b-green':'b-amber'}" style="font-size:10px">${cerrada?'✓ Cerrada':'Abierta'}</span>
+              ${saldo>0.5?`<span style="font-size:10px;color:var(--red);font-weight:600">Pendiente: ${State.fmtUSD(saldo)}</span>`:''}
               <span style="font-size:10px;color:var(--text-secondary);margin-left:auto">#${v.id}</span>
             </div>
           </div>`;
@@ -1844,9 +1847,9 @@ const Ventas = {
     if (!monto) { toast('Ingresá un monto.'); return; }
     const persona  = document.getElementById('cobro-persona')?.value;
     const bolsillo = document.getElementById('cobro-bolsillo')?.value;
-    document.getElementById('cobro-overlay')?.remove();
     const v = State.ventas.find(x => x.id === id);
-    if (!v) return;
+    if (!v) { toast('Error: venta no encontrada.'); return; }
+    document.getElementById('cobro-overlay')?.remove();
     const pago = { persona, bolsillo, monto, caja: `${persona}-${bolsillo}`, esTarjeta: false, diferencialArs: 0 };
     v.pagos.push(pago);
     let montoEnBolsillo = monto;
@@ -1854,7 +1857,7 @@ const Ventas = {
     State.acreditarCaja(persona, bolsillo, montoEnBolsillo);
     await DB.agregarPagoVenta(id, pago);
     const total = v.items.reduce((s, i) => s + i.precio, 0);
-    const pagado = v.pagos.reduce((s, p) => s + p.monto, 0);
+    const pagado = v.pagos.reduce((s, p) => s + p.monto, 0) + (v.tradeIn?.valor || 0);
     if (pagado >= total) {
       v.estado = 'cerrada';
       await DB.actualizarEstadoVenta(id, 'cerrada');
@@ -1878,11 +1881,18 @@ const Ventas = {
   },
 
   async eliminarPago(ventaId, pagoId) {
-    if (!confirm('¿Eliminar este pago? El saldo de la venta se actualizará.')) return;
+    if (!confirm('¿Eliminar este pago? El saldo de la venta se actualizará y el monto se debitará de la caja.')) return;
+    const v = State.ventas.find(x => x.id === ventaId);
+    const pago = v?.pagos.find(p => p.id === pagoId);
     const ok = await DB.eliminarPagoVenta(pagoId);
     if (!ok) { toast('Error al eliminar el pago'); return; }
-    const v = State.ventas.find(x => x.id === ventaId);
     if (v) {
+      // Revertir el movimiento de caja
+      if (pago) {
+        let montoEnBolsillo = pago.monto;
+        if (pago.bolsillo?.startsWith('ARS')) montoEnBolsillo = pago.monto * (pago.cotizacionDiferencial || State.refBlue);
+        State.debitarCaja(pago.persona, pago.bolsillo, montoEnBolsillo);
+      }
       v.pagos = v.pagos.filter(p => p.id !== pagoId);
       const total = v.items.reduce((s, i) => s + i.precio, 0);
       const pagado = v.pagos.reduce((s, p) => s + p.monto, 0) + (v.tradeIn?.valor || 0);
@@ -1921,10 +1931,10 @@ const Ventas = {
         }
       }
     }
-    // Revertir cajas
+    // Revertir cajas usando la cotización original del pago, no la actual
     v.pagos.forEach(p => {
       let montoEnBolsillo = p.monto;
-      if (p.bolsillo.startsWith('ARS')) montoEnBolsillo = p.monto * State.refBlue;
+      if (p.bolsillo?.startsWith('ARS')) montoEnBolsillo = p.monto * (p.cotizacionDiferencial || State.refBlue);
       State.debitarCaja(p.persona, p.bolsillo, montoEnBolsillo);
     });
     await DB.anularVenta(id);

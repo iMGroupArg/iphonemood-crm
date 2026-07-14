@@ -1413,7 +1413,7 @@ const Ventas = {
     const v = State.ventas.find(x => x.id === id);
     if (!v) return;
     const total = v.items.reduce((s, i) => s + i.precio, 0);
-    const pagado = v.pagos.reduce((s, p) => s + p.monto, 0);
+    const pagado = v.pagos.reduce((s, p) => s + p.monto, 0) + (v.tradeIn?.valor || 0);
     const saldo = pagado - total;
     const dispositivosCats = ['iphone','android','mac','ipad','watch'];
     const itemsDisp = v.items.filter(i => { const p = State.stock.find(s => s.id === i.stockId); return p ? dispositivosCats.includes(p.cat) : false; });

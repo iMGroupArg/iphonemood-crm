@@ -839,19 +839,27 @@ const CuentaCorriente = {
             <select id="cc-p-bolsillo" onchange="(function(){
               const b=document.getElementById('cc-p-bolsillo').value;
               const esARS=b.startsWith('ARS');
-              document.getElementById('cc-p-monto-label').textContent=esARS?'Monto en ARS (blue: $'+Math.round(State.refBlue).toLocaleString('es-AR')+')':'Monto en USD';
-              const v=parseFloat(document.getElementById('cc-p-monto').value)||0;
-              const eq=document.getElementById('cc-p-equiv');
-              if(eq) eq.textContent=esARS&&v>0?'≈ USD '+(v/State.refBlue).toFixed(2):'';
+              document.getElementById('cc-p-monto-label').textContent=esARS?'Monto en ARS':'Monto en USD';
+              const cw=document.getElementById('cc-cotiz-wrap');
+              if(cw) cw.style.display=esARS?'block':'none';
+              document.getElementById('cc-p-monto').dispatchEvent(new Event('input'));
             })()" style="width:100%;padding:10px;border:1px solid var(--border);border-radius:var(--radius);background:var(--bg);color:var(--text);font-size:14px">${bolsillosOpts}</select>
           </div>
         </div>
         <div>
-          <label id="cc-p-monto-label" style="font-size:12px;font-weight:600;color:var(--text-secondary);text-transform:uppercase;letter-spacing:.5px;display:block;margin-bottom:6px">Monto en ARS (blue: $${Math.round(State.refBlue).toLocaleString('es-AR')})</label>
+          <label id="cc-p-monto-label" style="font-size:12px;font-weight:600;color:var(--text-secondary);text-transform:uppercase;letter-spacing:.5px;display:block;margin-bottom:6px">Monto en ARS</label>
           <input id="cc-p-monto" type="number" placeholder="0" inputmode="decimal"
-            oninput="(function(){const b=document.getElementById('cc-p-bolsillo').value;const esARS=b.startsWith('ARS');const v=parseFloat(document.getElementById('cc-p-monto').value)||0;const eq=document.getElementById('cc-p-equiv');if(eq)eq.textContent=esARS&&v>0?'≈ USD '+(v/State.refBlue).toFixed(2):'';})()"
+            oninput="(function(){const b=document.getElementById('cc-p-bolsillo').value;const esARS=b.startsWith('ARS');const cotiz=parseFloat(document.getElementById('cc-p-cotiz')?.value)||State.refBlue;const v=parseFloat(document.getElementById('cc-p-monto').value)||0;const eq=document.getElementById('cc-p-equiv');if(eq)eq.textContent=esARS&&v>0?'≈ USD '+(v/cotiz).toFixed(2)+' (cotiz $'+Math.round(cotiz).toLocaleString('es-AR')+')':'';})()"
             style="width:100%;padding:10px;border:1px solid var(--border);border-radius:var(--radius);background:var(--bg);color:var(--text);font-size:14px;box-sizing:border-box">
           <div id="cc-p-equiv" style="font-size:11px;color:var(--text-secondary);margin-top:4px;min-height:16px"></div>
+        </div>
+        <div id="cc-cotiz-wrap" style="display:none">
+          <label style="font-size:12px;font-weight:600;color:var(--text-secondary);text-transform:uppercase;letter-spacing:.5px;display:block;margin-bottom:6px">Cotización a usar</label>
+          <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:6px">
+            <button type="button" onclick="document.getElementById('cc-p-cotiz').value=${State.refBlue};document.getElementById('cc-p-monto').dispatchEvent(new Event('input'))" style="padding:4px 10px;border:1px solid var(--border);border-radius:6px;background:var(--bg-secondary);color:var(--text);font-size:11px;cursor:pointer">Blue $${State.refBlue.toLocaleString('es-AR')}</button>
+            <button type="button" onclick="document.getElementById('cc-p-cotiz').value=${Math.round(State.refBlue*0.9)};document.getElementById('cc-p-monto').dispatchEvent(new Event('input'))" style="padding:4px 10px;border:1px solid var(--border);border-radius:6px;background:var(--bg-secondary);color:var(--text);font-size:11px;cursor:pointer">-10% $${Math.round(State.refBlue*0.9).toLocaleString('es-AR')}</button>
+          </div>
+          <input id="cc-p-cotiz" type="number" value="${State.refBlue}" oninput="document.getElementById('cc-p-monto').dispatchEvent(new Event('input'))" style="width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:var(--radius);background:var(--bg);color:var(--text);font-size:13px;font-weight:600;box-sizing:border-box">
         </div>
         <div>
           <label style="font-size:12px;font-weight:600;color:var(--text-secondary);text-transform:uppercase;letter-spacing:.5px;display:block;margin-bottom:6px">Notas</label>
@@ -876,8 +884,9 @@ const CuentaCorriente = {
       const montoRaw = parseFloat(document.getElementById('cc-p-monto').value);
       const esARS    = bolsillo.startsWith('ARS');
       const moneda   = esARS ? 'ARS' : 'USD';
-      // Convertir siempre a USD para almacenar
-      const monto    = esARS ? montoRaw / (State.refBlue || 1) : montoRaw;
+      const cotizUsada = esARS ? (parseFloat(document.getElementById('cc-p-cotiz')?.value) || State.refBlue) : 1;
+      // Convertir siempre a USD para almacenar usando la cotización elegida
+      const monto    = esARS ? montoRaw / cotizUsada : montoRaw;
       const errEl    = document.getElementById('cc-p-error');
 
       if (!montoRaw || montoRaw <= 0) { errEl.textContent = 'Ingresá un monto válido'; errEl.style.display = 'block'; return; }
@@ -943,29 +952,33 @@ const CuentaCorriente = {
     State.deudaPagos.push({ deudaId, monto, moneda, persona, bolsillo, fecha: new Date().toLocaleDateString('es-AR') });
   },
 
-  async _pagarVenta(ventaId, monto, moneda, persona, bolsillo) {
+  async _pagarVenta(ventaId, montoUSD, moneda, persona, bolsillo) {
+    // montoUSD ya viene convertido a USD desde el llamador
     const { SUPABASE_URL, SUPABASE_ANON_KEY } = window.__APP_CONFIG__;
     const supa2 = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
     const personaId = DB.personaId(persona);
     if (!personaId) throw new Error('Persona no encontrada');
 
-    const montoUSD = moneda === 'ARS' ? monto / (State.refBlue || 1) : monto;
-
-    const { error } = await supa2.from('venta_pagos').insert({
+    const { data: pagoData, error } = await supa2.from('venta_pagos').insert({
       venta_id: ventaId, persona_id: personaId, bolsillo,
       monto: montoUSD, es_tarjeta: false
-    });
+    }).select().single();
     if (error) throw error;
 
-    // Actualizar en memoria
+    // Actualizar en memoria: agregar pago a la venta
     const v = (State.ventas || []).find(x => x.id === ventaId);
     if (v) {
-      v.pagos.push({ persona, bolsillo, monto: montoUSD, esTarjeta: false, diferencialArs: 0 });
-      // Cerrar si saldo cubierto
+      v.pagos.push({
+        id: pagoData?.id || null,
+        persona, bolsillo, monto: montoUSD,
+        esTarjeta: false, diferencialArs: 0,
+        caja: `${persona}-${bolsillo}`
+      });
+      // Cerrar venta si el total queda cubierto (incluye trade-in)
       const total = v.items.reduce((s, i) => s + i.precio, 0);
-      const pagado = v.pagos.reduce((s, p) => s + p.monto, 0);
-      if (pagado >= total) {
+      const pagado = v.pagos.reduce((s, p) => s + p.monto, 0) + (v.tradeIn?.valor || 0);
+      if ((total - pagado) <= 0.5) {
         await supa2.from('ventas').update({ estado: 'cerrada' }).eq('id', ventaId);
         v.estado = 'cerrada';
       }

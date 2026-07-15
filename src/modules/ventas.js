@@ -659,6 +659,7 @@ const Ventas = {
       ${d.items.map((it, idx) => `<div style="display:flex;justify-content:space-between;align-items:center;padding:7px 10px;background:var(--bg-secondary);border-radius:8px;margin-bottom:5px;font-size:12px;gap:8px">
         <div style="flex:1;min-width:0">
           <div style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${it.nombre}${it.regalo?` <span style="font-size:10px;color:var(--green)">🎁 regalo</span>`:''}</div>
+          ${it.imei?`<div style="font-size:10px;color:var(--text-secondary);font-family:monospace">IMEI: ${it.imei}</div>`:''}
           ${it.regalo?`<div style="font-size:10px;color:var(--text-secondary)">Costo: USD ${it.costo||0} (impacta en margen)</div>`:''}
         </div>
         <div style="display:flex;align-items:center;gap:6px;flex-shrink:0">
@@ -996,7 +997,7 @@ const Ventas = {
     return `
       <div style="margin-bottom:14px"><b>Cliente:</b> ${d.cliente || 'Consumidor final'} ${d.vendedor?`· Vendedor: ${d.vendedor}`:''}</div>
       <div style="margin-bottom:14px"><b>Ítems (${d.items.length})</b>
-        ${d.items.map(i=>`<div style="display:flex;justify-content:space-between;font-size:12px;padding:3px 0">${i.nombre}<span>${State.fmtUSD(i.precio)}</span></div>`).join('')}
+        ${d.items.map(i=>`<div style="display:flex;justify-content:space-between;font-size:12px;padding:3px 0"><span>${i.nombre}${i.imei?`<br><span style="font-size:10px;color:var(--text-secondary);font-family:monospace">IMEI: ${i.imei}</span>`:''}</span><span>${State.fmtUSD(i.precio)}</span></div>`).join('')}
       </div>
       <div style="margin-bottom:14px"><b>Pagos</b>
         ${d.tradeIn?.valor > 0 ? `<div style="display:flex;justify-content:space-between;font-size:12px;padding:3px 0;color:var(--green)">🔄 Trade-In: ${d.tradeIn.modelo||'Equipo'}<span style="font-weight:600">${State.fmtUSD(d.tradeIn.valor)}</span></div>` : ''}

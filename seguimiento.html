@@ -235,6 +235,32 @@
   .btn-send:hover { opacity: .85; }
   .btn-send:disabled { opacity: .4; cursor: not-allowed; }
 
+  /* Presupuesto card */
+  .presupuesto-card {
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    overflow: hidden;
+    margin-bottom: 14px;
+  }
+  .presupuesto-header {
+    padding: 10px 16px;
+    border-bottom: 1px solid var(--border);
+    display: flex; align-items: center; justify-content: space-between;
+    background: var(--bg-elevated);
+  }
+  .presupuesto-header .titulo { font-size: 12px; font-weight: 700; display: flex; align-items: center; gap: 6px; }
+  .presupuesto-header .orden { font-size: 11px; color: var(--text-secondary); font-family: monospace; }
+  .presupuesto-body { padding: 14px 16px; display: flex; flex-direction: column; gap: 10px; }
+  .presupuesto-row { display: flex; justify-content: space-between; align-items: flex-start; gap: 10px; }
+  .presupuesto-row .lbl { font-size: 11px; color: var(--text-secondary); flex-shrink: 0; }
+  .presupuesto-row .val { font-size: 13px; font-weight: 600; text-align: right; }
+  .presupuesto-divider { height: 1px; background: var(--border); }
+  .presupuesto-total { display: flex; justify-content: space-between; align-items: center; padding: 12px 16px; background: var(--bg-elevated); }
+  .presupuesto-total .lbl { font-size: 12px; font-weight: 700; }
+  .presupuesto-total .val { font-size: 16px; font-weight: 800; color: var(--blue); }
+  .presupuesto-conditions { padding: 10px 16px; border-top: 1px solid var(--border); font-size: 10px; color: var(--text-tertiary); line-height: 1.5; }
+
   /* WA footer */
   .wa-card {
     background: rgba(37,211,102,.08);
@@ -406,6 +432,40 @@ async function renderPage() {
         </div>
       </div>`;
     })()}
+
+    <!-- Presupuesto -->
+    <div class="presupuesto-card">
+      <div class="presupuesto-header">
+        <div class="titulo"><i class="ti ti-file-description" style="color:var(--blue)"></i> Presupuesto</div>
+        <div class="orden">ORDEN R${String(r.id).padStart(3,'0')}</div>
+      </div>
+      <div class="presupuesto-body">
+        <div class="presupuesto-row">
+          <span class="lbl">Fecha de ingreso</span>
+          <span class="val">${r.creado_en ? new Date(r.creado_en).toLocaleDateString('es-AR',{day:'2-digit',month:'2-digit',year:'numeric'}) : '—'}</span>
+        </div>
+        ${r.tecnico ? `<div class="presupuesto-row">
+          <span class="lbl">Técnico</span>
+          <span class="val">${escHtml(r.tecnico)}</span>
+        </div>` : ''}
+        ${r.clave ? `<div class="presupuesto-row">
+          <span class="lbl">Clave / PIN</span>
+          <span class="val" style="font-family:monospace">${escHtml(r.clave)}</span>
+        </div>` : ''}
+        <div class="presupuesto-row">
+          <span class="lbl">Problema reportado</span>
+          <span class="val" style="color:var(--text-secondary);font-weight:400;font-size:12px;max-width:60%;text-align:right">${r.falla ? escHtml(r.falla) : '—'}</span>
+        </div>
+      </div>
+      <div class="presupuesto-divider"></div>
+      <div class="presupuesto-total">
+        <span class="lbl">TOTAL A ABONAR</span>
+        <span class="val">${r.precio_final ? 'USD ' + Number(r.precio_final).toFixed(0) : 'A presupuestar'}</span>
+      </div>
+      <div class="presupuesto-conditions">
+        <b>Condiciones:</b> El cliente declara haber entregado el equipo en las condiciones descritas. iPhoneMood no se responsabiliza por datos almacenados en el dispositivo. El presupuesto tiene validez de 48 horas.
+      </div>
+    </div>
 
     <!-- Flujo de estado -->
     <div class="flujo-card">

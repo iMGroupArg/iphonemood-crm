@@ -314,15 +314,25 @@ const CuentaCorriente = {
     const pagosVentas = c.ventasAbiertas.flatMap(v => v.pagos.map(p => ({ ...p, ventaId: v.id, fecha: v.fecha })));
 
     if (pagosDeudas.length + pagosVentas.length > 0) {
+      const pagoDeudaHTML = p => {
+        const esARS = p.bolsillo?.startsWith('ARS');
+        const montoDisplay = `+USD ${p.monto.toFixed(2)}${esARS ? ` (~$${Math.round(p.monto * State.refBlue).toLocaleString('es-AR')} ARS)` : ''}`;
+        return `<div style="display:flex;justify-content:space-between;align-items:center;padding:10px 0;border-bottom:1px solid var(--border);font-size:13px">
+          <div>
+            <span style="color:var(--text-secondary)">${p.fecha}</span> · ${p.persona || ''} · ${p.bolsillo || ''}
+          </div>
+          <div style="display:flex;align-items:center;gap:10px">
+            <span style="font-weight:600;color:var(--green)">${montoDisplay}</span>
+            ${p.id ? `<button onclick="CuentaCorriente.borrarPagoDeuda('${p.id}','${p.deudaId}',${p.monto})" style="background:none;border:none;cursor:pointer;color:var(--red);font-size:16px;padding:2px;line-height:1" title="Borrar pago">🗑️</button>` : ''}
+          </div>
+        </div>`;
+      };
       const items = [
         ...pagosVentas.map(p => `<div style="display:flex;justify-content:space-between;padding:10px 0;border-bottom:1px solid var(--border);font-size:13px">
           <div><span style="color:var(--text-secondary)">Venta #${p.ventaId}</span> · ${p.persona} · ${p.bolsillo}</div>
           <div style="font-weight:600;color:var(--green)">+USD ${p.monto.toFixed(2)}</div>
         </div>`),
-        ...pagosDeudas.map(p => `<div style="display:flex;justify-content:space-between;padding:10px 0;border-bottom:1px solid var(--border);font-size:13px">
-          <div><span style="color:var(--text-secondary)">${p.fecha}</span> · ${p.persona || ''} · ${p.bolsillo || ''}</div>
-          <div style="font-weight:600;color:var(--green)">+${p.moneda} ${p.monto.toFixed(2)}</div>
-        </div>`)
+        ...pagosDeudas.map(p => pagoDeudaHTML(p))
       ];
       body.appendChild(this._seccion('Historial de pagos', items.join('')));
     }
@@ -924,32 +934,97 @@ const CuentaCorriente = {
     });
   },
 
-  async _pagarDeudaManual(deudaId, monto, moneda, persona, bolsillo, notas) {
+  async _pagarDeudaManual(deudaId, montoUSD, moneda, persona, bolsillo, notas) {
+    // montoUSD ya viene convertido a USD desde el llamador; moneda indica el bolsillo de origen
     const { SUPABASE_URL, SUPABASE_ANON_KEY } = window.__APP_CONFIG__;
     const supa2 = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
-    // Insertar pago
-    const { error: e1 } = await supa2.from('deuda_pagos').insert({
-      deuda_id: deudaId, monto, moneda, persona, bolsillo, notas: notas || null
-    });
+    // Insertar pago — siempre guardamos en USD
+    const { data: pagoData, error: e1 } = await supa2.from('deuda_pagos').insert({
+      deuda_id: deudaId, monto: montoUSD, moneda: 'USD', persona, bolsillo, notas: notas || null
+    }).select().single();
     if (e1) throw e1;
 
     // Actualizar monto_pagado en la deuda
     const deuda = (State.deudas || []).find(d => d.id === deudaId);
     if (!deuda) return;
-    const nuevoPagado = (deuda.montoPagado || 0) + monto;
+    const nuevoPagado = (deuda.montoPagado || 0) + montoUSD;
+    const deudaPagada = nuevoPagado >= deuda.monto - 0.5;
     const { error: e2 } = await supa2.from('deudas_manuales').update({
       monto_pagado: nuevoPagado,
-      estado: nuevoPagado >= deuda.monto ? 'pagada' : 'activa'
+      estado: deudaPagada ? 'pagada' : 'activa'
     }).eq('id', deudaId);
     if (e2) throw e2;
 
     // Actualizar en memoria
     deuda.montoPagado = nuevoPagado;
-    if (nuevoPagado >= deuda.monto) deuda.estado = 'pagada';
+    if (deudaPagada) deuda.estado = 'pagada';
 
     State.deudaPagos = State.deudaPagos || [];
-    State.deudaPagos.push({ deudaId, monto, moneda, persona, bolsillo, fecha: new Date().toLocaleDateString('es-AR') });
+    State.deudaPagos.push({ id: pagoData?.id, deudaId, monto: montoUSD, moneda: 'USD', persona, bolsillo, fecha: new Date().toLocaleDateString('es-AR') });
+
+    // Si la deuda está vinculada a una venta (concepto = ventaId), sincronizar venta_pagos
+    const ventaId = deuda.concepto ? parseInt(deuda.concepto) : null;
+    if (ventaId) {
+      const personaId = DB.personaId(persona);
+      if (personaId) {
+        await supa2.from('venta_pagos').insert({
+          venta_id: ventaId, persona_id: personaId, bolsillo,
+          monto: montoUSD, es_tarjeta: false
+        });
+      }
+      // Actualizar en memoria y cerrar venta si saldo cubierto
+      const v = (State.ventas || []).find(x => x.id === ventaId);
+      if (v) {
+        v.pagos.push({ persona, bolsillo, monto: montoUSD, esTarjeta: false, diferencialArs: 0, caja: `${persona}-${bolsillo}` });
+        const total = v.items.reduce((s, i) => s + i.precio, 0);
+        const pagado = v.pagos.reduce((s, p) => s + p.monto, 0) + (v.tradeIn?.valor || 0);
+        if ((total - pagado) <= 0.5) {
+          await supa2.from('ventas').update({ estado: 'cerrada' }).eq('id', ventaId);
+          v.estado = 'cerrada';
+        }
+      }
+    }
+  },
+
+  async borrarPagoDeuda(pagoId, deudaId, monto) {
+    if (!confirm('¿Borrar este pago? Se revertirá el saldo de la deuda.')) return;
+    try {
+      const { SUPABASE_URL, SUPABASE_ANON_KEY } = window.__APP_CONFIG__;
+      const supa2 = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+      const { error } = await supa2.from('deuda_pagos').delete().eq('id', pagoId);
+      if (error) throw error;
+
+      const deuda = (State.deudas || []).find(d => d.id === deudaId);
+      if (deuda) {
+        deuda.montoPagado = Math.max(0, (deuda.montoPagado || 0) - monto);
+        deuda.estado = 'activa';
+        const nuevoPagado = deuda.montoPagado;
+        await supa2.from('deudas_manuales').update({ monto_pagado: nuevoPagado, estado: 'activa' }).eq('id', deudaId);
+
+        // Si está vinculada a una venta, reabrirla
+        const ventaId = deuda.concepto ? parseInt(deuda.concepto) : null;
+        if (ventaId) {
+          const v = (State.ventas || []).find(x => x.id === ventaId);
+          if (v && v.estado === 'cerrada') {
+            await supa2.from('ventas').update({ estado: 'abierta' }).eq('id', ventaId);
+            v.estado = 'abierta';
+          }
+        }
+      }
+
+      State.deudaPagos = (State.deudaPagos || []).filter(p => p.id !== pagoId);
+      State.showToast?.('Pago eliminado');
+      // Re-renderizar
+      const clientes = this.getClientesConDeuda();
+      const key = this._clienteActual?.key;
+      this._clienteActual = clientes.find(x => x.key === key) || null;
+      if (!this._clienteActual) this._vista = 'lista';
+      this._rerender();
+    } catch(e) {
+      alert('Error al borrar el pago: ' + e.message);
+    }
   },
 
   async _pagarVenta(ventaId, montoUSD, moneda, persona, bolsillo) {

@@ -1138,8 +1138,8 @@ const Ventas = {
   async confirmSale() {
     const d = this.draft;
     const total = d.items.reduce((s, i) => s + i.precio, 0);
-    const pagado = d.pagos.reduce((s, p) => s + Ventas.montoSinDiferencial(p), 0) + (d.tradeIn?.valor || 0) + (d.deudaVenta?.monto || 0);
-    // Tolerancia de hasta $0.50 USD para diferencias por conversión ARS
+    const pagado = d.pagos.reduce((s, p) => s + Ventas.montoSinDiferencial(p), 0) + (d.tradeIn?.valor || 0);
+    // La venta cierra solo cuando está 100% pagada en caja (la deuda a plazos NO cuenta como pago)
     const estado = (total - pagado) <= 0.5 ? 'cerrada' : 'abierta';
 
     toast('Guardando venta...');
@@ -1245,13 +1245,14 @@ const Ventas = {
           cliente_tel: d.clienteTel || null,
           descripcion: `${d.deudaVenta.descripcion} (Venta #${ventaId})`,
           moneda: 'USD', monto: d.deudaVenta.monto,
+          concepto: String(ventaId),  // vínculo con la venta
           notas: `Generada automáticamente desde venta #${ventaId}`, estado: 'activa'
         }).select().single();
         if (deudaData) {
           State.deudas = State.deudas || [];
           State.deudas.unshift({
             id: deudaData.id, cliente: d.cliente || 'Consumidor final', clienteTel: d.clienteTel || '',
-            descripcion: deudaData.descripcion, concepto: null, moneda: 'USD',
+            descripcion: deudaData.descripcion, concepto: String(ventaId), moneda: 'USD',
             monto: d.deudaVenta.monto, montoPagado: 0, estado: 'activa', notas: deudaData.notas || '', creadoEn: deudaData.creado_en
           });
         }

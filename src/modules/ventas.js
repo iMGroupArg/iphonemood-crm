@@ -152,12 +152,12 @@ const Ventas = {
           const pagado=v.pagos.reduce((s,p)=>s+p.monto,0)+(v.tradeIn?.valor||0);
           const saldo=total-pagado;
           const cerrada=v.estado==='cerrada';
-          const itemsStr=v.items.map(i=>i.nombre).join(', ');
+          const itemsStr=v.items.map(i=>i.nombre+(i.imei?` · ${i.imei}`:'')).join(', ');
           return `<div class="card" style="margin-bottom:0;padding:12px 14px" onclick="Ventas.viewSale(${v.id})">
             <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;margin-bottom:6px">
               <div style="min-width:0">
                 <div style="font-size:13px;font-weight:700">${v.cliente}</div>
-                <div style="font-size:11px;color:var(--text-secondary);margin-top:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${itemsStr}</div>
+                <div style="font-size:11px;color:var(--text-secondary);font-family:monospace;margin-top:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${itemsStr}</div>
               </div>
               <div style="text-align:right;flex-shrink:0">
                 <div style="font-size:15px;font-weight:700;color:var(--blue)">${State.fmtUSD(total)}</div>
@@ -189,7 +189,7 @@ const Ventas = {
           <td style="font-size:11.5px">${v.fecha}</td>
           <td>${v.cliente}${v.clienteTel?`<div style="font-size:10px;color:var(--text-secondary)">${v.clienteTel}</div>`:''}</td>
           <td><span class="badge b-blue" style="font-size:10px">${TIPO[v.tipoVenta]||'Minorista'}</span></td>
-          <td style="font-size:11.5px;max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${v.items.map(i=>i.nombre).join(', ')}</td>
+          <td style="font-size:11px;max-width:200px">${v.items.map(i=>`<div style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${i.nombre}${i.imei?`<span style="font-family:monospace;color:var(--text-secondary);font-size:10px"> · ${i.imei}</span>`:''}</div>`).join('')}</td>
           <td><b>${State.fmtUSD(total)}</b></td>
           <td style="min-width:160px">${pagosHtml}</td>
           <td>${this.estadoToggle(cerrada)}</td>
@@ -1869,7 +1869,7 @@ const Ventas = {
     const v = State.ventas.find(x => x.id === id);
     if (!v) return;
     const total = v.items.reduce((s, i) => s + i.precio, 0);
-    const items = v.items.map(i => `• ${i.nombre} — USD ${i.precio.toFixed(0)}`).join('\n');
+    const items = v.items.map(i => `• ${i.nombre}${i.imei ? ` (IMEI: ${i.imei})` : ''} — USD ${i.precio.toFixed(0)}`).join('\n');
     const estado = v.estado === 'cerrada' ? '✅ Pagado' : '⏳ Saldo pendiente';
     const msg = `¡Hola ${v.cliente}! 🙌\n\nAcá va el resumen de tu compra en *iPhoneMood*:\n\n${items}\n\n💰 *Total: USD ${total.toFixed(0)}*\n${estado}\n\n¡Muchas gracias por elegirnos! 😊\n_iPhoneMood — Rosario_`;
     const tel = (v.clienteTel || '').replace(/\D/g, '');

@@ -515,7 +515,7 @@ const Reparaciones = {
     </tbody></table>
 
     <div style="margin-top:14px;font-size:10px;color:#555;border:1px solid #e0e0e0;border-radius:6px;padding:10px">
-      <b>Condiciones:</b> El cliente declara haber entregado el equipo en las condiciones descritas. iPhoneMood no se responsabiliza por datos almacenados en el dispositivo. El presupuesto tiene validez de 7 días hábiles.
+      <b>Condiciones:</b> El cliente declara haber entregado el equipo en las condiciones descritas. iPhoneMood no se responsabiliza por datos almacenados en el dispositivo. El presupuesto tiene validez de 48 horas.
     </div>
 
     <div class="firma">

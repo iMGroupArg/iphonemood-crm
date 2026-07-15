@@ -588,7 +588,7 @@ const Stock = {
                     <input type="number" id="f-cantidad" value="${cantidadDeclarada}" min="0" style="width:100%;text-align:center;font-size:13px;font-weight:600;padding:7px 10px;border:1px solid var(--border-strong);border-radius:8px">
                     <button type="button" onclick="Stock.bumpQty(1)" style="width:32px;height:32px;border:1px solid var(--border-strong);border-radius:8px;background:var(--bg);cursor:pointer;font-size:16px">+</button>
                   </div>
-                  <div class="hint" style="font-size:10px;color:var(--text-secondary);margin-top:4px" id="cantidad-hint">Cantidad de unidades que tenés, sepas o no todavía los IMEIs de cada una.</div>
+                  <div class="hint" style="font-size:10px;color:var(--text-secondary);margin-top:4px" id="cantidad-hint">${esIMEI ? 'Para dispositivos con IMEI, la cantidad se determina por los IMEIs cargados (1 IMEI = 1 dispositivo).' : 'Cantidad de unidades que tenés.'}</div>
                 </div>
 
                 <div style="margin-bottom:12px"><label style="font-size:11px;color:var(--text-secondary);font-weight:600;display:block;margin-bottom:4px">Estado de inventario</label>
@@ -901,7 +901,10 @@ const Stock = {
         <button type="button" onclick="Stock.removeImei(${i})" style="background:none;border:none;cursor:pointer;color:var(--red);font-size:13px;line-height:1;padding:0">×</button>
       </span>
     `).join('') || `<span style="font-size:11px;color:var(--text-secondary)">Sin IMEIs cargados todavía</span>`;
-    if (countEl) countEl.textContent = `(${this.pendingImeis.length} cargados)`;
+    if (countEl) countEl.textContent = `(${this.pendingImeis.length} cargado${this.pendingImeis.length !== 1 ? 's' : ''} — ${this.pendingImeis.length} dispositivo${this.pendingImeis.length !== 1 ? 's' : ''} al guardar)`;
+    // Sincronizar cantidad con IMEIs
+    const cantEl = document.getElementById('f-cantidad');
+    if (cantEl && this.pendingImeis.length > 0) cantEl.value = this.pendingImeis.length;
   },
 
   addImei() {
@@ -1175,24 +1178,46 @@ const Stock = {
     }
 
     toast('Guardando producto...');
-    const { id: newId, error } = await DB.guardarProductoStock(obj, id);
-    if (error) { toast('Hubo un problema guardando el producto.'); console.error(error); restoreBtn(); return; }
 
-    const finalId = id || newId;
-    const cantidadDespues = this.stockReal(obj);
+    // Para dispositivos con IMEI en alta nueva: crear un registro por cada IMEI
+    const imeisParaCrear = (!id && esIMEI && this.pendingImeis.length > 0) ? [...this.pendingImeis] : null;
 
-    if (id) {
-      const idx = State.stock.findIndex(x => x.id === id);
-      State.stock[idx] = { ...State.stock[idx], ...obj };
-      await DB.registrarMovimientoStock(finalId, 'edicion', `Producto editado: ${nombre}`, cantidadAntes, cantidadDespues);
-      toast('Producto actualizado.');
+    if (imeisParaCrear) {
+      // Alta múltiple: un registro por IMEI
+      const creados = [];
+      for (const imeiVal of imeisParaCrear) {
+        const objImei = { ...obj, imeis: [imeiVal], cantidad: 1, cantidadDeclarada: 1 };
+        const { id: newId, error } = await DB.guardarProductoStock(objImei, null);
+        if (error) { toast(`Error guardando IMEI ${imeiVal}.`); console.error(error); continue; }
+        objImei.id = newId;
+        State.stock.push(objImei);
+        await DB.registrarMovimientoStock(newId, 'alta', `Producto agregado: ${nombre} (IMEI: ${imeiVal})`, 0, 1);
+        Sheets.stock(objImei);
+        creados.push(imeiVal);
+      }
+      toast(`${creados.length} dispositivo${creados.length !== 1 ? 's' : ''} agregado${creados.length !== 1 ? 's' : ''} al stock.`);
     } else {
-      obj.id = newId;
-      State.stock.push(obj);
-      await DB.registrarMovimientoStock(finalId, 'alta', `Producto agregado: ${nombre}`, 0, cantidadDespues);
-      toast('Producto agregado al stock.');
+      // Alta simple o edición
+      const { id: newId, error } = await DB.guardarProductoStock(obj, id);
+      if (error) { toast('Hubo un problema guardando el producto.'); console.error(error); restoreBtn(); return; }
+
+      const finalId = id || newId;
+      const cantidadDespues = this.stockReal(obj);
+
+      if (id) {
+        const idx = State.stock.findIndex(x => x.id === id);
+        State.stock[idx] = { ...State.stock[idx], ...obj };
+        await DB.registrarMovimientoStock(finalId, 'edicion', `Producto editado: ${nombre}`, cantidadAntes, cantidadDespues);
+        toast('Producto actualizado.');
+      } else {
+        obj.id = newId;
+        State.stock.push(obj);
+        await DB.registrarMovimientoStock(finalId, 'alta', `Producto agregado: ${nombre}`, 0, cantidadDespues);
+        toast('Producto agregado al stock.');
+      }
+      Sheets.stock(obj);
     }
-    Sheets.stock(obj);
+
     this.closeDrawer();
     this.renderKpis();
     this.renderTable();

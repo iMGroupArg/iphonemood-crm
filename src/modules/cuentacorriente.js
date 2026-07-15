@@ -993,15 +993,25 @@ const CuentaCorriente = {
       const { SUPABASE_URL, SUPABASE_ANON_KEY } = window.__APP_CONFIG__;
       const supa2 = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
+      // 1. Obtener el monto real del pago desde DB (evitar problemas de formato)
+      const { data: pagoRow } = await supa2.from('deuda_pagos').select('monto').eq('id', pagoId).single();
+      const montoReal = pagoRow ? Number(pagoRow.monto) : Number(monto);
+
+      // 2. Borrar el pago
       const { error } = await supa2.from('deuda_pagos').delete().eq('id', pagoId);
       if (error) throw error;
 
+      // 3. Recalcular monto_pagado desde DB sumando los pagos que quedan
+      const { data: pagosRestantes } = await supa2.from('deuda_pagos').select('monto').eq('deuda_id', deudaId);
+      const nuevoPagado = (pagosRestantes || []).reduce((s, p) => s + Number(p.monto), 0);
+
+      // 4. Actualizar deuda en DB y en memoria
+      await supa2.from('deudas_manuales').update({ monto_pagado: nuevoPagado, estado: 'activa' }).eq('id', deudaId);
+
       const deuda = (State.deudas || []).find(d => d.id === deudaId);
       if (deuda) {
-        deuda.montoPagado = Math.max(0, (deuda.montoPagado || 0) - monto);
+        deuda.montoPagado = nuevoPagado;
         deuda.estado = 'activa';
-        const nuevoPagado = deuda.montoPagado;
-        await supa2.from('deudas_manuales').update({ monto_pagado: nuevoPagado, estado: 'activa' }).eq('id', deudaId);
 
         // Si está vinculada a una venta, reabrirla
         const ventaId = deuda.concepto ? parseInt(deuda.concepto) : null;
@@ -1016,6 +1026,7 @@ const CuentaCorriente = {
 
       State.deudaPagos = (State.deudaPagos || []).filter(p => p.id !== pagoId);
       State.showToast?.('Pago eliminado');
+      toast?.('Pago eliminado');
       // Re-renderizar
       const clientes = this.getClientesConDeuda();
       const key = this._clienteActual?.key;

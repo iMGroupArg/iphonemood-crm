@@ -239,7 +239,7 @@ const Ventas = {
       this.mostrarRecuperarBorrador(pendiente);
       return;
     }
-    this.draft = { cliente: '', clienteTel: '', clienteDni: '', clienteEmail: '', tipoVenta: 'minorista', vendedor: '', fechaVenta: new Date().toISOString().slice(0,10), tradeIn: null, items: [], pagos: [], comisionVendedor: 0 };
+    this.draft = { cliente: '', clienteTel: '', clienteDni: '', clienteEmail: '', tipoVenta: 'minorista', vendedor: '', fechaVenta: new Date().toISOString().slice(0,10), tradeIn: null, deudaVenta: null, items: [], pagos: [], comisionVendedor: 0 };
     this.step = 0;
     this.selectedStockIds = []; this._selectedRegalo = {};
     this.invMode = 'manual';
@@ -281,7 +281,7 @@ const Ventas = {
   },
   descartarBorradorYEmpezarNueva() {
     this.borrarBorrador();
-    this.draft = { cliente: '', clienteTel: '', clienteDni: '', clienteEmail: '', tipoVenta: 'minorista', vendedor: '', fechaVenta: new Date().toISOString().slice(0,10), tradeIn: null, items: [], pagos: [], comisionVendedor: 0 };
+    this.draft = { cliente: '', clienteTel: '', clienteDni: '', clienteEmail: '', tipoVenta: 'minorista', vendedor: '', fechaVenta: new Date().toISOString().slice(0,10), tradeIn: null, deudaVenta: null, items: [], pagos: [], comisionVendedor: 0 };
     this.step = 0;
     this.selectedStockIds = []; this._selectedRegalo = {};
     this.invMode = 'manual';
@@ -858,6 +858,13 @@ const Ventas = {
         <span>${p.persona} — ${p.bolsillo} — ${p.bolsillo?.startsWith('ARS') ? `$${Math.round(p.monto*(State.refBlue||1)).toLocaleString('es-AR')} ARS <span style="color:var(--text-secondary);font-size:10px">(≈ ${State.fmtUSD(p.monto)})</span>` : State.fmtUSD(p.monto)}${p.esTarjeta?` <span class="badge b-purple" style="font-size:9px">Tarjeta +$${(p.diferencialArs||0).toLocaleString('es-AR')}</span>`:''}</span>
         <button onclick="Ventas.removePago(${idx})" title="Quitar pago" style="background:none;border:none;cursor:pointer;font-size:17px;padding:2px 4px;border-radius:5px;opacity:0.75;flex-shrink:0;line-height:1" onmouseover="this.style.opacity=1" onmouseout="this.style.opacity=0.75">🗑️</button>
       </div>`).join('')}
+      ${d.deudaVenta ? `<div style="display:flex;justify-content:space-between;align-items:center;padding:7px 10px;background:rgba(255,149,0,0.08);border:1px solid var(--amber);border-radius:8px;margin-bottom:5px;font-size:12px">
+        <span style="color:var(--amber)">📋 Deuda a plazos — ${d.deudaVenta.descripcion}</span>
+        <div style="display:flex;align-items:center;gap:8px">
+          <span style="color:var(--amber);font-weight:600">${State.fmtUSD(d.deudaVenta.monto)}</span>
+          <button onclick="Ventas.quitarDeudaVenta()" title="Quitar" style="background:none;border:none;cursor:pointer;font-size:17px;padding:2px 4px;border-radius:5px;opacity:0.75;line-height:1" onmouseover="this.style.opacity=1" onmouseout="this.style.opacity=0.75">🗑️</button>
+        </div>
+      </div>` : (saldo > 0.5 ? `<button class="btn" onclick="Ventas.abrirModalDeuda()" style="width:100%;margin-top:4px;border:1px dashed var(--amber);color:var(--amber);background:rgba(255,149,0,0.06)">📋 Registrar saldo (${State.fmtUSD(saldo)}) como deuda a plazos</button>` : '')}
       <div style="display:grid;grid-template-columns:${this.isMobile()?'1fr':'1fr 1fr'};gap:8px;margin:10px 0">
         <select id="vf-pago-persona" style="${this._sel()}">
           ${State.personas.map(p=>`<option>${p}</option>`).join('')}
@@ -987,6 +994,49 @@ const Ventas = {
   },
   removePago(idx) { this.draft.pagos.splice(idx, 1); document.getElementById('venta-step-body').innerHTML = this.stepPagos(); this.guardarBorrador(); },
 
+  abrirModalDeuda() {
+    const d = this.draft;
+    const total = d.items.reduce((s, i) => s + i.precio, 0);
+    const pagado = d.pagos.reduce((s, p) => s + Ventas.montoSinDiferencial(p), 0) + (d.tradeIn?.valor || 0);
+    const saldo = Math.max(0, total - pagado);
+    const descDefault = d.items.map(i => i.nombre).join(', ');
+
+    const overlay = document.createElement('div');
+    overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:500;display:flex;align-items:center;justify-content:center';
+    overlay.innerHTML = `
+      <div style="background:var(--bg-elevated);border-radius:14px;padding:20px;width:min(420px,90vw)">
+        <div style="font-size:16px;font-weight:700;margin-bottom:14px">📋 Registrar deuda a plazos</div>
+        <div style="font-size:12px;color:var(--text-secondary);margin-bottom:12px">El saldo pendiente se registrará en Cuenta Corriente y podrás ir cobrando las cuotas desde ahí.</div>
+        <label style="font-size:11px;font-weight:600;color:var(--text-secondary);display:block;margin-bottom:4px">Monto de la deuda (USD)</label>
+        <input type="number" id="deuda-monto" value="${saldo.toFixed(2)}" min="0" step="0.01" style="width:100%;font-size:15px;font-weight:600;padding:8px 10px;border:1px solid var(--border-strong);border-radius:8px;background:var(--bg);color:var(--text);margin-bottom:10px" inputmode="decimal">
+        <label style="font-size:11px;font-weight:600;color:var(--text-secondary);display:block;margin-bottom:4px">Descripción</label>
+        <input type="text" id="deuda-desc" value="${descDefault}" style="width:100%;font-size:13px;padding:8px 10px;border:1px solid var(--border-strong);border-radius:8px;background:var(--bg);color:var(--text);margin-bottom:14px">
+        <div style="display:flex;gap:8px;justify-content:flex-end">
+          <button class="btn" onclick="this.closest('[style*=fixed]').remove()">Cancelar</button>
+          <button class="btn btn-primary" onclick="Ventas.confirmarDeudaVenta(this)">Registrar deuda</button>
+        </div>
+      </div>`;
+    document.body.appendChild(overlay);
+    overlay.addEventListener('click', e => { if (e.target === overlay) overlay.remove(); });
+  },
+
+  confirmarDeudaVenta(btn) {
+    const overlay = btn.closest('[style*=fixed]');
+    const monto = parseFloat(document.getElementById('deuda-monto').value) || 0;
+    const descripcion = document.getElementById('deuda-desc').value.trim() || 'Venta a plazos';
+    if (!monto) { toast('Ingresá un monto.'); return; }
+    this.draft.deudaVenta = { monto, descripcion };
+    overlay?.remove();
+    document.getElementById('venta-step-body').innerHTML = this.stepPagos();
+    this.guardarBorrador();
+  },
+
+  quitarDeudaVenta() {
+    this.draft.deudaVenta = null;
+    document.getElementById('venta-step-body').innerHTML = this.stepPagos();
+    this.guardarBorrador();
+  },
+
   stepConfirm() {
     const d = this.draft;
     const total = d.items.reduce((s, i) => s + i.precio, 0);
@@ -1002,6 +1052,7 @@ const Ventas = {
       <div style="margin-bottom:14px"><b>Pagos</b>
         ${d.tradeIn?.valor > 0 ? `<div style="display:flex;justify-content:space-between;font-size:12px;padding:3px 0;color:var(--green)">🔄 Trade-In: ${d.tradeIn.modelo||'Equipo'}<span style="font-weight:600">${State.fmtUSD(d.tradeIn.valor)}</span></div>` : ''}
         ${d.pagos.map(p=>`<div style="display:flex;justify-content:space-between;font-size:12px;padding:3px 0">${p.persona} — ${p.bolsillo}${p.esTarjeta?' <span class="badge b-purple" style="font-size:9px">Tarjeta</span>':''}<span>${State.fmtUSD(p.monto)}</span></div>`).join('')}
+        ${d.deudaVenta ? `<div style="display:flex;justify-content:space-between;font-size:12px;padding:3px 0;color:var(--amber)">📋 Deuda a plazos (${d.deudaVenta.descripcion})<span style="font-weight:600">${State.fmtUSD(d.deudaVenta.monto)}</span></div>` : ''}
       </div>
       ${(()=>{
         const totalPagado = d.pagos.reduce((s,p) => s + p.monto, 0) + (d.tradeIn?.valor||0);
@@ -1061,7 +1112,7 @@ const Ventas = {
   async confirmSale() {
     const d = this.draft;
     const total = d.items.reduce((s, i) => s + i.precio, 0);
-    const pagado = d.pagos.reduce((s, p) => s + Ventas.montoSinDiferencial(p), 0) + (d.tradeIn?.valor || 0);
+    const pagado = d.pagos.reduce((s, p) => s + Ventas.montoSinDiferencial(p), 0) + (d.tradeIn?.valor || 0) + (d.deudaVenta?.monto || 0);
     // Tolerancia de hasta $0.50 USD para diferencias por conversión ARS
     const estado = (total - pagado) <= 0.5 ? 'cerrada' : 'abierta';
 
@@ -1157,13 +1208,40 @@ const Ventas = {
     };
     State.ventas.unshift(venta);
 
+    // Registrar deuda a plazos si fue indicada
+    if (d.deudaVenta && d.deudaVenta.monto > 0) {
+      try {
+        const { createClient } = supabase;
+        const { SUPABASE_URL, SUPABASE_ANON_KEY } = window.__APP_CONFIG__;
+        const supa2 = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+        const { data: deudaData } = await supa2.from('deudas_manuales').insert({
+          cliente: d.cliente || 'Consumidor final',
+          cliente_tel: d.clienteTel || null,
+          descripcion: `${d.deudaVenta.descripcion} (Venta #${ventaId})`,
+          moneda: 'USD', monto: d.deudaVenta.monto,
+          notas: `Generada automáticamente desde venta #${ventaId}`, estado: 'activa'
+        }).select().single();
+        if (deudaData) {
+          State.deudas = State.deudas || [];
+          State.deudas.unshift({
+            id: deudaData.id, cliente: d.cliente || 'Consumidor final', clienteTel: d.clienteTel || '',
+            descripcion: deudaData.descripcion, concepto: null, moneda: 'USD',
+            monto: d.deudaVenta.monto, montoPagado: 0, estado: 'activa', notas: deudaData.notas || '', creadoEn: deudaData.creado_en
+          });
+        }
+      } catch (e) {
+        console.warn('No se pudo guardar la deuda a plazos:', e);
+      }
+    }
+
     // Respaldo en Google Sheets (no bloquea, falla en silencio si hay un problema)
     const costoTotal = d.items.reduce((s, i) => s + (i.costo || 0), 0);
     Sheets.venta(venta, total, costoTotal);
 
     this.closeModal();
     this.renderList();
-    toast(`Venta #${venta.id} confirmada y guardada. Stock actualizado y pagos acreditados en las cajas correspondientes.`);
+    const msgDeuda = d.deudaVenta ? ` Deuda de ${State.fmtUSD(d.deudaVenta.monto)} registrada en Cuenta Corriente.` : '';
+    toast(`Venta #${venta.id} confirmada y guardada.${msgDeuda}`);
     if (d.clienteTel) this._sugerirWhatsappVenta(venta);
   },
 

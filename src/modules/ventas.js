@@ -681,13 +681,21 @@ const Ventas = {
 
   manualItemForm() {
     const mobile = this.isMobile();
-    const inp = `font-size:${mobile?'14px':'12px'};padding:${mobile?'9px 10px':'7px 10px'};border:1px solid var(--border-strong);border-radius:8px`;
+    const inp = `width:100%;font-size:${mobile?'16px':'12px'};padding:${mobile?'10px 12px':'7px 10px'};border:1px solid var(--border-strong);border-radius:8px;box-sizing:border-box`;
     return `
-      <div style="display:grid;grid-template-columns:${mobile?'1fr':'1fr 1fr'};gap:8px;margin-bottom:8px">
-        <input type="text" id="vf-m-nombre" placeholder="Nombre del producto" style="width:100%;${inp}">
-        <input type="number" id="vf-m-costo" placeholder="Costo USD" style="width:100%;${inp}" inputmode="decimal">
+      <div style="display:flex;flex-direction:column;gap:8px;margin-bottom:8px">
+        <input type="text" id="vf-m-nombre" placeholder="Nombre del producto *" style="${inp}">
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+          <div>
+            <div style="font-size:10px;color:var(--text-secondary);margin-bottom:3px">Precio venta (USD) *</div>
+            <input type="number" id="vf-m-precio" placeholder="0" style="${inp}" inputmode="decimal">
+          </div>
+          <div>
+            <div style="font-size:10px;color:var(--text-secondary);margin-bottom:3px">Costo (USD)</div>
+            <input type="number" id="vf-m-costo" placeholder="0" style="${inp}" inputmode="decimal">
+          </div>
+        </div>
       </div>
-      <input type="number" id="vf-m-precio" placeholder="Precio de venta (USD)" style="width:100%;${inp};margin-bottom:8px" inputmode="decimal">
       <button class="btn btn-primary" style="width:100%;justify-content:center" onclick="Ventas.addManualItem()"><i class="ti ti-plus"></i> Agregar ítem</button>
     `;
   },

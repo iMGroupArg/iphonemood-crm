@@ -410,8 +410,26 @@ const CuentaCorriente = {
   },
 
   _enviarWhatsapp(c, saldoTotal) {
+    const lineas = [];
+
+    // Ventas abiertas con saldo
+    c.ventasAbiertas.forEach(v => {
+      const saldo = this.saldoVenta(v);
+      if (saldo <= 0) return;
+      const productos = v.items.map(i => i.nombre + (i.imei ? ` (IMEI: ${i.imei})` : '')).join(', ');
+      lineas.push(`• Venta #${v.id} — ${productos}: USD ${saldo.toFixed(2)} pendiente`);
+    });
+
+    // Deudas manuales activas
+    c.deudasManuales.forEach(d => {
+      const saldo = this.saldoDeuda(d);
+      if (saldo <= 0) return;
+      lineas.push(`• ${d.descripcion}: ${d.moneda} ${saldo.toFixed(2)} pendiente`);
+    });
+
+    const detalle = lineas.length ? `\n\n📋 Detalle:\n${lineas.join('\n')}` : '';
     const msg = encodeURIComponent(
-      `Hola ${c.nombre}! Te recordamos que tenés un saldo pendiente de USD ${saldoTotal.toFixed(2)} con iPhoneMood. Cualquier consulta estamos a disposición!`
+      `Hola ${c.nombre}! 👋 Te enviamos el estado de cuenta actualizado desde iPhoneMood.\n\n💰 Saldo total pendiente: USD ${saldoTotal.toFixed(2)}${detalle}\n\nCualquier consulta estamos a disposición. ¡Gracias! 🙏`
     );
     window.open(`https://wa.me/${(c.tel || '').replace(/\D/g, '')}?text=${msg}`, '_blank');
   },

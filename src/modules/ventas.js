@@ -863,7 +863,7 @@ const Ventas = {
         <span style="color:var(--green);font-weight:600">${State.fmtUSD(d.tradeIn.valor)}</span>
       </div>` : ''}
       ${d.pagos.map((p, idx) => `<div style="display:flex;justify-content:space-between;align-items:center;padding:7px 10px;background:var(--bg-secondary);border-radius:8px;margin-bottom:5px;font-size:12px">
-        <span>${p.persona} — ${p.bolsillo} — ${p.bolsillo?.startsWith('ARS') ? `$${Math.round(p.monto*(State.refBlue||1)).toLocaleString('es-AR')} ARS <span style="color:var(--text-secondary);font-size:10px">(≈ ${State.fmtUSD(p.monto)})</span>` : State.fmtUSD(p.monto)}${p.esTarjeta?` <span class="badge b-purple" style="font-size:9px">Tarjeta +$${(p.diferencialArs||0).toLocaleString('es-AR')}</span>`:''}</span>
+        <span>${p.persona} — ${p.bolsillo} — ${p.bolsillo?.startsWith('ARS') ? `$${Math.round(p.monto*(p.cotizacionDiferencial||State.refBlue||1)).toLocaleString('es-AR')} ARS <span style="color:var(--text-secondary);font-size:10px">(≈ ${State.fmtUSD(p.monto)} · cotiz $${(p.cotizacionDiferencial||State.refBlue||1).toLocaleString('es-AR')})</span>` : State.fmtUSD(p.monto)}${p.esTarjeta?` <span class="badge b-purple" style="font-size:9px">Tarjeta +$${(p.diferencialArs||0).toLocaleString('es-AR')}</span>`:''}</span>
         <button onclick="Ventas.removePago(${idx})" title="Quitar pago" style="background:none;border:none;cursor:pointer;font-size:17px;padding:2px 4px;border-radius:5px;opacity:0.75;flex-shrink:0;line-height:1" onmouseover="this.style.opacity=1" onmouseout="this.style.opacity=0.75">🗑️</button>
       </div>`).join('')}
       ${d.deudaVenta ? `<div style="display:flex;justify-content:space-between;align-items:center;padding:7px 10px;background:rgba(255,149,0,0.08);border:1px solid var(--amber);border-radius:8px;margin-bottom:5px;font-size:12px">
@@ -887,6 +887,15 @@ const Ventas = {
       <div style="display:flex;gap:8px;margin-bottom:4px">
         <input type="number" id="vf-pago-monto" value="" placeholder="0" oninput="Ventas.actualizarLabelMonto()" style="flex:1;${this._inp()}" inputmode="decimal">
         <button class="btn btn-primary" onclick="Ventas.addPago()"><i class="ti ti-plus"></i> Agregar pago</button>
+      </div>
+      <div id="vf-cotiz-ars-wrap" style="display:none;margin-bottom:4px">
+        <label style="font-size:11px;color:var(--text-secondary);font-weight:600;display:block;margin-bottom:3px">Cotización a usar <span style="font-weight:400">(blue actual: $${State.refBlue.toLocaleString('es-AR')})</span></label>
+        <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:4px">
+          <button class="btn btn-sm" onclick="Ventas.setCotizPago(${State.refBlue})">Blue $${State.refBlue.toLocaleString('es-AR')}</button>
+          ${State.refOficial ? `<button class="btn btn-sm" onclick="Ventas.setCotizPago(${State.refOficial})">Oficial $${State.refOficial.toLocaleString('es-AR')}</button>` : ''}
+          <button class="btn btn-sm" onclick="Ventas.setCotizPago(${Math.round(State.refBlue*0.9)})">-10% $${Math.round(State.refBlue*0.9).toLocaleString('es-AR')}</button>
+        </div>
+        <input type="number" id="vf-cotiz-ars" value="${State.refBlue}" oninput="Ventas.actualizarLabelMonto()" style="width:100%;font-size:13px;font-weight:600;padding:7px 10px;border:1px solid var(--border-strong);border-radius:8px" inputmode="decimal">
       </div>
       <div id="vf-pago-equiv" style="font-size:11px;color:var(--text-secondary);margin-bottom:8px;min-height:16px"></div>
       <label style="display:flex;align-items:center;gap:7px;font-size:12.5px;cursor:pointer;margin-bottom:8px" id="vf-tarjeta-check-wrap">
@@ -914,11 +923,18 @@ const Ventas = {
       </div>
     `;
   },
+  setCotizPago(val) {
+    const inp = document.getElementById('vf-cotiz-ars');
+    if (inp) { inp.value = val; this.actualizarLabelMonto(); }
+  },
   toggleTarjetaWrap() {
     const bolsillo = document.getElementById('vf-pago-bolsillo')?.value || '';
     const wrap = document.getElementById('vf-tarjeta-check-wrap');
-    if (!wrap) return;
+    const cotizWrap = document.getElementById('vf-cotiz-ars-wrap');
+    const esARS = bolsillo.startsWith('ARS');
     const esTransferencia = bolsillo.includes('transferencia');
+    if (cotizWrap) cotizWrap.style.display = esARS ? 'block' : 'none';
+    if (!wrap) return;
     wrap.style.display = esTransferencia ? 'flex' : 'none';
     if (!esTransferencia) {
       const chk = document.getElementById('vf-es-tarjeta');
@@ -969,10 +985,11 @@ const Ventas = {
     const equiv    = document.getElementById('vf-pago-equiv');
     const input    = document.getElementById('vf-pago-monto');
     const esARS    = bolsillo.startsWith('ARS');
-    if (label) label.textContent = esARS ? `Monto en ARS (blue: $${State.refBlue.toLocaleString('es-AR')})` : 'Monto en USD';
+    const cotiz    = parseFloat(document.getElementById('vf-cotiz-ars')?.value) || State.refBlue;
+    if (label) label.textContent = esARS ? `Monto en ARS` : 'Monto en USD';
     if (equiv && input) {
       const val = parseFloat(input.value) || 0;
-      equiv.textContent = esARS && val > 0 ? `≈ USD ${(val / State.refBlue).toFixed(2)}` : '';
+      equiv.textContent = esARS && val > 0 ? `≈ USD ${(val / cotiz).toFixed(2)} (cotiz: $${cotiz.toLocaleString('es-AR')})` : '';
     }
   },
 
@@ -981,11 +998,12 @@ const Ventas = {
     const bolsillo = document.getElementById('vf-pago-bolsillo').value;
     const esTarjeta = document.getElementById('vf-es-tarjeta')?.checked || false;
     const esARS = bolsillo.startsWith('ARS');
+    const cotizARS = parseFloat(document.getElementById('vf-cotiz-ars')?.value) || State.refBlue;
     let montoIngresado = parseFloat(document.getElementById('vf-pago-monto').value) || 0;
-    // Convertir siempre a USD para almacenar
-    let monto = esARS ? montoIngresado / (State.refBlue || 1) : montoIngresado;
+    // Convertir siempre a USD para almacenar, usando la cotización elegida
+    let monto = esARS ? montoIngresado / (cotizARS || 1) : montoIngresado;
     let diferencialArs = 0;
-    let cotizacionDiferencial = null;
+    let cotizacionDiferencial = esARS ? cotizARS : null;
 
     if (esTarjeta) {
       const { montoPosnet, netoArs, precioVentaRealUSD, diferencialUSD, cotiz } = this.calcularVentaTarjeta();

@@ -780,7 +780,7 @@ const Ventas = {
           return `<div style="border:${sel?'2px solid var(--blue)':'1px solid var(--border)'};background:${sel?'var(--blue-light)':'var(--bg)'};border-radius:8px;padding:9px 11px;font-size:11.5px">
             <div onclick="Ventas.toggleStockSel('${s.id}')" style="cursor:pointer;margin-bottom:${sel?'8px':'0'}">
               <b style="font-size:12px">${s.nombre}</b><br>
-              <span style="color:var(--text-secondary)">Costo: USD ${s.costoUSD}${precioUSD ? ' · Precio sugerido: USD ' + precioUSD : ''}</span>
+              <span style="color:var(--text-secondary)">Costo: USD ${s.costoUSD}${precioUSD ? ' · Precio sugerido: USD ' + precioUSD : ''}</span>${s.imeis && s.imeis.length ? `<br><span style="font-family:monospace;font-size:10px;color:var(--text-secondary)">IMEI: ${s.imeis[0]}</span>` : ''}
             </div>
             ${sel ? (()=>{ const esRegalo = !!this._selectedRegalo[s.id]; return `<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:4px">
               ${esAccesorio ? `<label style="display:flex;align-items:center;gap:5px;font-size:11px;cursor:pointer;padding:3px 8px;border-radius:6px;border:1px solid ${esRegalo?'var(--green)':'var(--border)'};background:${esRegalo?'rgba(34,197,94,.1)':'var(--bg-secondary)'}" onclick="event.stopPropagation()">

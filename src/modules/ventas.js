@@ -1245,6 +1245,34 @@ const Ventas = {
     if (d.clienteTel) this._sugerirWhatsappVenta(venta);
   },
 
+  async editarImeiItem(ventaId, nombreItem, event) {
+    event?.stopPropagation();
+    const imei = prompt(`Ingresá el IMEI para "${nombreItem}":`);
+    if (!imei || !imei.trim()) return;
+    const imeiVal = imei.trim();
+    const v = State.ventas.find(x => x.id === ventaId);
+    if (!v) return;
+    const item = v.items.find(i => i.nombre === nombreItem && !i.imei);
+    if (!item) return;
+
+    try {
+      const { createClient } = supabase;
+      const { SUPABASE_URL, SUPABASE_ANON_KEY } = window.__APP_CONFIG__;
+      const supa2 = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+      const { error } = await supa2.from('venta_items')
+        .update({ imei: imeiVal })
+        .eq('venta_id', ventaId)
+        .eq('nombre', nombreItem)
+        .is('imei', null);
+      if (error) { toast('Error al guardar el IMEI.'); return; }
+      item.imei = imeiVal;
+      this.viewSale(ventaId);
+      toast('IMEI guardado.');
+    } catch(e) {
+      toast('Error al guardar el IMEI.');
+    }
+  },
+
   viewSale(id) {
     const v = State.ventas.find(x => x.id === id);
     if (!v) return;
@@ -1332,7 +1360,7 @@ const Ventas = {
                 return `<tr>
                   <td><b>${i.nombre}</b>${p?.notas?`<div style="font-size:10px;color:var(--text-secondary);font-style:italic">${p.notas}</div>`:''}</td>
                   <td><span class="badge b-amber">${p?.estadoProducto||'Usado'}</span></td>
-                  <td style="font-family:monospace;font-size:11px">${i.imei||'—'}</td>
+                  <td style="font-family:monospace;font-size:11px">${i.imei ? i.imei : `<button onclick="Ventas.editarImeiItem(${v.id},'${i.nombre.replace(/'/g,"\\'")}',event)" style="font-size:10px;padding:2px 7px;border:1px dashed var(--border-strong);border-radius:5px;background:none;color:var(--text-secondary);cursor:pointer">+ IMEI</button>`}</td>
                   <td>${diasRestantes !== null ? `
                     <div style="font-size:11px;color:var(--green);font-weight:600">Garantía activa</div>
                     <div style="font-size:10px;color:var(--text-secondary)">${diasRestantes} días restantes</div>

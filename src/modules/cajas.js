@@ -56,21 +56,20 @@ const Cajas = {
 
       <!-- Contenido de la pestaña activa -->
       <div id="cajas-tab-content">
-        ${this._tab === 'cajas' ? this._cajasHTML(BOLSILLO_ICON) : '<div style="color:var(--text-secondary);text-align:center;padding:20px">Cargando movimientos...</div>'}
+        ${this._tab === 'cajas' ? this._cajasHTML(BOLSILLO_ICON) : this._movimientosHTML()}
       </div>
 
       <div style="font-size:11px;color:var(--text-secondary);margin-top:12px"><i class="ti ti-info-circle"></i> Tocá cualquier saldo para ajustarlo. Para agregar o renombrar personas, andá a Panel de control → Cajas y personas.</div>
     `;
 
-    if (this._tab === 'movimientos') {
-      this._renderMovimientos();
-    }
-
     return c;
   },
 
-  setTab(t) {
+  async setTab(t) {
     this._tab = t;
+    if (t === 'movimientos') {
+      this._movimientos = await DB.listarMovimientosCaja(200);
+    }
     App.goTo('cajas');
   },
 
@@ -116,53 +115,46 @@ const Cajas = {
       </div>`;
   },
 
-  async _renderMovimientos() {
-    const host = document.getElementById('cajas-tab-content');
-    if (!host) return;
-    host.innerHTML = `<div style="color:var(--text-secondary);text-align:center;padding:20px"><i class="ti ti-loader-2"></i> Cargando...</div>`;
-    const movs = await DB.listarMovimientosCaja(200);
-    this._movimientos = movs;
+  _movimientosHTML() {
+    const movs = this._movimientos || [];
     if (!movs.length) {
-      host.innerHTML = `<div style="text-align:center;padding:40px;color:var(--text-secondary)"><i class="ti ti-arrows-exchange" style="font-size:32px;display:block;margin-bottom:8px"></i>No hay movimientos registrados aún.</div>`;
-      return;
+      return `<div style="text-align:center;padding:40px;color:var(--text-secondary)"><i class="ti ti-arrows-exchange" style="font-size:32px;display:block;margin-bottom:8px"></i>No hay movimientos registrados aún.</div>`;
     }
     const TIPO_LABEL = { pasada_manos:'Pasada de manos', retiro_banco:'Retiro bancario a efectivo', deposito_banco:'Depósito a banco', otro:'Otro' };
     const TIPO_ICON  = { pasada_manos:'ti-arrows-exchange', retiro_banco:'ti-building-bank', deposito_banco:'ti-building-bank', otro:'ti-cash' };
     const TIPO_COLOR = { pasada_manos:'var(--blue)', retiro_banco:'var(--amber)', deposito_banco:'var(--green)', otro:'var(--text-secondary)' };
-    host.innerHTML = `
-      <div style="display:flex;flex-direction:column;gap:10px">
-        ${movs.map(m => {
-          const fmtMonto = m.moneda === 'ARS' ? State.fmtARS(m.monto)
-                         : m.moneda === 'USDT' ? m.monto.toLocaleString('es-AR') + ' USDT'
-                         : State.fmtUSD(m.monto);
-          const fecha = new Date(m.creado_en).toLocaleDateString('es-AR', { day:'2-digit', month:'2-digit', year:'numeric', hour:'2-digit', minute:'2-digit' });
-          const origenStr = m.origenP ? `${m.origenP} · ${m.origen_bolsillo}` : '—';
-          const destinoStr = m.destinoP ? `${m.destinoP} · ${m.destino_bolsillo}` : '—';
-          return `<div class="card" style="margin-bottom:0;display:flex;align-items:flex-start;gap:14px">
-            <div style="width:38px;height:38px;border-radius:10px;background:${TIPO_COLOR[m.tipo]}22;display:flex;align-items:center;justify-content:center;flex-shrink:0;margin-top:2px">
-              <i class="ti ${TIPO_ICON[m.tipo]||'ti-cash'}" style="font-size:18px;color:${TIPO_COLOR[m.tipo]}"></i>
+    return `<div style="display:flex;flex-direction:column;gap:10px">
+      ${movs.map(m => {
+        const fmtMonto = m.moneda === 'ARS' ? State.fmtARS(m.monto)
+                       : m.moneda === 'USDT' ? m.monto.toLocaleString('es-AR') + ' USDT'
+                       : State.fmtUSD(m.monto);
+        const fecha = new Date(m.creado_en).toLocaleDateString('es-AR', { day:'2-digit', month:'2-digit', year:'numeric', hour:'2-digit', minute:'2-digit' });
+        const origenStr = m.origenP ? `${m.origenP} · ${m.origen_bolsillo}` : '—';
+        const destinoStr = m.destinoP ? `${m.destinoP} · ${m.destino_bolsillo}` : '—';
+        return `<div class="card" style="margin-bottom:0;display:flex;align-items:flex-start;gap:14px">
+          <div style="width:38px;height:38px;border-radius:10px;background:${TIPO_COLOR[m.tipo]}22;display:flex;align-items:center;justify-content:center;flex-shrink:0;margin-top:2px">
+            <i class="ti ${TIPO_ICON[m.tipo]||'ti-cash'}" style="font-size:18px;color:${TIPO_COLOR[m.tipo]}"></i>
+          </div>
+          <div style="flex:1;min-width:0">
+            <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:4px">
+              <span style="font-size:13px;font-weight:700">${TIPO_LABEL[m.tipo]||m.tipo}</span>
+              <span style="font-size:14px;font-weight:800;color:${TIPO_COLOR[m.tipo]}">${fmtMonto}</span>
             </div>
-            <div style="flex:1;min-width:0">
-              <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:4px">
-                <span style="font-size:13px;font-weight:700">${TIPO_LABEL[m.tipo]||m.tipo}</span>
-                <span style="font-size:14px;font-weight:800;color:${TIPO_COLOR[m.tipo]}">${fmtMonto}</span>
-              </div>
-              <div style="font-size:11px;color:var(--text-secondary);margin-bottom:2px">
-                <i class="ti ti-arrow-right" style="font-size:10px"></i>
-                ${origenStr} → ${destinoStr}
-              </div>
-              ${m.descripcion ? `<div style="font-size:11px;color:var(--text-secondary);margin-bottom:2px">${m.descripcion}</div>` : ''}
-              <div style="display:flex;align-items:center;gap:10px;margin-top:4px">
-                <span style="font-size:10px;color:var(--text-tertiary)">${fecha}${m.creado_por ? ` · ${m.creado_por}` : ''}</span>
-                ${m.comprobante_url
-                  ? `<button onclick="Cajas.verComprobante('${m.comprobante_url}')" style="font-size:10px;padding:2px 8px;border:1px solid var(--border-strong);border-radius:6px;background:transparent;color:var(--text-secondary);cursor:pointer"><i class="ti ti-photo"></i> Ver comprobante</button>`
-                  : `<button onclick="Cajas.adjuntarComprobante(${m.id})" style="font-size:10px;padding:2px 8px;border:1px solid var(--border);border-radius:6px;background:transparent;color:var(--text-tertiary);cursor:pointer"><i class="ti ti-upload"></i> Adjuntar comprobante</button>`}
-              </div>
+            <div style="font-size:11px;color:var(--text-secondary);margin-bottom:2px">
+              <i class="ti ti-arrow-right" style="font-size:10px"></i>
+              ${origenStr} → ${destinoStr}
             </div>
-          </div>`;
-        }).join('')}
-      </div>
-    `;
+            ${m.descripcion ? `<div style="font-size:11px;color:var(--text-secondary);margin-bottom:2px">${m.descripcion}</div>` : ''}
+            <div style="display:flex;align-items:center;gap:10px;margin-top:4px">
+              <span style="font-size:10px;color:var(--text-tertiary)">${fecha}${m.creado_por ? ` · ${m.creado_por}` : ''}</span>
+              ${m.comprobante_url
+                ? `<button onclick="Cajas.verComprobante('${m.comprobante_url}')" style="font-size:10px;padding:2px 8px;border:1px solid var(--border-strong);border-radius:6px;background:transparent;color:var(--text-secondary);cursor:pointer"><i class="ti ti-photo"></i> Ver comprobante</button>`
+                : `<button onclick="Cajas.adjuntarComprobante(${m.id})" style="font-size:10px;padding:2px 8px;border:1px solid var(--border);border-radius:6px;background:transparent;color:var(--text-tertiary);cursor:pointer"><i class="ti ti-upload"></i> Adjuntar comprobante</button>`}
+            </div>
+          </div>
+        </div>`;
+      }).join('')}
+    </div>`;
   },
 
   // ── Modal nuevo movimiento ─────────────────────────────────
@@ -336,6 +328,7 @@ const Cajas = {
       document.getElementById('caja-mov-overlay')?.remove();
       toast('Movimiento registrado.');
       this._tab = 'movimientos';
+      this._movimientos = await DB.listarMovimientosCaja(200);
       App.goTo('cajas');
     } catch(e) {
       console.error(e);
@@ -386,7 +379,8 @@ const Cajas = {
       try {
         await DB.subirComprobanteCaja(movId, file);
         toast('Comprobante adjuntado.');
-        this._renderMovimientos();
+        this._movimientos = await DB.listarMovimientosCaja(200);
+        App.goTo('cajas');
       } catch(e) { toast('Error al subir el comprobante.'); }
     };
     input.click();

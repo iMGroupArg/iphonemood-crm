@@ -255,6 +255,44 @@ const DB = {
       .eq('persona_id', pid).eq('bolsillo', bolsillo);
   },
 
+  async crearMovimientoCaja({ tipo, descripcion, origenPersona, origenBolsillo, destinoPersona, destinoBolsillo, monto, moneda, creadoPor }) {
+    const row = {
+      tipo, descripcion: descripcion || null, monto, moneda,
+      origen_persona_id: this.personaId(origenPersona) || null,
+      origen_bolsillo: origenBolsillo || null,
+      destino_persona_id: destinoPersona ? (this.personaId(destinoPersona) || null) : null,
+      destino_bolsillo: destinoBolsillo || null,
+      creado_por: creadoPor || null,
+    };
+    const { data, error } = await supa.from('caja_movimientos').insert(row).select().single();
+    if (error) throw error;
+    return data;
+  },
+
+  async subirComprobanteCaja(movimientoId, file) {
+    const ext = file.name.split('.').pop();
+    const path = `caja_movimientos/${movimientoId}_${Date.now()}.${ext}`;
+    const { error } = await supa.storage.from('comprobantes').upload(path, file, { upsert: true });
+    if (error) throw error;
+    await supa.from('caja_movimientos').update({ comprobante_url: path }).eq('id', movimientoId);
+    return path;
+  },
+
+  async getComprobanteCajaUrl(path) {
+    const { data } = await supa.storage.from('comprobantes').createSignedUrl(path, 3600);
+    return data?.signedUrl || null;
+  },
+
+  async listarMovimientosCaja(limit = 100) {
+    const { data } = await supa.from('caja_movimientos')
+      .select('*').order('creado_en', { ascending: false }).limit(limit);
+    return (data || []).map(m => ({
+      ...m,
+      origenP: this.personasIdToNombre[m.origen_persona_id] || '',
+      destinoP: this.personasIdToNombre[m.destino_persona_id] || '',
+    }));
+  },
+
   async guardarProductoStock(obj, idExistente) {
     const row = {
       categoria: obj.cat, nombre: obj.nombre, imeis: obj.imeis || [], cantidad: obj.cantidad || 0,

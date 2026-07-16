@@ -119,15 +119,37 @@ const Stock = {
         const precioUSD = p.cotiz ? p.precioARS / p.cotiz : 0;
         return a + precioUSD * Math.max(this.stockReal(p), p.estadoInventario==='vendido'?1:0);
       }, 0);
-      kpis = [
-        ['Total', total, '📦', 'var(--blue)', 'var(--blue-light)'],
-        ['Disponibles', disponibles, '✅', 'var(--green)', 'var(--green-light)'],
-        ['Vendidos', vendidos, '📈', 'var(--text)', 'var(--bg-secondary)'],
-        ['Valor Disponible', State.fmtUSD(valorDisponible), '💰', 'var(--blue)', 'var(--blue-light)'],
-        ['Valor de Venta', State.fmtUSD(valorVendidoPotencial), '💵', 'var(--green)', 'var(--green-light)'],
-      ];
+      document.getElementById('stock-kpis').innerHTML = `
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px" class="stock-kpi-grid">
+          <!-- Card unificada: Total / Disponibles / Vendidos -->
+          <div class="card" style="padding:12px 16px;margin-bottom:0;display:flex;align-items:stretch;gap:0;min-height:76px">
+            ${[
+              ['Total', total, 'var(--blue)'],
+              ['Disponibles', disponibles, 'var(--green)'],
+              ['Vendidos', vendidos, 'var(--text-secondary)'],
+            ].map(([label, val, color], i) => `
+              <div style="flex:1;${i>0?'border-left:1px solid var(--border);padding-left:14px;':''}padding-right:14px">
+                <div style="font-size:10px;color:var(--text-secondary);margin-bottom:3px;text-transform:uppercase;letter-spacing:.04em">${label}</div>
+                <div style="font-size:22px;font-weight:700;color:${color}">${val}</div>
+              </div>
+            `).join('')}
+          </div>
+          <!-- Valor Disponible -->
+          <div class="card" style="padding:12px 14px;margin-bottom:0;display:flex;justify-content:space-between;align-items:flex-start;gap:8px;min-height:76px">
+            <div><label style="font-size:11px;color:var(--text-secondary);display:block;margin-bottom:4px">Valor Disponible</label><div style="font-size:19px;font-weight:700;color:var(--blue)">${State.fmtUSD(valorDisponible)}</div></div>
+            <div style="width:34px;height:34px;border-radius:8px;background:var(--blue-light);display:flex;align-items:center;justify-content:center;flex-shrink:0;font-size:18px">💰</div>
+          </div>
+          <!-- Valor de Venta -->
+          <div class="card" style="padding:12px 14px;margin-bottom:0;display:flex;justify-content:space-between;align-items:flex-start;gap:8px;min-height:76px">
+            <div><label style="font-size:11px;color:var(--text-secondary);display:block;margin-bottom:4px">Valor de Venta</label><div style="font-size:19px;font-weight:700;color:var(--green)">${State.fmtUSD(valorVendidoPotencial)}</div></div>
+            <div style="width:34px;height:34px;border-radius:8px;background:var(--green-light);display:flex;align-items:center;justify-content:center;flex-shrink:0;font-size:18px">💵</div>
+          </div>
+        </div>
+      `;
+      return;
     }
 
+    // Taller: layout original de 5 cards
     document.getElementById('stock-kpis').innerHTML = `
       <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:10px" class="stock-kpi-grid">
         ${kpis.map(([label,val,emoji,color,bg]) => `
@@ -150,51 +172,79 @@ const Stock = {
     const mobile = this.isMobile();
     const px = mobile ? '10px 12px' : '10px 22px';
     const pxS = mobile ? '8px 12px' : '12px 22px';
+    const extraSelects = this.currentGroup === 'perfumeria' ? `
+      <select id="pf-cat" onchange="Stock.onPerfumeFilterChange()" style="font-size:12px;padding:5px 8px;border:1px solid var(--border-strong);border-radius:8px;max-width:130px">
+        <option value="">Categoría</option>
+        ${this.PERFUME_CATEGORIAS.map(c=>`<option>${c}</option>`).join('')}
+      </select>
+      <select id="pf-conc" onchange="Stock.renderTable()" style="font-size:12px;padding:5px 8px;border:1px solid var(--border-strong);border-radius:8px;max-width:100px">
+        <option value="">Conc.</option>
+        ${this.PERFUME_CONCENTRACIONES.map(c=>`<option>${c}</option>`).join('')}
+      </select>
+      <select id="pf-marca" onchange="Stock.renderTable()" style="font-size:12px;padding:5px 8px;border:1px solid var(--border-strong);border-radius:8px;max-width:140px">
+        <option value="">Marca</option>
+        ${Object.entries(this.PERFUME_MARCAS).map(([cat,marcas])=>`<optgroup label="${cat}">${marcas.map(m=>`<option>${m}</option>`).join('')}</optgroup>`).join('')}
+      </select>
+    ` : `
+      <select id="stock-filter-modelo" onchange="Stock.onModeloFilterChange()" style="font-size:12px;padding:5px 8px;border:1px solid var(--border-strong);border-radius:8px;max-width:160px">
+        <option value="">Todos los modelos</option>
+        ${Object.entries(this.MODELOS_POR_CAT).map(([cat,modelos])=>`<optgroup label="${this.CAT_LABELS[cat]||cat}">${modelos.map(m=>`<option value="${m}">${m}</option>`).join('')}</optgroup>`).join('')}
+      </select>
+      <select id="stock-filter-color" onchange="Stock.renderTable()" style="font-size:12px;padding:5px 8px;border:1px solid var(--border-strong);border-radius:8px;max-width:140px">
+        <option value="">Todos los colores</option>
+      </select>
+    `;
+
     if (this.currentView === 'productos') {
-      host.innerHTML = `
-        <div style="padding:${px};border-bottom:1px solid var(--border);display:flex;gap:4px;overflow-x:auto;-webkit-overflow-scrolling:touch;white-space:nowrap;flex-shrink:0" id="stock-grupo-tabs"></div>
-        <div style="padding:${px};border-bottom:1px solid var(--border);display:flex;gap:6px;overflow-x:auto;-webkit-overflow-scrolling:touch;white-space:nowrap;flex-shrink:0;align-items:center" id="stock-estado-tabs"></div>
-        <div style="padding:${pxS};border-bottom:1px solid var(--border);display:flex;gap:0;overflow-x:auto;-webkit-overflow-scrolling:touch;white-space:nowrap;flex-shrink:0;align-items:center" id="stock-tabs-wrap">
-          <div style="display:flex;gap:4px;align-items:center" id="stock-condicion-tabs"></div>
-          <div style="width:1px;background:var(--border);height:20px;margin:0 8px;flex-shrink:0" id="stock-tabs-divider"></div>
-          <div style="display:flex;gap:4px" id="stock-tabs"></div>
-        </div>
-        <div style="padding:${mobile?'8px 12px':'0 22px 12px'};display:flex;gap:8px;flex-wrap:wrap;align-items:center;flex-shrink:0">
-          <input type="text" id="stock-search" placeholder="Buscar..." oninput="Stock.renderTable()" style="font-size:12px;padding:6px 10px;border:1px solid var(--border-strong);border-radius:8px;flex:1;min-width:120px">
-          ${this.currentGroup === 'perfumeria' ? `
-            <select id="pf-cat" onchange="Stock.onPerfumeFilterChange()" style="font-size:12px;padding:6px 8px;border:1px solid var(--border-strong);border-radius:8px;max-width:130px">
-              <option value="">Categoría</option>
-              ${this.PERFUME_CATEGORIAS.map(c=>`<option>${c}</option>`).join('')}
-            </select>
-            <select id="pf-conc" onchange="Stock.renderTable()" style="font-size:12px;padding:6px 8px;border:1px solid var(--border-strong);border-radius:8px;max-width:100px">
-              <option value="">Conc.</option>
-              ${this.PERFUME_CONCENTRACIONES.map(c=>`<option>${c}</option>`).join('')}
-            </select>
-            <select id="pf-marca" onchange="Stock.renderTable()" style="font-size:12px;padding:6px 8px;border:1px solid var(--border-strong);border-radius:8px;max-width:140px">
-              <option value="">Marca</option>
-              ${Object.entries(this.PERFUME_MARCAS).map(([cat, marcas])=>
-                `<optgroup label="${cat}">${marcas.map(m=>`<option>${m}</option>`).join('')}</optgroup>`
-              ).join('')}
-            </select>
-          ` : `
-            <select id="stock-filter-modelo" onchange="Stock.onModeloFilterChange()" style="font-size:12px;padding:6px 8px;border:1px solid var(--border-strong);border-radius:8px;max-width:160px">
-              <option value="">Todos los modelos</option>
-              ${Object.entries(this.MODELOS_POR_CAT).map(([cat, modelos]) =>
-                `<optgroup label="${this.CAT_LABELS[cat]||cat}">${modelos.map(m=>`<option value="${m}">${m}</option>`).join('')}</optgroup>`
-              ).join('')}
-            </select>
-            <select id="stock-filter-color" onchange="Stock.renderTable()" style="font-size:12px;padding:6px 8px;border:1px solid var(--border-strong);border-radius:8px;max-width:140px">
-              <option value="">Todos los colores</option>
-            </select>
-          `}
-        </div>
-        <div class="body-pad" style="padding:0;overflow-y:auto;-webkit-overflow-scrolling:touch;flex:1;min-height:0">
-          <table class="stock-table-desktop"><thead><tr>
-            <th>Producto</th><th>Color</th><th>Batería</th><th>Costo USD</th><th>Precio venta USD</th><th>Margen</th><th>Stock</th><th>IMEI</th><th>Estado</th><th></th>
-          </tr></thead><tbody id="stock-tbody"></tbody></table>
-          <div class="stock-cards-mobile" id="stock-cards"></div>
-        </div>
-      `;
+      if (mobile) {
+        // Mobile: filas apiladas (comportamiento original)
+        host.innerHTML = `
+          <div style="padding:${px};border-bottom:1px solid var(--border);display:flex;gap:4px;overflow-x:auto;-webkit-overflow-scrolling:touch;white-space:nowrap;flex-shrink:0" id="stock-grupo-tabs"></div>
+          <div style="padding:${px};border-bottom:1px solid var(--border);display:flex;gap:6px;overflow-x:auto;-webkit-overflow-scrolling:touch;white-space:nowrap;flex-shrink:0;align-items:center" id="stock-estado-tabs"></div>
+          <div style="padding:${pxS};border-bottom:1px solid var(--border);display:flex;gap:0;overflow-x:auto;-webkit-overflow-scrolling:touch;white-space:nowrap;flex-shrink:0;align-items:center" id="stock-tabs-wrap">
+            <div style="display:flex;gap:4px;align-items:center" id="stock-condicion-tabs"></div>
+            <div style="width:1px;background:var(--border);height:20px;margin:0 8px;flex-shrink:0" id="stock-tabs-divider"></div>
+            <div style="display:flex;gap:4px" id="stock-tabs"></div>
+          </div>
+          <div style="padding:8px 12px;display:flex;gap:8px;flex-wrap:wrap;align-items:center;flex-shrink:0">
+            <input type="text" id="stock-search" placeholder="Buscar..." oninput="Stock.renderTable()" style="font-size:12px;padding:6px 10px;border:1px solid var(--border-strong);border-radius:8px;flex:1;min-width:120px">
+            ${extraSelects}
+          </div>
+          <div class="body-pad" style="padding:0;overflow-y:auto;-webkit-overflow-scrolling:touch;flex:1;min-height:0">
+            <table class="stock-table-desktop"><thead><tr>
+              <th>Producto</th><th>Color</th><th>Batería</th><th>Costo USD</th><th>Precio venta USD</th><th>Margen</th><th>Stock</th><th>IMEI</th><th>Estado</th><th></th>
+            </tr></thead><tbody id="stock-tbody"></tbody></table>
+            <div class="stock-cards-mobile" id="stock-cards"></div>
+          </div>
+        `;
+      } else {
+        // Desktop: 2 filas compactas aprovechando el espacio horizontal
+        host.innerHTML = `
+          <!-- Fila 1: Grupos (izq) + Estado (der) -->
+          <div style="padding:8px 22px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:0;flex-shrink:0;min-height:0">
+            <div style="display:flex;gap:4px;flex-shrink:0;overflow-x:auto;-webkit-overflow-scrolling:touch" id="stock-grupo-tabs"></div>
+            <div style="width:1px;background:var(--border);height:22px;margin:0 14px;flex-shrink:0"></div>
+            <div style="display:flex;gap:2px;overflow-x:auto;-webkit-overflow-scrolling:touch;flex:1;align-items:center" id="stock-estado-tabs"></div>
+          </div>
+          <!-- Fila 2: Condición + Subcats (izq) + Búsqueda/dropdowns (der) -->
+          <div style="padding:8px 22px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:8px;flex-shrink:0;flex-wrap:nowrap">
+            <div style="display:flex;gap:0;align-items:center;flex-shrink:0" id="stock-tabs-wrap">
+              <div style="display:flex;gap:4px;align-items:center" id="stock-condicion-tabs"></div>
+              <div style="width:1px;background:var(--border);height:20px;margin:0 8px;flex-shrink:0" id="stock-tabs-divider"></div>
+              <div style="display:flex;gap:4px" id="stock-tabs"></div>
+            </div>
+            <div style="flex:1"></div>
+            <input type="text" id="stock-search" placeholder="Buscar..." oninput="Stock.renderTable()" style="font-size:12px;padding:5px 10px;border:1px solid var(--border-strong);border-radius:8px;width:180px;flex-shrink:0">
+            ${extraSelects}
+          </div>
+          <div class="body-pad" style="padding:0;overflow-y:auto;-webkit-overflow-scrolling:touch;flex:1;min-height:0">
+            <table class="stock-table-desktop"><thead><tr>
+              <th>Producto</th><th>Color</th><th>Batería</th><th>Costo USD</th><th>Precio venta USD</th><th>Margen</th><th>Stock</th><th>IMEI</th><th>Estado</th><th></th>
+            </tr></thead><tbody id="stock-tbody"></tbody></table>
+            <div class="stock-cards-mobile" id="stock-cards"></div>
+          </div>
+        `;
+      }
       this.renderGrupoTabs();
       this.renderEstadoTabs();
       this.renderCondicionTabs();

@@ -68,6 +68,10 @@ const Dashboard = {
     const resultFinanciero = spreadCueva + diferencialTarjetaARS;
     const totalResultado = resultComercial + resultFinanciero;
 
+    // Pasivo adelantos socios
+    const adelantosPend = (State.adelantos || []).filter(a => a.estado === 'pendiente');
+    const pasivoAdelantos = adelantosPend.reduce((s, a) => s + (a.moneda === 'USD' ? a.monto : a.monto / State.refBlue), 0);
+
     const totalVentasUSD = ventas.reduce((a, v) => a + v.items.reduce((s, i) => s + i.precio, 0), 0);
     const repActivas = State.reparaciones.filter(r => !['entregado', 'rechazado', 'no_reparable'].includes(r.estado)).length;
     const repListas = State.reparaciones.filter(r => r.estado === 'listo').length;
@@ -112,11 +116,16 @@ const Dashboard = {
         </div>
       </div>
 
-      <div class="kpi-row" style="grid-template-columns:repeat(4,1fr);padding:0 0 14px 0;border:none">
+      <div class="kpi-row" style="grid-template-columns:repeat(5,1fr);padding:0 0 14px 0;border:none">
         <div class="kpi"><label>Ventas del período</label><div class="val">${State.fmtUSD(totalVentasUSD)}</div><div class="sub">${ventas.length} ventas · ticket prom. ${State.fmtUSD(ticketPromedio)}</div></div>
         <div class="kpi"><label>Resultado comercial</label><div class="val" style="color:${resultComercial>=0?'var(--green)':'var(--red)'}">${resultComercial>=0?'+':''}${State.fmtUSD(resultComercial / State.refBlue)}</div><div class="sub">margen sobre ventas del período</div></div>
         <div class="kpi"><label>Resultado financiero</label><div class="val" style="color:${resultFinanciero>=0?'var(--green)':'var(--red)'}">${resultFinanciero>=0?'+':''}${State.fmtUSD(resultFinanciero / State.refBlue)}</div><div class="sub">spread cueva + diferencial tarjeta</div></div>
         <div class="kpi"><label>Resultado total</label><div class="val" style="color:var(--blue)">${totalResultado>=0?'+':''}${State.fmtUSD(totalResultado / State.refBlue)}</div><div class="sub">comercial + financiero</div></div>
+        <div class="kpi" style="cursor:pointer" onclick="App.goTo('adelantos')">
+          <label>Adelantos pendientes</label>
+          <div class="val" style="color:${pasivoAdelantos>0?'var(--amber)':'var(--text)'}">${pasivoAdelantos>0?'-':''}${State.fmtUSD(pasivoAdelantos)}</div>
+          <div class="sub">${adelantosPend.length > 0 ? `${adelantosPend.length} pendiente${adelantosPend.length>1?'s':''} · clic para ver` : 'Sin deuda con socios'}</div>
+        </div>
       </div>
 
       <div class="kpi-row" style="grid-template-columns:repeat(4,1fr);padding:0 0 14px 0;border:none">

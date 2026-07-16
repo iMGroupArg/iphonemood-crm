@@ -49,6 +49,7 @@ const State = {
 
   // CUENTA CORRIENTE — se carga desde Supabase
   deudas: [],
+  adelantos: [],
   deudaPagos: [],
 
   // CASH FLOW — log de movimientos para el módulo de cash flow

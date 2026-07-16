@@ -14,6 +14,7 @@ import './clientes.js';
 import './proveedores.js';
 import './turnos.js';
 import './cuentacorriente.js';
+import './adelantos.js';
 
 const App = {
   PAGES: {
@@ -30,6 +31,7 @@ const App = {
     proveedores: { title: 'Proveedores', module: Proveedores },
     turnos: { title: 'Turnos', module: Turnos },
     cuentacorriente: { title: 'Cuenta Corriente', module: CuentaCorriente },
+    adelantos: { title: 'Adelantos de socios', module: Adelantos },
     panel: { title: 'Panel de control', module: Panel },
   },
 
@@ -240,6 +242,12 @@ const App = {
       const con = CuentaCorriente.getClientesConDeuda().length;
       if (con > 0) { badgeCC.textContent = con; badgeCC.style.display = 'inline-flex'; }
       else { badgeCC.style.display = 'none'; }
+    }
+    const badgeAd = document.getElementById('badge-adelantos');
+    if (badgeAd) {
+      const pend = (State.adelantos || []).filter(a => a.estado === 'pendiente').length;
+      if (pend > 0) { badgeAd.textContent = pend; badgeAd.style.display = 'inline-flex'; }
+      else { badgeAd.style.display = 'none'; }
     }
   }
 };

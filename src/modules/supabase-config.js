@@ -21,7 +21,7 @@ const DB = {
            gastosFijosRes, cierresRes, inversoresRes, inversorPagosRes, activosFijosRes,
            proveedoresRes, lotesRes, loteItemsRes, lotePagosRes,
            turnosSlotsRes, turnosReservasRes,
-           deudasRes, deudaPagosRes, configRes] = await Promise.all([
+           deudasRes, deudaPagosRes, configRes, adelantosRes] = await Promise.all([
       supa.from('personas').select('*'),
       supa.from('cajas').select('*'),
       supa.from('stock').select('*'),
@@ -49,6 +49,7 @@ const DB = {
       supa.from('deudas_manuales').select('*').order('creado_en', { ascending: false }),
       supa.from('deuda_pagos').select('*').order('creado_en', { ascending: false }),
       supa.from('configuracion').select('*'),
+      supa.from('adelantos_socios').select('*').order('creado_en', { ascending: false }),
     ]);
 
     // mapa de personas (id <-> nombre), lo usamos todo el tiempo para traducir
@@ -239,12 +240,31 @@ const DB = {
       fecha: p.fecha || '',
     }));
 
+    State.adelantos = (adelantosRes.data || []).map(a => ({
+      id: a.id, socio: a.socio, motivo: a.motivo, monto: Number(a.monto),
+      moneda: a.moneda, fecha: a.fecha, estado: a.estado,
+      fechaCobro: a.fecha_cobro || null, cajaDebito: a.caja_debito || null,
+      notas: a.notas || '',
+    }));
+
     // cotizaciones persistidas — tienen prioridad sobre el valor hardcodeado en state.js
     const cfg = {};
     (configRes.data || []).forEach(r => { cfg[r.clave] = r.valor; });
     if (cfg.ref_blue)  State.refBlue      = Number(cfg.ref_blue);
     if (cfg.ref_usdt)  State.refUsdt      = Number(cfg.ref_usdt);
     if (cfg.ref_blue_compra) State.refBlueCompra = Number(cfg.ref_blue_compra);
+  },
+
+  async crearAdelanto({ socio, motivo, monto, moneda, fecha, notas }) {
+    return await supa.from('adelantos_socios').insert({ socio, motivo, monto, moneda, fecha, notas: notas || null, estado: 'pendiente' }).select().single();
+  },
+
+  async cobrarAdelanto(id, fechaCobro, cajaDebito) {
+    await supa.from('adelantos_socios').update({ estado: 'cobrado', fecha_cobro: fechaCobro, caja_debito: cajaDebito }).eq('id', id);
+  },
+
+  async eliminarAdelanto(id) {
+    await supa.from('adelantos_socios').delete().eq('id', id);
   },
 
   async guardarCotizacionesDB(blue, usdt) {

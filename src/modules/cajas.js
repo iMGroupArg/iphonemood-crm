@@ -115,42 +115,132 @@ const Cajas = {
       </div>`;
   },
 
+  _buildLedger() {
+    const entries = [];
+
+    // 1. Ventas — cada pago de venta entra a una caja
+    (State.ventas || []).forEach(v => {
+      (v.pagos || []).forEach(p => {
+        if (!p.monto) return;
+        entries.push({
+          _ts: v.fechaISO || v.fecha,
+          tipo: 'venta', icon: 'ti-receipt', color: 'var(--green)',
+          titulo: `Venta${v.cliente ? ' · ' + v.cliente : ''}`,
+          sub: `${p.caja}${v.items?.length ? ' · ' + v.items.map(i=>i.nombre).join(', ').substring(0,40) : ''}`,
+          montoFmt: State.fmtUSD(p.monto),
+          dir: '+', dirColor: 'var(--green)',
+          cajaStr: p.caja,
+        });
+      });
+    });
+
+    // 2. Gastos — salen de caja
+    (State.gastos || []).forEach(g => {
+      if (g.estado !== 'pagado') return;
+      const fmt = g.moneda === 'USD' ? State.fmtUSD(g.monto) : State.fmtARS(g.monto);
+      entries.push({
+        _ts: g.fechaISO || g.fecha,
+        tipo: 'gasto', icon: 'ti-arrow-down-circle', color: 'var(--red)',
+        titulo: g.motivo,
+        sub: g.caja + (g.responsable ? ' · ' + g.responsable : ''),
+        montoFmt: fmt,
+        dir: '−', dirColor: 'var(--red)',
+        cajaStr: g.caja,
+      });
+    });
+
+    // 3. Cambios de cueva — salen de origen y entran a destino
+    (State.cambios || []).forEach(c => {
+      const t = { 'ars-usd':'ARS → USD','usd-ars':'USD → ARS','usdt-ars':'USDT → ARS','usd-usdt':'USD → USDT' }[c.tipo] || c.tipo;
+      entries.push({
+        _ts: c.fechaISO || c.fecha,
+        tipo: 'cueva', icon: 'ti-arrows-exchange', color: 'var(--purple)',
+        titulo: `Cambio ${t}`,
+        sub: `${c.origenP}·${c.origenB} → ${c.destinoP}·${c.destinoB}`,
+        montoFmt: `${c.entrega.toLocaleString('es-AR')} → ${c.recibe.toLocaleString('es-AR')}`,
+        dir: '⇄', dirColor: 'var(--purple)',
+        cajaStr: `${c.origenP}-${c.origenB}`,
+      });
+    });
+
+    // 4. Pagos de compras a proveedores (lote pagos)
+    (State.lotePagos || []).forEach(p => {
+      if (!p.montoUsd && !p.montoUsdt) return;
+      const lote = (State.lotesCompra || []).find(l => l.id === p.loteId);
+      const monto = p.moneda === 'USDT' ? p.montoUsdt : p.montoUsd;
+      const fmt = p.moneda === 'USDT' ? monto.toLocaleString('es-AR') + ' USDT' : State.fmtUSD(monto);
+      entries.push({
+        _ts: p.fecha || '',
+        tipo: 'proveedor', icon: 'ti-truck', color: 'var(--amber)',
+        titulo: `Compra proveedor${lote?.nombre ? ' · ' + lote.nombre : ''}`,
+        sub: `${p.persona}·${p.bolsillo}${p.notas ? ' · ' + p.notas : ''}`,
+        montoFmt: fmt,
+        dir: '−', dirColor: 'var(--amber)',
+        cajaStr: `${p.persona}-${p.bolsillo}`,
+      });
+    });
+
+    // 5. Movimientos entre cajas (registrados manualmente)
+    const TIPO_LABEL = { pasada_manos:'Pasada de manos', retiro_banco:'Retiro bancario', deposito_banco:'Depósito a banco', otro:'Otro' };
+    (this._movimientos || []).forEach(m => {
+      const fmt = m.moneda === 'ARS' ? State.fmtARS(m.monto) : m.moneda === 'USDT' ? m.monto.toLocaleString('es-AR') + ' USDT' : State.fmtUSD(m.monto);
+      entries.push({
+        _ts: m.creado_en,
+        tipo: 'movimiento', icon: 'ti-arrows-exchange', color: 'var(--blue)',
+        titulo: TIPO_LABEL[m.tipo] || m.tipo,
+        sub: `${m.origenP ? m.origenP+'·'+m.origen_bolsillo : '—'} → ${m.destinoP ? m.destinoP+'·'+m.destino_bolsillo : '—'}${m.descripcion ? ' · '+m.descripcion : ''}`,
+        montoFmt: fmt,
+        dir: '⇄', dirColor: 'var(--blue)',
+        cajaStr: m.origenP ? `${m.origenP}-${m.origen_bolsillo}` : '',
+        _movId: m.id, _comprobanteUrl: m.comprobante_url,
+      });
+    });
+
+    // Ordenar por fecha desc — intentamos parsear, sino queda al final
+    entries.sort((a, b) => {
+      const ta = a._ts ? new Date(a._ts).getTime() : 0;
+      const tb = b._ts ? new Date(b._ts).getTime() : 0;
+      return tb - ta;
+    });
+
+    return entries;
+  },
+
   _movimientosHTML() {
-    const movs = this._movimientos || [];
-    if (!movs.length) {
+    const entries = this._buildLedger();
+    if (!entries.length) {
       return `<div style="text-align:center;padding:40px;color:var(--text-secondary)"><i class="ti ti-arrows-exchange" style="font-size:32px;display:block;margin-bottom:8px"></i>No hay movimientos registrados aún.</div>`;
     }
-    const TIPO_LABEL = { pasada_manos:'Pasada de manos', retiro_banco:'Retiro bancario a efectivo', deposito_banco:'Depósito a banco', otro:'Otro' };
-    const TIPO_ICON  = { pasada_manos:'ti-arrows-exchange', retiro_banco:'ti-building-bank', deposito_banco:'ti-building-bank', otro:'ti-cash' };
-    const TIPO_COLOR = { pasada_manos:'var(--blue)', retiro_banco:'var(--amber)', deposito_banco:'var(--green)', otro:'var(--text-secondary)' };
-    return `<div style="display:flex;flex-direction:column;gap:10px">
-      ${movs.map(m => {
-        const fmtMonto = m.moneda === 'ARS' ? State.fmtARS(m.monto)
-                       : m.moneda === 'USDT' ? m.monto.toLocaleString('es-AR') + ' USDT'
-                       : State.fmtUSD(m.monto);
-        const fecha = new Date(m.creado_en).toLocaleDateString('es-AR', { day:'2-digit', month:'2-digit', year:'numeric', hour:'2-digit', minute:'2-digit' });
-        const origenStr = m.origenP ? `${m.origenP} · ${m.origen_bolsillo}` : '—';
-        const destinoStr = m.destinoP ? `${m.destinoP} · ${m.destino_bolsillo}` : '—';
-        return `<div class="card" style="margin-bottom:0;display:flex;align-items:flex-start;gap:14px">
-          <div style="width:38px;height:38px;border-radius:10px;background:${TIPO_COLOR[m.tipo]}22;display:flex;align-items:center;justify-content:center;flex-shrink:0;margin-top:2px">
-            <i class="ti ${TIPO_ICON[m.tipo]||'ti-cash'}" style="font-size:18px;color:${TIPO_COLOR[m.tipo]}"></i>
+
+    const BADGE = {
+      venta:      `<span class="badge b-green"  style="font-size:9px">Venta</span>`,
+      gasto:      `<span class="badge b-red"    style="font-size:9px">Gasto</span>`,
+      cueva:      `<span class="badge b-purple" style="font-size:9px">Cambio</span>`,
+      proveedor:  `<span class="badge b-amber"  style="font-size:9px">Proveedor</span>`,
+      movimiento: `<span class="badge b-blue"   style="font-size:9px">Movimiento</span>`,
+    };
+
+    return `<div style="display:flex;flex-direction:column;gap:8px">
+      ${entries.map(e => {
+        const fechaFmt = e._ts ? (() => { try { return new Date(e._ts).toLocaleDateString('es-AR',{day:'2-digit',month:'2-digit',year:'2-digit',hour:'2-digit',minute:'2-digit'}); } catch(_){return e._ts;} })() : '—';
+        return `<div class="card" style="margin-bottom:0;display:flex;align-items:flex-start;gap:12px;padding:10px 14px">
+          <div style="width:34px;height:34px;border-radius:9px;background:${e.color}22;display:flex;align-items:center;justify-content:center;flex-shrink:0;margin-top:2px">
+            <i class="ti ${e.icon}" style="font-size:16px;color:${e.color}"></i>
           </div>
           <div style="flex:1;min-width:0">
-            <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:4px">
-              <span style="font-size:13px;font-weight:700">${TIPO_LABEL[m.tipo]||m.tipo}</span>
-              <span style="font-size:14px;font-weight:800;color:${TIPO_COLOR[m.tipo]}">${fmtMonto}</span>
+            <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:2px">
+              ${BADGE[e.tipo]||''}
+              <span style="font-size:12px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:260px">${e.titulo}</span>
             </div>
-            <div style="font-size:11px;color:var(--text-secondary);margin-bottom:2px">
-              <i class="ti ti-arrow-right" style="font-size:10px"></i>
-              ${origenStr} → ${destinoStr}
-            </div>
-            ${m.descripcion ? `<div style="font-size:11px;color:var(--text-secondary);margin-bottom:2px">${m.descripcion}</div>` : ''}
-            <div style="display:flex;align-items:center;gap:10px;margin-top:4px">
-              <span style="font-size:10px;color:var(--text-tertiary)">${fecha}${m.creado_por ? ` · ${m.creado_por}` : ''}</span>
-              ${m.comprobante_url
-                ? `<button onclick="Cajas.verComprobante('${m.comprobante_url}')" style="font-size:10px;padding:2px 8px;border:1px solid var(--border-strong);border-radius:6px;background:transparent;color:var(--text-secondary);cursor:pointer"><i class="ti ti-photo"></i> Ver comprobante</button>`
-                : `<button onclick="Cajas.adjuntarComprobante(${m.id})" style="font-size:10px;padding:2px 8px;border:1px solid var(--border);border-radius:6px;background:transparent;color:var(--text-tertiary);cursor:pointer"><i class="ti ti-upload"></i> Adjuntar comprobante</button>`}
-            </div>
+            <div style="font-size:10px;color:var(--text-secondary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${e.sub}</div>
+            <div style="font-size:10px;color:var(--text-tertiary);margin-top:2px">${fechaFmt}</div>
+          </div>
+          <div style="text-align:right;flex-shrink:0">
+            <div style="font-size:13px;font-weight:800;color:${e.dirColor}">${e.dir} ${e.montoFmt}</div>
+            ${e._movId !== undefined ? `<div style="margin-top:4px">${e._comprobanteUrl
+              ? `<button onclick="Cajas.verComprobante('${e._comprobanteUrl}')" style="font-size:9px;padding:1px 6px;border:1px solid var(--border-strong);border-radius:5px;background:transparent;color:var(--text-secondary);cursor:pointer"><i class="ti ti-photo"></i></button>`
+              : `<button onclick="Cajas.adjuntarComprobante(${e._movId})" style="font-size:9px;padding:1px 6px;border:1px solid var(--border);border-radius:5px;background:transparent;color:var(--text-tertiary);cursor:pointer"><i class="ti ti-upload"></i></button>`
+            }</div>` : ''}
           </div>
         </div>`;
       }).join('')}

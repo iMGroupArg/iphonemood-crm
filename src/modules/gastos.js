@@ -121,7 +121,12 @@ const Gastos = {
         <td>${g.responsable}</td><td style="font-size:11px;color:var(--text-secondary)">${g.caja}</td>
         <td><b>${g.moneda==='USD'?State.fmtUSD(g.monto):State.fmtARS(g.monto)}</b></td>
         <td><span class="badge ${pagado?'b-gray':'b-amber'}" style="opacity:${pagado?'0.45':'1'}">Pendiente</span> <span class="badge ${pagado?'b-green':'b-gray'}" style="opacity:${pagado?'1':'0.45'}">Pagado</span></td>
-        <td><button class="btn btn-sm" onclick="Gastos.openEdit('${g.id}')">✏️ Editar</button></td>
+        <td style="display:flex;gap:6px;align-items:center">
+          ${g.comprobanteUrl
+            ? `<button class="btn btn-sm" onclick="Gastos.verComprobante('${g.comprobanteUrl}')" title="Ver comprobante"><i class="ti ti-photo" style="font-size:13px"></i></button>`
+            : `<button class="btn btn-sm" onclick="Gastos.adjuntarComprobante('${g.id}')" title="Adjuntar comprobante" style="color:var(--text-tertiary)"><i class="ti ti-upload" style="font-size:13px"></i></button>`}
+          <button class="btn btn-sm" onclick="Gastos.openEdit('${g.id}')">✏️ Editar</button>
+        </td>
       </tr>`;
     }).join('');
   },
@@ -164,6 +169,14 @@ const Gastos = {
               <select id="gf-caja-bolsillo" style="${this._sel()}"><option>ARS cash</option><option>ARS transferencia</option><option>USD cash</option><option>USD transferencia</option><option>USDT</option></select>
             </div>
           </div>
+          <div style="margin-bottom:14px">
+            <label style="font-size:11px;color:var(--text-secondary);font-weight:600;display:block;margin-bottom:4px">Comprobante (opcional)</label>
+            <label for="gf-file" style="display:flex;align-items:center;gap:8px;padding:9px 12px;background:var(--bg-secondary);border:1px solid var(--border-strong);border-radius:8px;cursor:pointer">
+              <i class="ti ti-upload" style="font-size:15px;color:var(--text-secondary)"></i>
+              <span id="gf-file-label" style="font-size:12px;color:var(--text-secondary)">Adjuntar imagen o PDF</span>
+            </label>
+            <input type="file" id="gf-file" accept="image/*,application/pdf" style="display:none" onchange="document.getElementById('gf-file-label').textContent=this.files[0]?.name||'Adjuntar imagen o PDF'">
+          </div>
           <div style="display:flex;gap:8px;${mobile?'':'justify-content:flex-end'}">
             ${mobile?'':'<button class="btn" onclick="Gastos.close()">Cancelar</button>'}
             <button class="btn btn-primary" style="${mobile?'flex:1;justify-content:center':''}" onclick="Gastos.save()">✓ Guardar</button>
@@ -175,6 +188,34 @@ const Gastos = {
   },
   close() { document.getElementById('gastos-modal-host').innerHTML = ''; },
 
+  async verComprobante(path) {
+    const url = await DB.getComprobanteUrl(path);
+    if (!url) { toast('No se pudo obtener el comprobante.'); return; }
+    const overlay = document.createElement('div');
+    overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.92);z-index:1000;display:flex;align-items:center;justify-content:center;padding:20px;cursor:zoom-out';
+    overlay.innerHTML = `<img src="${url}" style="max-width:100%;max-height:90vh;border-radius:8px;object-fit:contain">`;
+    overlay.onclick = () => overlay.remove();
+    document.body.appendChild(overlay);
+  },
+
+  adjuntarComprobante(gastoId) {
+    const input = document.createElement('input');
+    input.type = 'file'; input.accept = 'image/*,application/pdf';
+    input.onchange = async () => {
+      const file = input.files[0];
+      if (!file) return;
+      try {
+        const path = await DB.subirComprobanteGasto(gastoId, file);
+        const g = State.gastos.find(x => x.id == gastoId);
+        if (g) g.comprobanteUrl = path;
+        toast('Comprobante adjuntado.');
+        this.close();
+        this.renderTable();
+      } catch(e) { toast('Error al subir el comprobante.'); }
+    };
+    input.click();
+  },
+
   async save() {
     const motivo = document.getElementById('gf-motivo').value.trim();
     const monto = parseFloat(document.getElementById('gf-monto').value) || 0;
@@ -185,12 +226,18 @@ const Gastos = {
     const cat = document.getElementById('gf-cat').value;
     const responsable = document.getElementById('gf-resp').value;
 
+    const file = document.getElementById('gf-file')?.files[0];
     toast('Guardando gasto...');
     const mesCierre = this.mesActual;
     const cotizacionUsada = moneda === 'ARS' ? State.refBlue : null;
     const newId = await DB.crearGasto({ motivo, cat, responsable, persona, bolsillo, moneda, monto, estado: 'pagado', mesCierre, cotizacionUsada });
 
-    State.gastos.unshift({ id: newId || Date.now(), fecha: 'Hoy', motivo, cat, responsable, caja: `${persona}-${bolsillo}`, moneda, monto, estado: 'pagado', mesCierre, esFijo: false, esSueldoSocio: false, cotizacionUsada });
+    let comprobanteUrl = null;
+    if (file && newId) {
+      try { comprobanteUrl = await DB.subirComprobanteGasto(newId, file); } catch(e) { console.warn('Comprobante no subido:', e); }
+    }
+
+    State.gastos.unshift({ id: newId || Date.now(), fecha: 'Hoy', motivo, cat, responsable, caja: `${persona}-${bolsillo}`, moneda, monto, estado: 'pagado', mesCierre, esFijo: false, esSueldoSocio: false, cotizacionUsada, comprobanteUrl });
     State.debitarCaja(persona, bolsillo, monto);
     Sheets.gasto({ fecha: 'Hoy', motivo, responsable, caja: `${persona}-${bolsillo}`, moneda, monto, estado: 'pagado' }, this.catObj(cat).nombre);
     this.close(); this.renderChips(); this.renderKpis(); this.renderTable();
@@ -219,6 +266,15 @@ const Gastos = {
               <option value="pagado" ${g.estado==='pagado'?'selected':''}>Pagado</option>
               <option value="pendiente" ${g.estado==='pendiente'?'selected':''}>Pendiente</option>
             </select>
+          </div>
+          <div style="margin-bottom:14px">
+            <label style="font-size:11px;color:var(--text-secondary);font-weight:600;display:block;margin-bottom:6px">Comprobante</label>
+            ${g.comprobanteUrl
+              ? `<div style="display:flex;align-items:center;gap:8px">
+                  <button class="btn btn-sm" onclick="Gastos.verComprobante('${g.comprobanteUrl}')"><i class="ti ti-photo"></i> Ver comprobante</button>
+                  <button class="btn btn-sm" onclick="Gastos.adjuntarComprobante('${g.id}')" style="color:var(--text-secondary)"><i class="ti ti-refresh"></i> Reemplazar</button>
+                </div>`
+              : `<button class="btn btn-sm" onclick="Gastos.adjuntarComprobante('${g.id}')"><i class="ti ti-upload"></i> Adjuntar comprobante</button>`}
           </div>
           <div style="display:flex;justify-content:space-between;margin-top:6px">
             <button class="btn" style="color:var(--red)" onclick="Gastos.deleteGasto('${g.id}')">🗑️ Eliminar</button>

@@ -102,7 +102,8 @@ const DB = {
       _personaCajaId: g.persona_caja_id, _bolsillo: g.bolsillo,
       esFijo: !!g.es_fijo, mesCierre: g.mes_cierre || null,
       esSueldoSocio: !!g.es_sueldo_socio, socioNombre: g.socio_nombre || null,
-      cotizacionUsada: g.cotizacion_usada ? Number(g.cotizacion_usada) : null
+      cotizacionUsada: g.cotizacion_usada ? Number(g.cotizacion_usada) : null,
+      comprobanteUrl: g.comprobante_url || null
     }));
 
     State.gastosFijosPlantilla = (gastosFijosRes.data || []).map(g => ({
@@ -505,6 +506,20 @@ const DB = {
       cotizacion_usada: g.moneda === 'ARS' ? (g.cotizacionUsada || State.refBlue) : null
     }).select().single();
     return data?.id;
+  },
+
+  async subirComprobanteGasto(gastoId, file) {
+    const ext = file.name.split('.').pop();
+    const path = `gastos/${gastoId}_${Date.now()}.${ext}`;
+    const { error } = await supa.storage.from('comprobantes').upload(path, file, { upsert: true });
+    if (error) throw error;
+    await supa.from('gastos').update({ comprobante_url: path }).eq('id', gastoId);
+    return path;
+  },
+
+  async getComprobanteUrl(path) {
+    const { data } = await supa.storage.from('comprobantes').createSignedUrl(path, 3600);
+    return data?.signedUrl || null;
   },
 
   async actualizarEstadoGasto(gastoId, estado) {

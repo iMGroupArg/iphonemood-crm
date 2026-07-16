@@ -154,8 +154,9 @@ const Stock = {
       host.innerHTML = `
         <div style="padding:${px};border-bottom:1px solid var(--border);display:flex;gap:4px;overflow-x:auto;-webkit-overflow-scrolling:touch;white-space:nowrap;flex-shrink:0" id="stock-grupo-tabs"></div>
         <div style="padding:${px};border-bottom:1px solid var(--border);display:flex;gap:6px;overflow-x:auto;-webkit-overflow-scrolling:touch;white-space:nowrap;flex-shrink:0;align-items:center" id="stock-estado-tabs"></div>
-        <div style="padding:${px};border-bottom:1px solid var(--border);display:flex;gap:6px;overflow-x:auto;-webkit-overflow-scrolling:touch;white-space:nowrap;flex-shrink:0;align-items:center" id="stock-condicion-tabs"></div>
-        <div style="padding:${pxS};border-bottom:1px solid var(--border);display:flex;gap:6px;overflow-x:auto;-webkit-overflow-scrolling:touch;white-space:nowrap;flex-shrink:0" id="stock-tabs-wrap">
+        <div style="padding:${pxS};border-bottom:1px solid var(--border);display:flex;gap:0;overflow-x:auto;-webkit-overflow-scrolling:touch;white-space:nowrap;flex-shrink:0;align-items:center" id="stock-tabs-wrap">
+          <div style="display:flex;gap:4px;align-items:center" id="stock-condicion-tabs"></div>
+          <div style="width:1px;background:var(--border);height:20px;margin:0 8px;flex-shrink:0" id="stock-tabs-divider"></div>
           <div style="display:flex;gap:4px" id="stock-tabs"></div>
         </div>
         <div style="padding:${mobile?'8px 12px':'0 22px 12px'};display:flex;gap:8px;flex-wrap:wrap;align-items:center;flex-shrink:0">
@@ -243,7 +244,7 @@ const Stock = {
     const labels = { todos: '📦 Todos', nuevo: '✨ Nuevo / Sellado', usado: '🔄 Usado' };
     document.getElementById('stock-condicion-tabs').innerHTML = Object.entries(labels).map(([key, label]) => {
       const active = this.currentCondicion === key;
-      return `<span onclick="Stock.setCondicionFiltro('${key}')" style="cursor:pointer;font-size:12px;padding:5px 11px;border-radius:20px;border-bottom:2px solid ${active?'var(--blue)':'transparent'};color:${active?'var(--blue)':'var(--text-secondary)'};font-weight:${active?'600':'400'};display:inline-flex;align-items:center;gap:5px">${label} <span style="background:var(--bg-secondary);padding:1px 6px;border-radius:10px;font-size:10px">${counts[key]}</span></span>`;
+      return `<button onclick="Stock.setCondicionFiltro('${key}')" style="cursor:pointer;font-size:11px;padding:4px 9px;border-radius:14px;border:1px solid ${active?'var(--blue)':'var(--border-strong)'};background:${active?'var(--blue-light)':'transparent'};color:${active?'var(--blue)':'var(--text-secondary)'};font-weight:${active?'600':'400'};display:inline-flex;align-items:center;gap:4px;white-space:nowrap">${label} <span style="font-size:10px;opacity:.75">${counts[key]}</span></button>`;
     }).join('');
   },
   setCondicionFiltro(c) { this.currentCondicion = c; this.renderCondicionTabs(); this.renderTable(); },
@@ -251,11 +252,14 @@ const Stock = {
   renderTabs() {
     const catsDelGrupo = this.GRUPOS[this.currentGroup]?.cats || [];
     const cats = ['all', ...catsDelGrupo.filter(c => State.stock.some(s => s.cat === c))];
-    document.getElementById('stock-tabs').innerHTML = cats.map(c => {
+    const showSubcats = cats.length > 2;
+    const divider = document.getElementById('stock-tabs-divider');
+    if (divider) divider.style.display = showSubcats ? '' : 'none';
+    document.getElementById('stock-tabs').innerHTML = showSubcats ? cats.map(c => {
       const count = c === 'all' ? this.productosDelGrupo(this.currentGroup).length : State.stock.filter(s => s.cat === c).length;
       const label = c === 'all' ? 'Todos' : (this.CAT_LABELS[c] || c);
       return `<button class="btn btn-sm ${this.currentTab===c?'btn-primary':''}" onclick="Stock.setTab('${c}')">${label} (${count})</button>`;
-    }).join('');
+    }).join('') : '';
   },
   setTab(c) { this.currentTab = c; this.renderTabs(); this._actualizarColoresDisponibles(); this.renderTable(); },
 

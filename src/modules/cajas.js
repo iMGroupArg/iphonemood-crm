@@ -129,7 +129,7 @@ const Cajas = {
           sub: `${p.caja}${v.items?.length ? ' · ' + v.items.map(i=>i.nombre).join(', ').substring(0,40) : ''}`,
           montoFmt: State.fmtUSD(p.monto),
           dir: '+', dirColor: 'var(--green)',
-          cajaStr: p.caja,
+          _revertKey: `venta:${v.id}:${p.id}:${p.persona}:${p.bolsillo}:${p.monto}`,
         });
       });
     });
@@ -145,11 +145,11 @@ const Cajas = {
         sub: g.caja + (g.responsable ? ' · ' + g.responsable : ''),
         montoFmt: fmt,
         dir: '−', dirColor: 'var(--red)',
-        cajaStr: g.caja,
+        _revertKey: `gasto:${g.id}`,
       });
     });
 
-    // 3. Cambios de cueva — salen de origen y entran a destino
+    // 3. Cambios de cueva
     (State.cambios || []).forEach(c => {
       const t = { 'ars-usd':'ARS → USD','usd-ars':'USD → ARS','usdt-ars':'USDT → ARS','usd-usdt':'USD → USDT' }[c.tipo] || c.tipo;
       entries.push({
@@ -159,11 +159,11 @@ const Cajas = {
         sub: `${c.origenP}·${c.origenB} → ${c.destinoP}·${c.destinoB}`,
         montoFmt: `${c.entrega.toLocaleString('es-AR')} → ${c.recibe.toLocaleString('es-AR')}`,
         dir: '⇄', dirColor: 'var(--purple)',
-        cajaStr: `${c.origenP}-${c.origenB}`,
+        _revertKey: `cueva:${c.id}`,
       });
     });
 
-    // 4. Pagos de compras a proveedores (lote pagos)
+    // 4. Pagos de compras a proveedores
     (State.lotePagos || []).forEach(p => {
       if (!p.montoUsd && !p.montoUsdt) return;
       const lote = (State.lotesCompra || []).find(l => l.id === p.loteId);
@@ -176,11 +176,11 @@ const Cajas = {
         sub: `${p.persona}·${p.bolsillo}${p.notas ? ' · ' + p.notas : ''}`,
         montoFmt: fmt,
         dir: '−', dirColor: 'var(--amber)',
-        cajaStr: `${p.persona}-${p.bolsillo}`,
+        _revertKey: `lote:${p.id}:${p.persona}:${p.bolsillo}:${monto}:${p.moneda}`,
       });
     });
 
-    // 5. Movimientos entre cajas (registrados manualmente)
+    // 5. Movimientos entre cajas
     const TIPO_LABEL = { pasada_manos:'Pasada de manos', retiro_banco:'Retiro bancario', deposito_banco:'Depósito a banco', otro:'Otro' };
     (this._movimientos || []).forEach(m => {
       const fmt = m.moneda === 'ARS' ? State.fmtARS(m.monto) : m.moneda === 'USDT' ? m.monto.toLocaleString('es-AR') + ' USDT' : State.fmtUSD(m.monto);
@@ -191,8 +191,8 @@ const Cajas = {
         sub: `${m.origenP ? m.origenP+'·'+m.origen_bolsillo : '—'} → ${m.destinoP ? m.destinoP+'·'+m.destino_bolsillo : '—'}${m.descripcion ? ' · '+m.descripcion : ''}`,
         montoFmt: fmt,
         dir: '⇄', dirColor: 'var(--blue)',
-        cajaStr: m.origenP ? `${m.origenP}-${m.origen_bolsillo}` : '',
         _movId: m.id, _comprobanteUrl: m.comprobante_url,
+        _revertKey: `movimiento:${m.id}`,
       });
     });
 
@@ -223,6 +223,7 @@ const Cajas = {
     return `<div style="display:flex;flex-direction:column;gap:8px">
       ${entries.map(e => {
         const fechaFmt = e._ts ? (() => { try { return new Date(e._ts).toLocaleDateString('es-AR',{day:'2-digit',month:'2-digit',year:'2-digit',hour:'2-digit',minute:'2-digit'}); } catch(_){return e._ts;} })() : '—';
+        const rk = e._revertKey ? encodeURIComponent(e._revertKey) : '';
         return `<div class="card" style="margin-bottom:0;display:flex;align-items:flex-start;gap:12px;padding:10px 14px">
           <div style="width:34px;height:34px;border-radius:9px;background:${e.color}22;display:flex;align-items:center;justify-content:center;flex-shrink:0;margin-top:2px">
             <i class="ti ${e.icon}" style="font-size:16px;color:${e.color}"></i>
@@ -230,17 +231,20 @@ const Cajas = {
           <div style="flex:1;min-width:0">
             <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:2px">
               ${BADGE[e.tipo]||''}
-              <span style="font-size:12px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:260px">${e.titulo}</span>
+              <span style="font-size:12px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:220px">${e.titulo}</span>
             </div>
             <div style="font-size:10px;color:var(--text-secondary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${e.sub}</div>
             <div style="font-size:10px;color:var(--text-tertiary);margin-top:2px">${fechaFmt}</div>
           </div>
-          <div style="text-align:right;flex-shrink:0">
+          <div style="text-align:right;flex-shrink:0;display:flex;flex-direction:column;align-items:flex-end;gap:4px">
             <div style="font-size:13px;font-weight:800;color:${e.dirColor}">${e.dir} ${e.montoFmt}</div>
-            ${e._movId !== undefined ? `<div style="margin-top:4px">${e._comprobanteUrl
-              ? `<button onclick="Cajas.verComprobante('${e._comprobanteUrl}')" style="font-size:9px;padding:1px 6px;border:1px solid var(--border-strong);border-radius:5px;background:transparent;color:var(--text-secondary);cursor:pointer"><i class="ti ti-photo"></i></button>`
-              : `<button onclick="Cajas.adjuntarComprobante(${e._movId})" style="font-size:9px;padding:1px 6px;border:1px solid var(--border);border-radius:5px;background:transparent;color:var(--text-tertiary);cursor:pointer"><i class="ti ti-upload"></i></button>`
-            }</div>` : ''}
+            <div style="display:flex;gap:4px;align-items:center">
+              ${e._movId !== undefined ? (e._comprobanteUrl
+                ? `<button onclick="Cajas.verComprobante('${e._comprobanteUrl}')" style="font-size:9px;padding:2px 6px;border:1px solid var(--border-strong);border-radius:5px;background:transparent;color:var(--text-secondary);cursor:pointer"><i class="ti ti-photo"></i></button>`
+                : `<button onclick="Cajas.adjuntarComprobante(${e._movId})" style="font-size:9px;padding:2px 6px;border:1px solid var(--border);border-radius:5px;background:transparent;color:var(--text-tertiary);cursor:pointer"><i class="ti ti-upload"></i></button>`
+              ) : ''}
+              ${rk ? `<button onclick="Cajas.revertirMovimiento('${rk}')" style="font-size:9px;padding:2px 6px;border:1px solid var(--red);border-radius:5px;background:transparent;color:var(--red);cursor:pointer" title="Revertir este movimiento"><i class="ti ti-arrow-back-up"></i></button>` : ''}
+            </div>
           </div>
         </div>`;
       }).join('')}
@@ -445,6 +449,83 @@ const Cajas = {
       await DB.actualizarSaldoCaja(destinoPFinal, destinoBFinal, actualDestino);
       if (!State.cajas[destinoPFinal]) State.cajas[destinoPFinal] = {};
       State.cajas[destinoPFinal][destinoBFinal] = actualDestino;
+    }
+  },
+
+  // ── Revertir movimiento ─────────────────────────────────────
+
+  async revertirMovimiento(encodedKey) {
+    const key = decodeURIComponent(encodedKey);
+    const [tipo, ...parts] = key.split(':');
+
+    if (tipo === 'gasto') {
+      const [id] = parts;
+      const g = State.gastos.find(x => x.id == id);
+      if (!g) return;
+      if (!confirm(`¿Revertir el gasto "${g.motivo}" por ${g.moneda === 'USD' ? State.fmtUSD(g.monto) : State.fmtARS(g.monto)}?\nEl monto volverá a la caja ${g.caja}.`)) return;
+      await Gastos.deleteGasto(id);
+      this._movimientos = await DB.listarMovimientosCaja(200);
+      this._tab = 'movimientos';
+      App.goTo('cajas');
+
+    } else if (tipo === 'movimiento') {
+      const [id] = parts;
+      const m = (this._movimientos || []).find(x => x.id == id);
+      if (!m) return;
+      if (!confirm(`¿Revertir este movimiento (${m.monto.toLocaleString('es-AR')} ${m.moneda})?\nSe devolverá el dinero al origen y se quitará del destino.`)) return;
+      // Revertir: sumar al origen, restar del destino
+      if (m.origenP && m.origen_bolsillo) {
+        const actual = (State.cajas[m.origenP]?.[m.origen_bolsillo] || 0) + m.monto;
+        State.cajas[m.origenP][m.origen_bolsillo] = actual;
+        await DB.actualizarSaldoCaja(m.origenP, m.origen_bolsillo, actual);
+      }
+      if (m.destinoP && m.destino_bolsillo) {
+        const actual = Math.max(0, (State.cajas[m.destinoP]?.[m.destino_bolsillo] || 0) - m.monto);
+        State.cajas[m.destinoP][m.destino_bolsillo] = actual;
+        await DB.actualizarSaldoCaja(m.destinoP, m.destino_bolsillo, actual);
+      }
+      await supa.from('caja_movimientos').delete().eq('id', id);
+      this._movimientos = await DB.listarMovimientosCaja(200);
+      this._tab = 'movimientos';
+      App.goTo('cajas');
+      toast('Movimiento revertido. Los saldos fueron restaurados.');
+
+    } else if (tipo === 'cueva') {
+      const [id] = parts;
+      await Cueva.deleteOp(id);
+
+    } else if (tipo === 'venta') {
+      const [ventaId, pagoId, persona, bolsillo, monto] = parts;
+      if (!confirm(`¿Revertir el pago de esta venta (${State.fmtUSD(Number(monto))}) de la caja ${persona}-${bolsillo}?\nEl monto volverá a la caja pero la venta seguirá registrada.`)) return;
+      // Acreditar la caja
+      const actual = (State.cajas[persona]?.[bolsillo] || 0) - Number(monto);
+      State.cajas[persona][bolsillo] = Math.max(0, actual);
+      await DB.actualizarSaldoCaja(persona, bolsillo, Math.max(0, actual));
+      // Eliminar el pago puntual
+      await supa.from('venta_pagos').delete().eq('id', pagoId);
+      const v = State.ventas.find(x => x.id == ventaId);
+      if (v) v.pagos = v.pagos.filter(p => p.id != pagoId);
+      this._movimientos = await DB.listarMovimientosCaja(200);
+      this._tab = 'movimientos';
+      App.goTo('cajas');
+      toast('Pago revertido. La venta sigue activa pero sin ese cobro.');
+
+    } else if (tipo === 'lote') {
+      const [pagoId, persona, bolsillo, monto, moneda] = parts;
+      if (!confirm(`¿Revertir este pago a proveedor (${moneda === 'USDT' ? Number(monto).toLocaleString('es-AR')+' USDT' : State.fmtUSD(Number(monto))}) de la caja ${persona}-${bolsillo}?\nEl monto volverá a la caja.`)) return;
+      // Acreditar la caja
+      const actual = (State.cajas[persona]?.[bolsillo] || 0) + Number(monto);
+      State.cajas[persona][bolsillo] = actual;
+      await DB.actualizarSaldoCaja(persona, bolsillo, actual);
+      await DB.eliminarLotePago(pagoId);
+      State.lotePagos = State.lotePagos.filter(p => p.id != pagoId);
+      this._movimientos = await DB.listarMovimientosCaja(200);
+      this._tab = 'movimientos';
+      App.goTo('cajas');
+      toast('Pago a proveedor revertido. El monto fue devuelto a la caja.');
+
+    } else {
+      toast('Este tipo de movimiento no se puede revertir desde aquí.');
     }
   },
 

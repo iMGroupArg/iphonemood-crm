@@ -121,24 +121,38 @@ const App = {
   },
 
   async actualizarCotizacion() {
-    // Solo actualiza el topbar con el valor de referencia de mercado.
-    // NO pisa State.refBlue — ese valor lo controla el usuario desde Panel.
-    const el = document.getElementById('topbar-blue');
-    if (el) el.textContent = State.refBlue.toLocaleString('es-AR');
+    // Muestra cotizaciones de mercado en tiempo real (dolarapi.com = misma fuente que dolarito.ar).
+    // NO pisa State.refBlue / State.refUsdt — esos los controla el usuario desde Panel.
+    const elBlue = document.getElementById('topbar-blue');
+    const elUsdt = document.getElementById('topbar-usdt');
+    // Mientras carga: muestra los valores manuales guardados
+    if (elBlue) elBlue.textContent = `$ ${State.refBlue.toLocaleString('es-AR')}`;
+    if (elUsdt) elUsdt.textContent = `$ ${State.refUsdt.toLocaleString('es-AR')}`;
     try {
-      const res = await fetch('https://api.bluelytics.com.ar/v2/latest');
-      if (!res.ok) return;
-      const data = await res.json();
-      const venta = data?.blue?.value_sell;
-      // Muestra referencia de mercado entre paréntesis si difiere del manual
-      if (venta && venta > 0 && el) {
-        const mercado = Math.round(venta);
-        if (mercado !== State.refBlue) {
-          el.title = `Mercado: $${mercado.toLocaleString('es-AR')}`;
+      const [blueRes, criptoRes] = await Promise.all([
+        fetch('https://dolarapi.com/v1/dolares/blue'),
+        fetch('https://dolarapi.com/v1/dolares/cripto'),
+      ]);
+      if (blueRes.ok) {
+        const blue = await blueRes.json();
+        const compra = Math.round(blue.compra);
+        const venta  = Math.round(blue.venta);
+        if (elBlue) {
+          elBlue.textContent = `$ ${venta.toLocaleString('es-AR')}`;
+          elBlue.title = `Comprá $${compra.toLocaleString('es-AR')} · Vendé $${venta.toLocaleString('es-AR')} · Tu ref: $${State.refBlue.toLocaleString('es-AR')}`;
+        }
+      }
+      if (criptoRes.ok) {
+        const cripto = await criptoRes.json();
+        const compra = Math.round(cripto.compra);
+        const venta  = Math.round(cripto.venta);
+        if (elUsdt) {
+          elUsdt.textContent = `$ ${venta.toLocaleString('es-AR')}`;
+          elUsdt.title = `Comprá $${compra.toLocaleString('es-AR')} · Vendé $${venta.toLocaleString('es-AR')} · Tu ref: $${State.refUsdt.toLocaleString('es-AR')}`;
         }
       }
     } catch (e) {
-      // silencioso
+      // silencioso — queda con los valores manuales
     }
   },
 

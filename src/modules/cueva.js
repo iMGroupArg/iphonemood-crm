@@ -34,16 +34,22 @@ const Cueva = {
 
   renderTable() {
     const spreadTotal = State.resultadoFinancieroMes();
-    document.getElementById('cueva-resultado-financiero').textContent = (spreadTotal>=0?'+':'') + State.fmtARS(spreadTotal);
+    const spreadTotalUSD = spreadTotal / State.refBlue;
+    document.getElementById('cueva-resultado-financiero').innerHTML =
+      `${spreadTotal>=0?'+':''}${State.fmtARS(spreadTotal)} <span style="opacity:.7;font-size:11px">≈ ${spreadTotalUSD>=0?'+':''}${State.fmtUSD(spreadTotalUSD)}</span>`;
     document.getElementById('cueva-tbody').innerHTML = State.cambios.map(o => {
       const t = this.typeObj(o.tipo);
       const spread = State.calcSpreadARS(o);
+      const spreadUSD = spread / State.refBlue;
       return `<tr>
         <td>${o.fecha}</td><td><span class="badge b-purple">${t.label}</span></td>
         <td>${o.origenP} (${o.origenB})<br><b>${this.fmtByMoneda(o.entrega, t.monedaO)}</b></td>
         <td>${o.destinoP} (${o.destinoB})<br><b>${this.fmtByMoneda(o.recibe, t.monedaD)}</b></td>
         <td>$${o.cotiz.toLocaleString('es-AR')}</td>
-        <td style="color:${spread>=0?'var(--green)':'var(--red)'};font-weight:600">${spread>=0?'+':''}${State.fmtARS(spread)}</td>
+        <td style="color:${spread>=0?'var(--green)':'var(--red)'};font-weight:600">
+          ${spread>=0?'+':''}${State.fmtARS(spread)}<br>
+          <span style="font-size:11px;font-weight:500;opacity:.8">${spreadUSD>=0?'+':''}${State.fmtUSD(spreadUSD)}</span>
+        </td>
         <td><button class="btn btn-sm" onclick="Cueva.openView('${o.id}')">✏️ Ver</button></td>
       </tr>`;
     }).join('');
@@ -71,7 +77,13 @@ const Cueva = {
             <div style="font-size:13px">${o.destinoP} — ${o.destinoB}: <b>${this.fmtByMoneda(o.recibe, t.monedaD)}</b></div>
           </div>
           <div style="display:flex;justify-content:space-between;padding:8px 0;border-top:1px solid var(--border);font-size:12.5px"><span>Cotización usada</span><b>$${o.cotiz.toLocaleString('es-AR')}</b></div>
-          <div style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--border);font-size:12.5px"><span>Spread</span><b style="color:${spread>=0?'var(--green)':'var(--red)'}">${spread>=0?'+':''}${State.fmtARS(spread)}</b></div>
+          <div style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--border);font-size:12.5px">
+            <span>Spread</span>
+            <div style="text-align:right">
+              <b style="color:${spread>=0?'var(--green)':'var(--red)'}">${spread>=0?'+':''}${State.fmtARS(spread)}</b><br>
+              <span style="font-size:11px;color:${spread>=0?'var(--green)':'var(--red)'};">${(spread/State.refBlue)>=0?'+':''}${State.fmtUSD(spread/State.refBlue)}</span>
+            </div>
+          </div>
           <div style="display:flex;justify-content:space-between;margin-top:14px">
             <button class="btn" style="color:var(--red)" onclick="Cueva.deleteOp('${o.id}')">🗑️ Eliminar</button>
             <button class="btn" onclick="Cueva.close()">Cerrar</button>
@@ -166,7 +178,7 @@ const Cueva = {
     const prev = document.getElementById('cueva-preview');
     if (entrega > 0) {
       prev.style.display = 'block';
-      document.getElementById('cueva-preview-val').textContent = (spread>=0?'+':'') + State.fmtARS(spread);
+      document.getElementById('cueva-preview-val').innerHTML = `${spread>=0?'+':''}${State.fmtARS(spread)} <span style="font-size:12px;opacity:.75">≈ ${spread>=0?'+':''}${State.fmtUSD(spread/State.refBlue)}</span>`;
       document.getElementById('cueva-preview-val').style.color = spread >= 0 ? 'var(--green)' : 'var(--red)';
     } else prev.style.display = 'none';
   },

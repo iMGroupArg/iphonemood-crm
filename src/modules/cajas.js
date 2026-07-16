@@ -55,19 +55,16 @@ const Cajas = {
       </div>
 
       <!-- Contenido de la pestaña activa -->
-      <div id="cajas-tab-content"></div>
+      <div id="cajas-tab-content">
+        ${this._tab === 'cajas' ? this._cajasHTML(BOLSILLO_ICON) : '<div style="color:var(--text-secondary);text-align:center;padding:20px">Cargando movimientos...</div>'}
+      </div>
 
       <div style="font-size:11px;color:var(--text-secondary);margin-top:12px"><i class="ti ti-info-circle"></i> Tocá cualquier saldo para ajustarlo. Para agregar o renombrar personas, andá a Panel de control → Cajas y personas.</div>
     `;
 
-    const BOLSILLO_ICON2 = BOLSILLO_ICON; // closure
-    setTimeout(() => {
-      if (this._tab === 'cajas') {
-        this._renderCajas(BOLSILLO_ICON2);
-      } else {
-        this._renderMovimientos();
-      }
-    }, 0);
+    if (this._tab === 'movimientos') {
+      this._renderMovimientos();
+    }
 
     return c;
   },
@@ -77,11 +74,8 @@ const Cajas = {
     App.goTo('cajas');
   },
 
-  _renderCajas(BOLSILLO_ICON) {
-    const host = document.getElementById('cajas-tab-content');
-    if (!host) return;
-    host.innerHTML = `
-      <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:14px">
+  _cajasHTML(BOLSILLO_ICON) {
+    return `<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:14px">
         ${State.personas.map(p => {
           const caja = State.cajas[p] || {};
           const arsEquiv = (caja['ARS cash']||0) + (caja['ARS transferencia']||0)
@@ -119,8 +113,7 @@ const Cajas = {
             </div>
           </div>`;
         }).join('')}
-      </div>
-    `;
+      </div>`;
   },
 
   async _renderMovimientos() {

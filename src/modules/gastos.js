@@ -119,7 +119,11 @@ const Gastos = {
         <td>${g.motivo}</td>
         <td><span class="badge" style="background:${c.color}22;color:${c.color}">${c.nombre}</span></td>
         <td>${g.responsable}</td><td style="font-size:11px;color:var(--text-secondary)">${g.caja}</td>
-        <td><b>${g.moneda==='USD'?State.fmtUSD(g.monto):State.fmtARS(g.monto)}</b></td>
+        <td>
+          <b>${g.moneda==='USD'?State.fmtUSD(g.monto):State.fmtARS(g.monto)}</b>
+          ${g.moneda==='ARS'?`<div style="font-size:10px;color:var(--text-secondary);margin-top:1px">≈ ${State.fmtUSD(g.monto/State.refBlue)}</div>`:''}
+          ${g.moneda==='USD'?`<div style="font-size:10px;color:var(--text-secondary);margin-top:1px">≈ ${State.fmtARS(g.monto*State.refBlue)}</div>`:''}
+        </td>
         <td><span class="badge ${pagado?'b-gray':'b-amber'}" style="opacity:${pagado?'0.45':'1'}">Pendiente</span> <span class="badge ${pagado?'b-green':'b-gray'}" style="opacity:${pagado?'1':'0.45'}">Pagado</span></td>
         <td style="display:flex;gap:6px;align-items:center">
           ${g.comprobanteUrl
@@ -300,14 +304,28 @@ const Gastos = {
   },
 
   async deleteGasto(id) {
-    if (!confirm('¿Eliminar este gasto? Esta acción no revierte el monto en la caja automáticamente.')) return;
+    const g = State.gastos.find(x => x.id == id);
+    if (!confirm(`¿Eliminar este gasto? Se revertirá el monto en la caja correspondiente.`)) return;
+
+    // revertir en caja si el gasto tenía caja asignada y estaba pagado
+    if (g && g.caja && g.estado === 'pagado') {
+      const [persona, ...bolsilloPartes] = g.caja.split('-');
+      const bolsillo = bolsilloPartes.join('-');
+      if (persona && bolsillo && State.cajas[persona] !== undefined) {
+        const actual = State.cajas[persona][bolsillo] || 0;
+        const nuevo = actual + g.monto;
+        State.cajas[persona][bolsillo] = nuevo;
+        await DB.actualizarSaldoCaja(persona, bolsillo, nuevo);
+      }
+    }
+
     await DB.eliminarGasto(id);
-    State.gastos = State.gastos.filter(x => x.id !== id);
+    State.gastos = State.gastos.filter(x => x.id != id);
     this.close();
     this.renderChips();
     this.renderKpis();
     this.renderTable();
-    toast('Gasto eliminado.');
+    toast('Gasto eliminado y monto revertido en la caja.');
   },
 
   manageCats() {

@@ -119,22 +119,24 @@ const App = {
   },
 
   async actualizarCotizacion() {
+    // Solo actualiza el topbar con el valor de referencia de mercado.
+    // NO pisa State.refBlue — ese valor lo controla el usuario desde Panel.
+    const el = document.getElementById('topbar-blue');
+    if (el) el.textContent = State.refBlue.toLocaleString('es-AR');
     try {
       const res = await fetch('https://api.bluelytics.com.ar/v2/latest');
       if (!res.ok) return;
       const data = await res.json();
       const venta = data?.blue?.value_sell;
-      const compra = data?.blue?.value_buy;
-      if (venta && venta > 0) {
-        State.refBlue = Math.round(venta);
-        const el = document.getElementById('topbar-blue');
-        if (el) el.textContent = State.refBlue.toLocaleString('es-AR');
-      }
-      if (compra && compra > 0) {
-        State.refBlueCompra = Math.round(compra);
+      // Muestra referencia de mercado entre paréntesis si difiere del manual
+      if (venta && venta > 0 && el) {
+        const mercado = Math.round(venta);
+        if (mercado !== State.refBlue) {
+          el.title = `Mercado: $${mercado.toLocaleString('es-AR')}`;
+        }
       }
     } catch (e) {
-      // silencioso — se queda con el valor anterior
+      // silencioso
     }
   },
 

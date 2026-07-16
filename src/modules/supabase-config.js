@@ -21,7 +21,7 @@ const DB = {
            gastosFijosRes, cierresRes, inversoresRes, inversorPagosRes, activosFijosRes,
            proveedoresRes, lotesRes, loteItemsRes, lotePagosRes,
            turnosSlotsRes, turnosReservasRes,
-           deudasRes, deudaPagosRes] = await Promise.all([
+           deudasRes, deudaPagosRes, configRes] = await Promise.all([
       supa.from('personas').select('*'),
       supa.from('cajas').select('*'),
       supa.from('stock').select('*'),
@@ -48,6 +48,7 @@ const DB = {
       supa.from('turnos_reservas').select('*').order('creado_en', { ascending: false }),
       supa.from('deudas_manuales').select('*').order('creado_en', { ascending: false }),
       supa.from('deuda_pagos').select('*').order('creado_en', { ascending: false }),
+      supa.from('configuracion').select('*'),
     ]);
 
     // mapa de personas (id <-> nombre), lo usamos todo el tiempo para traducir
@@ -237,6 +238,20 @@ const DB = {
       persona: p.persona || '', bolsillo: p.bolsillo || '', notas: p.notas || '',
       fecha: p.fecha || '',
     }));
+
+    // cotizaciones persistidas — tienen prioridad sobre el valor hardcodeado en state.js
+    const cfg = {};
+    (configRes.data || []).forEach(r => { cfg[r.clave] = r.valor; });
+    if (cfg.ref_blue)  State.refBlue      = Number(cfg.ref_blue);
+    if (cfg.ref_usdt)  State.refUsdt      = Number(cfg.ref_usdt);
+    if (cfg.ref_blue_compra) State.refBlueCompra = Number(cfg.ref_blue_compra);
+  },
+
+  async guardarCotizacionesDB(blue, usdt) {
+    await Promise.all([
+      supa.from('configuracion').upsert({ clave: 'ref_blue', valor: String(blue) }),
+      supa.from('configuracion').upsert({ clave: 'ref_usdt', valor: String(usdt) }),
+    ]);
   },
 
   fmtFecha(iso) {

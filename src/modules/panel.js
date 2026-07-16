@@ -341,16 +341,17 @@ const Panel = {
     `;
   },
 
-  guardarCotizaciones() {
+  async guardarCotizaciones() {
     const blue = parseFloat(document.getElementById('cf-blue').value) || State.refBlue;
     const usdt = parseFloat(document.getElementById('cf-usdt').value) || State.refUsdt;
     State.refBlue = blue;
     State.refUsdt = usdt;
     const topbarBlue = document.getElementById('topbar-blue');
     const topbarUsdt = document.getElementById('topbar-usdt');
-    if (topbarBlue) topbarBlue.textContent = blue;
-    if (topbarUsdt) topbarUsdt.textContent = usdt;
-    toast(`Cotizaciones actualizadas: Blue $${blue} · USDT $${usdt}.`);
+    if (topbarBlue) topbarBlue.textContent = blue.toLocaleString('es-AR');
+    if (topbarUsdt) topbarUsdt.textContent = usdt.toLocaleString('es-AR');
+    await DB.guardarCotizacionesDB(blue, usdt);
+    toast(`Cotizaciones actualizadas y guardadas: Blue $${blue.toLocaleString('es-AR')} · USDT $${usdt.toLocaleString('es-AR')}.`);
   },
 
   formasPagoView() {

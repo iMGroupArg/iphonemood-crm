@@ -6,10 +6,10 @@ CREATE TABLE IF NOT EXISTS caja_movimientos (
   tipo          TEXT NOT NULL,                  -- 'pasada_manos' | 'retiro_banco' | 'deposito_banco' | 'otro'
   descripcion   TEXT,
   -- Origen
-  origen_persona_id  BIGINT REFERENCES personas(id),
+  origen_persona_id  UUID REFERENCES personas(id),
   origen_bolsillo    TEXT,
   -- Destino (puede ser null en retiro)
-  destino_persona_id BIGINT REFERENCES personas(id),
+  destino_persona_id UUID REFERENCES personas(id),
   destino_bolsillo   TEXT,
   -- Monto
   monto         NUMERIC(18,2) NOT NULL,

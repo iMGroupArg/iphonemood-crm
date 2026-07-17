@@ -163,6 +163,10 @@ const State = {
       const refRecibe = op.entrega * (this.refBlue / this.refUsdt);
       return (op.recibe - refRecibe) * this.refUsdt;
     }
+    if (op.tipo === 'ars-usdt') {
+      const refRecibe = op.entrega / this.refUsdt;
+      return (op.recibe - refRecibe) * this.refUsdt;
+    }
     return 0;
   },
 

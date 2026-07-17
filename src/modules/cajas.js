@@ -151,7 +151,7 @@ const Cajas = {
 
     // 3. Cambios de cueva
     (State.cambios || []).forEach(c => {
-      const t = { 'ars-usd':'ARS → USD','usd-ars':'USD → ARS','usdt-ars':'USDT → ARS','usd-usdt':'USD → USDT' }[c.tipo] || c.tipo;
+      const t = { 'ars-usd':'ARS → USD','ars-usdt':'ARS → USDT','usd-ars':'USD → ARS','usdt-ars':'USDT → ARS','usd-usdt':'USD → USDT' }[c.tipo] || c.tipo;
       entries.push({
         _ts: c.fechaISO || c.fecha,
         tipo: 'cueva', icon: 'ti-arrows-exchange', color: 'var(--purple)',

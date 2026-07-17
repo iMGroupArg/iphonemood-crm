@@ -2,6 +2,7 @@ const Cueva = {
   opType: 'ars-usd',
   OP_TYPES: [
     { id: 'ars-usd', label: 'ARS → USD', monedaO: 'ARS', monedaD: 'USD' },
+    { id: 'ars-usdt', label: 'ARS → USDT', monedaO: 'ARS', monedaD: 'USDT' },
     { id: 'usd-usdt', label: 'USD → USDT', monedaO: 'USD', monedaD: 'USDT' },
     { id: 'usdt-ars', label: 'USDT → ARS', monedaO: 'USDT', monedaD: 'ARS' },
     { id: 'usd-ars', label: 'USD → ARS', monedaO: 'USD', monedaD: 'ARS' },
@@ -161,7 +162,7 @@ const Cueva = {
     const t = this.typeObj(this.opType);
     document.getElementById('cf-origen-b').innerHTML = this.BOLSILLOS[t.monedaO].map(b => `<option>${b}</option>`).join('');
     document.getElementById('cf-destino-b').innerHTML = this.BOLSILLOS[t.monedaD].map(b => `<option>${b}</option>`).join('');
-    document.getElementById('cf-cotiz').value = t.id === 'usd-usdt' ? State.refUsdt : State.refBlue;
+    document.getElementById('cf-cotiz').value = (t.id === 'usd-usdt' || t.id === 'ars-usdt') ? State.refUsdt : State.refBlue;
   },
   setType(id) { this.opType = id; this.renderTypeGrid(); this.calcPreview(); },
 
@@ -170,6 +171,7 @@ const Cueva = {
     const cotiz = parseFloat(document.getElementById('cf-cotiz').value) || 0;
     let recibe = 0;
     if (this.opType === 'ars-usd') recibe = cotiz ? entrega / cotiz : 0;
+    if (this.opType === 'ars-usdt') recibe = cotiz ? entrega / cotiz : 0;
     if (this.opType === 'usd-ars') recibe = entrega * cotiz;
     if (this.opType === 'usdt-ars') recibe = entrega * cotiz;
     if (this.opType === 'usd-usdt') recibe = entrega;

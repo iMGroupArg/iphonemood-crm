@@ -325,14 +325,26 @@ const Proveedores = {
                 ? `${State.fmtUSD(pg.montoUsd)} USD desde <b>${pg.persona}</b> (${pg.bolsillo}) → <b>${pg.montoUsdt.toFixed(2)} USDT</b> en ${pg.personaDest || pg.persona} · Comisión ${pg.comisionPct}% = ${State.fmtUSD(pg.comisionUsd)}`
                 : pg.tipo === 'pago_proveedor'
                 ? `${pg.moneda === 'ARS' ? State.fmtARS(pg.montoUsd * (State.refBlue||1)) : (pg.moneda === 'USDT' ? pg.montoUsdt?.toFixed(2) : pg.montoUsd.toFixed(2))} ${pg.moneda} desde <b>${pg.persona}</b> (${pg.bolsillo})${pg.moneda === 'ARS' ? ` ≈ ${State.fmtUSD(pg.montoUsd)}` : ''}`
+                : pg.tipo === 'devolucion'
+                ? `${State.fmtUSD(pg.montoUsd)} acreditado en <b>${pg.persona}</b> (${pg.bolsillo})`
                 : `${State.fmtUSD(pg.montoUsd)} ${pg.moneda} desde <b>${pg.persona}</b> (${pg.bolsillo})`;
+              // Qué hace revertir cada tipo
+              const revertInfo = {
+                devolucion:     { label: 'Revertir devolución',   accion: 'debitar',   quien: pg.persona, bolsillo: pg.bolsillo, monto: pg.montoUsd },
+                costo:          { label: 'Eliminar costo',         accion: 'acreditar', quien: pg.persona, bolsillo: pg.bolsillo, monto: pg.montoUsd },
+                envio:          { label: 'Eliminar costo envío',   accion: 'acreditar', quien: pg.persona, bolsillo: pg.bolsillo, monto: pg.montoUsd },
+                pago_proveedor: { label: 'Revertir pago',          accion: 'acreditar', quien: pg.persona, bolsillo: pg.bolsillo, monto: pg.montoUsd },
+                conversion:     { label: 'Revertir conversión',    accion: null },
+              }[pg.tipo];
+              const btnRevertir = !isTerminal && revertInfo ? `<button onclick="Proveedores.revertirMovimientoLote(${l.id}, ${pg.id})" style="background:none;border:1px solid var(--border);border-radius:6px;padding:3px 8px;cursor:pointer;color:var(--text-secondary);font-size:11px;white-space:nowrap" title="${revertInfo.label}">↩ Revertir</button>` : '';
               return `<div style="display:flex;gap:10px;align-items:flex-start;padding:9px 0;border-bottom:1px solid var(--border)">
-                <div style="font-size:20px;flex-shrink:0;line-height:1;padding-top:2px">${pagoIcons[pg.tipo]}</div>
+                <div style="font-size:20px;flex-shrink:0;line-height:1;padding-top:2px">${pagoIcons[pg.tipo] || '📋'}</div>
                 <div style="flex:1">
-                  <div style="font-size:12px;font-weight:600">${pagoLabels[pg.tipo]}</div>
+                  <div style="font-size:12px;font-weight:600">${pagoLabels[pg.tipo] || pg.tipo}</div>
                   <div style="font-size:11px;color:var(--text-secondary);margin-top:2px">${desc}</div>
                   <div style="font-size:10px;color:var(--text-tertiary);margin-top:2px">${pg.fecha}${pg.notas ? ' · ' + pg.notas : ''}</div>
                 </div>
+                <div style="flex-shrink:0;padding-top:2px">${btnRevertir}</div>
               </div>`;
             }).join('')}
       </div>
@@ -1286,6 +1298,45 @@ const Proveedores = {
 
     document.getElementById('prov-devolucion-overlay')?.remove();
     toast(`${State.fmtUSD(monto)} acreditados en ${persona} — ${bolsillo}.`);
+    this.renderContent();
+  },
+
+  async revertirMovimientoLote(loteId, pagoId) {
+    const pg = (State.lotePagos || []).find(p => p.id === pagoId);
+    if (!pg) return;
+
+    const mensajes = {
+      devolucion:     `¿Revertir la devolución de ${State.fmtUSD(pg.montoUsd)}?\nSe debitará de ${pg.persona} (${pg.bolsillo}) y se eliminará el registro.`,
+      costo:          `¿Eliminar este costo adicional de ${State.fmtUSD(pg.montoUsd)}?\nSe acreditará en ${pg.persona} (${pg.bolsillo}).`,
+      envio:          `¿Eliminar este costo de envío de ${State.fmtUSD(pg.montoUsd)}?\nSe acreditará en ${pg.persona} (${pg.bolsillo}).`,
+      pago_proveedor: `¿Revertir este pago al proveedor de ${State.fmtUSD(pg.montoUsd)}?\nSe acreditará en ${pg.persona} (${pg.bolsillo}).`,
+      conversion:     `¿Revertir esta conversión? Se restaurarán los saldos de USD y USDT de ${pg.persona}.`,
+    };
+
+    if (!confirm(mensajes[pg.tipo] || '¿Revertir este movimiento?')) return;
+
+    if (pg.tipo === 'devolucion') {
+      // La devolución acreditó la caja → ahora la debitamos de vuelta
+      State.debitarCaja(pg.persona, pg.bolsillo, pg.montoUsd);
+    } else if (pg.tipo === 'costo' || pg.tipo === 'envio') {
+      // El costo debitó la caja → la acreditamos de vuelta
+      State.acreditarCaja(pg.persona, pg.bolsillo, pg.montoUsd);
+    } else if (pg.tipo === 'pago_proveedor') {
+      // El pago debitó la caja → la acreditamos de vuelta
+      State.acreditarCaja(pg.persona, pg.bolsillo, pg.montoUsd);
+      if (pg.moneda === 'USDT' && pg.montoUsdt) {
+        // Era USDT: acreditar USDT y no USD
+        State.acreditarCaja(pg.persona, pg.bolsillo, pg.montoUsdt);
+        State.debitarCaja(pg.persona, pg.bolsillo, pg.montoUsd); // restar el equivalente USD que sumamos arriba
+      }
+    } else if (pg.tipo === 'conversion') {
+      // Devolver USD al origen, quitar USDT del destino
+      State.acreditarCaja(pg.persona, pg.bolsillo, pg.montoUsd);
+      State.debitarCaja(pg.personaDest || pg.persona, pg.bolsilloDestino || 'USDT', pg.montoUsdt);
+    }
+
+    await DB.eliminarLotePago(pagoId);
+    toast('Movimiento revertido y saldo restaurado.');
     this.renderContent();
   },
 

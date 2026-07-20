@@ -528,12 +528,12 @@ const Gastos = {
 
       <div class="card">
         <div class="card-title"><i class="ti ti-chart-line"></i> Variación de gastos — últimos 6 meses (en USD)</div>
-        <div style="display:flex;gap:8px;margin-bottom:10px;flex-wrap:wrap;align-items:center">
-          <select id="grafico-cat-selector" onchange="Gastos.onCatSelectorChange()" style="font-size:12px;padding:6px 10px;border:1px solid var(--border-strong);border-radius:8px">
-            <option value="__todas__">Todas las categorías</option>
-            ${State.categoriasGasto.map(c => `<option value="${c.id}">${c.nombre}</option>`).join('')}
-          </select>
-          <select id="grafico-concepto-selector" onchange="Gastos.renderGraficoVariacion()" style="font-size:12px;padding:6px 10px;border:1px solid var(--border-strong);border-radius:8px;display:none">
+        <div style="display:flex;gap:6px;margin-bottom:8px;flex-wrap:wrap;align-items:center" id="grafico-cat-chips">
+          <button class="btn btn-sm btn-primary" onclick="Gastos.setGraficoCat('__todas__')" data-cat="__todas__">Todos</button>
+          ${State.categoriasGasto.map(c => `<button class="btn btn-sm" onclick="Gastos.setGraficoCat('${c.id}')" data-cat="${c.id}">${c.nombre}</button>`).join('')}
+        </div>
+        <div id="grafico-concepto-wrap" style="display:none;margin-bottom:8px">
+          <select id="grafico-concepto-selector" onchange="Gastos.renderGraficoVariacion()" style="font-size:12px;padding:6px 10px;border:1px solid var(--border-strong);border-radius:8px">
             <option value="__total_cat__">Total categoría</option>
           </select>
         </div>
@@ -707,24 +707,30 @@ const Gastos = {
 
   _chartVariacion: null,
 
-  onCatSelectorChange() {
-    const catSel = document.getElementById('grafico-cat-selector');
+  _graficoCatActiva: '__todas__',
+
+  setGraficoCat(catId) {
+    this._graficoCatActiva = catId;
+    // Actualizar estilos de chips
+    document.querySelectorAll('#grafico-cat-chips button').forEach(btn => {
+      btn.classList.toggle('btn-primary', btn.dataset.cat === catId);
+    });
+    const wrap = document.getElementById('grafico-concepto-wrap');
     const concSel = document.getElementById('grafico-concepto-selector');
-    if (!catSel || !concSel) return;
-    const catId = catSel.value;
     if (catId === '__todas__') {
-      concSel.style.display = 'none';
+      if (wrap) wrap.style.display = 'none';
     } else {
-      // Poblar conceptos de esa categoría
       const conceptos = [...new Set(
         State.gastos.filter(g => g.cat === catId && g.mesCierre).map(g => g.motivo)
       )].sort();
-      concSel.innerHTML = `<option value="__total_cat__">Total categoría</option>` +
+      if (concSel) concSel.innerHTML = `<option value="__total_cat__">Total categoría</option>` +
         conceptos.map(m => `<option value="${m}">${m}</option>`).join('');
-      concSel.style.display = '';
+      if (wrap) wrap.style.display = '';
     }
     this.renderGraficoVariacion();
   },
+
+  onCatSelectorChange() { this.setGraficoCat(this._graficoCatActiva); },
 
   renderGraficoVariacion() {
     const ctx = document.getElementById('chart-gastos-variacion');
@@ -732,9 +738,8 @@ const Gastos = {
     if (this._chartVariacion) { this._chartVariacion.destroy(); this._chartVariacion = null; }
 
     const meses = this.ultimosMeses(6).reverse();
-    const catSel = document.getElementById('grafico-cat-selector');
+    const catId = this._graficoCatActiva || '__todas__';
     const concSel = document.getElementById('grafico-concepto-selector');
-    const catId = catSel ? catSel.value : '__todas__';
     const concepto = concSel ? concSel.value : '__total_cat__';
 
     let datasets = [];

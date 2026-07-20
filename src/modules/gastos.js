@@ -467,7 +467,7 @@ const Gastos = {
             ${meses.map(m => `<option value="${m.value}" ${m.value===this.mesActual?'selected':''}>${m.label}</option>`).join('')}
           </select>
         </div>
-        <button class="btn btn-sm" onclick="Gastos.clonarFijos()"><i class="ti ti-copy"></i> Cargar gastos fijos del mes</button>
+        <button class="btn btn-sm" onclick="Gastos.abrirChecklist()"><i class="ti ti-checklist"></i> Verificar gastos fijos</button>
       </div>
       <div class="body-pad" id="cierre-body"></div>
     `;
@@ -545,7 +545,7 @@ const Gastos = {
         ${gastosMes.length ? `
           <table><thead><tr><th>Motivo</th><th>Categoría</th><th>Monto</th></tr></thead>
           <tbody>${gastosMes.map(g => `<tr><td>${g.motivo}${g.esSueldoSocio?` <span class="badge b-purple" style="font-size:9px">Sueldo</span>`:''}</td><td>${this.catObj(g.cat).nombre}</td><td>${g.moneda==='USD'?State.fmtUSD(g.monto):State.fmtARS(g.monto)}</td></tr>`).join('')}</tbody></table>
-        ` : `<div class="empty-state"><i class="ti ti-receipt-off"></i>Todavía no cargaste gastos para este mes. Usá "Cargar gastos fijos del mes" o registrá uno nuevo desde la pestaña "Gastos del mes".</div>`}
+        ` : `<div class="empty-state"><i class="ti ti-receipt-off"></i>Todavía no cargaste gastos para este mes. Registrá gastos desde la pestaña "Gastos del mes" a medida que los pagás.</div>`}
       </div>
 
       <div class="card">
@@ -595,21 +595,50 @@ const Gastos = {
     if (el) el.textContent = State.fmtUSD(total);
   },
 
-  async clonarFijos() {
-    if (!State.gastosFijosPlantilla.length) { toast('Todavía no tenés gastos fijos cargados en la plantilla. Andá a "Gastos fijos" para crearlos.'); return; }
-    if (!confirm(`Se van a cargar ${State.gastosFijosPlantilla.length} gasto(s) fijo(s) para el mes ${this.mesActual}, usando los montos sugeridos de la plantilla. Podés editarlos después. ¿Continuar?`)) return;
-    toast('Cargando gastos fijos...');
-    for (const fijo of State.gastosFijosPlantilla.filter(f => f.activo !== false)) {
-      const cotizacionUsada = fijo.moneda === 'ARS' ? State.refBlue : null;
-      const newId = await DB.crearGasto({
-        motivo: fijo.motivo, cat: fijo.cat, responsable: State.personas[0] || '', persona: State.personas[0] || '',
-        bolsillo: 'ARS cash', moneda: fijo.moneda, monto: fijo.montoSugerido, estado: 'pendiente',
-        esFijo: true, mesCierre: this.mesActual, cotizacionUsada
-      });
-      State.gastos.unshift({ id: newId || Date.now()+Math.random(), fecha: 'Hoy', motivo: fijo.motivo, cat: fijo.cat, responsable: State.personas[0]||'', caja: `${State.personas[0]||''}-ARS cash`, moneda: fijo.moneda, monto: fijo.montoSugerido, estado: 'pendiente', esFijo: true, mesCierre: this.mesActual, esSueldoSocio: false, cotizacionUsada });
-    }
-    this.renderCierre();
-    toast('Gastos fijos cargados para este mes. Ajustá los montos y marcalos como pagados desde "Gastos del mes" a medida que los abonás.');
+  abrirChecklist() {
+    if (!State.gastosFijosPlantilla.length) { toast('No tenés gastos fijos en la plantilla. Andá a "Gastos fijos" para agregarlos.'); return; }
+    const mes = this.mesActual;
+    const gastosDelMes = State.gastos.filter(g => g.mesCierre === mes);
+    const host = document.getElementById('cierre-body');
+
+    const filas = State.gastosFijosPlantilla.filter(f => f.activo !== false).map(f => {
+      const cargados = gastosDelMes.filter(g => g.motivo.toLowerCase() === f.motivo.toLowerCase());
+      const totalCargado = cargados.reduce((a, g) => a + State.gastoEnUSD(g), 0);
+      const ok = cargados.length > 0;
+      return `
+        <tr style="opacity:${ok?'1':'.75'}">
+          <td style="width:24px">${ok ? '<span style="color:var(--green);font-size:16px">✓</span>' : '<span style="color:var(--text-secondary);font-size:16px">○</span>'}</td>
+          <td style="font-weight:${ok?'400':'600'}">${f.motivo}</td>
+          <td><span class="badge" style="background:var(--bg-secondary);color:var(--text-secondary);font-size:10px">${this.catObj(f.cat).nombre}</span></td>
+          <td style="color:${ok?'var(--green)':'var(--text-secondary)'}">
+            ${ok ? cargados.map(g => `${g.moneda==='USD'?State.fmtUSD(g.monto):State.fmtARS(g.monto)}`).join(' + ') : '<span style="font-size:11px">No cargado</span>'}
+          </td>
+          <td>${ok ? '' : `<button class="btn btn-sm btn-primary" onclick="Gastos.close();Gastos.setView('mes');setTimeout(()=>Gastos.openNew(),50)" style="font-size:11px">+ Cargar</button>`}</td>
+        </tr>`;
+    }).join('');
+
+    const pendientes = State.gastosFijosPlantilla.filter(f => f.activo !== false && !gastosDelMes.find(g => g.motivo.toLowerCase() === f.motivo.toLowerCase())).length;
+
+    const modal = document.createElement('div');
+    modal.id = 'checklist-modal';
+    modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.5);display:flex;align-items:center;justify-content:center;z-index:300';
+    modal.innerHTML = `
+      <div style="width:560px;max-width:94vw;max-height:80vh;overflow-y:auto;background:var(--bg-elevated);border-radius:14px;padding:20px" onclick="event.stopPropagation()">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">
+          <h3 style="font-size:15px;font-weight:600"><i class="ti ti-checklist"></i> Verificación gastos fijos — ${mes}</h3>
+          <button class="btn btn-sm" onclick="document.getElementById('checklist-modal').remove()">✕</button>
+        </div>
+        ${pendientes > 0
+          ? `<div style="background:var(--amber-light,#fff8e1);color:#b45309;border-radius:8px;padding:9px 12px;font-size:12px;margin-bottom:12px"><i class="ti ti-alert-triangle"></i> <b>${pendientes}</b> gasto(s) fijo(s) todavía no fueron cargados este mes.</div>`
+          : `<div style="background:var(--green-light);color:var(--green);border-radius:8px;padding:9px 12px;font-size:12px;margin-bottom:12px"><i class="ti ti-circle-check"></i> Todos los gastos fijos ya están cargados para este mes.</div>`
+        }
+        <table style="width:100%">
+          <thead><tr><th></th><th>Concepto</th><th>Categoría</th><th>Cargado</th><th></th></tr></thead>
+          <tbody>${filas}</tbody>
+        </table>
+      </div>`;
+    modal.onclick = () => modal.remove();
+    document.body.appendChild(modal);
   },
 
   async confirmarCierre(mes) {

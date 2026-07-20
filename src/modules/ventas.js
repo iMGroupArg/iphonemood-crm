@@ -16,6 +16,7 @@ const Ventas = {
 
   periodoVentas: 'mes',
   periodoDesde: '', periodoHasta: '',
+  periodoMes: '',
   isMobile() { return window.innerWidth <= 768; },
 
   render() {
@@ -49,6 +50,7 @@ const Ventas = {
       if (this.periodoVentas === 'hoy') return f.getTime() === hoy.getTime();
       if (this.periodoVentas === 'semana') { const d=new Date(hoy); d.setDate(d.getDate()-7); return f>=d; }
       if (this.periodoVentas === 'mes') return f.getFullYear()===hoy.getFullYear()&&f.getMonth()===hoy.getMonth();
+      if (this.periodoVentas === 'mes-especifico') return v.fechaISO.slice(0,7) === this.periodoMes;
       if (this.periodoVentas === 'libre') {
         const desde=this.periodoDesde?new Date(this.periodoDesde):null;
         const hasta=this.periodoHasta?new Date(this.periodoHasta):null;
@@ -60,16 +62,42 @@ const Ventas = {
     });
   },
 
+  _mesesDisponibles() {
+    const meses = new Set();
+    State.ventas.forEach(v => { if (v.fechaISO) meses.add(v.fechaISO.slice(0, 7)); });
+    // Agregar también los últimos 6 meses aunque no haya ventas
+    const hoy = new Date();
+    for (let i = 0; i < 6; i++) {
+      const d = new Date(hoy.getFullYear(), hoy.getMonth() - i, 1);
+      meses.add(`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`);
+    }
+    return Array.from(meses).sort().reverse();
+  },
+
   renderPeriodoTabs() {
     const tabs=[['hoy','Hoy'],['semana','Esta semana'],['mes','Este mes'],['libre','Rango libre']];
     const el=document.getElementById('ventas-periodo-tabs');
     if (!el) return;
-    el.innerHTML=tabs.map(([k,l])=>`<button class="btn btn-sm ${this.periodoVentas===k?'btn-primary':''}" onclick="Ventas.setPeriodo('${k}')">${l}</button>`).join('');
+    const mesesOpts = this._mesesDisponibles().map(m => {
+      const [y, mo] = m.split('-');
+      const label = new Date(Number(y), Number(mo)-1, 1).toLocaleDateString('es-AR', { month: 'short', year: '2-digit' });
+      return `<option value="${m}" ${this.periodoMes===m?'selected':''}>${label}</option>`;
+    }).join('');
+    el.innerHTML = tabs.map(([k,l])=>`<button class="btn btn-sm ${this.periodoVentas===k&&k!=='mes-especifico'?'btn-primary':''}" onclick="Ventas.setPeriodo('${k}')">${l}</button>`).join('')
+      + `<select id="ventas-mes-selector" onchange="Ventas.setPeriodoMes(this.value)" style="font-size:12px;padding:4px 8px;border:1px solid var(--border-strong);border-radius:8px;margin-left:4px;background:var(--bg-secondary);color:var(--text);${this.periodoVentas==='mes-especifico'?'border-color:var(--blue);outline:none':''}">
+          <option value="">Mes específico…</option>
+          ${mesesOpts}
+        </select>`;
     const rangoEl=document.getElementById('ventas-rango-libre');
     if (rangoEl) rangoEl.style.display=this.periodoVentas==='libre'?'flex':'none';
   },
 
-  setPeriodo(p) { this.periodoVentas=p; this.renderPeriodoTabs(); this.renderMetricas(); this.renderList(); },
+  setPeriodo(p) { this.periodoVentas=p; this.periodoMes=''; this.renderPeriodoTabs(); this.renderMetricas(); this.renderList(); },
+  setPeriodoMes(mes) {
+    if (!mes) return;
+    this.periodoVentas='mes-especifico'; this.periodoMes=mes;
+    this.renderPeriodoTabs(); this.renderMetricas(); this.renderList();
+  },
 
   aplicarRangoLibre() {
     this.periodoDesde=document.getElementById('ventas-desde')?.value||'';

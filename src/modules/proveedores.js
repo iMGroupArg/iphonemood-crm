@@ -1315,24 +1315,22 @@ const Proveedores = {
 
     if (!confirm(mensajes[pg.tipo] || '¿Revertir este movimiento?')) return;
 
+    // montoReal = monto en la moneda original que se movió en la caja
+    const montoReal = (pg.moneda === 'USDT' && pg.montoUsdt) ? pg.montoUsdt : pg.montoUsd;
+
     if (pg.tipo === 'devolucion') {
-      // La devolución acreditó la caja → ahora la debitamos de vuelta
-      State.debitarCaja(pg.persona, pg.bolsillo, pg.montoUsd);
+      // La devolución acreditó la caja en USD → debitamos de vuelta
+      if (pg.persona) State.debitarCaja(pg.persona, pg.bolsillo, montoReal);
     } else if (pg.tipo === 'costo' || pg.tipo === 'envio') {
-      // El costo debitó la caja → la acreditamos de vuelta
-      State.acreditarCaja(pg.persona, pg.bolsillo, pg.montoUsd);
+      // El costo debitó la caja en la moneda original → acreditamos de vuelta
+      if (pg.persona) State.acreditarCaja(pg.persona, pg.bolsillo, montoReal);
     } else if (pg.tipo === 'pago_proveedor') {
-      // El pago debitó la caja → la acreditamos de vuelta
-      State.acreditarCaja(pg.persona, pg.bolsillo, pg.montoUsd);
-      if (pg.moneda === 'USDT' && pg.montoUsdt) {
-        // Era USDT: acreditar USDT y no USD
-        State.acreditarCaja(pg.persona, pg.bolsillo, pg.montoUsdt);
-        State.debitarCaja(pg.persona, pg.bolsillo, pg.montoUsd); // restar el equivalente USD que sumamos arriba
-      }
+      // El pago debitó la caja en la moneda original → acreditamos de vuelta
+      if (pg.persona) State.acreditarCaja(pg.persona, pg.bolsillo, montoReal);
     } else if (pg.tipo === 'conversion') {
       // Devolver USD al origen, quitar USDT del destino
-      State.acreditarCaja(pg.persona, pg.bolsillo, pg.montoUsd);
-      State.debitarCaja(pg.personaDest || pg.persona, pg.bolsilloDestino || 'USDT', pg.montoUsdt);
+      if (pg.persona) State.acreditarCaja(pg.persona, pg.bolsillo, pg.montoUsd);
+      if (pg.personaDest || pg.persona) State.debitarCaja(pg.personaDest || pg.persona, pg.bolsilloDestino || 'USDT', pg.montoUsdt);
     }
 
     await DB.eliminarLotePago(pagoId);

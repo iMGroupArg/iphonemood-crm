@@ -490,10 +490,10 @@ const Gastos = {
   gastosDelMes(mes) { return State.gastos.filter(g => g.mesCierre === mes); },
 
   ventasDelMes(mes) {
-    // En esta maqueta las ventas no tienen mes_cierre explícito; se contemplan
-    // todas las ventas registradas hasta que el volumen de datos requiera
-    // un filtro de fecha más granular.
-    return State.ventas;
+    return State.ventas.filter(v => {
+      const f = v.fechaISO ? v.fechaISO.slice(0, 7) : null;
+      return f === mes;
+    });
   },
 
   renderCierre() {
@@ -506,8 +506,8 @@ const Gastos = {
     const totalGastosUSD = gastosMes.reduce((a, g) => a + State.gastoEnUSD(g), 0);
     const totalGastosARS = totalGastosUSD * State.refBlue;
     const totalVentasARS = this.ventasDelMes(mes).reduce((a, v) => a + v.items.reduce((s, i) => s + i.precio, 0), 0) * State.refBlue;
-    const spreadCueva = State.resultadoFinancieroMes();
-    const diferencialTarjetaARS = State.resultadoDiferencialTarjetaMes() * State.refBlue;
+    const spreadCueva = State.resultadoFinancieroMes(mes);
+    const diferencialTarjetaARS = State.resultadoDiferencialTarjetaMes(mes) * State.refBlue;
     const totalIngresos = totalVentasARS + spreadCueva + diferencialTarjetaARS;
     const balance = totalIngresos - totalGastosARS;
 
@@ -618,8 +618,8 @@ const Gastos = {
     const totalGastosUSD = gastosMes.reduce((a, g) => a + State.gastoEnUSD(g), 0);
     const totalGastosARS = totalGastosUSD * State.refBlue;
     const totalVentasARS = this.ventasDelMes(mes).reduce((a, v) => a + v.items.reduce((s, i) => s + i.precio, 0), 0) * State.refBlue;
-    const spreadCueva = State.resultadoFinancieroMes();
-    const diferencialTarjetaARS = State.resultadoDiferencialTarjetaMes() * State.refBlue;
+    const spreadCueva = State.resultadoFinancieroMes(mes);
+    const diferencialTarjetaARS = State.resultadoDiferencialTarjetaMes(mes) * State.refBlue;
     const totalIngresos = totalVentasARS + spreadCueva + diferencialTarjetaARS;
     const balanceAntes = totalIngresos - totalGastosARS;
 

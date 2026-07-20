@@ -137,7 +137,7 @@ const DB = {
 
     // cambios (cueva)
     State.cambios = (cambiosRes.data || []).map(c => ({
-      id: c.id, fecha: this.fmtFecha(c.creado_en), tipo: c.tipo,
+      id: c.id, fecha: this.fmtFecha(c.creado_en), fechaISO: c.creado_en, tipo: c.tipo,
       entrega: Number(c.entrega), recibe: Number(c.recibe), cotiz: Number(c.cotizacion),
       origenP: this.personasIdToNombre[c.origen_persona_id] || '', origenB: c.origen_bolsillo,
       destinoP: this.personasIdToNombre[c.destino_persona_id] || '', destinoB: c.destino_bolsillo

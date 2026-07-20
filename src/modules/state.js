@@ -170,14 +170,16 @@ const State = {
     return 0;
   },
 
-  resultadoFinancieroMes() {
-    return this.cambios.reduce((a, o) => a + this.calcSpreadARS(o), 0);
+  resultadoFinancieroMes(mes) {
+    const ops = mes ? this.cambios.filter(o => (o.fechaISO || '').slice(0, 7) === mes) : this.cambios;
+    return ops.reduce((a, o) => a + this.calcSpreadARS(o), 0);
   },
   // Diferencial financiero: lo cobrado en pagos menos el precio de lista de los items.
   // Captura tanto el recargo tarjeta como la diferencia de tipo de cambio.
-  resultadoDiferencialTarjetaMes() {
+  resultadoDiferencialTarjetaMes(mes) {
+    const ventas = mes ? this.ventas.filter(v => (v.fechaISO || '').slice(0, 7) === mes) : this.ventas;
     let totalUSD = 0;
-    this.ventas.forEach(v => {
+    ventas.forEach(v => {
       const totalVenta = (v.items || []).reduce((s, i) => s + i.precio, 0);
       const totalPagado = (v.pagos || []).reduce((s, p) => s + p.monto, 0) + (v.tradeIn?.valor || 0);
       totalUSD += Math.max(0, totalPagado - totalVenta);

@@ -238,8 +238,8 @@ const Proveedores = {
     const costoUnit = totalUds > 0 ? costoTotal / totalUds : 0;
     const isTerminal = ['recibido', 'cancelado'].includes(l.estado);
 
-    const pagoIcons = { conversion: '💱', pago_proveedor: '💸', envio: '🚚', costo: '💰' };
-    const pagoLabels = { conversion: 'Conversión USD → USDT', pago_proveedor: 'Pago al proveedor', envio: 'Costo de envío', costo: 'Costo adicional' };
+    const pagoIcons = { conversion: '💱', pago_proveedor: '💸', envio: '🚚', costo: '💰', devolucion: '↩️' };
+    const pagoLabels = { conversion: 'Conversión USD → USDT', pago_proveedor: 'Pago al proveedor', envio: 'Costo de envío', costo: 'Costo adicional', devolucion: 'Devolución del proveedor' };
 
     host.innerHTML = `
       <button class="btn btn-sm" onclick="Proveedores.back()" style="margin-bottom:16px">← ${prov?.nombre || 'Proveedores'}</button>
@@ -1183,6 +1183,8 @@ const Proveedores = {
 
   async guardarEdicionItems(loteId) {
     const items = (State.loteItems || []).filter(i => i.loteId === loteId);
+    const totalAntes = items.reduce((s, i) => s + i.precioUsd * i.cantidad, 0);
+
     let ok = true;
     for (const i of items) {
       const cant = parseFloat(document.getElementById(`edit-cant-${i.id}`)?.value);
@@ -1193,9 +1195,97 @@ const Proveedores = {
         if (!res) ok = false;
       }
     }
+
+    // Calcular nuevo total con los valores guardados
+    const totalDespues = (State.loteItems || []).filter(i => i.loteId === loteId)
+      .reduce((s, i) => s + i.precioUsd * i.cantidad, 0);
+    const diferencia = +(totalAntes - totalDespues).toFixed(2);
+
     document.getElementById('prov-edit-items-overlay')?.remove();
-    if (ok) toast('Orden actualizada correctamente.');
-    else toast('Algunos ítems no pudieron guardarse.');
+
+    if (diferencia > 0) {
+      // Hay devolución — abrir modal para elegir caja destino
+      this._modalDevolucion(loteId, diferencia);
+    } else {
+      if (ok) toast('Orden actualizada correctamente.');
+      this.renderContent();
+    }
+  },
+
+  _modalDevolucion(loteId, diferencia) {
+    const personaOpts = State.personas.map(p => `<option value="${p}">${p}</option>`).join('');
+    const bolsilloOpts = (p) => ['USD cash', 'USD transferencia', 'USDT', 'ARS cash', 'ARS transferencia']
+      .map(b => `<option value="${b}">${b}</option>`).join('');
+
+    const overlay = document.createElement('div');
+    overlay.id = 'prov-devolucion-overlay';
+    overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.6);backdrop-filter:blur(4px);z-index:800;display:flex;align-items:center;justify-content:center;padding:20px';
+    overlay.innerHTML = `
+      <div style="background:var(--bg-elevated);border:1px solid var(--border-strong);border-radius:var(--radius-xl);width:min(440px,96vw);display:flex;flex-direction:column;overflow:hidden">
+        <div style="padding:16px 20px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center">
+          <div style="font-size:16px;font-weight:700">💰 Devolución del proveedor</div>
+          <button onclick="document.getElementById('prov-devolucion-overlay').remove()" style="background:none;border:none;cursor:pointer;color:var(--text-secondary);font-size:20px">✕</button>
+        </div>
+        <div style="padding:18px 20px">
+          <div style="background:var(--green-light);color:var(--green);border-radius:8px;padding:10px 14px;font-size:13px;font-weight:600;margin-bottom:16px">
+            El proveedor te devuelve <b>${State.fmtUSD(diferencia)}</b> por la diferencia en la orden.
+          </div>
+          <div style="margin-bottom:12px">
+            <label style="font-size:11px;font-weight:600;color:var(--text-secondary);display:block;margin-bottom:5px">¿A qué caja ingresa la devolución?</label>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+              <select id="dev-persona" onchange="document.getElementById('dev-bolsillo').innerHTML=Proveedores._bolsillosOpts(this.value)" style="font-size:12px;padding:7px 10px;border:1px solid var(--border-strong);border-radius:8px">
+                ${personaOpts}
+              </select>
+              <select id="dev-bolsillo" style="font-size:12px;padding:7px 10px;border:1px solid var(--border-strong);border-radius:8px">
+                ${bolsilloOpts(State.personas[0])}
+              </select>
+            </div>
+          </div>
+          <div style="margin-bottom:16px">
+            <label style="font-size:11px;font-weight:600;color:var(--text-secondary);display:block;margin-bottom:5px">Monto a acreditar (USD)</label>
+            <input type="number" id="dev-monto" value="${diferencia}" step="0.01" style="width:100%;font-size:13px;padding:8px 10px;border:1px solid var(--border-strong);border-radius:8px">
+            <div style="font-size:10px;color:var(--text-secondary);margin-top:4px">Podés ajustar si la devolución fue parcial o en otra moneda.</div>
+          </div>
+          <div style="margin-bottom:4px">
+            <label style="font-size:11px;font-weight:600;color:var(--text-secondary);display:block;margin-bottom:5px">Notas (opcional)</label>
+            <input type="text" id="dev-notas" placeholder="Ej: iPhone 17 Pro Max azul no disponible" style="width:100%;font-size:12px;padding:7px 10px;border:1px solid var(--border-strong);border-radius:8px">
+          </div>
+        </div>
+        <div style="padding:14px 20px;border-top:1px solid var(--border);display:flex;justify-content:flex-end;gap:8px">
+          <button class="btn" onclick="document.getElementById('prov-devolucion-overlay').remove();Proveedores.renderContent()">Sin devolución</button>
+          <button class="btn btn-primary" onclick="Proveedores.confirmarDevolucion(${loteId})">✓ Acreditar en caja</button>
+        </div>
+      </div>`;
+    overlay.onclick = e => { if (e.target === overlay) { overlay.remove(); this.renderContent(); } };
+    document.body.appendChild(overlay);
+  },
+
+  _bolsillosOpts(persona) {
+    const cajas = State.cajas[persona] || {};
+    const bolsillos = Object.keys(cajas).length
+      ? Object.keys(cajas)
+      : ['USD cash', 'USD transferencia', 'USDT', 'ARS cash', 'ARS transferencia'];
+    return bolsillos.map(b => `<option value="${b}">${b}</option>`).join('');
+  },
+
+  async confirmarDevolucion(loteId) {
+    const persona = document.getElementById('dev-persona')?.value;
+    const bolsillo = document.getElementById('dev-bolsillo')?.value;
+    const monto = parseFloat(document.getElementById('dev-monto')?.value) || 0;
+    const notas = document.getElementById('dev-notas')?.value || '';
+    if (!persona || !bolsillo || !monto) { toast('Completá todos los campos.'); return; }
+
+    // Acreditar en la caja
+    State.acreditarCaja(persona, bolsillo, monto);
+
+    // Registrar como movimiento en el lote (tipo 'devolucion')
+    await DB.guardarLotePago(loteId, {
+      tipo: 'devolucion', montoUsd: monto, moneda: 'USD',
+      persona, bolsillo, notas: notas || 'Devolución parcial del proveedor', fecha: new Date().toISOString().slice(0,10)
+    });
+
+    document.getElementById('prov-devolucion-overlay')?.remove();
+    toast(`${State.fmtUSD(monto)} acreditados en ${persona} — ${bolsillo}.`);
     this.renderContent();
   },
 

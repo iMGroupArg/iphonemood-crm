@@ -164,7 +164,7 @@ const Gastos = {
           </div>
           <div style="display:grid;grid-template-columns:1fr 1fr;gap:9px">
             ${this._labelInp('Moneda', `<select id="gf-moneda" style="${this._sel()}"><option value="ARS">ARS</option><option value="USD">USD</option></select>`)}
-            ${this._labelInp('Monto', `<input type="number" id="gf-monto" style="${this._inp()}" inputmode="decimal">`)}
+            ${this._labelInp('Monto', `<input type="number" id="gf-monto" step="0.01" style="${this._inp()}" inputmode="decimal">`)}
           </div>
           <div style="margin-bottom:14px">
             <label style="font-size:11px;color:var(--text-secondary);font-weight:600;display:block;margin-bottom:4px">Caja que paga</label>
@@ -402,7 +402,7 @@ const Gastos = {
                 <option value="">Sin categoría</option>
                 ${State.categoriasGasto.map(c=>`<option value="${c.id}" ${g.cat===c.id?'selected':''}>${c.nombre}</option>`).join('')}
               </select>
-              <input type="number" value="${g.montoSugerido}" onchange="Gastos.editarFijoMonto(${i}, this.value)" placeholder="Monto" style="font-size:12px;padding:5px 8px;border:1px solid var(--border-strong);border-radius:6px;background:var(--bg-secondary);color:var(--text)">
+              <input type="number" step="0.01" value="${g.montoSugerido}" onchange="Gastos.editarFijoMonto(${i}, this.value)" placeholder="Monto" style="font-size:12px;padding:5px 8px;border:1px solid var(--border-strong);border-radius:6px;background:var(--bg-secondary);color:var(--text)">
               <select onchange="Gastos.editarFijoMoneda(${i}, this.value)" style="font-size:12px;padding:5px 8px;border:1px solid var(--border-strong);border-radius:6px;background:var(--bg-secondary);color:var(--text)">
                 <option value="ARS" ${g.moneda==='ARS'?'selected':''}>ARS</option>
                 <option value="USD" ${g.moneda==='USD'?'selected':''}>USD</option>

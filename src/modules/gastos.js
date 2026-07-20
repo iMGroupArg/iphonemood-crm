@@ -528,10 +528,13 @@ const Gastos = {
 
       <div class="card">
         <div class="card-title"><i class="ti ti-chart-line"></i> Variación de gastos — últimos 6 meses (en USD)</div>
-        <div style="display:flex;gap:8px;margin-bottom:10px;flex-wrap:wrap">
-          <select id="grafico-concepto-selector" onchange="Gastos.renderGraficoVariacion()" style="font-size:12px;padding:6px 10px;border:1px solid var(--border-strong);border-radius:8px">
-            <option value="__categorias__">Ver por categoría</option>
-            ${this.conceptosUnicos().map(m => `<option value="${m}">${m}</option>`).join('')}
+        <div style="display:flex;gap:8px;margin-bottom:10px;flex-wrap:wrap;align-items:center">
+          <select id="grafico-cat-selector" onchange="Gastos.onCatSelectorChange()" style="font-size:12px;padding:6px 10px;border:1px solid var(--border-strong);border-radius:8px">
+            <option value="__todas__">Todas las categorías</option>
+            ${State.categoriasGasto.map(c => `<option value="${c.id}">${c.nombre}</option>`).join('')}
+          </select>
+          <select id="grafico-concepto-selector" onchange="Gastos.renderGraficoVariacion()" style="font-size:12px;padding:6px 10px;border:1px solid var(--border-strong);border-radius:8px;display:none">
+            <option value="__total_cat__">Total categoría</option>
           </select>
         </div>
         <div style="position:relative;height:240px"><canvas id="chart-gastos-variacion"></canvas></div>
@@ -675,32 +678,68 @@ const Gastos = {
 
   _chartVariacion: null,
 
+  onCatSelectorChange() {
+    const catSel = document.getElementById('grafico-cat-selector');
+    const concSel = document.getElementById('grafico-concepto-selector');
+    if (!catSel || !concSel) return;
+    const catId = catSel.value;
+    if (catId === '__todas__') {
+      concSel.style.display = 'none';
+    } else {
+      // Poblar conceptos de esa categoría
+      const conceptos = [...new Set(
+        State.gastos.filter(g => g.cat === catId && g.mesCierre).map(g => g.motivo)
+      )].sort();
+      concSel.innerHTML = `<option value="__total_cat__">Total categoría</option>` +
+        conceptos.map(m => `<option value="${m}">${m}</option>`).join('');
+      concSel.style.display = '';
+    }
+    this.renderGraficoVariacion();
+  },
+
   renderGraficoVariacion() {
     const ctx = document.getElementById('chart-gastos-variacion');
     if (!ctx) return;
     if (this._chartVariacion) { this._chartVariacion.destroy(); this._chartVariacion = null; }
 
-    const meses = this.ultimosMeses(6).reverse(); // orden cronológico para el gráfico
-    const selector = document.getElementById('grafico-concepto-selector');
-    const modo = selector ? selector.value : '__categorias__';
+    const meses = this.ultimosMeses(6).reverse();
+    const catSel = document.getElementById('grafico-cat-selector');
+    const concSel = document.getElementById('grafico-concepto-selector');
+    const catId = catSel ? catSel.value : '__todas__';
+    const concepto = concSel ? concSel.value : '__total_cat__';
 
     let datasets = [];
-    const colores = ['#185FA5', '#3B6D11', '#854F0B', '#3C3489', '#085041', '#791F1F'];
 
-    if (modo === '__categorias__') {
-      State.categoriasGasto.forEach((cat, i) => {
+    if (catId === '__todas__') {
+      // Una línea por cada categoría que tenga datos
+      State.categoriasGasto.forEach(cat => {
         const data = meses.map(m => {
-          const gastosDelMesYCat = State.gastos.filter(g => g.mesCierre === m.value && g.cat === cat.id);
-          return +gastosDelMesYCat.reduce((a, g) => a + State.gastoEnUSD(g), 0).toFixed(2);
+          const total = State.gastos.filter(g => g.mesCierre === m.value && g.cat === cat.id)
+            .reduce((a, g) => a + State.gastoEnUSD(g), 0);
+          return +total.toFixed(2);
         });
-        if (data.some(v => v > 0)) datasets.push({ label: cat.nombre, data, borderColor: cat.color, backgroundColor: cat.color + '22', tension: 0.3 });
+        if (data.some(v => v > 0)) datasets.push({ label: cat.nombre, data, borderColor: cat.color, backgroundColor: cat.color + '22', tension: 0.3, pointRadius: 4 });
       });
     } else {
-      const data = meses.map(m => {
-        const gastosDelMesYConcepto = State.gastos.filter(g => g.mesCierre === m.value && g.motivo === modo);
-        return +gastosDelMesYConcepto.reduce((a, g) => a + State.gastoEnUSD(g), 0).toFixed(2);
-      });
-      datasets.push({ label: modo, data, borderColor: colores[0], backgroundColor: colores[0] + '22', fill: true, tension: 0.3 });
+      const cat = State.categoriasGasto.find(c => c.id === catId);
+      const color = cat?.color || '#185FA5';
+      if (concepto === '__total_cat__') {
+        // Total de la categoría mes a mes
+        const data = meses.map(m => {
+          const total = State.gastos.filter(g => g.mesCierre === m.value && g.cat === catId)
+            .reduce((a, g) => a + State.gastoEnUSD(g), 0);
+          return +total.toFixed(2);
+        });
+        datasets.push({ label: `Total ${cat?.nombre || ''}`, data, borderColor: color, backgroundColor: color + '33', fill: true, tension: 0.3, pointRadius: 5 });
+      } else {
+        // Concepto específico dentro de la categoría
+        const data = meses.map(m => {
+          const total = State.gastos.filter(g => g.mesCierre === m.value && g.cat === catId && g.motivo === concepto)
+            .reduce((a, g) => a + State.gastoEnUSD(g), 0);
+          return +total.toFixed(2);
+        });
+        datasets.push({ label: concepto, data, borderColor: color, backgroundColor: color + '33', fill: true, tension: 0.3, pointRadius: 5 });
+      }
     }
 
     if (!datasets.length) {

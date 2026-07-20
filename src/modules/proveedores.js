@@ -256,6 +256,7 @@ const Proveedores = {
           ${!conv ? `<button class="btn btn-sm" onclick="Proveedores.modalConversion(${l.id})">💱 Conversión USD→USDT</button>` : ''}
           <button class="btn btn-sm btn-primary" onclick="Proveedores.modalPago(${l.id})">💸 Registrar pago</button>
           <button class="btn btn-sm" onclick="Proveedores.modalCostoAdicional(${l.id})">💰 Agregar costo</button>
+          <button class="btn btn-sm" onclick="Proveedores.modalEditarItems(${l.id})">✏️ Editar orden</button>
           ${pagadoProveedor > 0 && l.estado !== 'recibido' ? `<button class="btn btn-sm btn-green" onclick="Proveedores.modalRecepcion(${l.id})">📦 Confirmar recepción</button>` : ''}
         </div>` : ''}
       </div>
@@ -1093,6 +1094,109 @@ const Proveedores = {
         await DB.actualizarSaldoCaja(pg.persona, pg.bolsillo, s + montoOriginal);
       }
     }
+  },
+
+  modalEditarItems(loteId) {
+    const l = (State.lotesCompra || []).find(x => x.id === loteId);
+    const items = (State.loteItems || []).filter(i => i.loteId === loteId);
+    const overlay = document.createElement('div');
+    overlay.id = 'prov-edit-items-overlay';
+    overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.6);backdrop-filter:blur(4px);z-index:800;display:flex;align-items:center;justify-content:center;padding:20px';
+    overlay.innerHTML = `
+      <div style="background:var(--bg-elevated);border:1px solid var(--border-strong);border-radius:var(--radius-xl);width:min(560px,96vw);max-height:90dvh;display:flex;flex-direction:column;overflow:hidden">
+        <div style="padding:16px 20px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;flex-shrink:0">
+          <div style="font-size:16px;font-weight:700">✏️ Editar ítems — ${l?.nombre || 'Orden'}</div>
+          <button onclick="document.getElementById('prov-edit-items-overlay').remove()" style="background:none;border:none;cursor:pointer;color:var(--text-secondary);font-size:20px">✕</button>
+        </div>
+        <div style="padding:16px 20px;overflow-y:auto;flex:1">
+          <p style="font-size:12px;color:var(--text-secondary);margin-bottom:14px">Modificá cantidad o precio por unidad. Si un equipo no pudo conseguirse, poné cantidad 0 o eliminá el ítem. Los pagos ya registrados <b>no se modifican automáticamente</b> — ajustá la caja manualmente si corresponde.</p>
+          <table style="width:100%;font-size:13px">
+            <thead><tr style="border-bottom:1px solid var(--border)">
+              <th style="text-align:left;padding:6px 4px;color:var(--text-secondary);font-weight:600">Producto</th>
+              <th style="text-align:center;padding:6px 4px;color:var(--text-secondary);font-weight:600">Cant.</th>
+              <th style="text-align:center;padding:6px 4px;color:var(--text-secondary);font-weight:600">Precio/u (USD)</th>
+              <th style="text-align:right;padding:6px 4px;color:var(--text-secondary);font-weight:600">Subtotal</th>
+              <th></th>
+            </tr></thead>
+            <tbody id="edit-items-tbody">
+              ${items.map(i => `
+                <tr id="edit-item-row-${i.id}" style="border-bottom:1px solid var(--border)">
+                  <td style="padding:8px 4px">${i.nombre}${i.storage ? ' ' + i.storage : ''}${i.color ? ' · ' + i.color : ''}</td>
+                  <td style="padding:8px 4px;text-align:center">
+                    <input type="number" min="0" step="1" value="${i.cantidad}" id="edit-cant-${i.id}" oninput="Proveedores._editItemPreview('${i.id}')" style="width:60px;text-align:center;font-size:12px;padding:4px 6px;border:1px solid var(--border-strong);border-radius:6px">
+                  </td>
+                  <td style="padding:8px 4px;text-align:center">
+                    <input type="number" min="0" step="0.01" value="${i.precioUsd}" id="edit-precio-${i.id}" oninput="Proveedores._editItemPreview('${i.id}')" style="width:90px;text-align:center;font-size:12px;padding:4px 6px;border:1px solid var(--border-strong);border-radius:6px">
+                  </td>
+                  <td style="padding:8px 4px;text-align:right;font-weight:600" id="edit-sub-${i.id}">${State.fmtUSD(i.precioUsd * i.cantidad)}</td>
+                  <td style="padding:8px 4px;text-align:right">
+                    <button onclick="Proveedores._confirmarEliminarItem(${loteId}, '${i.id}')" style="background:none;border:none;cursor:pointer;color:var(--red);font-size:15px" title="Eliminar ítem">🗑️</button>
+                  </td>
+                </tr>`).join('')}
+            </tbody>
+          </table>
+          <div style="text-align:right;font-size:13px;margin-top:12px;padding-top:10px;border-top:1px solid var(--border)">
+            Nuevo total: <b id="edit-items-total" style="color:var(--blue)">${State.fmtUSD(items.reduce((s,i) => s + i.precioUsd * i.cantidad, 0))}</b>
+          </div>
+        </div>
+        <div style="padding:14px 20px;border-top:1px solid var(--border);display:flex;justify-content:flex-end;gap:8px;flex-shrink:0">
+          <button class="btn" onclick="document.getElementById('prov-edit-items-overlay').remove()">Cancelar</button>
+          <button class="btn btn-primary" onclick="Proveedores.guardarEdicionItems(${loteId})">✓ Guardar cambios</button>
+        </div>
+      </div>`;
+    overlay.onclick = e => { if (e.target === overlay) overlay.remove(); };
+    document.body.appendChild(overlay);
+  },
+
+  _editItemPreview(itemId) {
+    const cant = parseFloat(document.getElementById(`edit-cant-${itemId}`)?.value) || 0;
+    const precio = parseFloat(document.getElementById(`edit-precio-${itemId}`)?.value) || 0;
+    const sub = document.getElementById(`edit-sub-${itemId}`);
+    if (sub) sub.textContent = State.fmtUSD(cant * precio);
+    // Recalcular total
+    const items = (State.loteItems || []).filter(i => i.loteId === (State.loteItems.find(x => x.id == itemId)?.loteId));
+    let total = 0;
+    items.forEach(i => {
+      const c = parseFloat(document.getElementById(`edit-cant-${i.id}`)?.value) || 0;
+      const p = parseFloat(document.getElementById(`edit-precio-${i.id}`)?.value) || 0;
+      total += c * p;
+    });
+    const el = document.getElementById('edit-items-total');
+    if (el) el.textContent = State.fmtUSD(total);
+  },
+
+  async _confirmarEliminarItem(loteId, itemId) {
+    const item = State.loteItems.find(i => i.id == itemId);
+    if (!item) return;
+    if (!confirm(`¿Eliminar "${item.nombre}" del lote? Esto reduce el total de la orden.`)) return;
+    const ok = await DB.eliminarLoteItem(itemId);
+    if (ok) {
+      document.getElementById(`edit-item-row-${itemId}`)?.remove();
+      this._editItemPreview(itemId);
+      toast('Ítem eliminado del lote.');
+      // Refrescar total
+      const items = (State.loteItems || []).filter(i => i.loteId === loteId);
+      const el = document.getElementById('edit-items-total');
+      if (el) el.textContent = State.fmtUSD(items.reduce((s, i) => s + i.precioUsd * i.cantidad, 0));
+    }
+  },
+
+  async guardarEdicionItems(loteId) {
+    const items = (State.loteItems || []).filter(i => i.loteId === loteId);
+    let ok = true;
+    for (const i of items) {
+      const cant = parseFloat(document.getElementById(`edit-cant-${i.id}`)?.value);
+      const precio = parseFloat(document.getElementById(`edit-precio-${i.id}`)?.value);
+      if (isNaN(cant) || isNaN(precio)) continue;
+      if (cant !== i.cantidad || precio !== i.precioUsd) {
+        const res = await DB.actualizarLoteItem(i.id, cant, precio);
+        if (!res) ok = false;
+      }
+    }
+    document.getElementById('prov-edit-items-overlay')?.remove();
+    if (ok) toast('Orden actualizada correctamente.');
+    else toast('Algunos ítems no pudieron guardarse.');
+    this.renderContent();
   },
 
   async cancelarLote(loteId) {

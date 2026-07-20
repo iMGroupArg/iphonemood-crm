@@ -652,6 +652,21 @@ const DB = {
     if (l) { l.estado = estado; if (fechaRecepcion) l.fechaRecepcion = fechaRecepcion; }
   },
 
+  async actualizarLoteItem(itemId, cantidad, precioUsd) {
+    const { error } = await supa.from('lote_items').update({ cantidad, precio_usd: precioUsd }).eq('id', itemId);
+    if (!error) {
+      const item = State.loteItems.find(i => i.id === itemId);
+      if (item) { item.cantidad = cantidad; item.precioUsd = precioUsd; }
+    }
+    return !error;
+  },
+
+  async eliminarLoteItem(itemId) {
+    const { error } = await supa.from('lote_items').delete().eq('id', itemId);
+    if (!error) State.loteItems = State.loteItems.filter(i => i.id !== itemId);
+    return !error;
+  },
+
   async eliminarLote(loteId) {
     await supa.from('lote_pagos').delete().eq('lote_id', loteId);
     await supa.from('lote_items').delete().eq('lote_id', loteId);

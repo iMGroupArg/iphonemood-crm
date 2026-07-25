@@ -1261,7 +1261,7 @@ const Proveedores = {
             notas: notasBase,
             estadoInventario: 'disponible',
             grado: item.grado || 'Sin grado',
-            modelo: window.Stock?._normalizarModelo(item.nombre) || item.nombre,
+            modelo: item.nombre,
             storage: storageU,
             color: colorU,
             bateriaPct: null,

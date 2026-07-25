@@ -1214,6 +1214,13 @@ const Proveedores = {
   },
 
   async _confirmarRecepcion(loteId) {
+    const btn = document.querySelector('#prov-recep-overlay .btn-green');
+    if (btn) { btn.disabled = true; btn.textContent = '⏳ Procesando…'; }
+    try { await this.__confirmarRecepcionInterno(loteId); }
+    catch(e) { toast('Error al confirmar: ' + e.message, 'error'); console.error(e); if (btn) { btn.disabled = false; btn.innerHTML = '📦 Confirmar e ingresar al stock'; } }
+  },
+
+  async __confirmarRecepcionInterno(loteId) {
     const fecha = document.getElementById('recep-fecha')?.value || new Date().toISOString().slice(0, 10);
     const custodio = document.getElementById('recep-custodio')?.value || '';
     const items = (State.loteItems || []).filter(i => i.loteId === loteId);

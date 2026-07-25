@@ -232,7 +232,7 @@ const Proveedores = {
     const totalUds = items.reduce((s, i) => s + i.cantidad, 0);
     const conv = pagos.find(p => p.tipo === 'conversion');
     const pagadoProveedor = pagos.filter(p => p.tipo === 'pago_proveedor').reduce((s, p) => s + p.montoUsd, 0);
-    const totalEnvio = pagos.filter(p => ['envio','costo'].includes(p.tipo)).reduce((s, p) => s + p.montoUsd, 0);
+    const totalEnvio = pagos.filter(p => ['envio','costo','diferencial'].includes(p.tipo)).reduce((s, p) => s + p.montoUsd, 0);
     const comisionUsd = conv?.comisionUsd || 0;
     const costoTotal = totalItems + comisionUsd + totalEnvio;
     const costoUnit = totalUds > 0 ? costoTotal / totalUds : 0;
@@ -279,15 +279,33 @@ const Proveedores = {
         <div style="font-size:13px;font-weight:700;margin-bottom:10px">Items del lote (${totalUds} unidades)</div>
         <table style="width:100%;border-collapse:collapse;font-size:12px">
           <thead><tr style="border-bottom:1px solid var(--border)">
-            ${['Producto','Uds','Precio/u','Subtotal'].map((h,i) => `<th style="text-align:${i===0?'left':'right'};padding:5px 4px;color:var(--text-secondary);font-weight:600">${h}</th>`).join('')}
+            ${['Producto','Uds','Precio/u','Logística/u','Costo final/u','Subtotal',''].map((h,i) => `<th style="text-align:${i===0?'left':'right'};padding:5px 4px;color:var(--text-secondary);font-weight:600">${h}</th>`).join('')}
           </tr></thead>
           <tbody>
-            ${items.map(i => `<tr style="border-bottom:1px solid var(--border)">
-              <td style="padding:7px 4px">${i.nombre}${i.modelo&&i.modelo!==i.nombre?` · ${i.modelo}`:''}${i.storage ? ` ${i.storage}` : ''}${i.color ? ` · ${i.color}` : ''}</td>
-              <td style="text-align:right;padding:7px 4px">${i.cantidad}</td>
-              <td style="text-align:right;padding:7px 4px">${State.fmtUSD(i.precioUsd)}</td>
-              <td style="text-align:right;padding:7px 4px;font-weight:600">${State.fmtUSD(i.precioUsd * i.cantidad)}</td>
-            </tr>`).join('')}
+            ${items.map(i => {
+              const logAuto = totalUds > 0 ? (totalEnvio + comisionUsd) / totalUds : 0;
+              const logUsada = i.logisticaManual != null ? i.logisticaManual : logAuto;
+              const costoFinalU = i.precioUsd + logUsada;
+              const esManual = i.logisticaManual != null;
+              return `<tr style="border-bottom:1px solid var(--border)">
+                <td style="padding:7px 4px">${i.nombre}${i.storage ? ` ${i.storage}` : ''}${i.color ? ` · ${i.color}` : ''}</td>
+                <td style="text-align:right;padding:7px 4px">${i.cantidad}</td>
+                <td style="text-align:right;padding:7px 4px">${State.fmtUSD(i.precioUsd)}</td>
+                <td style="text-align:right;padding:7px 4px">
+                  <div style="display:flex;align-items:center;justify-content:flex-end;gap:6px">
+                    <span style="color:${esManual?'var(--blue)':'var(--amber)'};font-weight:${esManual?'600':'400'}">+${State.fmtUSD(logUsada)}</span>
+                    <button onclick="Proveedores.editarLogistica(${i.id}, ${logAuto})" style="background:none;border:none;cursor:pointer;font-size:13px;line-height:1;padding:2px;opacity:.7" title="Editar logística de este ítem">✏️</button>
+                    ${esManual ? `<button onclick="Proveedores.resetLogistica(${i.id})" style="background:none;border:none;cursor:pointer;font-size:12px;line-height:1;padding:2px;opacity:.7" title="Restaurar auto">↩️</button>` : ''}
+                  </div>
+                  ${esManual ? `<div style="font-size:9px;color:var(--text-secondary);text-align:right;margin-top:1px">auto: ${State.fmtUSD(logAuto)}</div>` : ''}
+                </td>
+                <td style="text-align:right;padding:7px 4px;font-weight:700;color:var(--blue)">${State.fmtUSD(costoFinalU)}</td>
+                <td style="text-align:right;padding:7px 4px;font-weight:600">${State.fmtUSD(costoFinalU * i.cantidad)}</td>
+                <td style="text-align:center;padding:7px 4px">
+                  <button onclick="Proveedores.modalUnidades(${i.id})" style="background:none;border:1px solid var(--border-strong);border-radius:6px;padding:3px 7px;cursor:pointer;font-size:11px;white-space:nowrap;color:${(i.unidades||[]).length > 0 ? 'var(--blue)' : 'var(--text-secondary)'}" title="Datos por unidad (IMEI, color, almacenamiento)">${(i.unidades||[]).length > 0 ? `📋 ${i.unidades.length}/${i.cantidad}` : '📋 Datos'}</button>
+                </td>
+              </tr>`;
+            }).join('')}
           </tbody>
         </table>
       </div>
@@ -299,9 +317,9 @@ const Proveedores = {
           <div style="font-size:13px;font-weight:700">💰 Costos adicionales</div>
           ${!isTerminal ? `<button class="btn btn-sm" onclick="Proveedores.modalCostoAdicional(${l.id})">➕ Agregar</button>` : ''}
         </div>
-        ${pagos.filter(p => ['envio','costo'].includes(p.tipo)).length === 0
+        ${pagos.filter(p => ['envio','costo','diferencial'].includes(p.tipo)).length === 0
           ? '<div style="color:var(--text-secondary);font-size:12px">Sin costos registrados. Podés agregar envío, aduana, flete nacional, etc.</div>'
-          : pagos.filter(p => ['envio','costo'].includes(p.tipo)).map(pg => `
+          : pagos.filter(p => ['envio','costo','diferencial'].includes(p.tipo)).map(pg => `
             <div style="display:flex;align-items:center;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--border)">
               <div>
                 <div style="font-size:12px;font-weight:600">💰 ${pg.notas || 'Costo adicional'}</div>
@@ -312,7 +330,7 @@ const Proveedores = {
                 ${!isTerminal ? `<button onclick="Proveedores.eliminarCosto(${l.id},${pg.id})" style="background:none;border:none;cursor:pointer;color:var(--red);font-size:14px" title="Eliminar costo">🗑️</button>` : ''}
               </div>
             </div>`).join('')}
-        ${pagos.filter(p => ['envio','costo'].includes(p.tipo)).length > 0 ? `<div style="text-align:right;font-size:12px;color:var(--text-secondary);margin-top:8px">Total costos: <b style="color:var(--text)">${State.fmtUSD(totalEnvio)}</b> · Prorrateo: <b style="color:var(--green)">${State.fmtUSD(totalUds > 0 ? totalEnvio / totalUds : 0)}/u</b></div>` : ''}
+        ${pagos.filter(p => ['envio','costo','diferencial'].includes(p.tipo)).length > 0 ? `<div style="text-align:right;font-size:12px;color:var(--text-secondary);margin-top:8px">Total costos: <b style="color:var(--text)">${State.fmtUSD(totalEnvio)}</b> · Prorrateo: <b style="color:var(--green)">${State.fmtUSD(totalUds > 0 ? totalEnvio / totalUds : 0)}/u</b></div>` : ''}
       </div>
 
       <!-- Línea de tiempo -->
@@ -499,6 +517,16 @@ const Proveedores = {
                 <input type="number" min="0" step="0.01" value="${item.precioUsd}" oninput="Proveedores._editItem(${idx},'precioUsd',+this.value);Proveedores._refrescarTotal()" style="width:100%;font-size:12px;padding:5px 8px;background:var(--bg-elevated);border:1px solid var(--border-strong);border-radius:6px;color:var(--text)">
               </div>
             </div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:6px">
+              <div>
+                <label style="font-size:10px;color:var(--text-secondary);display:block;margin-bottom:2px">Almacenamiento</label>
+                <input type="text" placeholder="Ej: 128GB, 256GB" value="${item.storage || ''}" oninput="Proveedores._editItem(${idx},'storage',this.value)" style="width:100%;font-size:12px;padding:5px 8px;background:var(--bg-elevated);border:1px solid var(--border-strong);border-radius:6px;color:var(--text)">
+              </div>
+              <div>
+                <label style="font-size:10px;color:var(--text-secondary);display:block;margin-bottom:2px">Color</label>
+                <input type="text" placeholder="Ej: Negro, Blanco" value="${item.color || ''}" oninput="Proveedores._editItem(${idx},'color',this.value)" style="width:100%;font-size:12px;padding:5px 8px;background:var(--bg-elevated);border:1px solid var(--border-strong);border-radius:6px;color:var(--text)">
+              </div>
+            </div>
             <div style="text-align:right;font-size:11px;color:var(--text-secondary);margin-top:4px">Subtotal: <b>${State.fmtUSD(item.precioUsd * item.cantidad)}</b></div>
           </div>
         `).join('')}
@@ -543,7 +571,7 @@ const Proveedores = {
     `;
   },
 
-  _agregarItem() { this._loteWizard.items.push({ nombre: '', cantidad: 1, precioUsd: 0 }); this._renderWizard(); },
+  _agregarItem() { this._loteWizard.items.push({ nombre: '', cantidad: 1, precioUsd: 0, storage: '', color: '' }); this._renderWizard(); },
   _quitarItem(idx) { this._loteWizard.items.splice(idx, 1); this._renderWizard(); },
   _editItem(idx, campo, val) { if (this._loteWizard.items[idx]) this._loteWizard.items[idx][campo] = val; },
   _refrescarTotal() {
@@ -878,6 +906,14 @@ const Proveedores = {
             Los costos adicionales se prorratean entre todas las unidades del lote para calcular el costo real por dispositivo.
           </div>
           <div>
+            <label style="font-size:11px;color:var(--text-secondary);display:block;margin-bottom:4px">Tipo de costo</label>
+            <select id="costo-tipo-sel" onchange="Proveedores._toggleCostoTipo()" style="width:100%;font-size:13px;padding:7px 10px;background:var(--bg-secondary);border:1px solid var(--border-strong);border-radius:8px;color:var(--text)">
+              <option value="costo">Costo general (envío, aduana, flete…)</option>
+              <option value="diferencial">Diferencial de tipo de cambio ARS→USDT</option>
+            </select>
+          </div>
+          <div id="costo-tipo-general">
+          <div>
             <label style="font-size:11px;color:var(--text-secondary);display:block;margin-bottom:4px">Descripción *</label>
             <input id="costo-desc" type="text" placeholder="Ej: Envío USA, Envío nacional, Aduana, Flete..." style="width:100%;font-size:13px;padding:8px 10px;background:var(--bg-secondary);border:1px solid var(--border-strong);border-radius:8px;color:var(--text)">
           </div>
@@ -912,17 +948,91 @@ const Proveedores = {
             <label style="font-size:11px;color:var(--text-secondary);display:block;margin-bottom:4px">Fecha</label>
             <input id="costo-fecha" type="date" value="${new Date().toISOString().slice(0, 10)}" style="width:100%;font-size:13px;padding:7px 10px;background:var(--bg-secondary);border:1px solid var(--border-strong);border-radius:8px;color:var(--text)">
           </div>
+          </div><!-- fin costo-tipo-general -->
+          <div id="costo-tipo-diferencial" style="display:none;flex-direction:column;gap:10px">
+            <div style="background:var(--amber-light,#fff8e1);border-radius:8px;padding:10px;font-size:12px;color:var(--amber)">
+              Ingresá los datos de la compra de USDT. El diferencial (cotiz compra − cotiz venta) × USDT se agrega al costo del lote y se prorratea por unidad.
+            </div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+              <div>
+                <label style="font-size:11px;color:var(--text-secondary);display:block;margin-bottom:4px">USDT comprados</label>
+                <input id="dif-usdt" type="number" min="0" step="0.01" placeholder="0" oninput="Proveedores._calcDiferencial()" style="width:100%;font-size:13px;padding:8px 10px;background:var(--bg-secondary);border:1px solid var(--border-strong);border-radius:8px;color:var(--text)">
+              </div>
+              <div>
+                <label style="font-size:11px;color:var(--text-secondary);display:block;margin-bottom:4px">Cotiz. compra (ARS/USDT)</label>
+                <input id="dif-cotiz-compra" type="number" min="0" step="0.1" placeholder="${State.refBlue}" oninput="Proveedores._calcDiferencial()" style="width:100%;font-size:13px;padding:8px 10px;background:var(--bg-secondary);border:1px solid var(--border-strong);border-radius:8px;color:var(--text)">
+              </div>
+            </div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+              <div>
+                <label style="font-size:11px;color:var(--text-secondary);display:block;margin-bottom:4px">Cotiz. referencia (venta)</label>
+                <input id="dif-cotiz-ref" type="number" min="0" step="0.1" placeholder="${State.refBlue}" oninput="Proveedores._calcDiferencial()" style="width:100%;font-size:13px;padding:8px 10px;background:var(--bg-secondary);border:1px solid var(--border-strong);border-radius:8px;color:var(--text)">
+              </div>
+              <div style="display:flex;align-items:flex-end;padding-bottom:2px">
+                <div id="dif-preview" style="font-size:13px;font-weight:600;color:var(--red)"></div>
+              </div>
+            </div>
+            <div>
+              <label style="font-size:11px;color:var(--text-secondary);display:block;margin-bottom:4px">Fecha</label>
+              <input id="dif-fecha" type="date" value="${new Date().toISOString().slice(0, 10)}" style="width:100%;font-size:13px;padding:7px 10px;background:var(--bg-secondary);border:1px solid var(--border-strong);border-radius:8px;color:var(--text)">
+            </div>
+          </div>
         </div>
         <div style="padding:12px 18px;border-top:1px solid var(--border);display:flex;justify-content:flex-end;gap:8px">
           <button class="btn" onclick="document.getElementById('prov-costo-overlay').remove()">Cancelar</button>
-          <button class="btn btn-primary" onclick="Proveedores._confirmarCosto(${loteId})">💰 Registrar costo</button>
+          <button class="btn btn-primary" onclick="Proveedores._confirmarCosto(${loteId})">💰 Registrar</button>
         </div>
       </div>
     `;
     document.body.appendChild(overlay);
   },
 
+  _toggleCostoTipo() {
+    const tipo = document.getElementById('costo-tipo-sel')?.value;
+    document.getElementById('costo-tipo-general').style.display = tipo === 'costo' ? 'flex' : 'none';
+    document.getElementById('costo-tipo-general').style.flexDirection = 'column';
+    document.getElementById('costo-tipo-diferencial').style.display = tipo === 'diferencial' ? 'flex' : 'none';
+  },
+
+  _calcDiferencial() {
+    const usdt = parseFloat(document.getElementById('dif-usdt')?.value) || 0;
+    const compra = parseFloat(document.getElementById('dif-cotiz-compra')?.value) || 0;
+    const ref = parseFloat(document.getElementById('dif-cotiz-ref')?.value) || 0;
+    const preview = document.getElementById('dif-preview');
+    if (!preview) return;
+    if (usdt > 0 && compra > 0 && ref > 0) {
+      const diferencialARS = (compra - ref) * usdt;
+      const diferencialUSD = diferencialARS / ref;
+      preview.textContent = `${diferencialARS >= 0 ? '+' : ''}${State.fmtARS(diferencialARS)} (${diferencialUSD >= 0 ? '+' : ''}${State.fmtUSD(diferencialUSD)})`;
+      preview.style.color = diferencialARS >= 0 ? 'var(--red)' : 'var(--green)';
+    } else {
+      preview.textContent = '';
+    }
+  },
+
   async _confirmarCosto(loteId) {
+    const tipoSel = document.getElementById('costo-tipo-sel')?.value || 'costo';
+
+    if (tipoSel === 'diferencial') {
+      const usdt = parseFloat(document.getElementById('dif-usdt')?.value) || 0;
+      const cotizCompra = parseFloat(document.getElementById('dif-cotiz-compra')?.value) || 0;
+      const cotizRef = parseFloat(document.getElementById('dif-cotiz-ref')?.value) || 0;
+      const fecha = document.getElementById('dif-fecha')?.value;
+      if (!usdt || !cotizCompra || !cotizRef) { toast('Completá todos los campos del diferencial', 'error'); return; }
+      const diferencialARS = (cotizCompra - cotizRef) * usdt;
+      const montoUsd = diferencialARS / cotizRef;
+      await DB.guardarLotePago(loteId, {
+        tipo: 'diferencial', montoUsd, montoUsdt: 0, comisionPct: 0, comisionUsd: 0,
+        moneda: 'USD', persona: '', bolsillo: '', personaDest: '', bolsilloDestino: '', fecha,
+        notas: `Dif. cambio: ${usdt} USDT × (${cotizCompra} - ${cotizRef}) ARS/USDT`
+      });
+      document.getElementById('prov-costo-overlay')?.remove();
+      toast('Diferencial de cambio registrado');
+      this.renderKpis();
+      this.renderContent();
+      return;
+    }
+
     const desc = document.getElementById('costo-desc')?.value.trim();
     const monto = parseFloat(document.getElementById('costo-monto')?.value) || 0;
     const moneda = document.getElementById('costo-moneda')?.value;
@@ -932,14 +1042,20 @@ const Proveedores = {
     if (!desc) { toast('Ingresá una descripción', 'error'); return; }
     if (!monto || monto <= 0) { toast('Ingresá un monto válido', 'error'); return; }
 
-    const montoUsd = moneda === 'ARS' ? monto / (State.refBlue || 1) : monto;
+    const montoUsd = moneda === 'ARS' ? monto / (State.refBlue || 1) : moneda === 'USDT' ? monto : monto;
 
-    // Solo debitar caja si se eligió una persona
     if (persona) {
       const saldo = (State.cajas[persona]?.[bolsillo]) || 0;
       State.cajas[persona] = State.cajas[persona] || {};
-      State.cajas[persona][bolsillo] = saldo - monto;
-      await DB.actualizarSaldoCaja(persona, bolsillo, saldo - monto);
+      // Convertir monto a la moneda nativa del bolsillo para deducir correctamente
+      const esARS = bolsillo.startsWith('ARS');
+      const esUSDT = bolsillo === 'USDT';
+      let montoParaCaja;
+      if (esARS)       montoParaCaja = moneda === 'ARS' ? monto : montoUsd * (State.refBlue || 1);
+      else if (esUSDT) montoParaCaja = moneda === 'USDT' ? monto : montoUsd;
+      else             montoParaCaja = montoUsd; // bolsillo USD
+      State.cajas[persona][bolsillo] = saldo - montoParaCaja;
+      await DB.actualizarSaldoCaja(persona, bolsillo, saldo - montoParaCaja);
     }
 
     await DB.guardarLotePago(loteId, {
@@ -960,6 +1076,77 @@ const Proveedores = {
     this.renderContent();
   },
 
+  editarLogistica(itemId, logAuto) {
+    const nuevo = prompt(`Logística por unidad (USD)\nAuto-prorrateado: ${logAuto.toFixed(2)}\n\nIngresá el valor manual o dejá vacío para restaurar auto:`, logAuto.toFixed(2));
+    if (nuevo === null) return; // canceló
+    const val = nuevo.trim() === '' ? null : parseFloat(nuevo.replace(',', '.'));
+    if (nuevo.trim() !== '' && (isNaN(val) || val < 0)) { toast('Valor inválido', 'error'); return; }
+    DB.actualizarLogisticaItem(itemId, val).then(() => {
+      this.renderContent();
+    });
+  },
+  resetLogistica(itemId) {
+    DB.actualizarLogisticaItem(itemId, null).then(() => { this.renderContent(); });
+  },
+
+  modalUnidades(itemId) {
+    const item = (State.loteItems || []).find(i => i.id === itemId);
+    if (!item) return;
+    const unids = Array.isArray(item.unidades) ? item.unidades : [];
+    const esSerie = ['cargador','cable','accesorio'].includes(item.cat);
+    const label1 = esSerie ? 'N° de serie' : 'IMEI';
+    const rows = Array.from({ length: item.cantidad }, (_, k) => {
+      const u = unids[k] || {};
+      return `<div style="background:var(--bg-secondary);border-radius:8px;padding:10px;margin-bottom:8px;display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;align-items:end">
+        <div style="grid-column:1/-1;font-size:11px;font-weight:700;color:var(--text-secondary)">Unidad ${k+1}</div>
+        <div>
+          <label style="font-size:10px;color:var(--text-secondary);display:block;margin-bottom:3px">${label1}</label>
+          <input class="ud-imei" data-idx="${k}" type="text" value="${u.imei||''}" placeholder="${label1}…" style="width:100%;font-size:12px;padding:6px 8px;background:var(--bg);border:1px solid var(--border-strong);border-radius:6px;color:var(--text)">
+        </div>
+        <div>
+          <label style="font-size:10px;color:var(--text-secondary);display:block;margin-bottom:3px">Color</label>
+          <input class="ud-color" data-idx="${k}" type="text" value="${u.color||item.color||''}" placeholder="Color…" style="width:100%;font-size:12px;padding:6px 8px;background:var(--bg);border:1px solid var(--border-strong);border-radius:6px;color:var(--text)">
+        </div>
+        <div>
+          <label style="font-size:10px;color:var(--text-secondary);display:block;margin-bottom:3px">Almacenamiento</label>
+          <input class="ud-storage" data-idx="${k}" type="text" value="${u.storage||item.storage||''}" placeholder="128GB…" style="width:100%;font-size:12px;padding:6px 8px;background:var(--bg);border:1px solid var(--border-strong);border-radius:6px;color:var(--text)">
+        </div>
+      </div>`;
+    }).join('');
+
+    const overlay = document.createElement('div');
+    overlay.id = 'prov-unid-overlay';
+    overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.65);backdrop-filter:blur(4px);z-index:1000;display:flex;align-items:center;justify-content:center;padding:20px';
+    overlay.innerHTML = `
+      <div style="background:var(--bg-elevated);border:1px solid var(--border-strong);border-radius:var(--radius-xl);width:min(560px,96vw);max-height:90dvh;display:flex;flex-direction:column;overflow:hidden">
+        <div style="padding:14px 18px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;flex-shrink:0">
+          <div style="font-size:15px;font-weight:700">📋 Datos por unidad — ${item.nombre}${item.storage?' '+item.storage:''}${item.color?' · '+item.color:''}</div>
+          <button onclick="document.getElementById('prov-unid-overlay').remove()" style="background:none;border:none;cursor:pointer;color:var(--text-secondary);font-size:18px">✕</button>
+        </div>
+        <div id="prov-unid-body" style="padding:14px 18px;overflow-y:auto;flex:1">${rows}</div>
+        <div style="padding:12px 18px;border-top:1px solid var(--border);display:flex;justify-content:flex-end;gap:8px;flex-shrink:0">
+          <button class="btn" onclick="document.getElementById('prov-unid-overlay').remove()">Cancelar</button>
+          <button class="btn btn-primary" onclick="Proveedores._guardarUnidades(${itemId})">💾 Guardar datos</button>
+        </div>
+      </div>`;
+    document.body.appendChild(overlay);
+  },
+
+  async _guardarUnidades(itemId) {
+    const imeis = [...document.querySelectorAll('.ud-imei')];
+    const colors = [...document.querySelectorAll('.ud-color')];
+    const storages = [...document.querySelectorAll('.ud-storage')];
+    const unidades = imeis.map((el, k) => ({
+      imei: el.value.trim(),
+      color: colors[k]?.value.trim() || '',
+      storage: storages[k]?.value.trim() || '',
+    }));
+    await DB.actualizarUnidadesItem(itemId, unidades);
+    document.getElementById('prov-unid-overlay')?.remove();
+    toast('Datos guardados', 'success');
+    this.renderContent();
+  },
+
   // Mantener alias para compatibilidad
   modalEnvio(loteId) { this.modalCostoAdicional(loteId); },
 
@@ -972,22 +1159,23 @@ const Proveedores = {
     const totalItems = items.reduce((s, i) => s + i.precioUsd * i.cantidad, 0);
     const totalUds = items.reduce((s, i) => s + i.cantidad, 0);
     const comision = pagos.find(p => p.tipo === 'conversion')?.comisionUsd || 0;
-    const envio = pagos.filter(p => ['envio','costo'].includes(p.tipo)).reduce((s, p) => s + p.montoUsd, 0);
-    const costoUnit = totalUds > 0 ? (totalItems + comision + envio) / totalUds : 0;
+    const envio = pagos.filter(p => ['envio','costo','diferencial'].includes(p.tipo)).reduce((s, p) => s + p.montoUsd, 0);
+    const logistica = comision + envio;
+    const logPorUnidad = totalUds > 0 ? logistica / totalUds : 0;
 
     const overlay = document.createElement('div');
     overlay.id = 'prov-recep-overlay';
     overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.65);backdrop-filter:blur(4px);z-index:900;display:flex;align-items:center;justify-content:center;padding:20px';
     overlay.innerHTML = `
-      <div style="background:var(--bg-elevated);border:1px solid var(--border-strong);border-radius:var(--radius-xl);width:min(500px,96vw);max-height:90dvh;display:flex;flex-direction:column;overflow:hidden">
+      <div style="background:var(--bg-elevated);border:1px solid var(--border-strong);border-radius:var(--radius-xl);width:min(520px,96vw);max-height:90dvh;display:flex;flex-direction:column;overflow:hidden">
         <div style="padding:14px 18px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;flex-shrink:0">
           <div style="font-size:15px;font-weight:700">📦 Confirmar recepción</div>
           <button onclick="document.getElementById('prov-recep-overlay').remove()" style="background:none;border:none;cursor:pointer;color:var(--text-secondary);font-size:18px">✕</button>
         </div>
         <div style="padding:18px;overflow-y:auto;flex:1;display:flex;flex-direction:column;gap:12px">
-          <div style="background:var(--green-light);border-radius:8px;padding:10px;font-size:12px;color:var(--green)">
-            Al confirmar, los items se agregarán al inventario con costo unitario: <b>${State.fmtUSD(costoUnit)}/u</b>
-            <div style="font-size:10px;margin-top:4px;opacity:.8">= (items ${State.fmtUSD(totalItems)} + comisión ${State.fmtUSD(comision)} + costos adicionales ${State.fmtUSD(envio)}) ÷ ${totalUds} uds</div>
+          <div style="background:var(--blue-light);border-radius:8px;padding:10px;font-size:12px;color:var(--blue)">
+            Logística prorrateada: <b>${State.fmtUSD(logistica)}</b> ÷ ${totalUds} uds = <b>${State.fmtUSD(logPorUnidad)}/u</b>
+            <div style="font-size:10px;margin-top:3px;opacity:.8">comisión ${State.fmtUSD(comision)} + costos adicionales ${State.fmtUSD(envio)}</div>
           </div>
           <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
             <div>
@@ -1002,68 +1190,117 @@ const Proveedores = {
               </select>
             </div>
           </div>
-          <div style="font-size:11px;font-weight:700;color:var(--text-secondary);text-transform:uppercase;letter-spacing:.04em">Items que entran al stock:</div>
-          ${items.map(i => `<div style="background:var(--bg-secondary);border-radius:8px;padding:10px;font-size:12px">
-            <div style="font-weight:600">${i.nombre}${i.storage ? ` ${i.storage}` : ''}${i.color ? ` · ${i.color}` : ''} × ${i.cantidad} uds</div>
-            <div style="color:var(--text-secondary);margin-top:2px">Costo unitario final: <b style="color:var(--blue)">${State.fmtUSD(costoUnit)}</b></div>
-          </div>`).join('')}
+          <div style="font-size:11px;font-weight:700;color:var(--text-secondary);text-transform:uppercase;letter-spacing:.04em">Costo final por producto:</div>
+          ${items.map(i => {
+            const logUsada = i.logisticaManual != null ? i.logisticaManual : logPorUnidad;
+            const costoFinalU = i.precioUsd + logUsada;
+            const esManual = i.logisticaManual != null;
+            return `<div style="background:var(--bg-secondary);border-radius:8px;padding:10px;font-size:12px;display:flex;justify-content:space-between;align-items:center">
+              <div>
+                <div style="font-weight:600">${i.nombre}${i.storage ? ` ${i.storage}` : ''}${i.color ? ` · ${i.color}` : ''} × ${i.cantidad} uds</div>
+                <div style="color:var(--text-secondary);margin-top:2px;font-size:11px">${State.fmtUSD(i.precioUsd)} producto + <span style="color:${esManual?'var(--blue)':'inherit'}">${State.fmtUSD(logUsada)} logística${esManual?' ✎':''}</span></div>
+              </div>
+              <b style="color:var(--blue);font-size:13px">${State.fmtUSD(costoFinalU)}/u</b>
+            </div>`;
+          }).join('')}
         </div>
         <div style="padding:12px 18px;border-top:1px solid var(--border);display:flex;justify-content:flex-end;gap:8px;flex-shrink:0">
           <button class="btn" onclick="document.getElementById('prov-recep-overlay').remove()">Cancelar</button>
-          <button class="btn btn-green" onclick="Proveedores._confirmarRecepcion(${loteId},${costoUnit.toFixed(4)})">📦 Confirmar e ingresar al stock</button>
+          <button class="btn btn-green" onclick="Proveedores._confirmarRecepcion(${loteId})">📦 Confirmar e ingresar al stock</button>
         </div>
       </div>
     `;
     document.body.appendChild(overlay);
   },
 
-  async _confirmarRecepcion(loteId, costoUnit) {
+  async _confirmarRecepcion(loteId) {
     const fecha = document.getElementById('recep-fecha')?.value || new Date().toISOString().slice(0, 10);
     const custodio = document.getElementById('recep-custodio')?.value || '';
     const items = (State.loteItems || []).filter(i => i.loteId === loteId);
     const l = (State.lotesCompra || []).find(x => x.id === loteId);
     const prov = (State.proveedores || []).find(p => p.id === l?.proveedorId);
+    const pagos = (State.lotePagos || []).filter(p => p.loteId === loteId);
+    const comision = pagos.find(p => p.tipo === 'conversion')?.comisionUsd || 0;
+    const envio = pagos.filter(p => ['envio','costo','diferencial'].includes(p.tipo)).reduce((s, p) => s + p.montoUsd, 0);
+    const totalUds = items.reduce((s, i) => s + i.cantidad, 0);
+    const logPorUnidad = totalUds > 0 ? (comision + envio) / totalUds : 0;
 
     let errores = 0;
+    const CATS_IMEI = ['iphone','android','mac','ipad'];
     for (const item of items) {
-      const obj = {
-        cat: item.cat || 'iphone',
-        nombre: [item.nombre, item.storage, item.color].filter(Boolean).join(' '),
-        costoUSD: parseFloat(costoUnit),
-        precioARS: Math.round(parseFloat(costoUnit) * (State.refBlue || 1)),
-        cantidad: Number(item.cantidad) || 1,
-        imeis: [],
-        cotiz: State.refBlue,
-        proveedor: prov?.nombre || '',
-        custodio,
-        notas: `Lote #${loteId}${l?.nombre ? ' — ' + l.nombre : ''}`,
-        estadoInventario: 'disponible',
-        grado: item.grado || 'Sin grado',
-        modelo: item.nombre,
-        storage: item.storage || '',
-        color: item.color || '',
-        bateriaPct: null,
-        estadoProducto: 'Nuevo / Sellado',
-      };
-      const { id: newId, error } = await DB.guardarProductoStock(obj, null);
-      if (error || !newId) {
-        console.error('Error al guardar stock item:', error);
-        errores++;
+      const logUsada = item.logisticaManual != null ? item.logisticaManual : logPorUnidad;
+      const costoFinalU = item.precioUsd + logUsada;
+      const unidades = Array.isArray(item.unidades) ? item.unidades : [];
+      const notasBase = `Lote #${loteId}${l?.nombre ? ' — ' + l.nombre : ''}`;
+      const esIMEI = CATS_IMEI.includes(item.cat || 'iphone');
+
+      // Si hay datos por unidad, crear una entrada de stock por unidad
+      if (unidades.length > 0) {
+        for (let k = 0; k < item.cantidad; k++) {
+          const ud = unidades[k] || {};
+          const colorU = ud.color || item.color || '';
+          const storageU = ud.storage || item.storage || '';
+          const nombreU = [item.nombre, storageU, colorU].filter(Boolean).join(' ');
+          const obj = {
+            cat: item.cat || 'iphone',
+            nombre: nombreU,
+            costoUSD: costoFinalU,
+            precioARS: Math.round(costoFinalU * (State.refBlue || 1)),
+            cantidad: 1,
+            imeis: ud.imei ? [ud.imei] : [],
+            cotiz: State.refBlue,
+            proveedor: prov?.nombre || '',
+            custodio,
+            notas: notasBase,
+            estadoInventario: 'disponible',
+            grado: item.grado || 'Sin grado',
+            modelo: Stock._normalizarModelo(item.nombre),
+            storage: storageU,
+            color: colorU,
+            bateriaPct: null,
+            estadoProducto: 'Nuevo / Sellado',
+          };
+          const { id: newId, error } = await DB.guardarProductoStock(obj, null);
+          if (error || !newId) { errores++; } else {
+            State.stock.push({ id: newId, cat: obj.cat, nombre: obj.nombre, modelo: obj.modelo,
+              storage: obj.storage, color: obj.color, costoUSD: obj.costoUSD, precioARS: obj.precioARS,
+              cotiz: obj.cotiz, proveedor: obj.proveedor, custodio, notas: obj.notas,
+              estadoInventario: 'disponible', grado: obj.grado, estadoProducto: obj.estadoProducto,
+              cantidad: 1, cantidadDeclarada: 1, imeis: esIMEI ? (ud.imei ? [ud.imei] : []) : undefined,
+              bateriaPct: null, ciclosBateria: null });
+          }
+        }
       } else {
-        // Agregar a memoria inmediatamente
-        const CATS_IMEI = ['iphone','android','mac','ipad'];
-        const esIMEI = CATS_IMEI.includes(obj.cat);
-        State.stock.push({
-          id: newId, cat: obj.cat, nombre: obj.nombre, modelo: obj.modelo,
-          storage: obj.storage, color: obj.color, costoUSD: obj.costoUSD,
-          precioARS: obj.precioARS, cotiz: obj.cotiz, proveedor: obj.proveedor,
-          custodio: custodio, notas: obj.notas, estadoInventario: 'disponible',
-          grado: obj.grado, estadoProducto: obj.estadoProducto,
-          cantidad: esIMEI ? obj.cantidad : obj.cantidad,
-          cantidadDeclarada: obj.cantidad,
-          imeis: esIMEI ? [] : undefined,
-          bateriaPct: null, ciclosBateria: null,
-        });
+        // Sin datos por unidad: entrada grupal como antes
+        const nombre = [item.nombre, item.storage, item.color].filter(Boolean).join(' ');
+        const obj = {
+          cat: item.cat || 'iphone',
+          nombre,
+          costoUSD: costoFinalU,
+          precioARS: Math.round(costoFinalU * (State.refBlue || 1)),
+          cantidad: Number(item.cantidad) || 1,
+          imeis: [],
+          cotiz: State.refBlue,
+          proveedor: prov?.nombre || '',
+          custodio,
+          notas: notasBase,
+          estadoInventario: 'disponible',
+          grado: item.grado || 'Sin grado',
+          modelo: Stock._normalizarModelo(item.nombre),
+          storage: item.storage || '',
+          color: item.color || '',
+          bateriaPct: null,
+          estadoProducto: 'Nuevo / Sellado',
+        };
+        const { id: newId, error } = await DB.guardarProductoStock(obj, null);
+        if (error || !newId) { errores++; } else {
+          State.stock.push({ id: newId, cat: obj.cat, nombre: obj.nombre, modelo: obj.modelo,
+            storage: obj.storage, color: obj.color, costoUSD: obj.costoUSD, precioARS: obj.precioARS,
+            cotiz: obj.cotiz, proveedor: obj.proveedor, custodio, notas: obj.notas,
+            estadoInventario: 'disponible', grado: obj.grado, estadoProducto: obj.estadoProducto,
+            cantidad: obj.cantidad, cantidadDeclarada: obj.cantidad,
+            imeis: esIMEI ? [] : undefined, bateriaPct: null, ciclosBateria: null });
+        }
       }
     }
 

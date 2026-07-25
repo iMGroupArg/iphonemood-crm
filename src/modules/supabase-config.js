@@ -139,6 +139,7 @@ const DB = {
     State.cambios = (cambiosRes.data || []).map(c => ({
       id: c.id, fecha: this.fmtFecha(c.creado_en), fechaISO: c.creado_en, tipo: c.tipo,
       entrega: Number(c.entrega), recibe: Number(c.recibe), cotiz: Number(c.cotizacion),
+      cotizRef: c.cotiz_ref ? Number(c.cotiz_ref) : null,
       origenP: this.personasIdToNombre[c.origen_persona_id] || '', origenB: c.origen_bolsillo,
       destinoP: this.personasIdToNombre[c.destino_persona_id] || '', destinoB: c.destino_bolsillo
     }));
@@ -203,10 +204,11 @@ const DB = {
       fechaOrden: l.fecha_orden, fechaLlegadaEsperada: l.fecha_llegada_esperada || '',
       fechaRecepcion: l.fecha_recepcion || '', estado: l.estado || 'programado', notas: l.notas || '',
     }));
-    State.loteItems = (loteItemsRes.data || []).map(i => ({
+    State.loteItems = (loteItemsRes.data || []).map(i => ({ logisticaManual: i.logistica_manual != null ? Number(i.logistica_manual) : null,
       id: i.id, loteId: i.lote_id, nombre: i.nombre, cat: i.cat || 'iphone',
       modelo: i.modelo || '', storage: i.storage || '', color: i.color || '',
       cantidad: Number(i.cantidad), precioUsd: Number(i.precio_usd), grado: i.grado || '', notas: i.notas || '',
+      unidades: Array.isArray(i.unidades) ? i.unidades : [],
     }));
     State.lotePagos = (lotePagosRes.data || []).map(p => ({
       id: p.id, loteId: p.lote_id, tipo: p.tipo,
@@ -251,7 +253,7 @@ const DB = {
     const cfg = {};
     (configRes.data || []).forEach(r => { cfg[r.clave] = r.valor; });
     if (cfg.ref_blue)  State.refBlue      = Number(cfg.ref_blue);
-    if (cfg.ref_usdt)  State.refUsdt      = Number(cfg.ref_usdt);
+    if (cfg.ref_usdt) { State.refUsdt = Number(cfg.ref_usdt); State._refUsdtCustomizado = true; }
     if (cfg.ref_blue_compra) State.refBlueCompra = Number(cfg.ref_blue_compra);
   },
 
@@ -268,6 +270,7 @@ const DB = {
   },
 
   async guardarCotizacionesDB(blue, usdt) {
+    State._refUsdtCustomizado = true;
     await Promise.all([
       supa.from('configuracion').upsert({ clave: 'ref_blue', valor: String(blue) }),
       supa.from('configuracion').upsert({ clave: 'ref_usdt', valor: String(usdt) }),
@@ -343,8 +346,9 @@ const DB = {
       destacado: !!obj.destacado, estado_inventario: obj.estadoInventario || 'disponible'
     };
     if (idExistente) {
-      const { error } = await supa.from('stock').update(row).eq('id', idExistente);
-      return { id: idExistente, error };
+      const { error, count } = await supa.from('stock').update(row).eq('id', idExistente).select('id');
+      const sinPermiso = !error && count === 0;
+      return { id: idExistente, error: error || (sinPermiso ? new Error('Sin permisos para actualizar este producto. Revisá los permisos en Supabase.') : null) };
     } else {
       let { data, error } = await supa.from('stock').insert(row).select().single();
       if (error) {
@@ -652,6 +656,19 @@ const DB = {
     if (l) { l.estado = estado; if (fechaRecepcion) l.fechaRecepcion = fechaRecepcion; }
   },
 
+  async actualizarLogisticaItem(itemId, logisticaManual) {
+    const val = logisticaManual == null ? null : Number(logisticaManual);
+    await supa.from('lote_items').update({ logistica_manual: val }).eq('id', itemId);
+    const item = State.loteItems.find(i => i.id === itemId);
+    if (item) item.logisticaManual = val;
+  },
+
+  async actualizarUnidadesItem(itemId, unidades) {
+    await supa.from('lote_items').update({ unidades: JSON.stringify(unidades) }).eq('id', itemId);
+    const item = State.loteItems.find(i => i.id === itemId);
+    if (item) item.unidades = unidades;
+  },
+
   async actualizarLoteItem(itemId, cantidad, precioUsd) {
     const { error } = await supa.from('lote_items').update({ cantidad, precio_usd: precioUsd }).eq('id', itemId);
     if (!error) {
@@ -680,11 +697,13 @@ const DB = {
   },
 
   async crearCambio(c) {
-    const { data } = await supa.from('cambios').insert({
+    const row = {
       tipo: c.tipo, entrega: c.entrega, recibe: c.recibe, cotizacion: c.cotiz,
       origen_persona_id: this.personaId(c.origenP), origen_bolsillo: c.origenB,
       destino_persona_id: this.personaId(c.destinoP), destino_bolsillo: c.destinoB
-    }).select().single();
+    };
+    if (c.cotizRef) row.cotiz_ref = c.cotizRef;
+    const { data } = await supa.from('cambios').insert(row).select().single();
     return data?.id;
   },
 

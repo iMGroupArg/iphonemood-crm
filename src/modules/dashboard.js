@@ -11,7 +11,7 @@ const Dashboard = {
     const hoy = new Date(); hoy.setHours(0,0,0,0);
     if (this.periodo === 'hoy') return f.getTime() === hoy.getTime();
     if (this.periodo === 'semana') { const d = new Date(hoy); d.setDate(d.getDate()-6); return f >= d; }
-    if (this.periodo === 'mes') { const d = new Date(hoy); d.setDate(d.getDate()-29); return f >= d; }
+    if (this.periodo === 'mes') return f.getFullYear() === hoy.getFullYear() && f.getMonth() === hoy.getMonth();
     if (this.periodo === 'rango') {
       const desde = this.fechaDesde ? new Date(this.fechaDesde) : null;
       const hasta = this.fechaHasta ? new Date(this.fechaHasta) : null;
@@ -30,15 +30,17 @@ const Dashboard = {
 
   getDiasRango() {
     const hoy = new Date();
-    let dias = 30;
-    if (this.periodo === 'hoy') dias = 1;
-    else if (this.periodo === 'semana') dias = 7;
-    else if (this.periodo === 'mes') dias = 30;
     const arr = [];
-    for (let i = dias - 1; i >= 0; i--) {
-      const d = new Date(hoy);
-      d.setDate(d.getDate() - i);
-      arr.push(d);
+    if (this.periodo === 'hoy') {
+      arr.push(new Date(hoy));
+    } else if (this.periodo === 'semana') {
+      for (let i = 6; i >= 0; i--) { const d = new Date(hoy); d.setDate(d.getDate()-i); arr.push(d); }
+    } else if (this.periodo === 'mes') {
+      const y = hoy.getFullYear(), m = hoy.getMonth();
+      const diasMes = hoy.getDate();
+      for (let i = 1; i <= diasMes; i++) arr.push(new Date(y, m, i));
+    } else {
+      for (let i = 29; i >= 0; i--) { const d = new Date(hoy); d.setDate(d.getDate()-i); arr.push(d); }
     }
     return arr;
   },
@@ -57,15 +59,17 @@ const Dashboard = {
       return a + (totalVenta - totalCosto) * State.refBlue;
     }, 0);
 
-    // Spread de cueva y diferencial de tarjeta: son globales (no dependen del período de ventas)
-    const spreadCueva = State.resultadoFinancieroMes();
+    // Spread de cueva filtrado al mismo período
+    const hoyStr = new Date().toISOString();
+    const cambiosPeriodo = State.cambios.filter(c => this._enPeriodo(c.fechaISO || hoyStr));
+    const spreadCuevaARS = cambiosPeriodo.reduce((a, o) => a + State.calcSpreadARS(o), 0);
     const diferencialTarjetaUSD = ventas.reduce((s, v) => {
       const totalVenta = v.items.reduce((a, i) => a + i.precio, 0);
       const totalPagado = (v.pagos||[]).reduce((a, p) => a + p.monto, 0) + (v.tradeIn?.valor||0);
       return s + Math.max(0, totalPagado - totalVenta);
     }, 0);
     const diferencialTarjetaARS = diferencialTarjetaUSD * State.refBlue;
-    const resultFinanciero = spreadCueva + diferencialTarjetaARS;
+    const resultFinanciero = spreadCuevaARS + diferencialTarjetaARS;
     const totalResultado = resultComercial + resultFinanciero;
 
     // Pasivo adelantos socios

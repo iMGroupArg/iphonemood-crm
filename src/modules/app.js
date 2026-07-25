@@ -15,6 +15,7 @@ import './proveedores.js';
 import './turnos.js';
 import './cuentacorriente.js';
 import './adelantos.js';
+import Bandeja from './bandeja.js';
 
 const App = {
   PAGES: {
@@ -32,6 +33,7 @@ const App = {
     turnos: { title: 'Turnos', module: Turnos },
     cuentacorriente: { title: 'Cuenta Corriente', module: CuentaCorriente },
     adelantos: { title: 'Adelantos de socios', module: Adelantos },
+    bandeja: { title: 'Bandeja WhatsApp', module: Bandeja },
     panel: { title: 'Panel de control', module: Panel },
   },
 
@@ -146,6 +148,7 @@ const App = {
         const cripto = await criptoRes.json();
         const compra = Math.round(cripto.compra);
         const venta  = Math.round(cripto.venta);
+        if (!State._refUsdtCustomizado) State.refUsdt = venta;
         if (elUsdt) {
           elUsdt.textContent = `$ ${venta.toLocaleString('es-AR')}`;
           elUsdt.title = `Comprá $${compra.toLocaleString('es-AR')} · Vendé $${venta.toLocaleString('es-AR')} · Tu ref: $${State.refUsdt.toLocaleString('es-AR')}`;
@@ -206,6 +209,11 @@ const App = {
   goTo(pageKey) {
     const page = this.PAGES[pageKey];
     if (!page) return;
+    // limpiar módulo actual si tiene destroy (ej. timers de Bandeja)
+    if (this._currentPage && this.PAGES[this._currentPage]?.module?.destroy) {
+      this.PAGES[this._currentPage].module.destroy();
+    }
+    this._currentPage = pageKey;
     document.getElementById('page-title').textContent = page.title;
     document.querySelectorAll('.nav-item').forEach(n => n.classList.toggle('active', n.dataset.page === pageKey));
     const container = document.getElementById('pages');

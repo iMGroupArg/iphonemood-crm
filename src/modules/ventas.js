@@ -111,8 +111,10 @@ const Ventas = {
     const ventas=this.ventasDelPeriodo();
 
     const volumen = ventas.reduce((s,v) => s + v.items.reduce((a,i) => a + i.precio, 0), 0);
-    const margenTotal = ventas.reduce((s,v) => s + v.items.reduce((a,i) => a + (i.precio - (i.costo||0)), 0), 0);
-    const margenXEquipo = ventas.length ? margenTotal / ventas.length : 0;
+    const unidades = ventas.reduce((s,v) => s + v.items.reduce((a,i) => a + (i.cantidad||1), 0), 0);
+    const margenReal = ventas.reduce((s,v) => s + v.items.reduce((a,i) => a + (i.precio - (i.costo||0)), 0), 0);
+    const margenXEquipo = ventas.length ? margenReal / ventas.length : 0;
+    const rentabilidad = volumen > 0 ? (margenReal / volumen * 100) : 0;
     const diferencial = ventas.reduce((s,v) => {
       const totalVenta = v.items.reduce((a,i) => a + i.precio, 0);
       const totalPagado = (v.pagos||[]).reduce((a,p) => a + p.monto, 0) + (v.tradeIn?.valor||0);
@@ -120,19 +122,37 @@ const Ventas = {
     }, 0);
     const ticketProm = ventas.length ? volumen / ventas.length : 0;
 
+    // Diferencial de tipo de cambio (ARS→USD) del período — spread Cueva
+    const cambiosPeriodo = (State.cambios || []).filter(c => {
+      if (c.tipo !== 'ars-usd') return false;
+      if (!c.fechaISO) return true;
+      const f = new Date(c.fechaISO); f.setHours(0,0,0,0);
+      const hoy = new Date(); hoy.setHours(0,0,0,0);
+      if (this.periodoVentas === 'hoy') return f.getTime() === hoy.getTime();
+      if (this.periodoVentas === 'semana') { const d=new Date(hoy); d.setDate(d.getDate()-7); return f>=d; }
+      if (this.periodoVentas === 'mes') return f.getFullYear()===hoy.getFullYear()&&f.getMonth()===hoy.getMonth();
+      if (this.periodoVentas === 'mes-especifico') return c.fechaISO.slice(0,7) === this.periodoMes;
+      if (this.periodoVentas === 'libre') {
+        if (this.periodoDesde && f < new Date(this.periodoDesde)) return false;
+        if (this.periodoHasta && f > new Date(this.periodoHasta)) return false;
+      }
+      return true;
+    });
+    const difCambio = cambiosPeriodo.reduce((s,c) => s + State.calcSpreadARS(c), 0) / (State.refBlue || 1);
+    const margenTotal = margenReal + diferencial + difCambio;
+
     if (this.isMobile()) {
-      // Tira compacta de 3 métricas clave + scrollable
       el.innerHTML = `
         <div style="display:flex;border-bottom:1px solid var(--border);overflow-x:auto;-webkit-overflow-scrolling:touch">
           <div style="flex:1;min-width:100px;padding:10px 12px;border-right:1px solid var(--border)">
-            <div style="font-size:10px;color:var(--text-secondary);margin-bottom:2px">${ventas.length} venta(s)</div>
+            <div style="font-size:10px;color:var(--text-secondary);margin-bottom:2px">${ventas.length} venta(s) · ${unidades} uds</div>
             <div style="font-size:15px;font-weight:700;color:var(--blue)">${State.fmtUSD(volumen)}</div>
             <div style="font-size:9px;color:var(--text-secondary)">Volumen</div>
           </div>
           <div style="flex:1;min-width:100px;padding:10px 12px;border-right:1px solid var(--border)">
-            <div style="font-size:10px;color:var(--text-secondary);margin-bottom:2px">Margen</div>
+            <div style="font-size:10px;color:var(--text-secondary);margin-bottom:2px">Margen total</div>
             <div style="font-size:15px;font-weight:700;color:${margenTotal>=0?'var(--green)':'var(--red)'}">${State.fmtUSD(margenTotal)}</div>
-            <div style="font-size:9px;color:var(--text-secondary)">x venta: ${State.fmtUSD(margenXEquipo)}</div>
+            <div style="font-size:9px;color:var(--text-secondary)">${rentabilidad.toFixed(1)}% rentabilidad</div>
           </div>
           <div style="flex:1;min-width:90px;padding:10px 12px">
             <div style="font-size:10px;color:var(--text-secondary);margin-bottom:2px">Ticket prom.</div>
@@ -144,23 +164,22 @@ const Ventas = {
     }
 
     const kpis = [
-      { label:'Volumen vendido',   val:State.fmtUSD(volumen),      sub:`${ventas.length} venta(s) en el período`, emoji:'💰', color:'var(--blue)' },
-      { label:'Margen total',      val:State.fmtUSD(margenTotal),  sub:'Precio venta − costo',                    emoji: margenTotal>=0?'📈':'📉', color:margenTotal>=0?'var(--green)':'var(--red)' },
-      { label:'Margen por venta',  val:State.fmtUSD(margenXEquipo),sub:'Margen total ÷ cantidad de ventas',       emoji: margenXEquipo>=0?'📊':'⚠️', color:margenXEquipo>=0?'var(--green)':'var(--red)' },
-      { label:'Diferencial tarjeta',val:State.fmtUSD(diferencial), sub:'Ganancia financiera por recargo',         emoji:'💳', color:'var(--purple)' },
-      { label:'Ticket promedio',   val:State.fmtUSD(ticketProm),   sub:'Volumen ÷ cantidad de ventas',            emoji:'🧾', color:'var(--text)' },
+      { label:'Volumen vendido',          val:State.fmtUSD(volumen),       sub:`${ventas.length} venta(s) en el período`,          emoji:'💰', color:'var(--blue)' },
+      { label:'Unidades vendidas',         val:String(unidades),            sub:`${ventas.length} transacciones`,                   emoji:'📦', color:'var(--blue)' },
+      { label:'Rentabilidad',              val:`${rentabilidad.toFixed(1)}%`,sub:'Margen real ÷ volumen vendido',                   emoji:'📊', color:rentabilidad>=0?'var(--green)':'var(--red)' },
+      { label:'Margen por venta',          val:State.fmtUSD(margenXEquipo), sub:'Margen real ÷ cantidad de ventas',                emoji:margenXEquipo>=0?'📈':'📉', color:margenXEquipo>=0?'var(--green)':'var(--red)' },
+      { label:'MARGEN TOTAL',              val:State.fmtUSD(margenTotal),   sub:'Ventas + tarjeta + tipo de cambio',               emoji:'🏆', color:margenTotal>=0?'var(--green)':'var(--red)' },
+      { label:'Margen real (ventas)',       val:State.fmtUSD(margenReal),    sub:'Precio venta − costo (sin diferenciales)',        emoji:margenReal>=0?'✅':'⚠️', color:margenReal>=0?'var(--green)':'var(--red)' },
+      { label:'Diferencial tarjeta',        val:State.fmtUSD(diferencial),  sub:'Ganancia por recargo posnet',                     emoji:'💳', color:'var(--purple)' },
+      { label:'Dif. tipo de cambio',        val:State.fmtUSD(difCambio),    sub:`${cambiosPeriodo.length} op. ARS→USD en el período`,emoji:'💱', color:difCambio>=0?'var(--green)':'var(--red)' },
+      { label:'Ticket promedio',            val:State.fmtUSD(ticketProm),   sub:'Volumen ÷ cantidad de ventas',                    emoji:'🧾', color:'var(--text)' },
     ];
-    el.style.cssText = 'padding:14px 22px;border-bottom:1px solid var(--border);display:grid;grid-template-columns:repeat(5,1fr);gap:10px';
-    el.innerHTML = kpis.map(k=>`
-      <div class="card" style="padding:12px 14px;margin-bottom:0;display:flex;justify-content:space-between;align-items:flex-start;gap:8px;min-height:90px">
-        <div style="min-width:0;flex:1">
-          <label style="font-size:10.5px;color:var(--text-secondary);display:block;margin-bottom:3px">${k.label}</label>
-          <div style="font-size:17px;font-weight:700;color:${k.color};word-break:break-word">${k.val}</div>
-          <div style="font-size:10px;color:var(--text-secondary);margin-top:2px">${k.sub}</div>
-        </div>
-        <div style="width:36px;height:36px;border-radius:9px;background:var(--bg-secondary);display:flex;align-items:center;justify-content:center;flex-shrink:0;font-size:18px">
-          ${k.emoji}
-        </div>
+    el.style.cssText = 'padding:14px 22px;border-bottom:1px solid var(--border);display:grid;grid-template-columns:repeat(9,1fr);gap:8px';
+    el.innerHTML = kpis.map((k,i)=>`
+      <div class="card" style="padding:10px 12px;margin-bottom:0;display:flex;flex-direction:column;gap:4px;min-height:90px${i===4?';border:1px solid var(--green);box-shadow:0 0 0 1px var(--green)20':''}">
+        <label style="font-size:9.5px;color:var(--text-secondary);display:block;line-height:1.2;${i===4?'font-weight:700;color:var(--green)':''}">${k.label}</label>
+        <div style="font-size:${i===4?'15':'14'}px;font-weight:700;color:${k.color};word-break:break-word;line-height:1.2">${k.val}</div>
+        <div style="font-size:9px;color:var(--text-secondary);line-height:1.2;margin-top:auto">${k.sub}</div>
       </div>`).join('');
   },
 
@@ -798,7 +817,7 @@ const Ventas = {
       if (State.getStock(s) <= 0) return false;
       const estado = s.estadoInventario || 'disponible';
       if (estado === 'vendido' || estado === 'eliminado') return false;
-      if (q && !s.nombre.toLowerCase().includes(q)) return false;
+      if (q && !s.nombre.toLowerCase().includes(q) && !(s.imeis||[]).some(im=>im.includes(q))) return false;
       if (cat !== 'todos') return s.cat === cat;
       return true;
     }).filter(s => {
@@ -806,29 +825,42 @@ const Ventas = {
       if (this._invCondicion === 'usado') return (s.estadoProducto || '') !== 'Nuevo / Sellado';
       return true;
     });
+
+    // Expandir: productos con IMEIs → una fila por IMEI; sin IMEIs → una fila por producto
+    const filas = [];
+    disponibles.forEach(s => {
+      const precioUSD = s.precioARS && s.cotiz ? +(s.precioARS / s.cotiz).toFixed(2) : 0;
+      if (s.imeis && s.imeis.length > 0) {
+        s.imeis.forEach(imei => filas.push({ s, imei, key: `${s.id}:${imei}`, precioUSD }));
+      } else {
+        filas.push({ s, imei: null, key: String(s.id), precioUSD });
+      }
+    });
+
     return `
-      <div style="font-size:11px;color:var(--text-secondary);margin-bottom:8px">${disponibles.length} producto${disponibles.length!==1?'s':''} con stock disponible</div>
+      <div style="font-size:11px;color:var(--text-secondary);margin-bottom:8px">${filas.length} unidad${filas.length!==1?'es':''} disponible${filas.length!==1?'s':''}</div>
       <div style="display:flex;flex-direction:column;gap:8px;max-height:240px;overflow-y:auto">
-        ${disponibles.map(s => {
-          const sel = this.selectedStockIds.includes(s.id);
-          const precioUSD = s.precioARS && s.cotiz ? +(s.precioARS / s.cotiz).toFixed(2) : 0;
+        ${filas.map(({ s, imei, key, precioUSD }) => {
+          const sel = this.selectedStockIds.includes(key);
           const esAccesorio = this._CATS_ACCESORIO.includes(s.cat);
+          const esRegalo = !!this._selectedRegalo[key];
           return `<div style="border:${sel?'2px solid var(--blue)':'1px solid var(--border)'};background:${sel?'var(--blue-light)':'var(--bg)'};border-radius:8px;padding:9px 11px;font-size:11.5px">
-            <div onclick="Ventas.toggleStockSel('${s.id}')" style="cursor:pointer;margin-bottom:${sel?'8px':'0'}">
+            <div onclick="Ventas.toggleStockSel('${key}')" style="cursor:pointer;margin-bottom:${sel?'8px':'0'}">
               <b style="font-size:12px">${s.nombre}</b><br>
-              <span style="color:var(--text-secondary)">Costo: USD ${s.costoUSD}${precioUSD ? ' · Precio sugerido: USD ' + precioUSD : ''}</span>${s.imeis && s.imeis.length ? `<br><span style="font-family:monospace;font-size:10px;color:var(--text-secondary)">IMEI: ${s.imeis[0]}</span>` : ''}
+              <span style="color:var(--text-secondary)">Costo: USD ${s.costoUSD}${precioUSD ? ' · Precio sugerido: USD ' + precioUSD : ''}</span>
+              ${imei ? `<br><span style="font-family:monospace;font-size:10px;color:var(--blue)">IMEI: ${imei}</span>` : ''}
             </div>
-            ${sel ? (()=>{ const esRegalo = !!this._selectedRegalo[s.id]; return `<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:4px">
+            ${sel ? `<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:4px">
               ${esAccesorio ? `<label style="display:flex;align-items:center;gap:5px;font-size:11px;cursor:pointer;padding:3px 8px;border-radius:6px;border:1px solid ${esRegalo?'var(--green)':'var(--border)'};background:${esRegalo?'rgba(34,197,94,.1)':'var(--bg-secondary)'}" onclick="event.stopPropagation()">
-                <input type="checkbox" id="inv-regalo-${s.id}" ${esRegalo?'checked':''} onchange="Ventas._toggleRegalo('${s.id}',this.checked)" style="accent-color:var(--green);cursor:pointer">
+                <input type="checkbox" id="inv-regalo-${key}" ${esRegalo?'checked':''} onchange="Ventas._toggleRegalo('${key}',this.checked)" style="accent-color:var(--green);cursor:pointer">
                 <span>🎁 Regalo (gratis)</span>
               </label>` : ''}
               <label style="font-size:10px;color:var(--text-secondary);white-space:nowrap">Precio (USD):</label>
-              <input type="number" id="inv-precio-${s.id}" value="${esRegalo ? 0 : (precioUSD || '')}" min="0" step="0.01" placeholder="0"
+              <input type="number" id="inv-precio-${key}" value="${esRegalo ? 0 : (precioUSD || '')}" min="0" step="0.01" placeholder="0"
                 ${esRegalo ? 'disabled' : ''}
                 style="font-size:13px;font-weight:700;padding:4px 8px;border:1px solid var(--border-strong);border-radius:6px;width:100px;color:var(--text);background:var(--bg-secondary);opacity:${esRegalo?'0.4':'1'}"
                 onclick="event.stopPropagation()">
-            </div>`; })() : ''}
+            </div>` : ''}
           </div>`;
         }).join('')}
       </div>
@@ -850,14 +882,17 @@ const Ventas = {
     this._renderInvLista();
   },
   addStockItems() {
-    this.selectedStockIds.forEach(id => {
-      const s = State.stock.find(x => x.id === id);
+    this.selectedStockIds.forEach(key => {
+      // key puede ser "stockId" o "stockId:imei"
+      const colonIdx = key.indexOf(':');
+      const stockId = colonIdx >= 0 ? key.slice(0, colonIdx) : key;
+      const imei = colonIdx >= 0 ? key.slice(colonIdx + 1) : null;
+      const s = State.stock.find(x => String(x.id) === String(stockId));
       if (!s) return;
-      const imei = s.imeis && s.imeis.length ? s.imeis[0] : null;
-      const esRegalo = !!this._selectedRegalo[id];
-      const precioIngresado = parseFloat(document.getElementById(`inv-precio-${id}`)?.value);
+      const esRegalo = !!this._selectedRegalo[key];
+      const precioIngresado = parseFloat(document.getElementById(`inv-precio-${key}`)?.value);
       const precioUSD = esRegalo ? 0 : ((!isNaN(precioIngresado) && precioIngresado >= 0) ? precioIngresado : (s.precioARS && s.cotiz ? +(s.precioARS / s.cotiz).toFixed(2) : 0));
-      this.draft.items.push({ nombre: s.nombre, precio: precioUSD, costo: s.costoUSD, stockId: id, imei, regalo: esRegalo || undefined });
+      this.draft.items.push({ nombre: s.nombre, precio: precioUSD, costo: s.costoUSD, stockId: s.id, imei, regalo: esRegalo || undefined });
     });
     this.selectedStockIds = []; this._selectedRegalo = {};
     document.getElementById('venta-step-body').innerHTML = this.stepItems();
@@ -925,7 +960,8 @@ const Ventas = {
         </div>
         <input type="number" id="vf-cotiz-ars" value="${State.refBlue}" oninput="Ventas.actualizarLabelMonto()" style="width:100%;font-size:13px;font-weight:600;padding:7px 10px;border:1px solid var(--border-strong);border-radius:8px" inputmode="decimal">
       </div>
-      <div id="vf-pago-equiv" style="font-size:11px;color:var(--text-secondary);margin-bottom:8px;min-height:16px"></div>
+      <div id="vf-pago-equiv" style="font-size:11px;color:var(--text-secondary);margin-bottom:4px;min-height:16px"></div>
+      <div id="vf-pago-vuelto" style="display:none;background:rgba(255,149,0,0.1);border:1px solid var(--amber);border-radius:8px;padding:8px 12px;margin-bottom:8px;font-size:13px;color:var(--amber);font-weight:600"></div>
       <label style="display:flex;align-items:center;gap:7px;font-size:12.5px;cursor:pointer;margin-bottom:8px" id="vf-tarjeta-check-wrap">
         <input type="checkbox" id="vf-es-tarjeta" onchange="Ventas.toggleDiferencialWrap()"> Pago con tarjeta de crédito (posnet)
       </label>
@@ -1012,12 +1048,32 @@ const Ventas = {
     const label    = document.getElementById('vf-pago-monto-label');
     const equiv    = document.getElementById('vf-pago-equiv');
     const input    = document.getElementById('vf-pago-monto');
+    const vueltoEl = document.getElementById('vf-pago-vuelto');
     const esARS    = bolsillo.startsWith('ARS');
     const cotiz    = parseFloat(document.getElementById('vf-cotiz-ars')?.value) || State.refBlue;
     if (label) label.textContent = esARS ? `Monto en ARS` : 'Monto en USD';
+    const val = parseFloat(input?.value) || 0;
     if (equiv && input) {
-      const val = parseFloat(input.value) || 0;
       equiv.textContent = esARS && val > 0 ? `≈ USD ${(val / cotiz).toFixed(2)} (cotiz: $${cotiz.toLocaleString('es-AR')})` : '';
+    }
+    if (vueltoEl && val > 0) {
+      const d = this.draft;
+      const total = d.items.reduce((s, i) => s + i.precio, 0);
+      const pagado = d.pagos.reduce((s, p) => s + this.montoSinDiferencial(p), 0) + (d.tradeIn?.valor || 0);
+      const saldo = Math.max(0, total - pagado);
+      const montoUSD = esARS ? val / (cotiz || 1) : val;
+      const exceso = montoUSD - saldo;
+      if (saldo > 0.005 && exceso > 0.005) {
+        const vueltoARS = esARS ? (exceso * cotiz) : null;
+        const vueltoUSD = exceso;
+        const textoARS = vueltoARS ? ` = $${Math.round(vueltoARS).toLocaleString('es-AR')} ARS` : '';
+        vueltoEl.innerHTML = `🔄 Vuelto a dar: <b>USD ${vueltoUSD.toFixed(2)}${textoARS}</b>`;
+        vueltoEl.style.display = 'block';
+      } else {
+        vueltoEl.style.display = 'none';
+      }
+    } else if (vueltoEl) {
+      vueltoEl.style.display = 'none';
     }
   },
 
@@ -1042,6 +1098,18 @@ const Ventas = {
     }
 
     if (!monto) { toast('Ingresá un monto.'); return; }
+    if (!esTarjeta) {
+      const d = this.draft;
+      const total = d.items.reduce((s, i) => s + i.precio, 0);
+      const pagado = d.pagos.reduce((s, p) => s + this.montoSinDiferencial(p), 0) + (d.tradeIn?.valor || 0);
+      const saldo = Math.max(0, total - pagado);
+      if (saldo > 0.005 && monto > saldo + 0.005) {
+        const exceso = monto - saldo;
+        const vueltoARS = esARS ? ` ($${Math.round(exceso * cotizARS).toLocaleString('es-AR')} ARS)` : '';
+        toast(`Vuelto al cliente: USD ${exceso.toFixed(2)}${vueltoARS}`);
+        monto = saldo;
+      }
+    }
     this.draft.pagos.push({ persona, bolsillo, monto, esTarjeta, diferencialArs, cotizacionDiferencial });
     document.getElementById('venta-step-body').innerHTML = this.stepPagos();
     this.guardarBorrador();

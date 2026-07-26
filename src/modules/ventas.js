@@ -961,7 +961,7 @@ const Ventas = {
         <input type="number" id="vf-cotiz-ars" value="${State.refBlue}" oninput="Ventas.actualizarLabelMonto()" style="width:100%;font-size:13px;font-weight:600;padding:7px 10px;border:1px solid var(--border-strong);border-radius:8px" inputmode="decimal">
       </div>
       <div id="vf-pago-equiv" style="font-size:11px;color:var(--text-secondary);margin-bottom:4px;min-height:16px"></div>
-      <div id="vf-pago-vuelto" style="display:none;background:rgba(255,149,0,0.1);border:1px solid var(--amber);border-radius:8px;padding:8px 12px;margin-bottom:8px;font-size:13px;color:var(--amber);font-weight:600"></div>
+      <div id="vf-pago-vuelto" style="display:none;background:rgba(255,149,0,0.08);border:1px dashed var(--amber);border-radius:8px;padding:7px 12px;margin-bottom:8px;font-size:12px;color:var(--amber)"></div>
       <label style="display:flex;align-items:center;gap:7px;font-size:12.5px;cursor:pointer;margin-bottom:8px" id="vf-tarjeta-check-wrap">
         <input type="checkbox" id="vf-es-tarjeta" onchange="Ventas.toggleDiferencialWrap()"> Pago con tarjeta de crédito (posnet)
       </label>
@@ -1067,7 +1067,7 @@ const Ventas = {
         const vueltoARS = esARS ? (exceso * cotiz) : null;
         const vueltoUSD = exceso;
         const textoARS = vueltoARS ? ` = $${Math.round(vueltoARS).toLocaleString('es-AR')} ARS` : '';
-        vueltoEl.innerHTML = `🔄 Vuelto a dar: <b>USD ${vueltoUSD.toFixed(2)}${textoARS}</b>`;
+        vueltoEl.innerHTML = `💡 El monto excede el saldo — se registrará USD ${(saldo).toFixed(2)} y el vuelto será <b>USD ${vueltoUSD.toFixed(2)}${textoARS}</b>`;
         vueltoEl.style.display = 'block';
       } else {
         vueltoEl.style.display = 'none';

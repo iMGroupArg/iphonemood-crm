@@ -11,46 +11,60 @@ const Bandeja = {
     c.style.cssText = 'flex:1;display:flex;flex-direction:column;overflow:hidden;width:100%';
     c.innerHTML = `
       <style>
-        #bdj-wrap { display:flex; height:calc(100vh - 56px); gap:0; }
-        #bdj-izq { width:320px; min-width:0; border-right:1px solid var(--border); display:flex; flex-direction:column; background:var(--bg-elevated); }
-        #bdj-busq { padding:10px; border-bottom:1px solid var(--border); }
-        #bdj-busq input { width:100%; border:1px solid var(--border-strong); border-radius:18px; padding:8px 14px; font-size:13px; background:var(--bg); color:var(--text); outline:none; }
+        #bdj-wrap { display:flex; height:calc(100dvh - 56px); gap:0; overflow:hidden; }
+
+        /* ── Panel izquierdo ── */
+        #bdj-izq { width:clamp(260px, 28%, 360px); min-width:0; border-right:1px solid var(--border); display:flex; flex-direction:column; background:var(--bg-elevated); flex-shrink:0; }
+        #bdj-busq { padding:10px 12px; border-bottom:1px solid var(--border); }
+        #bdj-busq input { width:100%; border:1px solid var(--border-strong); border-radius:18px; padding:8px 14px; font-size:13px; background:var(--bg); color:var(--text); outline:none; box-sizing:border-box; }
         #bdj-busq input:focus { border-color:var(--blue); }
         #bdj-lista { flex:1; overflow-y:auto; }
-        .bdj-conv { padding:11px 14px; border-bottom:1px solid var(--border); cursor:pointer; }
+        .bdj-conv { padding:11px 14px; border-bottom:1px solid var(--border); cursor:pointer; transition:background .12s; }
         .bdj-conv:hover { background:var(--bg-secondary); }
         .bdj-conv.activa { background:rgba(var(--blue-rgb,0,122,255),.08); border-left:3px solid var(--blue); }
         .bdj-conv .top { display:flex; align-items:center; gap:6px; margin-bottom:3px; }
-        .bdj-conv .nom { font-weight:600; font-size:13.5px; flex:1; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-        .bdj-conv .hora { font-size:10.5px; color:var(--text-secondary); flex-shrink:0; }
-        .bdj-conv .prev { font-size:12px; color:var(--text-secondary); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-        .bdj-badge { font-size:10px; font-weight:700; padding:2px 7px; border-radius:10px; color:#fff; flex-shrink:0; }
+        .bdj-conv .nom { font-weight:600; font-size:13px; flex:1; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+        .bdj-conv .hora { font-size:10px; color:var(--text-secondary); flex-shrink:0; }
+        .bdj-conv .prev { font-size:11.5px; color:var(--text-secondary); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+        .bdj-badge { font-size:9.5px; font-weight:700; padding:2px 7px; border-radius:10px; color:#fff; flex-shrink:0; }
         .bdj-badge.asesor { background:var(--red,#e0245e); }
         .bdj-badge.espera { background:var(--amber,#f5a623); }
+
+        /* ── Panel chat ── */
         #bdj-chat { flex:1; display:flex; flex-direction:column; min-width:0; }
-        #bdj-head { padding:11px 16px; background:var(--bg-elevated); border-bottom:1px solid var(--border); display:flex; align-items:center; gap:10px; }
-        #bdj-head .nom { font-weight:600; font-size:14px; flex:1; }
-        #bdj-msgs { flex:1; overflow-y:auto; padding:16px; display:flex; flex-direction:column; gap:6px; background:var(--bg); }
-        .bdj-msg { max-width:76%; padding:8px 11px; border-radius:10px; font-size:13.5px; line-height:1.4; white-space:pre-wrap; word-wrap:break-word; }
-        .bdj-msg.cliente { background:var(--bg-elevated); border:1px solid var(--border); align-self:flex-start; }
-        .bdj-msg.bot { background:rgba(52,199,89,.12); border:1px solid rgba(52,199,89,.25); align-self:flex-end; }
-        .bdj-msg.humano { background:rgba(0,122,255,.12); border:1px solid rgba(0,122,255,.25); align-self:flex-end; }
-        .bdj-msg .rol { display:block; font-size:10px; font-weight:700; opacity:.6; margin-bottom:3px; text-transform:uppercase; }
-        .bdj-msg .hora-msg { display:block; font-size:10px; color:var(--text-secondary); text-align:right; margin-top:3px; }
-        #bdj-barra { padding:10px 12px; background:var(--bg-elevated); border-top:1px solid var(--border); display:flex; gap:8px; }
-        #bdj-barra textarea { flex:1; resize:none; border:1px solid var(--border-strong); border-radius:12px; padding:9px 14px; font-size:13.5px; font-family:inherit; height:42px; max-height:120px; background:var(--bg); color:var(--text); outline:none; }
+        #bdj-head { padding:11px 16px; background:var(--bg-elevated); border-bottom:1px solid var(--border); display:flex; align-items:center; gap:10px; flex-shrink:0; }
+        #bdj-head .nom { font-weight:600; font-size:14px; flex:1; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+        #bdj-msgs { flex:1; overflow-y:auto; padding:16px; display:flex; flex-direction:column; gap:8px; background:var(--bg); }
+        .bdj-msg { max-width:72%; padding:9px 13px; border-radius:12px; font-size:13.5px; line-height:1.45; white-space:pre-wrap; word-wrap:break-word; }
+        .bdj-msg.cliente { background:var(--bg-elevated); border:1px solid var(--border); align-self:flex-start; border-bottom-left-radius:4px; }
+        .bdj-msg.bot { background:rgba(52,199,89,.12); border:1px solid rgba(52,199,89,.25); align-self:flex-end; border-bottom-right-radius:4px; }
+        .bdj-msg.humano { background:rgba(0,122,255,.12); border:1px solid rgba(0,122,255,.25); align-self:flex-end; border-bottom-right-radius:4px; }
+        .bdj-msg .rol { display:block; font-size:10px; font-weight:700; opacity:.55; margin-bottom:4px; text-transform:uppercase; letter-spacing:.04em; }
+        .bdj-msg .hora-msg { display:block; font-size:10px; color:var(--text-secondary); text-align:right; margin-top:4px; }
+        #bdj-barra { padding:10px 14px; background:var(--bg-elevated); border-top:1px solid var(--border); display:flex; gap:10px; align-items:flex-end; flex-shrink:0; }
+        #bdj-barra textarea { flex:1; resize:none; border:1px solid var(--border-strong); border-radius:14px; padding:10px 14px; font-size:14px; font-family:inherit; height:44px; max-height:140px; background:var(--bg); color:var(--text); outline:none; line-height:1.4; }
         #bdj-barra textarea:focus { border-color:var(--blue); }
-        #bdj-enviar { background:var(--blue,#007aff); color:#fff; border:none; border-radius:50%; width:42px; height:42px; font-size:18px; cursor:pointer; flex-shrink:0; }
-        #bdj-enviar:disabled { opacity:.4; }
-        .bdj-vacio { padding:40px; text-align:center; color:var(--text-secondary); font-size:14px; }
-        #bdj-estado { font-size:12px; color:var(--text-secondary); margin-left:auto; }
-        @media (max-width:700px) {
+        #bdj-enviar { background:var(--blue,#007aff); color:#fff; border:none; border-radius:50%; width:44px; height:44px; font-size:20px; cursor:pointer; flex-shrink:0; display:flex; align-items:center; justify-content:center; transition:opacity .15s; }
+        #bdj-enviar:disabled { opacity:.35; }
+        .bdj-vacio { padding:60px 20px; text-align:center; color:var(--text-secondary); font-size:14px; }
+        #bdj-estado { font-size:11.5px; color:var(--text-secondary); flex-shrink:0; }
+
+        /* ── Tablet: panel más angosto ── */
+        @media (max-width:900px) {
+          #bdj-izq { width:240px; }
+          .bdj-msg { max-width:85%; }
+        }
+
+        /* ── Mobile: vista de una sola columna ── */
+        @media (max-width:600px) {
           #bdj-wrap { position:relative; }
           #bdj-izq { width:100%; position:absolute; inset:0; z-index:1; }
           #bdj-chat { position:absolute; inset:0; z-index:2; display:none; }
           #bdj-wrap.enchat #bdj-izq { display:none; }
           #bdj-wrap.enchat #bdj-chat { display:flex; }
           #bdj-volver { display:flex !important; }
+          .bdj-msg { max-width:88%; font-size:14px; }
+          #bdj-barra textarea { font-size:16px; } /* evita zoom en iOS */
         }
       </style>
       <div id="bdj-wrap">

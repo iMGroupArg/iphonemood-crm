@@ -926,10 +926,21 @@ const Ventas = {
         <span style="color:var(--green)">🔄 Trade-In: ${d.tradeIn.modelo||'Equipo'}</span>
         <span style="color:var(--green);font-weight:600">${State.fmtUSD(d.tradeIn.valor)}</span>
       </div>` : ''}
-      ${d.pagos.map((p, idx) => `<div style="display:flex;justify-content:space-between;align-items:center;padding:7px 10px;background:var(--bg-secondary);border-radius:8px;margin-bottom:5px;font-size:12px">
-        <span>${p.persona} — ${p.bolsillo} — ${p.bolsillo?.startsWith('ARS') ? `$${Math.round(p.monto*(p.cotizacionDiferencial||State.refBlue||1)).toLocaleString('es-AR')} ARS <span style="color:var(--text-secondary);font-size:10px">(≈ ${State.fmtUSD(p.monto)} · cotiz $${(p.cotizacionDiferencial||State.refBlue||1).toLocaleString('es-AR')})</span>` : State.fmtUSD(p.monto)}${p.esTarjeta?` <span class="badge b-purple" style="font-size:9px">Tarjeta +$${(p.diferencialArs||0).toLocaleString('es-AR')}</span>`:''}</span>
-        <button onclick="Ventas.removePago(${idx})" title="Quitar pago" style="background:none;border:none;cursor:pointer;font-size:17px;padding:2px 4px;border-radius:5px;opacity:0.75;flex-shrink:0;line-height:1" onmouseover="this.style.opacity=1" onmouseout="this.style.opacity=0.75">🗑️</button>
-      </div>`).join('')}
+      ${d.pagos.map((p, idx) => {
+        const esVuelto = p.esVuelto || p.monto < 0;
+        const montoAbs = Math.abs(p.monto);
+        const cotiz = p.cotizacionDiferencial || State.refBlue || 1;
+        const esARS = p.bolsillo?.startsWith('ARS');
+        const textoMonto = esARS
+          ? `$${Math.round(montoAbs * cotiz).toLocaleString('es-AR')} ARS <span style="color:var(--text-secondary);font-size:10px">(≈ ${State.fmtUSD(montoAbs)} · cotiz $${cotiz.toLocaleString('es-AR')})</span>`
+          : State.fmtUSD(montoAbs);
+        const bg = esVuelto ? 'rgba(255,149,0,0.08)' : 'var(--bg-secondary)';
+        const prefijo = esVuelto ? `<span style="color:var(--amber);font-weight:700;margin-right:4px">↩ Vuelto</span>` : '';
+        return `<div style="display:flex;justify-content:space-between;align-items:center;padding:7px 10px;background:${bg};border-radius:8px;margin-bottom:5px;font-size:12px${esVuelto?';border:1px dashed var(--amber)':''}">
+          <span>${prefijo}${p.persona} — ${p.bolsillo} — ${textoMonto}${p.esTarjeta?` <span class="badge b-purple" style="font-size:9px">Tarjeta +$${(p.diferencialArs||0).toLocaleString('es-AR')}</span>`:''}</span>
+          <button onclick="Ventas.removePago(${idx})" title="Quitar" style="background:none;border:none;cursor:pointer;font-size:17px;padding:2px 4px;border-radius:5px;opacity:0.75;flex-shrink:0;line-height:1" onmouseover="this.style.opacity=1" onmouseout="this.style.opacity=0.75">🗑️</button>
+        </div>`;
+      }).join('')}
       ${d.deudaVenta ? `<div style="display:flex;justify-content:space-between;align-items:center;padding:7px 10px;background:rgba(255,149,0,0.08);border:1px solid var(--amber);border-radius:8px;margin-bottom:5px;font-size:12px">
         <span style="color:var(--amber)">📋 Deuda a plazos — ${d.deudaVenta.descripcion}</span>
         <div style="display:flex;align-items:center;gap:8px">
@@ -962,7 +973,27 @@ const Ventas = {
         <input type="number" id="vf-cotiz-ars" value="${State.refBlue}" oninput="Ventas.actualizarLabelMonto()" style="width:100%;font-size:13px;font-weight:600;padding:7px 10px;border:1px solid var(--border-strong);border-radius:8px" inputmode="decimal">
       </div>
       <div id="vf-pago-equiv" style="font-size:11px;color:var(--text-secondary);margin-bottom:4px;min-height:16px"></div>
-      <div id="vf-pago-vuelto" style="display:none;background:rgba(255,149,0,0.08);border:1px dashed var(--amber);border-radius:8px;padding:7px 12px;margin-bottom:8px;font-size:12px;color:var(--amber)"></div>
+      <div id="vf-pago-vuelto" style="display:none;background:rgba(255,149,0,0.07);border:1px dashed var(--amber);border-radius:10px;padding:10px 12px;margin-bottom:8px;font-size:12px">
+        <div style="display:flex;align-items:center;gap:8px;color:var(--amber);margin-bottom:0" id="vf-vuelto-info"></div>
+        <div id="vf-vuelto-panel" style="display:none;margin-top:10px;padding-top:10px;border-top:1px dashed rgba(255,149,0,0.3);display:none">
+          <div style="font-size:11px;color:var(--text-secondary);margin-bottom:6px;font-weight:600">Dar vuelto desde:</div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap">
+            <select id="vf-vuelto-persona" style="flex:1;font-size:12px;padding:6px 8px;background:var(--bg-secondary);border:1px solid var(--border-strong);border-radius:8px;color:var(--text);min-width:120px">
+              ${(State.personas||[]).map(p=>`<option>${p}</option>`).join('')}
+            </select>
+            <select id="vf-vuelto-bolsillo" style="flex:1;font-size:12px;padding:6px 8px;background:var(--bg-secondary);border:1px solid var(--border-strong);border-radius:8px;color:var(--text);min-width:120px" onchange="Ventas._actualizarBolsillosVuelto()">
+              ${Ventas._bolsillosVueltoOpts()}
+            </select>
+          </div>
+          <div style="display:flex;gap:8px;align-items:center;margin-top:8px">
+            <div style="flex:1">
+              <div style="font-size:11px;color:var(--text-secondary);margin-bottom:4px">Monto a devolver</div>
+              <input id="vf-vuelto-monto" type="number" placeholder="0" style="width:100%;font-size:13px;padding:7px 10px;background:var(--bg-secondary);border:1px solid var(--border-strong);border-radius:8px;color:var(--text);box-sizing:border-box" oninput="Ventas._actualizarVueltoEquiv()">
+            </div>
+            <div id="vf-vuelto-equiv" style="font-size:11px;color:var(--text-secondary);flex-shrink:0;padding-top:18px"></div>
+          </div>
+        </div>
+      </div>
       <label style="display:flex;align-items:center;gap:7px;font-size:12.5px;cursor:pointer;margin-bottom:8px" id="vf-tarjeta-check-wrap">
         <input type="checkbox" id="vf-es-tarjeta" onchange="Ventas.toggleDiferencialWrap()"> Pago con tarjeta de crédito (posnet)
       </label>
@@ -1066,16 +1097,59 @@ const Ventas = {
       const exceso = montoUSD - saldo;
       if (saldo > 0.005 && exceso > 0.005) {
         const vueltoARS = esARS ? (exceso * cotiz) : null;
-        const vueltoUSD = exceso;
         const textoARS = vueltoARS ? ` = $${Math.round(vueltoARS).toLocaleString('es-AR')} ARS` : '';
-        vueltoEl.innerHTML = `💡 El monto excede el saldo — al agregar se registrará el total y deberás dar vuelto de <b>USD ${vueltoUSD.toFixed(2)}${textoARS}</b>`;
+        const infoEl = document.getElementById('vf-vuelto-info');
+        if (infoEl) infoEl.innerHTML = `<label style="display:flex;align-items:center;gap:7px;cursor:pointer;color:var(--amber);font-weight:600;width:100%"><input type="checkbox" id="vf-vuelto-check" onchange="Ventas._toggleVueltoPanel(${exceso.toFixed(4)}, ${vueltoARS || 0})"> Dar vuelto de <b>USD ${exceso.toFixed(2)}${textoARS}</b></label>`;
         vueltoEl.style.display = 'block';
+        // Si el check ya estaba activo, mantener panel abierto
+        if (!document.getElementById('vf-vuelto-check')?.checked) {
+          const panel = document.getElementById('vf-vuelto-panel');
+          if (panel) panel.style.display = 'none';
+        }
       } else {
         vueltoEl.style.display = 'none';
       }
     } else if (vueltoEl) {
       vueltoEl.style.display = 'none';
     }
+  },
+
+  _bolsillosVueltoOpts() {
+    const persona = document.getElementById('vf-vuelto-persona')?.value || (State.personas||[])[0] || '';
+    const cajas = State.cajas?.[persona] || {};
+    return Object.keys(cajas).map(b => `<option value="${b}">${b} (${State.fmtUSD ? '' : ''}${typeof cajas[b] === 'number' ? cajas[b].toFixed(0) : ''})</option>`).join('') || '<option value="">Sin cajas</option>';
+  },
+
+  _toggleVueltoPanel(exceso, vueltoARS) {
+    const check = document.getElementById('vf-vuelto-check');
+    const panel = document.getElementById('vf-vuelto-panel');
+    if (!panel) return;
+    if (check?.checked) {
+      panel.style.display = 'block';
+      // Pre-llenar monto
+      const bolsillo = document.getElementById('vf-vuelto-bolsillo')?.value || '';
+      const esARS = bolsillo.startsWith('ARS');
+      const montoInput = document.getElementById('vf-vuelto-monto');
+      if (montoInput && !montoInput.value) montoInput.value = esARS ? Math.round(vueltoARS) : exceso.toFixed(2);
+      this._actualizarVueltoEquiv();
+    } else {
+      panel.style.display = 'none';
+    }
+  },
+
+  _actualizarBolsillosVuelto() {
+    this._actualizarVueltoEquiv();
+  },
+
+  _actualizarVueltoEquiv() {
+    const bolsillo = document.getElementById('vf-vuelto-bolsillo')?.value || '';
+    const monto = parseFloat(document.getElementById('vf-vuelto-monto')?.value) || 0;
+    const cotiz = parseFloat(document.getElementById('vf-cotiz-ars')?.value) || State.refBlue;
+    const esARS = bolsillo.startsWith('ARS');
+    const equiv = document.getElementById('vf-vuelto-equiv');
+    if (equiv && monto > 0) {
+      equiv.textContent = esARS ? `≈ USD ${(monto / cotiz).toFixed(2)}` : `= $${Math.round(monto * cotiz).toLocaleString('es-AR')} ARS`;
+    } else if (equiv) equiv.textContent = '';
   },
 
   addPago() {
@@ -1099,17 +1173,25 @@ const Ventas = {
     }
 
     if (!monto) { toast('Ingresá un monto.'); return; }
-    if (!esTarjeta) {
-      const d = this.draft;
-      const total = d.items.reduce((s, i) => s + i.precio, 0);
-      const pagado = d.pagos.reduce((s, p) => s + this.montoSinDiferencial(p), 0) + (d.tradeIn?.valor || 0);
-      const saldo = Math.max(0, total - pagado);
-      if (saldo > 0.005 && monto > saldo + 0.005) {
-        // Registrar monto completo — el exceso queda como saldo negativo (vuelto opcional)
-        // No recortamos automáticamente
+
+    // Verificar si hay vuelto a registrar
+    const darVuelto = document.getElementById('vf-vuelto-check')?.checked;
+    let vueltoExtra = null;
+    if (darVuelto) {
+      const vPersona   = document.getElementById('vf-vuelto-persona')?.value;
+      const vBolsillo  = document.getElementById('vf-vuelto-bolsillo')?.value;
+      const vMontoRaw  = parseFloat(document.getElementById('vf-vuelto-monto')?.value) || 0;
+      const vEsARS     = vBolsillo?.startsWith('ARS');
+      const vCotiz     = parseFloat(document.getElementById('vf-cotiz-ars')?.value) || State.refBlue;
+      const vMontoUSD  = vEsARS ? vMontoRaw / (vCotiz || 1) : vMontoRaw;
+      if (!vPersona || !vBolsillo || !vMontoRaw) {
+        toast('Completá los datos del vuelto.', 'error'); return;
       }
+      vueltoExtra = { persona: vPersona, bolsillo: vBolsillo, monto: -vMontoUSD, esVuelto: true, diferencialArs: 0, cotizacionDiferencial: vEsARS ? vCotiz : null };
     }
+
     this.draft.pagos.push({ persona, bolsillo, monto, esTarjeta, diferencialArs, cotizacionDiferencial });
+    if (vueltoExtra) this.draft.pagos.push(vueltoExtra);
     document.getElementById('venta-step-body').innerHTML = this.stepPagos();
     this.guardarBorrador();
   },

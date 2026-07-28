@@ -827,11 +827,18 @@ const Ventas = {
     });
 
     // Expandir: productos con IMEIs → una fila por IMEI; sin IMEIs → una fila por producto
+    // Deduplicar por IMEI global para evitar mostrar duplicados de BD
     const filas = [];
+    const imeisVistos = new Set();
     disponibles.forEach(s => {
       const precioUSD = s.precioARS && s.cotiz ? +(s.precioARS / s.cotiz).toFixed(2) : 0;
       if (s.imeis && s.imeis.length > 0) {
-        s.imeis.forEach(imei => filas.push({ s, imei, key: `${s.id}:${imei}`, precioUSD }));
+        s.imeis.forEach(imei => {
+          if (!imeisVistos.has(imei)) {
+            imeisVistos.add(imei);
+            filas.push({ s, imei, key: `${s.id}:${imei}`, precioUSD });
+          }
+        });
       } else {
         filas.push({ s, imei: null, key: String(s.id), precioUSD });
       }

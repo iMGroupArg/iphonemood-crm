@@ -915,11 +915,12 @@ const Ventas = {
     const d = this.draft;
     const total = d.items.reduce((s, i) => s + i.precio, 0);
     const pagado = d.pagos.reduce((s, p) => s + Ventas.montoSinDiferencial(p), 0) + (d.tradeIn?.valor || 0);
-    const saldo = Math.max(0, total - pagado);
+    const saldo = total - pagado;
+    const vuelto = saldo < -0.005;
     return `
       <div style="display:flex;gap:16px;padding:10px 0;border-bottom:1px solid var(--border);margin-bottom:12px">
         <div><div style="font-size:11px;color:var(--text-secondary)">Total venta</div><div style="font-size:16px;font-weight:600">${State.fmtUSD(total)}</div></div>
-        <div><div style="font-size:11px;color:var(--text-secondary)">Saldo restante</div><div style="font-size:16px;font-weight:600;color:${saldo>0?'var(--red)':'var(--green)'}">${State.fmtUSD(saldo)}</div></div>
+        <div><div style="font-size:11px;color:var(--text-secondary)">${vuelto ? 'Vuelto a dar' : 'Saldo restante'}</div><div style="font-size:16px;font-weight:600;color:${vuelto ? 'var(--amber)' : saldo > 0 ? 'var(--red)' : 'var(--green)'}">${State.fmtUSD(Math.abs(saldo))}</div></div>
       </div>
       ${d.tradeIn?.valor > 0 ? `<div style="display:flex;justify-content:space-between;align-items:center;padding:7px 10px;background:var(--bg-secondary);border:1px solid var(--green);border-radius:8px;margin-bottom:5px;font-size:12px">
         <span style="color:var(--green)">🔄 Trade-In: ${d.tradeIn.modelo||'Equipo'}</span>
@@ -1067,7 +1068,7 @@ const Ventas = {
         const vueltoARS = esARS ? (exceso * cotiz) : null;
         const vueltoUSD = exceso;
         const textoARS = vueltoARS ? ` = $${Math.round(vueltoARS).toLocaleString('es-AR')} ARS` : '';
-        vueltoEl.innerHTML = `💡 El monto excede el saldo — se registrará USD ${(saldo).toFixed(2)} y el vuelto será <b>USD ${vueltoUSD.toFixed(2)}${textoARS}</b>`;
+        vueltoEl.innerHTML = `💡 El monto excede el saldo — al agregar se registrará el total y deberás dar vuelto de <b>USD ${vueltoUSD.toFixed(2)}${textoARS}</b>`;
         vueltoEl.style.display = 'block';
       } else {
         vueltoEl.style.display = 'none';
@@ -1104,10 +1105,8 @@ const Ventas = {
       const pagado = d.pagos.reduce((s, p) => s + this.montoSinDiferencial(p), 0) + (d.tradeIn?.valor || 0);
       const saldo = Math.max(0, total - pagado);
       if (saldo > 0.005 && monto > saldo + 0.005) {
-        const exceso = monto - saldo;
-        const vueltoARS = esARS ? ` ($${Math.round(exceso * cotizARS).toLocaleString('es-AR')} ARS)` : '';
-        toast(`Vuelto al cliente: USD ${exceso.toFixed(2)}${vueltoARS}`);
-        monto = saldo;
+        // Registrar monto completo — el exceso queda como saldo negativo (vuelto opcional)
+        // No recortamos automáticamente
       }
     }
     this.draft.pagos.push({ persona, bolsillo, monto, esTarjeta, diferencialArs, cotizacionDiferencial });

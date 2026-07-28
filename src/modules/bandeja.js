@@ -3,8 +3,9 @@ const Bandeja = {
   _timerLista: null,
   _timerChat: null,
   filtro: '',
-  filtroEstado: 'todos', // todos | espera | asesor | mio
+  filtroEstado: 'todos', // todos | espera | asesor | mio | cerradas
   asignaciones: {}, // `platform:userId` -> nombre persona
+  cerradas: {}, // `platform:userId` -> true
 
   // ── render principal ────────────────────────────────────────────────────────
   render() {
@@ -98,6 +99,7 @@ const Bandeja = {
             <button class="bdj-ftab" data-f="espera" onclick="Bandeja._setFiltro('espera')">En espera</button>
             <button class="bdj-ftab" data-f="asesor" onclick="Bandeja._setFiltro('asesor')">Asesor</button>
             <button class="bdj-ftab" data-f="mio" onclick="Bandeja._setFiltro('mio')">Mis chats</button>
+            <button class="bdj-ftab" data-f="cerradas" onclick="Bandeja._setFiltro('cerradas')">Cerradas</button>
           </div>
           <div id="bdj-lista"><div class="bdj-vacio">Cargando…</div></div>
         </div>
@@ -109,6 +111,7 @@ const Bandeja = {
               <div id="bdj-head-sub"></div>
             </div>
             <button class="btn btn-sm" id="bdj-bot-btn" style="display:none" onclick="Bandeja.retomarBot()">🤖 Retomar bot</button>
+            <button id="bdj-cerrar-btn" style="display:none;font-size:11px;padding:4px 10px;border-radius:10px;border:1px solid var(--border-strong);background:none;color:var(--text-secondary);cursor:pointer;white-space:nowrap" onclick="Bandeja._toggleCerrar()">✓ Cerrar</button>
             <div class="bdj-assign-wrap" id="bdj-assign-wrap" style="display:none">
               <button class="bdj-assign-btn" id="bdj-assign-btn" onclick="Bandeja._toggleAssignMenu()">👤 Asignar</button>
               <div class="bdj-assign-menu" id="bdj-assign-menu" style="display:none"></div>
@@ -141,8 +144,42 @@ const Bandeja = {
     try {
       const { data } = await supa.from('bandeja_asignaciones').select('*');
       this.asignaciones = {};
-      (data || []).forEach(r => { this.asignaciones[`${r.platform}:${r.user_id}`] = r.asignado_a; });
+      this.cerradas = {};
+      (data || []).forEach(r => {
+        this.asignaciones[`${r.platform}:${r.user_id}`] = r.asignado_a;
+        if (r.cerrada) this.cerradas[`${r.platform}:${r.user_id}`] = true;
+      });
     } catch { /* tabla puede no existir todavía */ }
+  },
+
+  async _toggleCerrar() {
+    if (!this.actual) return;
+    const key = `${this.actual.platform}:${this.actual.userId}`;
+    const estaCerrada = !!this.cerradas[key];
+    if (estaCerrada) {
+      delete this.cerradas[key];
+    } else {
+      this.cerradas[key] = true;
+    }
+    await supa.from('bandeja_asignaciones').upsert({
+      platform: this.actual.platform, user_id: this.actual.userId,
+      asignado_a: this.asignaciones[key] || null,
+      cerrada: !estaCerrada, updated_at: new Date().toISOString(),
+    }, { onConflict: 'platform,user_id' });
+    this._actualizarCerrarBtn();
+    this.cargarLista();
+    toast(estaCerrada ? 'Conversación reabierta' : 'Conversación cerrada ✓', 'success');
+  },
+
+  _actualizarCerrarBtn() {
+    const key = this.actual ? `${this.actual.platform}:${this.actual.userId}` : null;
+    const cerrada = key ? !!this.cerradas[key] : false;
+    const btn = document.getElementById('bdj-cerrar-btn');
+    if (btn) {
+      btn.textContent = cerrada ? '↩ Reabrir' : '✓ Cerrar';
+      btn.style.color = cerrada ? 'var(--green)' : 'var(--text-secondary)';
+      btn.style.borderColor = cerrada ? 'var(--green)' : 'var(--border-strong)';
+    }
   },
 
   async _asignar(persona) {
@@ -243,9 +280,15 @@ const Bandeja = {
 
     // Aplicar filtro de estado
     const yo = this._usuarioActual();
-    if (this.filtroEstado === 'espera') convs = convs.filter(c => c.esperandoRespuesta && !c.pausado);
-    else if (this.filtroEstado === 'asesor') convs = convs.filter(c => c.pausado);
-    else if (this.filtroEstado === 'mio') convs = convs.filter(c => this.asignaciones[`${c.platform}:${c.userId}`] === yo);
+    if (this.filtroEstado === 'cerradas') {
+      convs = convs.filter(c => !!this.cerradas[`${c.platform}:${c.userId}`]);
+    } else {
+      // En todos los demás tabs, excluir cerradas
+      convs = convs.filter(c => !this.cerradas[`${c.platform}:${c.userId}`]);
+      if (this.filtroEstado === 'espera') convs = convs.filter(c => c.esperandoRespuesta && !c.pausado);
+      else if (this.filtroEstado === 'asesor') convs = convs.filter(c => c.pausado);
+      else if (this.filtroEstado === 'mio') convs = convs.filter(c => this.asignaciones[`${c.platform}:${c.userId}`] === yo);
+    }
 
     if (!convs.length) {
       cont.innerHTML = `<div class="bdj-vacio">${this.filtro || this.filtroEstado !== 'todos' ? 'Sin resultados.' : 'Sin conversaciones.'}</div>`;
@@ -306,6 +349,7 @@ const Bandeja = {
     if (nom) nom.textContent = data.nombre || ('+' + this.actual.userId);
     if (btnBot) btnBot.style.display = data.pausado ? 'inline-block' : 'none';
     this._actualizarAssignBtn();
+    this._actualizarCerrarBtn();
 
     const abajo = msgs.scrollHeight - msgs.scrollTop - msgs.clientHeight < 80;
     msgs.innerHTML = (data.mensajes || []).map(m => {
@@ -324,6 +368,9 @@ const Bandeja = {
     const barra = document.getElementById('bdj-barra');
     if (barra) barra.style.display = 'flex';
     document.getElementById('bdj-assign-wrap')?.style && (document.getElementById('bdj-assign-wrap').style.display = 'block');
+    const cerrarBtn = document.getElementById('bdj-cerrar-btn');
+    if (cerrarBtn) cerrarBtn.style.display = 'block';
+    this._actualizarCerrarBtn();
     this.cargarChat();
     this.cargarLista();
     clearInterval(this._timerChat);

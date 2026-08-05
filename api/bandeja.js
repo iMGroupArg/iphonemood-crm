@@ -1,5 +1,11 @@
 const RAILWAY = 'https://bot-comercial-iphone-mood-production.up.railway.app';
-const BASIC = Buffer.from('iphonemood:MoodBandeja2026').toString('base64');
+// Usuario/clave de la Bandeja del bot: vienen de variables de entorno (Vercel
+// > Settings > Environment Variables), NUNCA hardcodeadas en el codigo - este
+// repo es publico, cualquiera que lo lea se hubiera podido meter a la Bandeja
+// sin loguearse. Mismos nombres que usa el bot en Railway (INBOX_USER /
+// INBOX_PASSWORD), asi los dos lados usan literalmente la misma credencial.
+const BANDEJA_USER = process.env.INBOX_USER || 'iphonemood';
+const BASIC = Buffer.from(`${BANDEJA_USER}:${process.env.INBOX_PASSWORD || ''}`).toString('base64');
 const SUPABASE_URL = 'https://oqvmiozafgogfcclwseu.supabase.co';
 const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9xdm1pb3phZmdvZ2ZjY2x3c2V1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODE4MTg4MDQsImV4cCI6MjA5NzM5NDgwNH0.egzH4uyVJ0W1mj0dTJuJGIWTXXnur9B4z_f12Z8V1lQ';
 

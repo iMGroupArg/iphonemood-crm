@@ -23,6 +23,8 @@ const Panel = {
       ['categorias-gasto', 'ti ti-tag', 'Categorías gasto'],
       ['personas', 'ti ti-users', 'Cajas y personas'],
       ['usuarios', 'ti ti-lock', 'Usuarios y accesos'],
+      ['landing', 'ti ti-world', 'Landing pública'],
+      ['financiacion', 'ti ti-percentage', 'Financiación'],
       ['negocio', 'ti ti-building-store', 'Datos del negocio'],
       ['marca', 'ti ti-palette', 'Logo y tipografía'],
       ['exportar', 'ti ti-file-spreadsheet', 'Exportar todo'],
@@ -42,17 +44,26 @@ const Panel = {
     else if (this.activeTab === 'personas') body.innerHTML = this.personasView();
     else if (this.activeTab === 'usuarios') { body.innerHTML = this.usuariosView(); this.cargarUsuarios(); }
     else if (this.activeTab === 'marca') { body.innerHTML = this.marcaView(); this._initMarcaPreview(); }
+    else if (this.activeTab === 'landing') { body.innerHTML = this.landingView(); this.cargarLanding(); }
+    else if (this.activeTab === 'financiacion') { body.innerHTML = this.financiacionView(); this.cargarFinanciacion(); }
     else if (this.activeTab === 'exportar') body.innerHTML = this.exportarView();
     else body.innerHTML = this.negocioView();
   },
 
   garantiasView() {
+    const TIPO_LABEL = { nuevo: 'Equipos nuevos', usado: 'Equipos usados' };
     return `
       <h3 style="font-size:13px;font-weight:600;color:var(--text-secondary);text-transform:uppercase;letter-spacing:.4px;margin-bottom:12px;border-bottom:1px solid var(--border);padding-bottom:8px">Categorías de garantía</h3>
+      <p style="font-size:11px;color:var(--text-secondary);margin-bottom:12px">
+        Marcá una categoría como "Equipos nuevos" o "Equipos usados" para que la garantía se asigne sola al vender, según la condición del producto en Stock. Una categoría sin tipo queda solo de referencia — no se asigna automático.
+      </p>
       <div id="garantias-list">${State.garantias.map(g => `
         <div style="display:flex;align-items:center;gap:10px;background:var(--bg-elevated);border:1px solid var(--border);border-radius:10px;padding:12px 14px;margin-bottom:8px">
           <span style="width:12px;height:12px;border-radius:50%;background:${g.color}"></span>
-          <div style="flex:1"><b style="font-size:13px">${g.nombre}</b></div>
+          <div style="flex:1">
+            <b style="font-size:13px">${g.nombre}</b>
+            ${g.tipo ? `<span class="badge b-blue" style="margin-left:8px;font-size:10px">${TIPO_LABEL[g.tipo] || g.tipo}</span>` : ''}
+          </div>
           <div style="font-size:18px;font-weight:600;color:var(--blue)">${g.dias}<span style="font-size:10px;color:var(--text-secondary);display:block;font-weight:400">días</span></div>
           <button class="btn btn-sm" onclick="Panel.editGarantia('${g.id}')">✏️</button>
           <button class="btn btn-sm" onclick="Panel.delGarantia('${g.id}')" style="color:var(--red)">🗑️</button>
@@ -76,17 +87,72 @@ const Panel = {
     localStorage.setItem('im_condiciones_garantia', txt);
     toast('Condiciones de garantía guardadas.');
   },
-  async addGarantia() {
-    const nombre = prompt('Nombre de la categoría:'); if (!nombre) return;
-    const dias = parseInt(prompt('Días de garantía:', '30')); if (!dias) return;
-    const nueva = await DB.agregarGarantia(nombre, dias, '#185FA5');
-    State.garantias.push({ id: nueva?.id || Date.now(), nombre, dias, color: '#185FA5' });
-    this.renderBody();
+  addGarantia() { this._modalGarantia(null); },
+  editGarantia(id) { this._modalGarantia(id); },
+
+  _modalGarantia(id) {
+    const g = id ? State.garantias.find(x => x.id === id) : null;
+    const overlay = document.createElement('div');
+    overlay.id = 'garantia-modal-overlay';
+    overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.6);backdrop-filter:blur(4px);z-index:800;display:flex;align-items:center;justify-content:center;padding:20px';
+    overlay.innerHTML = `
+      <div style="background:var(--bg-elevated);border:1px solid var(--border-strong);border-radius:var(--radius-xl);width:min(420px,96vw);overflow:hidden" onclick="event.stopPropagation()">
+        <div style="padding:14px 18px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center">
+          <div style="font-size:15px;font-weight:700">${g ? 'Editar categoría' : 'Nueva categoría de garantía'}</div>
+          <button onclick="document.getElementById('garantia-modal-overlay').remove()" style="background:none;border:none;cursor:pointer;color:var(--text-secondary);font-size:18px">✕</button>
+        </div>
+        <div style="padding:18px;display:flex;flex-direction:column;gap:12px">
+          <div>
+            <label style="font-size:11px;color:var(--text-secondary);display:block;margin-bottom:4px">NOMBRE</label>
+            <input id="gm-nombre" type="text" value="${g?.nombre || ''}" placeholder="Ej: Garantía oficial" style="width:100%;font-size:13px;padding:8px 10px;background:var(--bg-secondary);border:1px solid var(--border-strong);border-radius:8px;color:var(--text)">
+          </div>
+          <div>
+            <label style="font-size:11px;color:var(--text-secondary);display:block;margin-bottom:4px">DÍAS DE GARANTÍA</label>
+            <input id="gm-dias" type="number" min="1" value="${g?.dias ?? 30}" style="width:100%;font-size:13px;padding:8px 10px;background:var(--bg-secondary);border:1px solid var(--border-strong);border-radius:8px;color:var(--text)">
+          </div>
+          <div>
+            <label style="font-size:11px;color:var(--text-secondary);display:block;margin-bottom:4px">SE ASIGNA SOLA A</label>
+            <select id="gm-tipo" style="width:100%;font-size:13px;padding:8px 10px;background:var(--bg-secondary);border:1px solid var(--border-strong);border-radius:8px;color:var(--text)">
+              <option value="" ${!g?.tipo ? 'selected' : ''}>Ninguno (solo de referencia)</option>
+              <option value="nuevo" ${g?.tipo === 'nuevo' ? 'selected' : ''}>Equipos nuevos</option>
+              <option value="usado" ${g?.tipo === 'usado' ? 'selected' : ''}>Equipos usados</option>
+            </select>
+            <div style="font-size:10px;color:var(--text-secondary);margin-top:4px">La condición sale del campo "Estado del producto" en Stock. Si ya hay otra categoría con el mismo tipo, esta la reemplaza.</div>
+          </div>
+        </div>
+        <div style="padding:12px 18px;border-top:1px solid var(--border);display:flex;justify-content:flex-end;gap:8px">
+          <button class="btn" onclick="document.getElementById('garantia-modal-overlay').remove()">Cancelar</button>
+          <button class="btn btn-primary" onclick="Panel._guardarGarantia(${g ? `'${id}'` : 'null'})">✓ Guardar</button>
+        </div>
+      </div>`;
+    overlay.onclick = () => overlay.remove();
+    document.body.appendChild(overlay);
   },
-  async editGarantia(id) {
-    const g = State.garantias.find(x => x.id === id);
-    const dias = parseInt(prompt(`Días de garantía para "${g.nombre}":`, g.dias));
-    if (dias) { g.dias = dias; await DB.editarGarantia(id, dias); this.renderBody(); }
+
+  async _guardarGarantia(id) {
+    const nombre = document.getElementById('gm-nombre')?.value.trim();
+    const dias = parseInt(document.getElementById('gm-dias')?.value);
+    const tipo = document.getElementById('gm-tipo')?.value || null;
+    if (!nombre || !dias) { toast('Completá el nombre y los días.'); return; }
+
+    const otraConMismoTipo = tipo && State.garantias.find(x => x.tipo === tipo && x.id !== id);
+    if (otraConMismoTipo) {
+      otraConMismoTipo.tipo = null;
+      await DB.editarGarantia(otraConMismoTipo.id, { tipo: null });
+    }
+
+    if (id) {
+      const g = State.garantias.find(x => x.id === id);
+      g.nombre = nombre; g.dias = dias; g.tipo = tipo;
+      await DB.editarGarantia(id, { nombre, dias, tipo });
+    } else {
+      const color = '#185FA5';
+      const nueva = await DB.agregarGarantia(nombre, dias, color, tipo);
+      State.garantias.push({ id: nueva?.id || Date.now(), nombre, dias, color, tipo });
+    }
+    document.getElementById('garantia-modal-overlay')?.remove();
+    toast(otraConMismoTipo ? `Guardado. "${otraConMismoTipo.nombre}" quedó sin tipo asignado, no puede haber dos.` : 'Categoría guardada.');
+    this.renderBody();
   },
   async delGarantia(id) {
     if (!confirm('¿Eliminar esta categoría?')) return;
@@ -318,6 +384,171 @@ const Panel = {
     this.renderBody();
   },
 
+
+  // ─── LANDING PÚBLICA — qué rubros se publican en precios.html ───
+  // La lista vive en configuracion.landing_categorias (un array JSON) y la lee
+  // la landing al cargar. Acá solo se prende y apaga.
+  LANDING_CATS: [
+    ['iphone',     '📱', 'iPhone'],
+    ['perfumeria', '🧴', 'Perfumería (incluye decants y combos)'],
+    ['accesorio',  '🔌', 'Accesorios'],
+    ['audio',      '🎧', 'AirPods / Audio'],
+    ['gaming',     '🎮', 'Gaming'],
+    ['mac',        '💻', 'Mac'],
+    ['ipad',       '🖥️', 'iPad'],
+    ['watch',      '⌚', 'Apple Watch'],
+    ['android',    '🤖', 'Android'],
+    ['cargador',   '⚡', 'Cargadores'],
+    ['herramienta','🛠️', 'Herramientas'],
+    ['otro',       '📦', 'Otros'],
+    ['repuesto',   '🔧', 'Repuestos'],
+  ],
+  _landingSel: null,
+
+  landingView() {
+    return `
+      <h3 style="font-size:13px;font-weight:600;color:var(--text-secondary);text-transform:uppercase;letter-spacing:.4px;margin-bottom:12px;border-bottom:1px solid var(--border);padding-bottom:8px">Landing pública — rubros visibles</h3>
+      <div style="background:var(--blue-light);border-radius:8px;padding:10px 12px;margin-bottom:14px;font-size:11.5px;color:var(--blue)">
+        <i class="ti ti-info-circle"></i> Elegí qué rubros se muestran en <strong>precios.html</strong>, la página que ven tus clientes. Los que estén apagados no se publican, aunque tengan stock disponible. El cambio se ve al recargar la landing, sin necesidad de deploy.
+      </div>
+      <div class="card">
+        <div id="landing-cats-list" style="display:flex;flex-direction:column;gap:2px">
+          <div style="color:var(--text-secondary);font-size:12px;padding:10px">Cargando…</div>
+        </div>
+        <button class="btn btn-primary" style="width:100%;justify-content:center;margin-top:14px" onclick="Panel.guardarLanding()">✓ Guardar rubros visibles</button>
+      </div>
+    `;
+  },
+
+  async cargarLanding() {
+    const guardadas = await DB.leerLandingCategorias();
+    this._landingSel = new Set(guardadas && guardadas.length ? guardadas : ['iphone']);
+    this.renderLandingList();
+  },
+
+  renderLandingList() {
+    const cont = document.getElementById('landing-cats-list');
+    if (!cont) return;
+    // Cantidad de artículos disponibles por rubro, para que se vea qué
+    // se está publicando o dejando afuera en cada caso.
+    const conteo = {};
+    (State.stock || []).forEach(p => {
+      const disp = (p.estadoInventario || 'disponible') === 'disponible';
+      if (disp) conteo[p.cat] = (conteo[p.cat] || 0) + 1;
+    });
+    cont.innerHTML = this.LANDING_CATS.map(([id, emoji, label]) => {
+      const on = this._landingSel.has(id);
+      const n = conteo[id] || 0;
+      const interno = id === 'repuesto';
+      return `<div onclick="Panel.toggleLandingCat('${id}')" style="display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:8px;cursor:pointer;background:${on?'var(--blue-light)':'transparent'};border:1px solid ${on?'var(--blue)':'var(--border)'}">
+        <span style="font-size:16px">${emoji}</span>
+        <div style="flex:1;min-width:0">
+          <div style="font-size:12.5px;font-weight:600;color:var(--text)">${label}</div>
+          <div style="font-size:10.5px;color:var(--text-secondary)">${n} ${n===1?'artículo':'artículos'} en stock${interno?' · uso interno del taller':''}</div>
+        </div>
+        <div style="width:38px;height:22px;border-radius:20px;background:${on?'var(--blue)':'var(--border-strong)'};position:relative;flex-shrink:0;transition:background .15s">
+          <div style="position:absolute;top:2px;left:${on?'18px':'2px'};width:18px;height:18px;border-radius:50%;background:#fff;transition:left .15s"></div>
+        </div>
+      </div>`;
+    }).join('');
+  },
+
+  toggleLandingCat(id) {
+    if (this._landingSel.has(id)) this._landingSel.delete(id);
+    else this._landingSel.add(id);
+    this.renderLandingList();
+  },
+
+  async guardarLanding() {
+    const lista = this.LANDING_CATS.map(([id]) => id).filter(id => this._landingSel.has(id));
+    if (!lista.length) { toast('Tenés que dejar al menos un rubro visible.'); return; }
+    await DB.guardarLandingCategorias(lista);
+    toast(`Landing actualizada: se publican ${lista.length} ${lista.length===1?'rubro':'rubros'}.`);
+  },
+
+  // ─── FINANCIACIÓN — coeficientes de tarjeta de la landing ───
+  // El coeficiente es el multiplicador del TOTAL sobre el precio de lista:
+  // 0.86 = 14% off · 1 = sin interés · 1.10 = 10% de interés.
+  // Guardado en configuracion.pagos_config; la landing lo lee al cargar.
+  _pagos: null,
+
+  financiacionView() {
+    return `
+      <h3 style="font-size:13px;font-weight:600;color:var(--text-secondary);text-transform:uppercase;letter-spacing:.4px;margin-bottom:12px;border-bottom:1px solid var(--border);padding-bottom:8px">Financiación con tarjeta — landing pública</h3>
+      <div style="background:var(--blue-light);border-radius:8px;padding:10px 12px;margin-bottom:14px;font-size:11.5px;color:var(--blue)">
+        <i class="ti ti-info-circle"></i> El <strong>coeficiente</strong> multiplica el precio de lista para dar el <strong>total financiado</strong>: 0,86 = 15% OFF · 1 = sin interés · 1,10 = 10% de interés. La cuota mensual es ese total dividido la cantidad de cuotas. Los cambios se ven al recargar la landing, sin deploy.
+      </div>
+      <div id="fin-body"><div style="color:var(--text-secondary);font-size:12px;padding:10px">Cargando…</div></div>
+    `;
+  },
+
+  async cargarFinanciacion() {
+    const cfg = await DB.leerPagosConfig() || {};
+    // Si todavía está el formato viejo (coef por cuota), se convierte para mostrar.
+    const conv = arr => (arr || []).map(c => ({ n: c.n, mostrar: c.mostrar !== false, coef: c.coef != null ? +(c.coef < 0.5 ? c.coef * c.n : c.coef).toFixed(4) : null }));
+    const base = ns => ns.map(n => ({ n, mostrar: false, coef: null }));
+    const mezclar = (guardadas, ns) => ns.map(n => (guardadas || []).find(c => c.n === n) || { n, mostrar: false, coef: null });
+    const promoSrc = cfg.promo?.cuotas || conv((cfg.promos || [])[0]?.cuotas) || [];
+    const otrosSrc = cfg.otros?.cuotas || conv(cfg.cuotas_fijas) || [];
+    this._pagos = {
+      lista_factor: cfg.lista_factor ?? 1.45,
+      promo: { titulo: cfg.promo?.titulo || (cfg.promos || [])[0]?.titulo || '🏦 Promo Banco Macro', vigencia: cfg.promo?.vigencia || 'Agosto · jueves a sábado', cuotas: mezclar(promoSrc, [3,6,9,12]) },
+      otros: { titulo: cfg.otros?.titulo || 'Otras tarjetas de crédito', cuotas: mezclar(otrosSrc, [3,6,9,12]) },
+    };
+    this.renderFinanciacion();
+  },
+
+  _finEtiqueta(coef) {
+    if (coef == null || !(coef > 0)) return '—';
+    if (Math.abs(coef - 1) < 0.005) return 'SIN INTERÉS';
+    if (coef < 1) return `${Math.round((1 - coef) * 100)}% OFF`;
+    return `+${Math.round((coef - 1) * 100)}% de interés`;
+  },
+
+  renderFinanciacion() {
+    const d = this._pagos;
+    const cont = document.getElementById('fin-body');
+    if (!cont || !d) return;
+    // Ejemplo vivo con un precio redondo, para ver el efecto de cada número.
+    const ejemploUSD = 1000;
+    const listaARS = Math.round(ejemploUSD * State.refBlue * d.lista_factor);
+    const bloque = (clave, b) => `
+      <div class="card" style="margin-bottom:14px">
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px">
+          <input type="text" value="${State.esc(b.titulo)}" onchange="Panel._pagos.${clave}.titulo=this.value" style="flex:1;font-size:13px;font-weight:700;padding:7px 10px;border:1px solid var(--border-strong);border-radius:8px">
+          ${clave === 'promo' ? `<input type="text" value="${State.esc(b.vigencia || '')}" placeholder="Vigencia (ej: Agosto · jueves a sábado)" onchange="Panel._pagos.promo.vigencia=this.value" style="flex:1;font-size:12px;padding:7px 10px;border:1px solid var(--border-strong);border-radius:8px">` : ''}
+        </div>
+        ${b.cuotas.map((c, i) => `
+          <div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-top:1px solid var(--border)">
+            <div style="width:70px;font-size:12.5px;font-weight:600">${c.n} cuotas</div>
+            <label style="display:flex;align-items:center;gap:5px;font-size:11px;color:var(--text-secondary);cursor:pointer">
+              <input type="checkbox" ${c.mostrar ? 'checked' : ''} onchange="Panel._pagos.${clave}.cuotas[${i}].mostrar=this.checked;Panel.renderFinanciacion()"> mostrar
+            </label>
+            <input type="number" step="0.01" min="0.1" value="${c.coef ?? ''}" placeholder="coef" onchange="Panel._pagos.${clave}.cuotas[${i}].coef=parseFloat(this.value)||null;Panel.renderFinanciacion()" style="width:80px;font-size:12.5px;font-weight:600;padding:6px 8px;border:1px solid var(--border-strong);border-radius:8px;text-align:center">
+            <div style="flex:1;font-size:11px;color:${c.mostrar && c.coef ? 'var(--text)' : 'var(--text-secondary)'}">
+              ${c.mostrar && c.coef ? `${this._finEtiqueta(c.coef)} · cuota ${State.fmtARS(Math.round(listaARS * c.coef / c.n))} · total ${State.fmtARS(Math.round(listaARS * c.coef))}` : 'no se publica'}
+            </div>
+          </div>`).join('')}
+      </div>`;
+    cont.innerHTML = `
+      <div class="card" style="margin-bottom:14px;display:flex;align-items:center;gap:12px">
+        <div style="font-size:12.5px;font-weight:600">Precio de lista = efectivo ×</div>
+        <input type="number" step="0.01" min="1" value="${d.lista_factor}" onchange="Panel._pagos.lista_factor=parseFloat(this.value)||1.45;Panel.renderFinanciacion()" style="width:90px;font-size:14px;font-weight:700;padding:7px 10px;border:1px solid var(--border-strong);border-radius:8px;text-align:center">
+        <div style="font-size:11px;color:var(--text-secondary)">Ejemplo: un equipo de USD ${ejemploUSD} lista a ${State.fmtARS(listaARS)} (blue $${State.refBlue.toLocaleString('es-AR')})</div>
+      </div>
+      ${bloque('promo', d.promo)}
+      ${bloque('otros', d.otros)}
+      <button class="btn btn-primary" style="width:100%;justify-content:center" onclick="Panel.guardarFinanciacion()">✓ Guardar financiación</button>
+    `;
+  },
+
+  async guardarFinanciacion() {
+    const d = this._pagos;
+    const visibles = [...d.promo.cuotas, ...d.otros.cuotas].filter(c => c.mostrar);
+    if (visibles.some(c => !(c.coef > 0))) { toast('Hay cuotas marcadas para mostrar sin coeficiente cargado.'); return; }
+    await DB.guardarPagosConfig({ lista_factor: d.lista_factor, promo: d.promo, otros: d.otros });
+    toast('Financiación guardada. La landing la toma al recargar.');
+  },
 
   cotizacionesView() {
     return `

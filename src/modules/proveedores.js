@@ -176,6 +176,15 @@ const Proveedores = {
 
   // ── DETALLE PROVEEDOR ────────────────────────────────────────────
 
+  // Saldo a favor CON el proveedor (plata que nos debe, no al revés).
+  // Cuenta corriente propia: 'generado' suma, 'aplicado' resta. No usa cajas,
+  // así que no se mezcla con el efectivo real del negocio.
+  saldoCredito(proveedorId) {
+    return (State.proveedorCreditos || [])
+      .filter(c => c.proveedorId === proveedorId)
+      .reduce((s, c) => s + (c.tipo === 'generado' ? c.montoUsd : -c.montoUsd), 0);
+  },
+
   _renderDetalleProveedor(host) {
     const p = (State.proveedores || []).find(x => x.id === this._proveedorId);
     if (!p) { this.back(); return; }
@@ -186,10 +195,12 @@ const Proveedores = {
     const totalGastado = lotes.flatMap(l => items.filter(i => i.loteId === l.id)).reduce((s, i) => s + i.precioUsd * i.cantidad, 0);
     const pendiente = lotes.filter(l => !['recibido', 'cancelado'].includes(l.estado)).reduce((s, l) => {
       const tot = items.filter(i => i.loteId === l.id).reduce((a, i) => a + i.precioUsd * i.cantidad, 0);
-      const pag = pagos.filter(pg => pg.loteId === l.id && pg.tipo === 'pago_proveedor').reduce((a, pg) => a + pg.montoUsd, 0);
+      const pag = pagos.filter(pg => pg.loteId === l.id && ['pago_proveedor', 'credito_aplicado'].includes(pg.tipo)).reduce((a, pg) => a + pg.montoUsd, 0);
       return s + Math.max(0, tot - pag);
     }, 0);
     const enStock = (State.stock || []).filter(s => s.proveedor === p.nombre).length;
+    const saldoCredito = this.saldoCredito(p.id);
+    const creditos = (State.proveedorCreditos || []).filter(c => c.proveedorId === p.id).slice().reverse();
 
     host.innerHTML = `
       <button class="btn btn-sm" onclick="Proveedores.back()" style="margin-bottom:16px">← Proveedores</button>
@@ -207,6 +218,7 @@ const Proveedores = {
       <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:20px">
         ${[['Total comprado', State.fmtUSD(totalGastado), '💰', 'var(--blue)'],
            ['Pendiente', State.fmtUSD(pendiente), '💸', pendiente > 0 ? 'var(--red)' : 'var(--green)'],
+           ['Saldo a favor', State.fmtUSD(saldoCredito), '💳', saldoCredito > 0 ? 'var(--green)' : 'var(--text)'],
            ['Órdenes', lotes.length, '📋', 'var(--text)'],
            ['En stock', enStock, '📦', 'var(--text)'],
           ].map(([l, v, e, c]) => `<div class="card" style="padding:12px 14px;margin-bottom:0;min-width:120px;flex:1">
@@ -214,6 +226,33 @@ const Proveedores = {
             <div style="font-size:16px;font-weight:700;color:${c}">${e} ${v}</div>
           </div>`).join('')}
       </div>
+
+      <div class="card" style="padding:14px;margin-bottom:20px">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:${creditos.length ? '10px' : '0'}">
+          <div style="font-size:13px;font-weight:700">💳 Saldo a favor — cuenta corriente con ${p.nombre}</div>
+          <button class="btn btn-sm" onclick="Proveedores.modalAjusteCredito('${p.id}')">✏️ Ajuste manual</button>
+        </div>
+        <p style="font-size:11px;color:var(--text-secondary);margin:0 0 ${creditos.length ? '10px' : '0'} 0">
+          Plata que <b>${p.nombre}</b> nos debe (sobrepagos o anticipos), usable como pago en una próxima orden. No es efectivo del negocio, por eso no aparece en las cajas ni en el total del Dashboard.
+        </p>
+        ${creditos.length ? `
+          <table style="width:100%;font-size:12px">
+            <thead><tr style="border-bottom:1px solid var(--border)"><th style="text-align:left;padding:5px 4px;color:var(--text-secondary);font-weight:600">Movimiento</th><th style="text-align:right;padding:5px 4px;color:var(--text-secondary);font-weight:600">Monto</th><th></th></tr></thead>
+            <tbody>
+              ${creditos.map(c => `
+                <tr style="border-bottom:1px solid var(--border)">
+                  <td style="padding:7px 4px">
+                    <div>${c.tipo === 'generado' ? '⬆️ Crédito generado' : '⬇️ Crédito aplicado'}${c.loteId ? ` · <a href="#" onclick="Proveedores.verLote(${c.loteId});return false" style="color:var(--blue)">lote #${c.loteId}</a>` : ''}</div>
+                    <div style="font-size:10px;color:var(--text-tertiary);margin-top:1px">${c.fecha}${c.notas ? ' · ' + c.notas : ''}</div>
+                  </td>
+                  <td style="text-align:right;padding:7px 4px;font-weight:600;color:${c.tipo === 'generado' ? 'var(--green)' : 'var(--red)'}">${c.tipo === 'generado' ? '+' : '−'}${State.fmtUSD(c.montoUsd)}</td>
+                  <td style="text-align:right;padding:7px 4px">${!c.loteId ? `<button onclick="Proveedores.eliminarCreditoManual(${c.id})" style="background:none;border:none;cursor:pointer;color:var(--red);font-size:13px" title="Quitar este ajuste">🗑️</button>` : ''}</td>
+                </tr>`).join('')}
+            </tbody>
+          </table>
+        ` : ''}
+      </div>
+
       <div style="font-size:11px;font-weight:700;color:var(--text-secondary);text-transform:uppercase;letter-spacing:.06em;margin-bottom:10px">Órdenes / Lotes</div>
       ${lotes.length ? lotes.map(l => this._loteCard(l)).join('') : '<div class="empty-state" style="margin-top:30px">📋<div>Sin órdenes para este proveedor</div></div>'}
     `;
@@ -232,14 +271,26 @@ const Proveedores = {
     const totalUds = items.reduce((s, i) => s + i.cantidad, 0);
     const conv = pagos.find(p => p.tipo === 'conversion');
     const pagadoProveedor = pagos.filter(p => p.tipo === 'pago_proveedor').reduce((s, p) => s + p.montoUsd, 0);
+    const creditoAplicadoLote = pagos.filter(p => p.tipo === 'credito_aplicado').reduce((s, p) => s + p.montoUsd, 0);
     const totalEnvio = pagos.filter(p => ['envio','costo','diferencial'].includes(p.tipo)).reduce((s, p) => s + p.montoUsd, 0);
     const comisionUsd = conv?.comisionUsd || 0;
     const costoTotal = totalItems + comisionUsd + totalEnvio;
     const costoUnit = totalUds > 0 ? costoTotal / totalUds : 0;
     const isTerminal = ['recibido', 'cancelado'].includes(l.estado);
 
-    const pagoIcons = { conversion: '💱', pago_proveedor: '💸', envio: '🚚', costo: '💰', devolucion: '↩️' };
-    const pagoLabels = { conversion: 'Conversión USD → USDT', pago_proveedor: 'Pago al proveedor', envio: 'Costo de envío', costo: 'Costo adicional', devolucion: 'Devolución del proveedor' };
+    // Pagado = efectivo + saldo a favor aplicado. Si supera el costo, esa
+    // diferencia es plata pagada de más que hay que guardar como crédito con
+    // el proveedor — si no, queda flotando sin registrar en ningún lado.
+    const pagadoTotal = pagadoProveedor + creditoAplicadoLote;
+    const restante = Math.max(0, costoTotal - pagadoTotal);
+    const excedenteBruto = Math.max(0, pagadoTotal - costoTotal);
+    const creditoYaGeneradoDeLote = (State.proveedorCreditos || [])
+      .filter(c => c.loteId === l.id && c.tipo === 'generado').reduce((s, c) => s + c.montoUsd, 0);
+    const excedenteSinConvertir = +Math.max(0, excedenteBruto - creditoYaGeneradoDeLote).toFixed(2);
+    const saldoCreditoProv = l.proveedorId ? this.saldoCredito(l.proveedorId) : 0;
+
+    const pagoIcons = { conversion: '💱', pago_proveedor: '💸', envio: '🚚', costo: '💰', devolucion: '↩️', credito_aplicado: '💳' };
+    const pagoLabels = { conversion: 'Conversión USD → USDT', pago_proveedor: 'Pago al proveedor', envio: 'Costo de envío', costo: 'Costo adicional', devolucion: 'Devolución del proveedor', credito_aplicado: 'Saldo a favor aplicado' };
 
     host.innerHTML = `
       <button class="btn btn-sm" onclick="Proveedores.back()" style="margin-bottom:16px">← ${prov?.nombre || 'Proveedores'}</button>
@@ -255,11 +306,19 @@ const Proveedores = {
         ${!isTerminal ? `<div style="display:flex;gap:6px;flex-wrap:wrap">
           ${!conv ? `<button class="btn btn-sm" onclick="Proveedores.modalConversion(${l.id})">💱 Conversión USD→USDT</button>` : ''}
           <button class="btn btn-sm btn-primary" onclick="Proveedores.modalPago(${l.id})">💸 Registrar pago</button>
+          ${saldoCreditoProv > 0 ? `<button class="btn btn-sm" onclick="Proveedores.modalUsarCredito(${l.id})">💳 Usar saldo a favor (${State.fmtUSD(saldoCreditoProv)})</button>` : ''}
           <button class="btn btn-sm" onclick="Proveedores.modalCostoAdicional(${l.id})">💰 Agregar costo</button>
           <button class="btn btn-sm" onclick="Proveedores.modalEditarItems(${l.id})">✏️ Editar orden</button>
-          ${pagadoProveedor > 0 && l.estado !== 'recibido' ? `<button class="btn btn-sm btn-green" onclick="Proveedores.modalRecepcion(${l.id})">📦 Confirmar recepción</button>` : ''}
+          ${pagadoTotal > 0 && l.estado !== 'recibido' ? `<button class="btn btn-sm btn-green" onclick="Proveedores.modalRecepcion(${l.id})">📦 Confirmar recepción</button>` : ''}
         </div>` : ''}
       </div>
+
+      ${excedenteSinConvertir > 0 ? `
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;background:var(--amber-light,#fff8e1);border-radius:8px;padding:10px 14px;margin-bottom:16px">
+          <div style="font-size:12.5px;color:#b45309"><i class="ti ti-alert-triangle"></i> Se pagó <b>${State.fmtUSD(excedenteSinConvertir)}</b> de más en este lote — ¿lo guardamos como saldo a favor con ${prov?.nombre || 'el proveedor'} para usarlo en otra orden?</div>
+          <button class="btn btn-sm btn-primary" onclick="Proveedores.convertirExcedenteACredito(${l.id})">💳 Guardar como saldo a favor</button>
+        </div>
+      ` : ''}
 
       <!-- Resumen financiero -->
       <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:16px">
@@ -268,6 +327,7 @@ const Proveedores = {
            ['Envío', State.fmtUSD(totalEnvio), '🚚', totalEnvio > 0 ? 'var(--text)' : 'var(--text-secondary)'],
            ['Costo total', State.fmtUSD(costoTotal), '💰', 'var(--blue)'],
            ['Costo / unidad', State.fmtUSD(costoUnit), '📊', 'var(--green)'],
+           ['Pagado' + (creditoAplicadoLote > 0 ? ` (${State.fmtUSD(creditoAplicadoLote)} en crédito)` : ''), State.fmtUSD(pagadoTotal), '✅', restante > 0 ? 'var(--amber)' : 'var(--green)'],
           ].map(([label, val, e, c]) => `<div class="card" style="padding:10px 12px;margin-bottom:0;min-width:110px;flex:1">
             <label style="font-size:10px;color:var(--text-secondary);display:block;margin-bottom:3px">${label}</label>
             <div style="font-size:14px;font-weight:700;color:${c}">${e} ${val}</div>
@@ -288,7 +348,7 @@ const Proveedores = {
               const costoFinalU = i.precioUsd + logUsada;
               const esManual = i.logisticaManual != null;
               return `<tr style="border-bottom:1px solid var(--border)">
-                <td style="padding:7px 4px">${i.nombre}${i.storage ? ` ${i.storage}` : ''}${i.color ? ` · ${i.color}` : ''}</td>
+                <td style="padding:7px 4px">${State.esc(i.nombre)}${i.storage ? ` ${State.esc(i.storage)}` : ''}${i.color ? ` · ${State.esc(i.color)}` : ''}${i.grado && i.grado !== 'Sin grado' ? ` <span style="font-size:10px;color:var(--text-secondary)">(${State.esc(i.grado)})</span>` : ''}</td>
                 <td style="text-align:right;padding:7px 4px">${i.cantidad}</td>
                 <td style="text-align:right;padding:7px 4px">${State.fmtUSD(i.precioUsd)}</td>
                 <td style="text-align:right;padding:7px 4px">
@@ -345,14 +405,17 @@ const Proveedores = {
                 ? `${pg.moneda === 'ARS' ? State.fmtARS(pg.montoUsd * (State.refBlue||1)) : (pg.moneda === 'USDT' ? pg.montoUsdt?.toFixed(2) : pg.montoUsd.toFixed(2))} ${pg.moneda} desde <b>${pg.persona}</b> (${pg.bolsillo})${pg.moneda === 'ARS' ? ` ≈ ${State.fmtUSD(pg.montoUsd)}` : ''}`
                 : pg.tipo === 'devolucion'
                 ? `${State.fmtUSD(pg.montoUsd)} acreditado en <b>${pg.persona}</b> (${pg.bolsillo})`
+                : pg.tipo === 'credito_aplicado'
+                ? `${State.fmtUSD(pg.montoUsd)} del saldo a favor con ${prov?.nombre || 'el proveedor'} — no salió de ninguna caja`
                 : `${State.fmtUSD(pg.montoUsd)} ${pg.moneda} desde <b>${pg.persona}</b> (${pg.bolsillo})`;
               // Qué hace revertir cada tipo
               const revertInfo = {
-                devolucion:     { label: 'Revertir devolución',   accion: 'debitar',   quien: pg.persona, bolsillo: pg.bolsillo, monto: pg.montoUsd },
-                costo:          { label: 'Eliminar costo',         accion: 'acreditar', quien: pg.persona, bolsillo: pg.bolsillo, monto: pg.montoUsd },
-                envio:          { label: 'Eliminar costo envío',   accion: 'acreditar', quien: pg.persona, bolsillo: pg.bolsillo, monto: pg.montoUsd },
-                pago_proveedor: { label: 'Revertir pago',          accion: 'acreditar', quien: pg.persona, bolsillo: pg.bolsillo, monto: pg.montoUsd },
-                conversion:     { label: 'Revertir conversión',    accion: null },
+                devolucion:       { label: 'Revertir devolución',   accion: 'debitar',   quien: pg.persona, bolsillo: pg.bolsillo, monto: pg.montoUsd },
+                costo:            { label: 'Eliminar costo',         accion: 'acreditar', quien: pg.persona, bolsillo: pg.bolsillo, monto: pg.montoUsd },
+                envio:            { label: 'Eliminar costo envío',   accion: 'acreditar', quien: pg.persona, bolsillo: pg.bolsillo, monto: pg.montoUsd },
+                pago_proveedor:   { label: 'Revertir pago',          accion: 'acreditar', quien: pg.persona, bolsillo: pg.bolsillo, monto: pg.montoUsd },
+                conversion:       { label: 'Revertir conversión',    accion: null },
+                credito_aplicado: { label: 'Devolver al saldo a favor', accion: null },
               }[pg.tipo];
               const btnRevertir = !isTerminal && revertInfo ? `<button onclick="Proveedores.revertirMovimientoLote(${l.id}, ${pg.id})" style="background:none;border:1px solid var(--border);border-radius:6px;padding:3px 8px;cursor:pointer;color:var(--text-secondary);font-size:11px;white-space:nowrap" title="${revertInfo.label}">↩ Revertir</button>` : '';
               return `<div style="display:flex;gap:10px;align-items:flex-start;padding:9px 0;border-bottom:1px solid var(--border)">
@@ -497,39 +560,7 @@ const Proveedores = {
     } else if (w.paso === 2) {
       const total = w.items.reduce((s, i) => s + i.precioUsd * i.cantidad, 0);
       body = `
-        ${w.items.map((item, idx) => `
-          <div style="background:var(--bg-secondary);border-radius:8px;padding:10px;margin-bottom:8px">
-            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
-              <div style="font-size:12px;font-weight:600">${item.nombre || `Item ${idx + 1}`}</div>
-              <button onclick="Proveedores._quitarItem(${idx})" style="background:none;border:none;cursor:pointer;color:var(--red);font-size:14px">✕</button>
-            </div>
-            <div style="display:grid;grid-template-columns:2fr 1fr 1fr;gap:8px">
-              <div>
-                <label style="font-size:10px;color:var(--text-secondary);display:block;margin-bottom:2px">Nombre / modelo *</label>
-                <input type="text" value="${item.nombre}" oninput="Proveedores._editItem(${idx},'nombre',this.value)" style="width:100%;font-size:12px;padding:5px 8px;background:var(--bg-elevated);border:1px solid var(--border-strong);border-radius:6px;color:var(--text)">
-              </div>
-              <div>
-                <label style="font-size:10px;color:var(--text-secondary);display:block;margin-bottom:2px">Cantidad</label>
-                <input type="number" min="1" value="${item.cantidad}" oninput="Proveedores._editItem(${idx},'cantidad',+this.value);Proveedores._refrescarTotal()" style="width:100%;font-size:12px;padding:5px 8px;background:var(--bg-elevated);border:1px solid var(--border-strong);border-radius:6px;color:var(--text)">
-              </div>
-              <div>
-                <label style="font-size:10px;color:var(--text-secondary);display:block;margin-bottom:2px">Precio USD/u</label>
-                <input type="number" min="0" step="0.01" value="${item.precioUsd}" oninput="Proveedores._editItem(${idx},'precioUsd',+this.value);Proveedores._refrescarTotal()" style="width:100%;font-size:12px;padding:5px 8px;background:var(--bg-elevated);border:1px solid var(--border-strong);border-radius:6px;color:var(--text)">
-              </div>
-            </div>
-            <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:6px">
-              <div>
-                <label style="font-size:10px;color:var(--text-secondary);display:block;margin-bottom:2px">Almacenamiento</label>
-                <input type="text" placeholder="Ej: 128GB, 256GB" value="${item.storage || ''}" oninput="Proveedores._editItem(${idx},'storage',this.value)" style="width:100%;font-size:12px;padding:5px 8px;background:var(--bg-elevated);border:1px solid var(--border-strong);border-radius:6px;color:var(--text)">
-              </div>
-              <div>
-                <label style="font-size:10px;color:var(--text-secondary);display:block;margin-bottom:2px">Color</label>
-                <input type="text" placeholder="Ej: Negro, Blanco" value="${item.color || ''}" oninput="Proveedores._editItem(${idx},'color',this.value)" style="width:100%;font-size:12px;padding:5px 8px;background:var(--bg-elevated);border:1px solid var(--border-strong);border-radius:6px;color:var(--text)">
-              </div>
-            </div>
-            <div style="text-align:right;font-size:11px;color:var(--text-secondary);margin-top:4px">Subtotal: <b>${State.fmtUSD(item.precioUsd * item.cantidad)}</b></div>
-          </div>
-        `).join('')}
+        ${w.items.map((item, idx) => this._itemCard(item, idx)).join('')}
         <button onclick="Proveedores._agregarItem()" style="width:100%;padding:10px;border:2px dashed var(--border-strong);border-radius:8px;background:none;color:var(--blue);cursor:pointer;font-size:13px;font-weight:600;margin-bottom:8px">➕ Agregar item</button>
         <div id="lw-total" style="text-align:right;font-size:14px;font-weight:700;color:var(--blue)">Total: ${State.fmtUSD(total)}</div>
       `;
@@ -541,7 +572,7 @@ const Proveedores = {
         <div style="background:var(--bg-secondary);border-radius:10px;padding:14px;display:flex;flex-direction:column;gap:8px;font-size:13px;margin-bottom:12px">
           ${[['Proveedor', prov?.nombre || '—'], ['Lote', w.nombre || 'Sin nombre'], ['Fecha', w.fechaOrden], ['Llegada esperada', w.fechaLlegadaEsperada || 'Sin definir']].map(([k, v]) => `<div style="display:flex;justify-content:space-between"><span style="color:var(--text-secondary)">${k}</span><b>${v}</b></div>`).join('')}
           <div style="border-top:1px solid var(--border);padding-top:8px">
-            ${w.items.filter(i => i.nombre).map(i => `<div style="display:flex;justify-content:space-between;margin-bottom:3px"><span>${i.nombre} × ${i.cantidad}</span><b>${State.fmtUSD(i.precioUsd * i.cantidad)}</b></div>`).join('')}
+            ${w.items.filter(i => i.nombre || i.modelo).map(i => `<div style="display:flex;justify-content:space-between;margin-bottom:3px"><span>${State.esc(this.tituloItem(i))} × ${i.cantidad}</span><b>${State.fmtUSD(i.precioUsd * i.cantidad)}</b></div>`).join('')}
           </div>
           <div style="display:flex;justify-content:space-between;border-top:1px solid var(--border);padding-top:8px;font-size:15px"><span style="color:var(--text-secondary)">Total</span><b style="color:var(--blue)">${State.fmtUSD(total)}</b></div>
           <div style="display:flex;justify-content:space-between"><span style="color:var(--text-secondary)">Unidades</span><b>${uds}</b></div>
@@ -571,9 +602,173 @@ const Proveedores = {
     `;
   },
 
-  _agregarItem() { this._loteWizard.items.push({ nombre: '', cantidad: 1, precioUsd: 0, storage: '', color: '' }); this._renderWizard(); },
+  // Categorías que se pueden comprar a un proveedor. Son las mismas de Stock,
+  // así lo que entra por acá cae en el rubro correcto sin tocarlo a mano.
+  CATS_COMPRA: ['iphone','android','mac','ipad','watch','audio','gaming','accesorio','repuesto','perfumeria','decant','herramienta','otro'],
+
+  // Rubros donde el producto se identifica por su NOMBRE y no por un modelo de
+  // catálogo. Importa porque ahí los campos están reutilizados a propósito:
+  //   perfumería → modelo = marca · color = categoría · storage = concentración
+  //   repuesto   → modelo = modelo compatible
+  // Si acá se tratan como modelo/color/almacenamiento, entran datos sin sentido
+  // (un perfume con storage '128GB') y se rompe el filtro de Perfumería del panel.
+  //
+  // NO se duplica la lista: la fuente única es Stock.CATS_NOMBRE_LIBRE. Tenerla
+  // dos veces ya salió caro — una copia quedó sin 'decant' y dejaba un formulario
+  // imposible de guardar.
+  get CATS_NOMBRE_LIBRE() { return window.Stock?.CATS_NOMBRE_LIBRE || []; },
+  esNombreLibre(cat) { return !!window.Stock?.esNombreLibre(cat); },
+  esPerfume(cat) { return !!window.Stock?.esPerfume(cat); },
+
+  _agregarItem() {
+    this._loteWizard.items.push({
+      cat: 'iphone', nombre: '', modelo: '', cantidad: 1, precioUsd: 0,
+      storage: '', color: '', grado: 'Sin grado', estadoProducto: 'Nuevo / Sellado',
+    });
+    this._renderWizard();
+  },
   _quitarItem(idx) { this._loteWizard.items.splice(idx, 1); this._renderWizard(); },
-  _editItem(idx, campo, val) { if (this._loteWizard.items[idx]) this._loteWizard.items[idx][campo] = val; },
+  _editItem(idx, campo, val) {
+    const it = this._loteWizard.items[idx];
+    if (!it) return;
+    it[campo] = val;
+    // En los rubros con modelo de catálogo, el nombre ES el modelo. En los de
+    // nombre libre no: ahí el nombre lo escribe el usuario y `modelo` guarda
+    // otra cosa (la marca del perfume, el modelo compatible del repuesto).
+    if (campo === 'modelo' && !this.esNombreLibre(it.cat)) it.nombre = val;
+  },
+
+  // Un desplegable con la lista oficial + una opción "Otro (escribir)" que abre
+  // un campo libre. Lo que se escriba entra igual al stock y desde ahí aparece
+  // solo en los filtros, sin tener que tocar ninguna lista en el código.
+  _selectConOtro(idx, campo, opciones, placeholder) {
+    const it = this._loteWizard.items[idx];
+    const valor = it[campo] || '';
+    const esc = v => State.esc(v);
+    const libre = !!it['_libre_' + campo] || (!!valor && !opciones.includes(valor));
+    const est = 'width:100%;font-size:12px;padding:5px 8px;background:var(--bg-elevated);border:1px solid var(--border-strong);border-radius:6px;color:var(--text)';
+    return `
+      <select onchange="Proveedores._editItemSelect(${idx},'${campo}',this.value)" style="${est}">
+        <option value="">— Elegir —</option>
+        ${opciones.map(o => `<option value="${esc(o)}" ${valor === o ? 'selected' : ''}>${esc(o)}</option>`).join('')}
+        <option value="__otro__" ${libre ? 'selected' : ''}>Otro (escribir)</option>
+      </select>
+      <input type="text" placeholder="${esc(placeholder)}" value="${libre ? esc(valor) : ''}"
+        oninput="Proveedores._editItem(${idx},'${campo}',this.value)"
+        style="${est};margin-top:4px;display:${libre ? 'block' : 'none'}">`;
+  },
+
+  _editItemSelect(idx, campo, val) {
+    const it = this._loteWizard.items[idx];
+    if (!it) return;
+    if (val === '__otro__') { it['_libre_' + campo] = true; it[campo] = ''; }
+    else { it['_libre_' + campo] = false; it[campo] = val; }
+    // Cambiar de rubro o de modelo invalida el almacenamiento y el color: cada
+    // modelo tiene los suyos.
+    if (campo === 'cat') { it.modelo = ''; it.nombre = ''; it.storage = ''; it.color = ''; it._libre_modelo = false; it._libre_storage = false; it._libre_color = false; }
+    if (campo === 'modelo' && !this.esNombreLibre(it.cat)) { it.nombre = it.modelo; it.storage = ''; it.color = ''; it._libre_storage = false; it._libre_color = false; }
+    this._renderWizard();
+  },
+
+  // Texto visible de un item. En los rubros de nombre libre el nombre ya lo dice
+  // todo; en los de modelo se arma con modelo + almacenamiento + color.
+  tituloItem(item) {
+    if (this.esNombreLibre(item.cat)) {
+      const extra = this.esPerfume(item.cat) ? [item.modelo, item.storage].filter(Boolean).join(' · ') : '';
+      return [item.nombre, extra ? `(${extra})` : ''].filter(Boolean).join(' ');
+    }
+    return [item.modelo || item.nombre, item.storage, item.color].filter(Boolean).join(' ');
+  },
+
+  _placeholderNombre(cat) { return window.Stock?.placeholderNombre(cat) || ''; },
+
+  _itemCard(item, idx) {
+    const esc = v => State.esc(v);
+    const cat = item.cat || 'iphone';
+    const S = window.Stock;
+    // Lista de modelos = catálogo fijo + lo que ya exista en el stock real.
+    const modelos = S?.modelosParaCat(cat) || [];
+    const specs = S?.specsParaModelo(item.modelo || '') || { s: [], c: [] };
+    const tieneModelo = modelos.length > 0 && !this.esNombreLibre(cat);
+    const esPerfume = this.esPerfume(cat);
+    const marcasPf = Object.values(S?.marcasPerfumeria() || {}).flat();
+    const est = 'width:100%;font-size:12px;padding:5px 8px;background:var(--bg-elevated);border:1px solid var(--border-strong);border-radius:6px;color:var(--text)';
+    const lbl = 'font-size:10px;color:var(--text-secondary);display:block;margin-bottom:2px';
+    const titulo = this.tituloItem(item);
+    return `
+      <div style="background:var(--bg-secondary);border-radius:8px;padding:10px;margin-bottom:8px">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+          <div style="font-size:12px;font-weight:600">${esc(titulo) || `Item ${idx + 1}`}</div>
+          <button onclick="Proveedores._quitarItem(${idx})" style="background:none;border:none;cursor:pointer;color:var(--red);font-size:14px">✕</button>
+        </div>
+        <div style="display:grid;grid-template-columns:1.3fr 1fr 1fr;gap:8px">
+          <div>
+            <label style="${lbl}">Rubro</label>
+            <select onchange="Proveedores._editItemSelect(${idx},'cat',this.value)" style="${est}">
+              ${this.CATS_COMPRA.map(c => `<option value="${c}" ${cat === c ? 'selected' : ''}>${esc(S?.CAT_LABELS[c] || c)}</option>`).join('')}
+            </select>
+          </div>
+          <div>
+            <label style="${lbl}">Cantidad</label>
+            <input type="number" min="1" value="${item.cantidad}" oninput="Proveedores._editItem(${idx},'cantidad',+this.value);Proveedores._refrescarTotal()" style="${est}">
+          </div>
+          <div>
+            <label style="${lbl}">Precio USD/u</label>
+            <input type="number" min="0" step="0.01" value="${item.precioUsd}" oninput="Proveedores._editItem(${idx},'precioUsd',+this.value);Proveedores._refrescarTotal()" style="${est}">
+          </div>
+        </div>
+        <div style="margin-top:6px">
+          <label style="${lbl}">${tieneModelo ? 'Modelo *' : 'Nombre del producto *'}</label>
+          ${tieneModelo
+            ? this._selectConOtro(idx, 'modelo', modelos, 'Escribí el modelo')
+            : `<input type="text" value="${esc(item.nombre || '')}" placeholder="${esc(this._placeholderNombre(cat))}" oninput="Proveedores._editItem(${idx},'nombre',this.value)" style="${est}">`}
+        </div>
+        ${esPerfume ? `
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-top:6px">
+          <div>
+            <label style="${lbl}">Marca</label>
+            ${this._selectConOtro(idx, 'modelo', marcasPf, 'ej: Armaf')}
+          </div>
+          <div>
+            <label style="${lbl}">Categoría</label>
+            ${this._selectConOtro(idx, 'color', S?.PERFUME_CATEGORIAS || [], 'ej: Árabe')}
+          </div>
+          <div>
+            <label style="${lbl}">Concentración</label>
+            ${this._selectConOtro(idx, 'storage', S?.PERFUME_CONCENTRACIONES || [], 'ej: EDP')}
+          </div>
+        </div>` : cat === 'repuesto' ? `
+        <div style="margin-top:6px">
+          <label style="${lbl}">Modelo compatible <span style="font-weight:400">(opcional)</span></label>
+          ${this._selectConOtro(idx, 'modelo', S?.todosLosModelos() || [], 'ej: Motorola G84')}
+        </div>` : `
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:6px">
+          <div>
+            <label style="${lbl}">Almacenamiento</label>
+            ${this._selectConOtro(idx, 'storage', specs.s || [], 'ej: 256GB')}
+          </div>
+          <div>
+            <label style="${lbl}">Color</label>
+            ${this._selectConOtro(idx, 'color', specs.c || [], 'ej: Lavanda')}
+          </div>
+        </div>`}
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:6px">
+          <div>
+            <label style="${lbl}">Grado</label>
+            <select onchange="Proveedores._editItem(${idx},'grado',this.value)" style="${est}">
+              ${(S?.GRADO_OPCIONES || ['Sin grado']).map(g => `<option ${(item.grado||'Sin grado') === g ? 'selected' : ''}>${esc(g)}</option>`).join('')}
+            </select>
+          </div>
+          <div>
+            <label style="${lbl}">Estado del producto</label>
+            <select onchange="Proveedores._editItem(${idx},'estadoProducto',this.value)" style="${est}">
+              ${(S?.ESTADO_OPCIONES || []).map(e => `<option ${(item.estadoProducto||'Nuevo / Sellado') === e ? 'selected' : ''}>${esc(e)}</option>`).join('')}
+            </select>
+          </div>
+        </div>
+        <div style="text-align:right;font-size:11px;color:var(--text-secondary);margin-top:6px">Subtotal: <b>${State.fmtUSD(item.precioUsd * item.cantidad)}</b></div>
+      </div>`;
+  },
   _refrescarTotal() {
     const total = this._loteWizard.items.reduce((s, i) => s + i.precioUsd * i.cantidad, 0);
     const el = document.getElementById('lw-total');
@@ -592,7 +787,7 @@ const Proveedores = {
       if (!w.fechaOrden) { toast('Ingresá la fecha de orden', 'error'); return; }
       if (!w.items.length) w.items.push({ nombre: '', cantidad: 1, precioUsd: 0 });
     } else if (w.paso === 2) {
-      const validos = w.items.filter(i => i.nombre.trim());
+      const validos = w.items.filter(i => (i.nombre || i.modelo || '').trim());
       if (!validos.length) { toast('Agregá al menos un item', 'error'); return; }
     }
     w.paso++;
@@ -603,7 +798,11 @@ const Proveedores = {
 
   async _crearLote() {
     const w = this._loteWizard;
-    const items = w.items.filter(i => i.nombre.trim());
+    const items = w.items
+      .filter(i => (i.nombre || i.modelo || '').trim())
+      // En los rubros con modelo de catálogo el nombre es el modelo; en los de
+      // nombre libre se respeta lo que se escribió tal cual.
+      .map(i => ({ ...i, nombre: (i.nombre || i.modelo || '').trim() }));
     if (!items.length) { toast('Agregá al menos un item', 'error'); return; }
     const lote = await DB.crearLote({ proveedorId: w.proveedorId, nombre: w.nombre, fechaOrden: w.fechaOrden, fechaLlegadaEsperada: w.fechaLlegadaEsperada || null, notas: w.notas }, items);
     document.getElementById('lote-modal-overlay')?.remove();
@@ -721,15 +920,11 @@ const Proveedores = {
 
     if (!montoUsd || montoUsd <= 0) { toast('Ingresá un monto válido', 'error'); return; }
 
-    // Impactar cajas
-    const saldoOrigen = (State.cajas[persona]?.[bolsillo]) || 0;
-    const saldoDest = (State.cajas[personaDest]?.[bolsilloDestino]) || 0;
-    State.cajas[persona] = State.cajas[persona] || {};
-    State.cajas[personaDest] = State.cajas[personaDest] || {};
-    State.cajas[persona][bolsillo] = saldoOrigen - montoUsd;
-    State.cajas[personaDest][bolsilloDestino] = saldoDest + montoUsdt;
-    await DB.actualizarSaldoCaja(persona, bolsillo, saldoOrigen - montoUsd);
-    await DB.actualizarSaldoCaja(personaDest, bolsilloDestino, saldoDest + montoUsdt);
+    // Impactar cajas por el motor central, para que queden en el libro
+    await State.debitarCaja(persona, bolsillo, montoUsd,
+      { tipo: 'proveedor', referencia: loteId, descripcion: `Conversión a USDT — pasa a ${personaDest} · ${bolsilloDestino}` });
+    await State.acreditarCaja(personaDest, bolsilloDestino, montoUsdt,
+      { tipo: 'proveedor', referencia: loteId, descripcion: `Conversión desde ${persona} · ${bolsillo} (comisión ${comisionPct}%)` });
 
     await DB.guardarLotePago(loteId, { tipo: 'conversion', montoUsd, montoUsdt, comisionPct, comisionUsd, moneda: 'USD', persona, bolsillo, personaDest, bolsilloDestino, fecha, notas });
 
@@ -871,10 +1066,8 @@ const Proveedores = {
     let montoUsd = monto;
     if (moneda === 'ARS') montoUsd = monto / (State.refBlue || 1);
 
-    const saldo = (State.cajas[persona]?.[bolsillo]) || 0;
-    State.cajas[persona] = State.cajas[persona] || {};
-    State.cajas[persona][bolsillo] = saldo - monto;
-    await DB.actualizarSaldoCaja(persona, bolsillo, saldo - monto);
+    await State.debitarCaja(persona, bolsillo, monto,
+      { tipo: 'proveedor', referencia: loteId, descripcion: `Pago a proveedor del lote ${loteId}` });
     await DB.guardarLotePago(loteId, {
       tipo: 'pago_proveedor', montoUsd, montoUsdt: moneda === 'USDT' ? monto : montoUsd,
       moneda, persona, bolsillo, personaDest: '', bolsilloDestino: '', fecha, notas
@@ -1045,8 +1238,6 @@ const Proveedores = {
     const montoUsd = moneda === 'ARS' ? monto / (State.refBlue || 1) : moneda === 'USDT' ? monto : monto;
 
     if (persona) {
-      const saldo = (State.cajas[persona]?.[bolsillo]) || 0;
-      State.cajas[persona] = State.cajas[persona] || {};
       // Convertir monto a la moneda nativa del bolsillo para deducir correctamente
       const esARS = bolsillo.startsWith('ARS');
       const esUSDT = bolsillo === 'USDT';
@@ -1054,8 +1245,8 @@ const Proveedores = {
       if (esARS)       montoParaCaja = moneda === 'ARS' ? monto : montoUsd * (State.refBlue || 1);
       else if (esUSDT) montoParaCaja = moneda === 'USDT' ? monto : montoUsd;
       else             montoParaCaja = montoUsd; // bolsillo USD
-      State.cajas[persona][bolsillo] = saldo - montoParaCaja;
-      await DB.actualizarSaldoCaja(persona, bolsillo, saldo - montoParaCaja);
+      await State.debitarCaja(persona, bolsillo, montoParaCaja,
+        { tipo: 'proveedor', referencia: loteId, descripcion: `Costo del lote: ${desc}` });
     }
 
     await DB.guardarLotePago(loteId, {
@@ -1095,21 +1286,35 @@ const Proveedores = {
     const unids = Array.isArray(item.unidades) ? item.unidades : [];
     const esSerie = ['cargador','cable','accesorio'].includes(item.cat);
     const label1 = esSerie ? 'N° de serie' : 'IMEI';
-    const rows = Array.from({ length: item.cantidad }, (_, k) => {
+    const esc = v => State.esc(v);
+    // Sugerencias del mismo catálogo que usa Stock (lista oficial + lo que ya
+    // exista en el inventario). Se pueden escribir igual: lo que se cargue acá
+    // entra al stock y desde ahí aparece solo en los filtros.
+    const specs = window.Stock?.specsParaModelo(item.modelo || item.nombre || '') || { s: [], c: [] };
+    const opts = arr => (arr || []).map(v => `<option value="${esc(v)}"></option>`).join('');
+    const listas = `
+      <datalist id="ud-lista-colores">${opts(specs.c)}</datalist>
+      <datalist id="ud-lista-storages">${opts(specs.s)}</datalist>`;
+    const inputEst = 'width:100%;font-size:12px;padding:6px 8px;background:var(--bg);border:1px solid var(--border-strong);border-radius:6px;color:var(--text)';
+    const rows = listas + Array.from({ length: item.cantidad }, (_, k) => {
       const u = unids[k] || {};
       return `<div style="background:var(--bg-secondary);border-radius:8px;padding:10px;margin-bottom:8px;display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;align-items:end">
         <div style="grid-column:1/-1;font-size:11px;font-weight:700;color:var(--text-secondary)">Unidad ${k+1}</div>
-        <div>
+        <div style="grid-column:1/-1">
           <label style="font-size:10px;color:var(--text-secondary);display:block;margin-bottom:3px">${label1}</label>
-          <input class="ud-imei" data-idx="${k}" type="text" value="${u.imei||''}" placeholder="${label1}…" style="width:100%;font-size:12px;padding:6px 8px;background:var(--bg);border:1px solid var(--border-strong);border-radius:6px;color:var(--text)">
+          <input class="ud-imei" data-idx="${k}" type="text" value="${esc(u.imei||'')}" placeholder="${label1}…" style="${inputEst};font-family:monospace">
         </div>
         <div>
           <label style="font-size:10px;color:var(--text-secondary);display:block;margin-bottom:3px">Color</label>
-          <input class="ud-color" data-idx="${k}" type="text" value="${u.color||item.color||''}" placeholder="Color…" style="width:100%;font-size:12px;padding:6px 8px;background:var(--bg);border:1px solid var(--border-strong);border-radius:6px;color:var(--text)">
+          <input class="ud-color" list="ud-lista-colores" data-idx="${k}" type="text" value="${esc(u.color||item.color||'')}" placeholder="Color…" style="${inputEst}">
         </div>
         <div>
           <label style="font-size:10px;color:var(--text-secondary);display:block;margin-bottom:3px">Almacenamiento</label>
-          <input class="ud-storage" data-idx="${k}" type="text" value="${u.storage||item.storage||''}" placeholder="128GB…" style="width:100%;font-size:12px;padding:6px 8px;background:var(--bg);border:1px solid var(--border-strong);border-radius:6px;color:var(--text)">
+          <input class="ud-storage" list="ud-lista-storages" data-idx="${k}" type="text" value="${esc(u.storage||item.storage||'')}" placeholder="128GB…" style="${inputEst}">
+        </div>
+        <div>
+          <label style="font-size:10px;color:var(--text-secondary);display:block;margin-bottom:3px">Batería %</label>
+          <input class="ud-bateria" data-idx="${k}" type="number" min="0" max="100" value="${u.bateriaPct ?? ''}" placeholder="—" style="${inputEst}">
         </div>
       </div>`;
     }).join('');
@@ -1120,7 +1325,7 @@ const Proveedores = {
     overlay.innerHTML = `
       <div style="background:var(--bg-elevated);border:1px solid var(--border-strong);border-radius:var(--radius-xl);width:min(560px,96vw);max-height:90dvh;display:flex;flex-direction:column;overflow:hidden">
         <div style="padding:14px 18px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;flex-shrink:0">
-          <div style="font-size:15px;font-weight:700">📋 Datos por unidad — ${item.nombre}${item.storage?' '+item.storage:''}${item.color?' · '+item.color:''}</div>
+          <div style="font-size:15px;font-weight:700">📋 Datos por unidad — ${State.esc(item.nombre)}${item.storage?' '+State.esc(item.storage):''}${item.color?' · '+State.esc(item.color):''}</div>
           <button onclick="document.getElementById('prov-unid-overlay').remove()" style="background:none;border:none;cursor:pointer;color:var(--text-secondary);font-size:18px">✕</button>
         </div>
         <div id="prov-unid-body" style="padding:14px 18px;overflow-y:auto;flex:1">${rows}</div>
@@ -1136,10 +1341,12 @@ const Proveedores = {
     const imeis = [...document.querySelectorAll('.ud-imei')];
     const colors = [...document.querySelectorAll('.ud-color')];
     const storages = [...document.querySelectorAll('.ud-storage')];
+    const baterias = [...document.querySelectorAll('.ud-bateria')];
     const unidades = imeis.map((el, k) => ({
       imei: el.value.trim(),
       color: colors[k]?.value.trim() || '',
       storage: storages[k]?.value.trim() || '',
+      bateriaPct: baterias[k]?.value ? parseInt(baterias[k].value, 10) : null,
     }));
     await DB.actualizarUnidadesItem(itemId, unidades);
     document.getElementById('prov-unid-overlay')?.remove();
@@ -1247,7 +1454,12 @@ const Proveedores = {
           const ud = unidades[k] || {};
           const colorU = ud.color || item.color || '';
           const storageU = ud.storage || item.storage || '';
-          const nombreU = [item.nombre, storageU, colorU].filter(Boolean).join(' ');
+          // En perfumería, repuestos y accesorios el nombre ya viene completo:
+          // pegarle el "storage" y el "color" produciría cosas como
+          // "Club de nuit intense man EDP 100ml EDP Árabe".
+          const nombreU = this.esNombreLibre(item.cat || 'iphone')
+            ? item.nombre
+            : [item.nombre, storageU, colorU].filter(Boolean).join(' ');
           const obj = {
             cat: item.cat || 'iphone',
             nombre: nombreU,
@@ -1261,11 +1473,13 @@ const Proveedores = {
             notas: notasBase,
             estadoInventario: 'disponible',
             grado: item.grado || 'Sin grado',
-            modelo: item.nombre,
+            modelo: this.esNombreLibre(item.cat || 'iphone') ? (item.modelo || '') : (item.modelo || item.nombre),
             storage: storageU,
             color: colorU,
-            bateriaPct: null,
-            estadoProducto: 'Nuevo / Sellado',
+            bateriaPct: ud.bateriaPct ?? null,
+            // El estado sale de lo que se cargó en la orden: no todo lo que se le
+            // compra a un proveedor entra nuevo/sellado.
+            estadoProducto: item.estadoProducto || 'Nuevo / Sellado',
           };
           const { id: newId, error } = await DB.guardarProductoStock(obj, null);
           if (error || !newId) { errores++; } else {
@@ -1274,12 +1488,18 @@ const Proveedores = {
               cotiz: obj.cotiz, proveedor: obj.proveedor, custodio, notas: obj.notas,
               estadoInventario: 'disponible', grado: obj.grado, estadoProducto: obj.estadoProducto,
               cantidad: 1, cantidadDeclarada: 1, imeis: esIMEI ? (ud.imei ? [ud.imei] : []) : undefined,
-              bateriaPct: null, ciclosBateria: null });
+              bateriaPct: ud.bateriaPct ?? null, ciclosBateria: null });
+            // Registrar el alta deja el ingreso del lote en el historial de stock,
+            // igual que cuando se carga un producto a mano.
+            await DB.registrarMovimientoStock(newId, 'alta',
+              `Alta por recepción de ${notasBase}${ud.imei ? ` — IMEI ${ud.imei}` : ''}`, 0, 1);
           }
         }
       } else {
         // Sin datos por unidad: entrada grupal como antes
-        const nombre = [item.nombre, item.storage, item.color].filter(Boolean).join(' ');
+        const nombre = this.esNombreLibre(item.cat || 'iphone')
+          ? item.nombre
+          : [item.nombre, item.storage, item.color].filter(Boolean).join(' ');
         const obj = {
           cat: item.cat || 'iphone',
           nombre,
@@ -1293,11 +1513,13 @@ const Proveedores = {
           notas: notasBase,
           estadoInventario: 'disponible',
           grado: item.grado || 'Sin grado',
-          modelo: window.Stock?._normalizarModelo(item.nombre) || item.nombre,
+          modelo: this.esNombreLibre(item.cat || 'iphone')
+            ? (item.modelo || '')
+            : (window.Stock?._normalizarModelo(item.modelo || item.nombre) || item.modelo || item.nombre),
           storage: item.storage || '',
           color: item.color || '',
           bateriaPct: null,
-          estadoProducto: 'Nuevo / Sellado',
+          estadoProducto: item.estadoProducto || 'Nuevo / Sellado',
         };
         const { id: newId, error } = await DB.guardarProductoStock(obj, null);
         if (error || !newId) { errores++; } else {
@@ -1307,6 +1529,8 @@ const Proveedores = {
             estadoInventario: 'disponible', grado: obj.grado, estadoProducto: obj.estadoProducto,
             cantidad: obj.cantidad, cantidadDeclarada: obj.cantidad,
             imeis: esIMEI ? [] : undefined, bateriaPct: null, ciclosBateria: null });
+          await DB.registrarMovimientoStock(newId, 'alta',
+            `Alta por recepción de ${notasBase} (${obj.cantidad} unidad/es)`, 0, obj.cantidad);
         }
       }
     }
@@ -1325,30 +1549,36 @@ const Proveedores = {
   async _revertirPagosCaja(loteId) {
     const pagos = (State.lotePagos || []).filter(p => p.loteId === loteId);
     for (const pg of pagos) {
+      // Todo por el motor central, para que el reverso quede en el libro.
+      const ref = { tipo: 'proveedor', referencia: loteId };
       if (pg.tipo === 'conversion') {
         // Devolver USD al origen, quitar USDT al destino
         if (pg.persona && pg.bolsillo) {
-          const s = State.cajas[pg.persona]?.[pg.bolsillo] || 0;
-          State.cajas[pg.persona] = State.cajas[pg.persona] || {};
-          State.cajas[pg.persona][pg.bolsillo] = s + pg.montoUsd;
-          await DB.actualizarSaldoCaja(pg.persona, pg.bolsillo, s + pg.montoUsd);
+          await State.acreditarCaja(pg.persona, pg.bolsillo, pg.montoUsd,
+            { ...ref, descripcion: 'Se revirtió una conversión a USDT' });
         }
         if (pg.personaDest && pg.bolsilloDestino) {
-          const s = State.cajas[pg.personaDest]?.[pg.bolsilloDestino] || 0;
-          State.cajas[pg.personaDest] = State.cajas[pg.personaDest] || {};
-          State.cajas[pg.personaDest][pg.bolsilloDestino] = s - pg.montoUsdt;
-          await DB.actualizarSaldoCaja(pg.personaDest, pg.bolsilloDestino, s - pg.montoUsdt);
+          await State.debitarCaja(pg.personaDest, pg.bolsilloDestino, pg.montoUsdt,
+            { ...ref, descripcion: 'Se revirtió una conversión a USDT' });
         }
       } else if (['pago_proveedor', 'costo', 'envio'].includes(pg.tipo) && pg.persona && pg.bolsillo) {
         // Devolver el monto en la moneda original al bolsillo
         const montoOriginal = pg.moneda === 'ARS'
           ? pg.montoUsd * (State.refBlue || 1)
           : pg.moneda === 'USDT' ? pg.montoUsdt : pg.montoUsd;
-        const s = State.cajas[pg.persona]?.[pg.bolsillo] || 0;
-        State.cajas[pg.persona] = State.cajas[pg.persona] || {};
-        State.cajas[pg.persona][pg.bolsillo] = s + montoOriginal;
-        await DB.actualizarSaldoCaja(pg.persona, pg.bolsillo, s + montoOriginal);
+        await State.acreditarCaja(pg.persona, pg.bolsillo, montoOriginal,
+          { ...ref, descripcion: 'Se revirtió un pago del lote' });
       }
+      // credito_aplicado no toca cajas — se restaura aparte más abajo.
+    }
+
+    // Restaurar el saldo a favor que se haya usado en este lote: al cancelar
+    // o eliminar la orden, ese crédito con el proveedor vuelve a estar
+    // disponible para otra compra (el saldo generado por sobrepago, en
+    // cambio, NO se toca acá: esa plata de verdad salió de la caja).
+    const creditosAplicados = (State.proveedorCreditos || []).filter(c => c.loteId === loteId && c.tipo === 'aplicado');
+    for (const c of creditosAplicados) {
+      await DB.eliminarProveedorCredito(c.id);
     }
   },
 
@@ -1532,7 +1762,7 @@ const Proveedores = {
     if (!persona || !bolsillo || !monto) { toast('Completá todos los campos.'); return; }
 
     // Acreditar en la caja
-    State.acreditarCaja(persona, bolsillo, monto);
+    State.acreditarCaja(persona, bolsillo, monto, { tipo: 'proveedor', descripcion: 'Movimiento con proveedor' });
 
     // Registrar como movimiento en el lote (tipo 'devolucion')
     await DB.guardarLotePago(loteId, {
@@ -1550,11 +1780,12 @@ const Proveedores = {
     if (!pg) return;
 
     const mensajes = {
-      devolucion:     `¿Revertir la devolución de ${State.fmtUSD(pg.montoUsd)}?\nSe debitará de ${pg.persona} (${pg.bolsillo}) y se eliminará el registro.`,
-      costo:          `¿Eliminar este costo adicional de ${State.fmtUSD(pg.montoUsd)}?\nSe acreditará en ${pg.persona} (${pg.bolsillo}).`,
-      envio:          `¿Eliminar este costo de envío de ${State.fmtUSD(pg.montoUsd)}?\nSe acreditará en ${pg.persona} (${pg.bolsillo}).`,
-      pago_proveedor: `¿Revertir este pago al proveedor de ${State.fmtUSD(pg.montoUsd)}?\nSe acreditará en ${pg.persona} (${pg.bolsillo}).`,
-      conversion:     `¿Revertir esta conversión? Se restaurarán los saldos de USD y USDT de ${pg.persona}.`,
+      devolucion:       `¿Revertir la devolución de ${State.fmtUSD(pg.montoUsd)}?\nSe debitará de ${pg.persona} (${pg.bolsillo}) y se eliminará el registro.`,
+      costo:            `¿Eliminar este costo adicional de ${State.fmtUSD(pg.montoUsd)}?\nSe acreditará en ${pg.persona} (${pg.bolsillo}).`,
+      envio:            `¿Eliminar este costo de envío de ${State.fmtUSD(pg.montoUsd)}?\nSe acreditará en ${pg.persona} (${pg.bolsillo}).`,
+      pago_proveedor:   `¿Revertir este pago al proveedor de ${State.fmtUSD(pg.montoUsd)}?\nSe acreditará en ${pg.persona} (${pg.bolsillo}).`,
+      conversion:       `¿Revertir esta conversión? Se restaurarán los saldos de USD y USDT de ${pg.persona}.`,
+      credito_aplicado: `¿Deshacer el uso de ${State.fmtUSD(pg.montoUsd)} de saldo a favor en este lote?\nEsa plata vuelve a estar disponible como crédito con el proveedor. No se mueve ninguna caja.`,
     };
 
     if (!confirm(mensajes[pg.tipo] || '¿Revertir este movimiento?')) return;
@@ -1564,22 +1795,186 @@ const Proveedores = {
 
     if (pg.tipo === 'devolucion') {
       // La devolución acreditó la caja en USD → debitamos de vuelta
-      if (pg.persona) State.debitarCaja(pg.persona, pg.bolsillo, montoReal);
+      if (pg.persona) State.debitarCaja(pg.persona, pg.bolsillo, montoReal, { tipo: 'proveedor', descripcion: 'Pago a proveedor' });
     } else if (pg.tipo === 'costo' || pg.tipo === 'envio') {
       // El costo debitó la caja en la moneda original → acreditamos de vuelta
-      if (pg.persona) State.acreditarCaja(pg.persona, pg.bolsillo, montoReal);
+      if (pg.persona) State.acreditarCaja(pg.persona, pg.bolsillo, montoReal, { tipo: 'proveedor', descripcion: 'Reverso de pago a proveedor' });
     } else if (pg.tipo === 'pago_proveedor') {
       // El pago debitó la caja en la moneda original → acreditamos de vuelta
-      if (pg.persona) State.acreditarCaja(pg.persona, pg.bolsillo, montoReal);
+      if (pg.persona) State.acreditarCaja(pg.persona, pg.bolsillo, montoReal, { tipo: 'proveedor', descripcion: 'Reverso de pago a proveedor' });
     } else if (pg.tipo === 'conversion') {
       // Devolver USD al origen, quitar USDT del destino
-      if (pg.persona) State.acreditarCaja(pg.persona, pg.bolsillo, pg.montoUsd);
-      if (pg.personaDest || pg.persona) State.debitarCaja(pg.personaDest || pg.persona, pg.bolsilloDestino || 'USDT', pg.montoUsdt);
+      if (pg.persona) await State.acreditarCaja(pg.persona, pg.bolsillo, pg.montoUsd, { tipo: 'proveedor', descripcion: 'Reverso de pago a proveedor' });
+      if (pg.personaDest || pg.persona) await State.debitarCaja(pg.personaDest || pg.persona, pg.bolsilloDestino || 'USDT', pg.montoUsdt, { tipo: 'proveedor', descripcion: 'Reverso de pago a proveedor (USDT)' });
+    } else if (pg.tipo === 'credito_aplicado') {
+      // No hay caja que tocar: se elimina el consumo de crédito, así el
+      // saldo a favor con el proveedor vuelve a subir en el mismo monto.
+      const aplicado = (State.proveedorCreditos || [])
+        .find(c => c.loteId === loteId && c.tipo === 'aplicado' && Math.abs(c.montoUsd - pg.montoUsd) < 0.01);
+      if (aplicado) await DB.eliminarProveedorCredito(aplicado.id);
     }
 
     await DB.eliminarLotePago(pagoId);
     toast('Movimiento revertido y saldo restaurado.');
     this.renderContent();
+  },
+
+  // ── SALDO A FAVOR CON EL PROVEEDOR ────────────────────────────────
+
+  // Convierte lo pagado de más en este lote en saldo a favor con el
+  // proveedor. No mueve ninguna caja: la plata ya salió de verdad cuando se
+  // registró el pago, esto solo evita que quede flotando sin registrar.
+  async convertirExcedenteACredito(loteId) {
+    const l = (State.lotesCompra || []).find(x => x.id === loteId);
+    if (!l) return;
+    const items = (State.loteItems || []).filter(i => i.loteId === loteId);
+    const pagos = (State.lotePagos || []).filter(p => p.loteId === loteId);
+    const conv = pagos.find(p => p.tipo === 'conversion');
+    const totalItems = items.reduce((s, i) => s + i.precioUsd * i.cantidad, 0);
+    const totalEnvio = pagos.filter(p => ['envio','costo','diferencial'].includes(p.tipo)).reduce((s, p) => s + p.montoUsd, 0);
+    const costoTotal = totalItems + (conv?.comisionUsd || 0) + totalEnvio;
+    const pagadoTotal = pagos.filter(p => ['pago_proveedor','credito_aplicado'].includes(p.tipo)).reduce((s, p) => s + p.montoUsd, 0);
+    const creditoYaGenerado = (State.proveedorCreditos || []).filter(c => c.loteId === loteId && c.tipo === 'generado').reduce((s, c) => s + c.montoUsd, 0);
+    const excedente = +Math.max(0, (pagadoTotal - costoTotal) - creditoYaGenerado).toFixed(2);
+    if (excedente <= 0) { toast('No hay excedente sin convertir en este lote.'); return; }
+    if (!confirm(`¿Guardar ${State.fmtUSD(excedente)} como saldo a favor con este proveedor? Vas a poder usarlo como pago en otra orden.`)) return;
+
+    const ok = await DB.crearProveedorCredito({ proveedorId: l.proveedorId, tipo: 'generado', montoUsd: excedente, loteId, notas: `Excedente del lote #${loteId}` });
+    if (!ok) { toast('No se pudo guardar el saldo a favor.'); return; }
+    toast(`${State.fmtUSD(excedente)} guardados como saldo a favor.`);
+    this.renderContent();
+  },
+
+  modalUsarCredito(loteId) {
+    const l = (State.lotesCompra || []).find(x => x.id === loteId);
+    if (!l) return;
+    const disponible = this.saldoCredito(l.proveedorId);
+    if (disponible <= 0) { toast('Este proveedor no tiene saldo a favor.'); return; }
+
+    const items = (State.loteItems || []).filter(i => i.loteId === loteId);
+    const pagos = (State.lotePagos || []).filter(p => p.loteId === loteId);
+    const conv = pagos.find(p => p.tipo === 'conversion');
+    const totalItems = items.reduce((s, i) => s + i.precioUsd * i.cantidad, 0);
+    const totalEnvio = pagos.filter(p => ['envio','costo','diferencial'].includes(p.tipo)).reduce((s, p) => s + p.montoUsd, 0);
+    const costoTotal = totalItems + (conv?.comisionUsd || 0) + totalEnvio;
+    const yaAplicado = pagos.filter(p => ['pago_proveedor','credito_aplicado'].includes(p.tipo)).reduce((s, p) => s + p.montoUsd, 0);
+    const restante = Math.max(0, costoTotal - yaAplicado);
+    const sugerido = +Math.min(disponible, restante).toFixed(2);
+
+    const overlay = document.createElement('div');
+    overlay.id = 'prov-credito-overlay';
+    overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.6);backdrop-filter:blur(4px);z-index:800;display:flex;align-items:center;justify-content:center;padding:20px';
+    overlay.innerHTML = `
+      <div style="background:var(--bg-elevated);border:1px solid var(--border-strong);border-radius:var(--radius-xl);width:min(400px,96vw);overflow:hidden">
+        <div style="padding:14px 18px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center">
+          <div style="font-size:15px;font-weight:700">💳 Usar saldo a favor</div>
+          <button onclick="document.getElementById('prov-credito-overlay').remove()" style="background:none;border:none;cursor:pointer;color:var(--text-secondary);font-size:18px">✕</button>
+        </div>
+        <div style="padding:18px;display:flex;flex-direction:column;gap:10px">
+          <div style="background:var(--green-light);color:var(--green);border-radius:8px;padding:9px 12px;font-size:12.5px">
+            Disponible: <b>${State.fmtUSD(disponible)}</b>${restante > 0 ? ` · Resta pagar de este lote: <b>${State.fmtUSD(restante)}</b>` : ''}
+          </div>
+          <div>
+            <label style="font-size:11px;color:var(--text-secondary);display:block;margin-bottom:4px">MONTO A APLICAR (USD)</label>
+            <input id="credito-monto" type="number" min="0" max="${Math.max(disponible, sugerido)}" step="0.01" value="${sugerido}"
+              style="width:100%;font-size:14px;padding:8px 10px;background:var(--bg-secondary);border:1px solid var(--border-strong);border-radius:8px;color:var(--text)">
+          </div>
+          <div style="font-size:10px;color:var(--text-secondary)">No mueve ninguna caja: solo descuenta del crédito con el proveedor.</div>
+        </div>
+        <div style="padding:12px 18px;border-top:1px solid var(--border);display:flex;justify-content:flex-end;gap:8px">
+          <button class="btn" onclick="document.getElementById('prov-credito-overlay').remove()">Cancelar</button>
+          <button class="btn btn-primary" onclick="Proveedores._confirmarUsarCredito(${loteId})">💳 Aplicar</button>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(overlay);
+  },
+
+  async _confirmarUsarCredito(loteId) {
+    const l = (State.lotesCompra || []).find(x => x.id === loteId);
+    if (!l) return;
+    const monto = +(parseFloat(document.getElementById('credito-monto')?.value) || 0).toFixed(2);
+    const disponible = this.saldoCredito(l.proveedorId);
+    if (!monto || monto <= 0) { toast('Ingresá un monto válido.'); return; }
+    if (monto > disponible + 0.01) { toast(`Ese proveedor solo tiene ${State.fmtUSD(disponible)} de saldo a favor.`); return; }
+
+    const credito = await DB.crearProveedorCredito({ proveedorId: l.proveedorId, tipo: 'aplicado', montoUsd: monto, loteId, notas: `Aplicado al lote #${loteId}` });
+    if (!credito) { toast('No se pudo aplicar el saldo a favor.'); return; }
+    await DB.guardarLotePago(loteId, {
+      tipo: 'credito_aplicado', montoUsd: monto, montoUsdt: 0, moneda: 'USD',
+      persona: '', bolsillo: '', notas: 'Saldo a favor aplicado', fecha: new Date().toISOString().slice(0, 10),
+    });
+    await DB.actualizarEstadoLote(loteId, 'pagado');
+
+    document.getElementById('prov-credito-overlay')?.remove();
+    toast(`${State.fmtUSD(monto)} de saldo a favor aplicados a este lote.`);
+    this.renderKpis();
+    this.renderContent();
+  },
+
+  // Ajuste manual del saldo a favor — para corregir un error o migrar un
+  // saldo que hoy vive en otro lado (ej. una "caja" de proveedor creada como
+  // persona, que hay que dejar de usar así).
+  modalAjusteCredito(proveedorId) {
+    const p = (State.proveedores || []).find(x => x.id === proveedorId);
+    if (!p) return;
+    const overlay = document.createElement('div');
+    overlay.id = 'prov-ajuste-credito-overlay';
+    overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.6);backdrop-filter:blur(4px);z-index:800;display:flex;align-items:center;justify-content:center;padding:20px';
+    overlay.innerHTML = `
+      <div style="background:var(--bg-elevated);border:1px solid var(--border-strong);border-radius:var(--radius-xl);width:min(420px,96vw);overflow:hidden">
+        <div style="padding:14px 18px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center">
+          <div style="font-size:15px;font-weight:700">✏️ Ajuste manual — ${p.nombre}</div>
+          <button onclick="document.getElementById('prov-ajuste-credito-overlay').remove()" style="background:none;border:none;cursor:pointer;color:var(--text-secondary);font-size:18px">✕</button>
+        </div>
+        <div style="padding:18px;display:flex;flex-direction:column;gap:12px">
+          <div style="font-size:12px;color:var(--text-secondary)">Saldo actual: <b style="color:var(--text)">${State.fmtUSD(this.saldoCredito(proveedorId))}</b></div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+            <div>
+              <label style="font-size:11px;color:var(--text-secondary);display:block;margin-bottom:4px">TIPO</label>
+              <select id="ajc-tipo" style="width:100%;font-size:13px;padding:7px 10px;background:var(--bg-secondary);border:1px solid var(--border-strong);border-radius:8px;color:var(--text)">
+                <option value="generado">Sumar crédito</option>
+                <option value="aplicado">Restar crédito</option>
+              </select>
+            </div>
+            <div>
+              <label style="font-size:11px;color:var(--text-secondary);display:block;margin-bottom:4px">MONTO (USD)</label>
+              <input id="ajc-monto" type="number" min="0" step="0.01" style="width:100%;font-size:13px;padding:7px 10px;background:var(--bg-secondary);border:1px solid var(--border-strong);border-radius:8px;color:var(--text)">
+            </div>
+          </div>
+          <div>
+            <label style="font-size:11px;color:var(--text-secondary);display:block;margin-bottom:4px">NOTAS</label>
+            <input id="ajc-notas" type="text" placeholder="Ej: migración desde la caja de Tincho" style="width:100%;font-size:13px;padding:7px 10px;background:var(--bg-secondary);border:1px solid var(--border-strong);border-radius:8px;color:var(--text)">
+          </div>
+        </div>
+        <div style="padding:12px 18px;border-top:1px solid var(--border);display:flex;justify-content:flex-end;gap:8px">
+          <button class="btn" onclick="document.getElementById('prov-ajuste-credito-overlay').remove()">Cancelar</button>
+          <button class="btn btn-primary" onclick="Proveedores._confirmarAjusteCredito('${proveedorId}')">✓ Guardar</button>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(overlay);
+  },
+
+  async _confirmarAjusteCredito(proveedorId) {
+    const tipo = document.getElementById('ajc-tipo')?.value;
+    const monto = parseFloat(document.getElementById('ajc-monto')?.value);
+    const notas = document.getElementById('ajc-notas')?.value.trim();
+    if (!monto || monto <= 0) { toast('Ingresá un monto válido.'); return; }
+
+    const ok = await DB.crearProveedorCredito({ proveedorId, tipo, montoUsd: monto, loteId: null, notas: notas || 'Ajuste manual' });
+    if (!ok) { toast('No se pudo guardar el ajuste.'); return; }
+    document.getElementById('prov-ajuste-credito-overlay')?.remove();
+    toast('Ajuste guardado.');
+    this.renderContent();
+  },
+
+  async eliminarCreditoManual(creditoId) {
+    const c = (State.proveedorCreditos || []).find(x => x.id === creditoId);
+    if (!c || c.loteId) return; // solo se borran ajustes manuales; lo ligado a un lote se revierte desde el lote
+    if (!confirm(`¿Quitar este ajuste de ${State.fmtUSD(c.montoUsd)}?`)) return;
+    const ok = await DB.eliminarProveedorCredito(creditoId);
+    if (ok) { toast('Ajuste eliminado.'); this.renderContent(); }
   },
 
   async cancelarLote(loteId) {

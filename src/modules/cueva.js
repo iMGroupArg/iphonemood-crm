@@ -9,16 +9,36 @@ const Cueva = {
   ],
   BOLSILLOS: { ARS: ['ARS cash', 'ARS transferencia'], USD: ['USD cash', 'USD transferencia'], USDT: ['USDT'] },
 
+  // Mismo selector de período que Ventas/Dashboard, y mismo filtro
+  // subyacente (State.cambiosEnPeriodo). Antes esta pantalla llamaba a
+  // State.resultadoFinancieroMes() sin mes, que pese al nombre suma TODA
+  // la historia — el cartel decía "del mes" pero no filtraba nada.
+  periodo: 'mes',
+  periodoMes: '', periodoDesde: '', periodoHasta: '',
+
+  _periodoDescriptor() {
+    return { tipo: this.periodo, mes: this.periodoMes, desde: this.periodoDesde, hasta: this.periodoHasta };
+  },
+
   render() {
     const c = document.createElement('div');
+    // Mismo caso que Adelantos: la página es flex en columna, y sin esto el
+    // contenido se recorta abajo en vez de generar scroll.
+    c.style.cssText = 'flex:1;min-height:0;display:flex;flex-direction:column;overflow:hidden';
     c.innerHTML = `
-      <div style="padding:10px 22px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center">
-        <div style="font-size:12px;color:var(--text-secondary)">${State.cambios.length} operaciones registradas</div>
+      <div style="padding:10px 22px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap">
+        <div style="display:flex;gap:4px;overflow-x:auto;-webkit-overflow-scrolling:touch" id="cueva-periodo-tabs"></div>
         <button class="btn btn-primary" onclick="Cueva.openNew()"><i class="ti ti-plus"></i> Nueva operación</button>
+      </div>
+      <div id="cueva-rango-libre" style="display:none;padding:8px 22px;border-bottom:1px solid var(--border);gap:8px;align-items:center;flex-wrap:wrap">
+        <input type="date" id="cueva-desde" style="font-size:12px;padding:5px 8px;border:1px solid var(--border-strong);border-radius:8px;flex:1">
+        <span style="font-size:12px;color:var(--text-secondary)">hasta</span>
+        <input type="date" id="cueva-hasta" style="font-size:12px;padding:5px 8px;border:1px solid var(--border-strong);border-radius:8px;flex:1">
+        <button class="btn btn-sm btn-primary" onclick="Cueva.aplicarRangoLibre()">Aplicar</button>
       </div>
       <div style="background:var(--purple-light);padding:10px 22px;font-size:12px;color:var(--purple);display:flex;gap:16px;align-items:center;flex-wrap:wrap">
         <i class="ti ti-info-circle"></i>
-        <div><b id="cueva-resultado-financiero">—</b> resultado financiero del mes (spread de cambios — separado de las ventas)</div>
+        <div><b id="cueva-resultado-financiero">—</b> <span id="cueva-resultado-label">resultado financiero (spread de cambios — separado de las ventas)</span></div>
       </div>
       <div class="body-pad">
         <table><thead><tr><th>Fecha</th><th>Operación</th><th>Sale (origen)</th><th>Entra (destino)</th><th>Cotización</th><th>Spread</th><th></th></tr></thead>
@@ -26,19 +46,68 @@ const Cueva = {
       </div>
       <div id="cueva-modal-host"></div>
     `;
-    setTimeout(() => this.renderTable(), 0);
+    setTimeout(() => { this.renderPeriodoTabs(); this.renderTable(); }, 0);
     return c;
   },
 
   typeObj(id) { return this.OP_TYPES.find(t => t.id === id); },
   fmtByMoneda(v, m) { return m === 'ARS' ? State.fmtARS(v) : m === 'USDT' ? v.toLocaleString('es-AR') + ' USDT' : State.fmtUSD(v); },
 
+  renderPeriodoTabs() {
+    const el = document.getElementById('cueva-periodo-tabs');
+    if (!el) return;
+    const tabs = [['hoy','Hoy'],['semana','Esta semana'],['mes','Este mes'],['libre','Rango libre'],['todo','Todo']];
+    // Misma lista de meses que usan Ventas/Dashboard, para que elegir el
+    // mismo mes en cualquier pantalla dé exactamente el mismo filtro.
+    const mesesOpts = Ventas._mesesDisponibles().map(m => {
+      const [y, mo] = m.split('-');
+      const label = new Date(Number(y), Number(mo) - 1, 1).toLocaleDateString('es-AR', { month: 'short', year: '2-digit' });
+      return `<option value="${m}" ${this.periodoMes === m ? 'selected' : ''}>${label}</option>`;
+    }).join('');
+    el.innerHTML = tabs.map(([k, l]) =>
+      `<button class="btn btn-sm ${this.periodo === k ? 'btn-primary' : ''}" onclick="Cueva.setPeriodo('${k}')">${l}</button>`
+    ).join('')
+    + `<select id="cueva-mes-selector" onchange="Cueva.setPeriodoMes(this.value)" style="font-size:12px;padding:5px 8px;border:1px solid var(--border-strong);border-radius:8px;margin-left:4px;background:var(--bg-secondary);color:var(--text);${this.periodo === 'mes-especifico' ? 'border-color:var(--blue);outline:none' : ''}">
+        <option value="">Mes específico…</option>
+        ${mesesOpts}
+      </select>`;
+    const rangoEl = document.getElementById('cueva-rango-libre');
+    if (rangoEl) rangoEl.style.display = this.periodo === 'libre' ? 'flex' : 'none';
+  },
+
+  setPeriodo(p) { this.periodo = p; this.periodoMes = ''; this.renderPeriodoTabs(); this.renderTable(); },
+  setPeriodoMes(mes) {
+    if (!mes) return;
+    this.periodo = 'mes-especifico'; this.periodoMes = mes;
+    this.renderPeriodoTabs(); this.renderTable();
+  },
+  aplicarRangoLibre() {
+    this.periodoDesde = document.getElementById('cueva-desde')?.value || '';
+    this.periodoHasta = document.getElementById('cueva-hasta')?.value || '';
+    if (!this.periodoDesde || !this.periodoHasta) { toast('Elegí las dos fechas antes de aplicar.'); return; }
+    this.periodo = 'libre';
+    this.renderTable();
+  },
+
+  _labelPeriodo() {
+    if (this.periodo === 'hoy') return 'resultado financiero de hoy';
+    if (this.periodo === 'semana') return 'resultado financiero de esta semana';
+    if (this.periodo === 'mes') return 'resultado financiero del mes';
+    if (this.periodo === 'mes-especifico') return `resultado financiero de ${this.periodoMes || 'ese mes'}`;
+    if (this.periodo === 'libre') return `resultado financiero del ${this.periodoDesde || '…'} al ${this.periodoHasta || '…'}`;
+    return 'resultado financiero histórico (todo)';
+  },
+
   renderTable() {
-    const spreadTotal = State.resultadoFinancieroMes();
+    const periodo = this._periodoDescriptor();
+    const cambiosFiltrados = State.cambiosEnPeriodo(periodo);
+    const spreadTotal = State.spreadCuevaDelPeriodo(periodo);
     const spreadTotalUSD = spreadTotal / State.refBlue;
     document.getElementById('cueva-resultado-financiero').innerHTML =
       `${spreadTotal>=0?'+':''}${State.fmtARS(spreadTotal)} <span style="opacity:.7;font-size:11px">≈ ${spreadTotalUSD>=0?'+':''}${State.fmtUSD(spreadTotalUSD)}</span>`;
-    document.getElementById('cueva-tbody').innerHTML = State.cambios.map(o => {
+    document.getElementById('cueva-resultado-label').textContent =
+      `${this._labelPeriodo()} — ${cambiosFiltrados.length} operación(es) (spread de cambios, separado de las ventas)`;
+    document.getElementById('cueva-tbody').innerHTML = cambiosFiltrados.map(o => {
       const t = this.typeObj(o.tipo);
       const spread = State.calcSpreadARS(o);
       const spreadUSD = spread / State.refBlue;
@@ -99,8 +168,13 @@ const Cueva = {
     if (!o) return;
     if (!confirm('¿Eliminar esta operación de cambio? Esto revertirá el movimiento en las cajas de origen y destino.')) return;
     // Revertir el movimiento de plata entre cajas
-    State.acreditarCaja(o.origenP, o.origenB, o.entrega);
-    State.debitarCaja(o.destinoP, o.destinoB, o.recibe);
+    // Esperar la reversión antes de borrar la operación
+    await Promise.all([
+      State.acreditarCaja(o.origenP, o.origenB, o.entrega,
+        { tipo: 'cueva_anulada', descripcion: 'Se deshizo un cambio de cueva' }),
+      State.debitarCaja(o.destinoP, o.destinoB, o.recibe,
+        { tipo: 'cueva_anulada', descripcion: 'Se deshizo un cambio de cueva' }),
+    ]);
     await DB.eliminarCambio(id);
     State.cambios = State.cambios.filter(x => x.id != id);
     this.close();
@@ -125,7 +199,20 @@ const Cueva = {
             <input type="number" id="cf-entrega" placeholder="Monto que sale" oninput="Cueva.calcPreview()" style="width:100%;font-size:12px;padding:7px 9px;border:1px solid var(--border-strong);border-radius:8px;margin-top:6px">
           </div>
 
-          <div style="text-align:center;font-size:11px;color:var(--text-secondary);margin:4px 0">cotización <input type="number" id="cf-cotiz" value="1075" oninput="Cueva.calcPreview()" style="width:65px;text-align:center;border:1px solid var(--border-strong);border-radius:6px;padding:3px"></div>
+          <div style="text-align:center;font-size:11px;color:var(--text-secondary);margin:4px 0">
+            cotización compra <input type="number" id="cf-cotiz" value="1075" oninput="Cueva.calcPreview()" style="width:70px;text-align:center;border:1px solid var(--border-strong);border-radius:6px;padding:3px">
+          </div>
+          <div id="cf-venta-row" style="display:none;background:var(--bg-secondary);border-radius:8px;padding:8px 10px;margin:4px 0">
+            <label style="display:flex;align-items:flex-start;gap:7px;font-size:11.5px;cursor:pointer">
+              <input type="checkbox" id="cf-viene-venta" onchange="Cueva.updateBolsillos();Cueva.calcPreview()" style="margin-top:2px">
+              <span>Esta plata <b>viene de una venta ya cargada</b>
+                <span style="display:block;color:var(--text-secondary);font-size:10.5px;margin-top:2px">Marcalo si estos pesos los cobraste en una venta y ahora los estás pasando a dólares. Así el spread no vuelve a medir plata que la venta ya valuó.</span>
+              </span>
+            </label>
+          </div>
+          <div id="cf-cotizref-row" style="display:none;text-align:center;font-size:11px;color:var(--text-secondary);margin:2px 0">
+            <span id="cf-cotizref-label">cotización referencia (venta)</span> <input type="number" id="cf-cotizref" value="1075" oninput="this._tocado=true;Cueva.calcPreview()" style="width:70px;text-align:center;border:1px solid var(--border-strong);border-radius:6px;padding:3px">
+          </div>
 
           <div style="background:var(--green-light);border-radius:8px;padding:10px 12px;margin-bottom:8px">
             <b style="font-size:11px;color:var(--green)">Entra a (destino)</b>
@@ -139,6 +226,7 @@ const Cueva = {
           <div id="cueva-preview" style="display:none;background:var(--purple-light);border-radius:8px;padding:10px 12px;margin-bottom:12px">
             <p style="font-size:11px;color:var(--purple)">Spread vs. referencia (va al resultado financiero)</p>
             <div id="cueva-preview-val" style="font-size:16px;font-weight:600"></div>
+            <div id="cueva-preview-nota" style="display:none;font-size:10.5px;color:var(--text-secondary);margin-top:5px"></div>
           </div>
 
           <div style="display:flex;gap:8px;justify-content:flex-end">
@@ -162,7 +250,30 @@ const Cueva = {
     const t = this.typeObj(this.opType);
     document.getElementById('cf-origen-b').innerHTML = this.BOLSILLOS[t.monedaO].map(b => `<option>${b}</option>`).join('');
     document.getElementById('cf-destino-b').innerHTML = this.BOLSILLOS[t.monedaD].map(b => `<option>${b}</option>`).join('');
-    document.getElementById('cf-cotiz').value = (t.id === 'usd-usdt' || t.id === 'ars-usdt') ? State.refUsdt : State.refBlue;
+    document.getElementById('cf-cotiz').value = t.id === 'ars-usdt' ? State.refUsdt : (t.id === 'usd-usdt' ? State.refUsdt : State.refBlue);
+
+    // La casilla "viene de una venta" solo aplica a ARS→USD: es el caso donde
+    // la plata cobrada en pesos se pasa a dólares y quedaba contada dos veces.
+    const ventaRow = document.getElementById('cf-venta-row');
+    const chk = document.getElementById('cf-viene-venta');
+    if (ventaRow) {
+      const aplica = t.id === 'ars-usd';
+      ventaRow.style.display = aplica ? 'block' : 'none';
+      if (!aplica && chk) chk.checked = false;
+    }
+
+    const refRow = document.getElementById('cf-cotizref-row');
+    if (refRow) {
+      const porVenta = t.id === 'ars-usd' && chk?.checked;
+      refRow.style.display = (t.id === 'ars-usdt' || porVenta) ? 'block' : 'none';
+      const lbl = document.getElementById('cf-cotizref-label');
+      if (lbl) lbl.textContent = porVenta ? 'cotización usada en esa venta' : 'cotización referencia (venta)';
+      const ref = document.getElementById('cf-cotizref');
+      // Al marcar la casilla arranca en la cotización de esta misma operación:
+      // si la plata se cambia a la misma cotización con la que se cobró, el
+      // spread da cero, que es el caso más común.
+      if (ref && !ref._tocado) ref.value = porVenta ? (document.getElementById('cf-cotiz').value || State.refBlue) : State.refBlue;
+    }
   },
   setType(id) { this.opType = id; this.renderTypeGrid(); this.calcPreview(); },
 
@@ -176,12 +287,21 @@ const Cueva = {
     if (this.opType === 'usdt-ars') recibe = entrega * cotiz;
     if (this.opType === 'usd-usdt') recibe = entrega;
     document.getElementById('cf-recibe').value = recibe.toFixed(2);
-    const spread = State.calcSpreadARS({ tipo: this.opType, entrega, recibe, cotiz });
+    const cotizRef = parseFloat(document.getElementById('cf-cotizref')?.value) || null;
+    const vieneDeVenta = !!document.getElementById('cf-viene-venta')?.checked;
+    const spread = State.calcSpreadARS({ tipo: this.opType, entrega, recibe, cotiz, cotizRef, vieneDeVenta });
     const prev = document.getElementById('cueva-preview');
     if (entrega > 0) {
       prev.style.display = 'block';
       document.getElementById('cueva-preview-val').innerHTML = `${spread>=0?'+':''}${State.fmtARS(spread)} <span style="font-size:12px;opacity:.75">≈ ${spread>=0?'+':''}${State.fmtUSD(spread/State.refBlue)}</span>`;
       document.getElementById('cueva-preview-val').style.color = spread >= 0 ? 'var(--green)' : 'var(--red)';
+      const nota = document.getElementById('cueva-preview-nota');
+      if (nota) {
+        nota.style.display = vieneDeVenta ? 'block' : 'none';
+        nota.textContent = Math.abs(spread) < 0.5
+          ? 'Da cero porque se cambia a la misma cotización con la que se cobró la venta: la ganancia ya la registró esa venta.'
+          : 'Se mide contra la cotización de la venta, no contra el blue.';
+      }
     } else prev.style.display = 'none';
   },
 
@@ -196,14 +316,21 @@ const Cueva = {
     toast('Guardando operación...');
 
     // Mover la plata de verdad entre cajas (memoria + base de datos)
-    State.debitarCaja(origenP, origenB, entrega);
-    State.acreditarCaja(destinoP, destinoB, recibe);
+    State.debitarCaja(origenP, origenB, entrega,
+      { tipo: 'cueva', descripcion: 'Cambio de moneda (cueva) — entrega' });
+    State.acreditarCaja(destinoP, destinoB, recibe,
+      { tipo: 'cueva', descripcion: 'Cambio de moneda (cueva) — recibe' });
 
-    const nuevoOp = { tipo: this.opType, entrega, recibe, cotiz, origenP, origenB, destinoP, destinoB };
+    const cotizRef = parseFloat(document.getElementById('cf-cotizref')?.value) || null;
+    const vieneDeVenta = this.opType === 'ars-usd' && !!document.getElementById('cf-viene-venta')?.checked;
+    const nuevoOp = { tipo: this.opType, entrega, recibe, cotiz, cotizRef, vieneDeVenta, origenP, origenB, destinoP, destinoB };
     const cambioId = await DB.crearCambio(nuevoOp);
     Sheets.cambio(nuevoOp);
 
-    State.cambios.unshift({ id: cambioId || Date.now(), fecha: 'Hoy', ...nuevoOp });
+    // fechaISO en el momento de crear: sin esto, la operación no entraba en
+    // ningún filtro por período (Hoy/Este mes) hasta recargar la página,
+    // porque State.cambiosEnPeriodo() solo cuenta sin fecha en "Todo".
+    State.cambios.unshift({ id: cambioId || Date.now(), fecha: 'Hoy', fechaISO: new Date().toISOString(), ...nuevoOp });
     this.close();
     this.renderTable();
     toast(`Operación guardada. Se debitó de la caja de ${origenP} y se acreditó en la de ${destinoP}. El spread quedó reflejado en el resultado financiero del mes.`);

@@ -242,7 +242,7 @@ const Gastos = {
     }
 
     State.gastos.unshift({ id: newId || Date.now(), fecha: 'Hoy', motivo, cat, responsable, caja: `${persona}-${bolsillo}`, moneda, monto, estado: 'pagado', mesCierre, esFijo: false, esSueldoSocio: false, cotizacionUsada, comprobanteUrl });
-    State.debitarCaja(persona, bolsillo, monto);
+    State.debitarCaja(persona, bolsillo, monto, { tipo: 'gasto', referencia: newId, descripcion: motivo });
     Sheets.gasto({ fecha: 'Hoy', motivo, responsable, caja: `${persona}-${bolsillo}`, moneda, monto, estado: 'pagado' }, this.catObj(cat).nombre);
     this.close(); this.renderChips(); this.renderKpis(); this.renderTable();
     toast('Gasto registrado y debitado de la caja correspondiente.');
@@ -312,10 +312,9 @@ const Gastos = {
       const [persona, ...bolsilloPartes] = g.caja.split('-');
       const bolsillo = bolsilloPartes.join('-');
       if (persona && bolsillo && State.cajas[persona] !== undefined) {
-        const actual = State.cajas[persona][bolsillo] || 0;
-        const nuevo = actual + g.monto;
-        State.cajas[persona][bolsillo] = nuevo;
-        await DB.actualizarSaldoCaja(persona, bolsillo, nuevo);
+        // Por el motor central, para que el reverso quede en el libro de caja
+        await State.acreditarCaja(persona, bolsillo, g.monto,
+          { tipo: 'gasto', referencia: id, descripcion: `Se eliminó el gasto "${g.motivo}"` });
       }
     }
 
@@ -496,20 +495,69 @@ const Gastos = {
     });
   },
 
+  // Resultado económico del mes — fuente única para el cierre.
+  //
+  // El ingreso es el MARGEN (precio − costo), no la facturación. Antes acá se
+  // contaba el precio de lista completo como ingreso, y el costo de los
+  // equipos no aparecía por ningún lado: las compras se cargan en Proveedores,
+  // que debita la caja pero nunca genera un gasto. Entraba el precio entero y
+  // no salía nunca el costo, así que el balance a repartir entre los socios se
+  // inflaba todos los meses en exactamente el costo de la mercadería vendida.
+  // La logística y la comisión del lote ya vienen prorrateadas dentro de
+  // item.costo (ver proveedores.js), así que medir margen no las pierde.
+  //
+  // Mismo criterio que Ventas y Dashboard: margen bruto menos lo que quedó sin
+  // cobrar en ventas CERRADAS. El diferencial de tarjeta se suma aparte, no
+  // dentro del margen, para no contarlo dos veces. Las ventas financiadas que
+  // siguen abiertas cuentan su margen entero (lo que falta cobrar se informa
+  // como "por cobrar", no descuenta).
+  resultadoDelMes(mes) {
+    const blue = State.refBlue || 1;
+    const ventas = this.ventasDelMes(mes);
+    const res = ventas.map(v => Ventas.resultadoVenta(v));
+
+    const facturacionUSD = res.reduce((s, r) => s + r.total, 0);
+    const costoUSD       = res.reduce((s, r) => s + r.costo, 0);
+    const quebrantoUSD   = res.reduce((s, r) => s + r.quebranto, 0);
+    const porCobrarUSD   = res.reduce((s, r) => s + r.pendiente, 0);
+    const margenUSD      = res.reduce((s, r) => s + r.margenBruto - r.quebranto, 0);
+    const diferencialUSD = res.reduce((s, r) => s + r.diferencial, 0);
+
+    // La misma función de período que usan Ventas, Cueva y Dashboard, en vez de
+    // la vieja State.resultadoFinancieroMes: una sola definición para todos.
+    const spreadCuevaARS = State.spreadCuevaDelPeriodo({ tipo: 'mes-especifico', mes });
+
+    const gastosMes = this.gastosDelMes(mes);
+    const totalGastosARS = gastosMes.reduce((a, g) => a + State.gastoEnUSD(g), 0) * blue;
+
+    const totalIngresos = (margenUSD + diferencialUSD) * blue + spreadCuevaARS;
+
+    return {
+      ventas, gastosMes, blue,
+      facturacionARS: facturacionUSD * blue,
+      costoARS:       costoUSD * blue,
+      margenARS:      margenUSD * blue,
+      diferencialARS: diferencialUSD * blue,
+      quebrantoARS:   quebrantoUSD * blue,
+      porCobrarARS:   porCobrarUSD * blue,
+      spreadCuevaARS,
+      totalIngresos,
+      totalGastosARS,
+      balance: totalIngresos - totalGastosARS,
+    };
+  },
+
   renderCierre() {
     const host = document.getElementById('cierre-body');
     if (!host) return;
     const mes = this.mesActual;
-    const gastosMes = this.gastosDelMes(mes);
     // Cada gasto se convierte a USD usando SU PROPIA cotización (la del día que se pagó),
     // y de ahí pasamos a ARS con la cotización actual solo para mostrar el equivalente.
-    const totalGastosUSD = gastosMes.reduce((a, g) => a + State.gastoEnUSD(g), 0);
-    const totalGastosARS = totalGastosUSD * State.refBlue;
-    const totalVentasARS = this.ventasDelMes(mes).reduce((a, v) => a + v.items.reduce((s, i) => s + i.precio, 0), 0) * State.refBlue;
-    const spreadCueva = State.resultadoFinancieroMes(mes);
-    const diferencialTarjetaARS = State.resultadoDiferencialTarjetaMes(mes) * State.refBlue;
-    const totalIngresos = totalVentasARS + spreadCueva + diferencialTarjetaARS;
-    const balance = totalIngresos - totalGastosARS;
+    const R = this.resultadoDelMes(mes);
+    const gastosMes = R.gastosMes;
+    const totalGastosARS = R.totalGastosARS;
+    const totalIngresos = R.totalIngresos;
+    const balance = R.balance;
 
     const cierreExistente = State.cierresMensuales.find(c => c.mes === mes);
     const yaCerrado = !!cierreExistente;
@@ -520,10 +568,29 @@ const Gastos = {
       ${yaCerrado ? `<div style="background:var(--green-light);color:var(--green);border-radius:8px;padding:10px 14px;margin-bottom:14px;font-size:12.5px"><i class="ti ti-circle-check"></i> Este mes ya fue cerrado el ${new Date(cierreExistente.cerradoEn).toLocaleDateString('es-AR')}${cierreExistente.cerradoPor?` por ${cierreExistente.cerradoPor}`:''}.</div>` : ''}
 
       <div class="kpi-row" style="grid-template-columns:repeat(4,1fr);padding:0 0 14px 0;border:none">
-        <div class="kpi"><label>Ingresos del mes</label><div class="val" style="color:var(--green)">${State.fmtARS(totalIngresos)}</div><div class="sub">ventas + spread cueva</div></div>
+        <div class="kpi"><label>Ingresos del mes</label><div class="val" style="color:var(--green)">${State.fmtARS(totalIngresos)}</div><div class="sub">margen + tarjeta + cueva</div></div>
         <div class="kpi"><label>Gastos del mes</label><div class="val" style="color:var(--red)">${State.fmtARS(totalGastosARS)}</div><div class="sub">${gastosMes.length} gasto(s) cargados</div></div>
         <div class="kpi"><label>Balance</label><div class="val" style="color:var(--blue)">${State.fmtARS(balance)}</div><div class="sub">antes de repartir</div></div>
         <div class="kpi"><label>Balance en USD</label><div class="val">${State.fmtUSD(balance / State.refBlue)}</div><div class="sub">a cotización blue actual</div></div>
+      </div>
+
+      <div class="card">
+        <div class="card-title"><i class="ti ti-calculator"></i> De dónde sale el ingreso del mes</div>
+        <table>
+          <tbody>
+            <tr><td>Facturación (${R.ventas.length} venta(s), precio de lista)</td><td style="text-align:right">${State.fmtARS(R.facturacionARS)}</td></tr>
+            <tr><td style="color:var(--red)">− Costo de los equipos vendidos</td><td style="text-align:right;color:var(--red)">−${State.fmtARS(R.costoARS)}</td></tr>
+            ${R.quebrantoARS > 0 ? `<tr><td style="color:var(--red)">− Sin cobrar (ventas cerradas)</td><td style="text-align:right;color:var(--red)">−${State.fmtARS(R.quebrantoARS)}</td></tr>` : ''}
+            <tr style="border-top:1px solid var(--border)"><td><b>Margen de las ventas</b></td><td style="text-align:right"><b>${State.fmtARS(R.margenARS)}</b></td></tr>
+            <tr><td style="color:var(--purple)">+ Diferencial de tarjeta</td><td style="text-align:right;color:var(--purple)">${State.fmtARS(R.diferencialARS)}</td></tr>
+            <tr><td style="color:var(--purple)">+ Spread de cueva</td><td style="text-align:right;color:var(--purple)">${R.spreadCuevaARS >= 0 ? '' : '−'}${State.fmtARS(Math.abs(R.spreadCuevaARS))}</td></tr>
+            <tr style="border-top:1px solid var(--border)"><td><b>Ingresos del mes</b></td><td style="text-align:right;color:var(--green)"><b>${State.fmtARS(totalIngresos)}</b></td></tr>
+          </tbody>
+        </table>
+        <p style="font-size:11.5px;color:var(--text-secondary);margin-top:10px">
+          El costo de los equipos se descuenta acá porque las compras se cargan en Proveedores y nunca llegan como gasto a este cierre. Incluye la logística y la comisión del lote, ya prorrateadas por unidad.
+          ${R.porCobrarARS > 0 ? `<br>Hay <b>${State.fmtARS(R.porCobrarARS)}</b> por cobrar de ventas financiadas todavía abiertas: su margen ya está contado arriba, pero esa plata aún no entró a la caja.` : ''}
+        </p>
       </div>
 
       <div class="card">
@@ -646,14 +713,12 @@ const Gastos = {
     const reparto = {};
     socios.forEach(s => { const el = document.getElementById(`reparto-${s}`); reparto[s] = parseFloat(el?.value) || 0; });
 
-    const gastosMes = this.gastosDelMes(mes);
-    const totalGastosUSD = gastosMes.reduce((a, g) => a + State.gastoEnUSD(g), 0);
-    const totalGastosARS = totalGastosUSD * State.refBlue;
-    const totalVentasARS = this.ventasDelMes(mes).reduce((a, v) => a + v.items.reduce((s, i) => s + i.precio, 0), 0) * State.refBlue;
-    const spreadCueva = State.resultadoFinancieroMes(mes);
-    const diferencialTarjetaARS = State.resultadoDiferencialTarjetaMes(mes) * State.refBlue;
-    const totalIngresos = totalVentasARS + spreadCueva + diferencialTarjetaARS;
-    const balanceAntes = totalIngresos - totalGastosARS;
+    // MISMA función que usa renderCierre: lo que se guarda no puede salir de un
+    // cálculo distinto al que el usuario vio en pantalla antes de confirmar.
+    const R = this.resultadoDelMes(mes);
+    const totalGastosARS = R.totalGastosARS;
+    const totalIngresos = R.totalIngresos;
+    const balanceAntes = R.balance;
 
     if (!confirm(`¿Confirmar el cierre de ${mes}? Se va a registrar un gasto "Sueldo socio" por cada persona con monto asignado, y el mes va a quedar cerrado.`)) return;
 

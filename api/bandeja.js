@@ -38,7 +38,13 @@ async function usuarioAutorizado(token) {
   }
 }
 
+const { limitar } = require('./_ratelimit.js');
+
 module.exports = async function handler(req, res) {
+  // Antes de todo, incluso de mirar el token: el objetivo es frenar la
+  // fuerza bruta de tokens y el martilleo del proxy desde un mismo origen.
+  if (!limitar(req, res, { max: 120, ventanaMs: 60_000 })) return;
+
   if (!INBOX_USER || !INBOX_PASSWORD) {
     console.error('Faltan las variables de entorno INBOX_USER / INBOX_PASSWORD.');
     res.status(500).json({ error: 'La bandeja no está configurada en el servidor.' });

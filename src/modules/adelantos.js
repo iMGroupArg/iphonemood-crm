@@ -2,6 +2,10 @@ const Adelantos = {
 
   render() {
     const c = document.createElement('div');
+    // La página es un contenedor flex en columna: sin esto el contenido se
+    // recorta en lugar de generar scroll, y el historial quedaba inalcanzable.
+    // (No uso .body-pad porque el markup ya trae su propio padding.)
+    c.style.cssText = 'flex:1;min-height:0;overflow-y:auto;padding-bottom:24px';
     const pendientes = (State.adelantos || []).filter(a => a.estado === 'pendiente');
     const cobrados   = (State.adelantos || []).filter(a => a.estado === 'cobrado');
     const totalPendARS = pendientes.filter(a => a.moneda === 'ARS').reduce((s, a) => s + a.monto, 0);
@@ -220,11 +224,10 @@ const Adelantos = {
     const fecha    = document.getElementById('cob-fecha')?.value;
     const cajaDebito = `${persona}-${bolsillo}`;
 
-    // Debitar la caja
-    const actual = State.cajas[persona]?.[bolsillo] || 0;
-    const nuevo  = Math.max(0, actual - a.monto);
-    State.cajas[persona][bolsillo] = nuevo;
-    await DB.actualizarSaldoCaja(persona, bolsillo, nuevo);
+    // Debitar la caja por el motor central: queda en el libro y no se recorta
+    // en 0 (recortar hacía desaparecer la diferencia cuando el saldo no alcanzaba).
+    await State.debitarCaja(persona, bolsillo, a.monto,
+      { tipo: 'adelanto', referencia: id, descripcion: `Cobro del adelanto: ${a.concepto || a.motivo || 'adelanto de socio'}` });
 
     // Marcar cobrado
     await DB.cobrarAdelanto(id, fecha, cajaDebito);

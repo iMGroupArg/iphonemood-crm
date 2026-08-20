@@ -53,6 +53,13 @@ const Bandeja = {
         .bdj-msg.humano { background:rgba(0,122,255,.12); border:1px solid rgba(0,122,255,.25); align-self:flex-end; border-bottom-right-radius:4px; }
         .bdj-msg .rol { display:block; font-size:10px; font-weight:700; opacity:.55; margin-bottom:4px; text-transform:uppercase; letter-spacing:.04em; }
         .bdj-msg .hora-msg { display:block; font-size:10px; color:var(--text-secondary); text-align:right; margin-top:4px; }
+        .bdj-media { margin-bottom:6px; }
+        .bdj-media audio { width:250px; max-width:100%; height:38px; display:block; }
+        .bdj-media img { max-width:100%; width:230px; border-radius:9px; display:block; cursor:zoom-in; background:var(--bg-secondary); }
+        .bdj-media a { color:inherit; text-decoration:none; }
+        .bdj-media-load { font-size:12px; opacity:.6; padding:5px 0; }
+        .bdj-media-err { font-size:12px; color:var(--red); padding:5px 0; }
+        @media (max-width:600px) { .bdj-media audio, .bdj-media img { width:100%; } }
         .bdj-loading { display:flex; gap:5px; align-items:center; padding:12px 16px; }
         .bdj-loading span { width:7px; height:7px; border-radius:50%; background:var(--text-secondary); animation:bdj-bounce .9s infinite; opacity:.4; }
         .bdj-loading span:nth-child(2) { animation-delay:.15s; }
@@ -351,14 +358,77 @@ const Bandeja = {
     this._actualizarAssignBtn();
     this._actualizarCerrarBtn();
 
+    // No repintar si nada cambió: repintar corta el audio que se esté escuchando.
+    const lista = data.mensajes || [];
+    const firma = JSON.stringify(lista.map(m => [m.rol, m.texto, m.en, m.media?.id]));
+    if (firma === this._firmaChat && !esPrimera) return;
+
+    // Si hay un audio sonando, esperar a que termine antes de repintar.
+    const sonando = [...msgs.querySelectorAll('audio')].some(a => !a.paused && !a.ended);
+    if (sonando && !esPrimera) return;
+
+    this._firmaChat = firma;
+
     const abajo = msgs.scrollHeight - msgs.scrollTop - msgs.clientHeight < 80;
-    msgs.innerHTML = (data.mensajes || []).map(m => {
+    msgs.innerHTML = lista.map(m => {
       const rolLabel = m.rol === 'cliente' ? 'Cliente' : m.rol === 'humano' ? 'Vos (equipo)' : 'Bot';
       return `<div class="bdj-msg ${m.rol}">
-        <span class="rol">${rolLabel}</span>${this._esc(m.texto)}<span class="hora-msg">${this._horaFull(m.en)}</span>
+        <span class="rol">${rolLabel}</span>${this._mediaHTML(m)}${this._esc(m.texto)}<span class="hora-msg">${this._horaFull(m.en)}</span>
       </div>`;
     }).join('') || '<div class="bdj-vacio">Sin mensajes aún.</div>';
     if (abajo || esPrimera) msgs.scrollTop = msgs.scrollHeight;
+    this._hidratarMedia(msgs);
+  },
+
+  // ── adjuntos (audios / imágenes de WhatsApp) ─────────────────────────────────
+  _mediaHTML(m) {
+    const md = m.media;
+    if (!md || !md.id) return '';
+    const tipo = (md.tipo || '').toLowerCase();
+    const nombre = md.nombre || 'archivo';
+    const clase = tipo === 'audio' ? 'audio' : (tipo === 'imagen' || tipo === 'image') ? 'imagen' : 'archivo';
+    const carga = clase === 'audio' ? '🎤 Cargando audio…'
+                : clase === 'imagen' ? '🖼️ Cargando imagen…'
+                : `📎 ${this._esc(nombre)}`;
+    return `<div class="bdj-media" data-mid="${this._esc(md.id)}" data-mtipo="${clase}" data-mnom="${this._esc(nombre)}">
+      <div class="bdj-media-load">${carga}</div>
+    </div>`;
+  },
+
+  async _mediaURL(id) {
+    this._mediaCache = this._mediaCache || {};
+    if (this._mediaCache[id]) return this._mediaCache[id];
+    const token = await this._token();
+    const r = await fetch('/api/bandeja/media/' + encodeURIComponent(id), { headers: { 'x-crm-token': token } });
+    if (!r.ok) throw new Error('media HTTP ' + r.status);
+    const url = URL.createObjectURL(await r.blob());
+    this._mediaCache[id] = url;
+    return url;
+  },
+
+  async _hidratarMedia(cont) {
+    for (const el of cont.querySelectorAll('.bdj-media[data-mid]')) {
+      if (el.dataset.listo) continue;
+      el.dataset.listo = '1';
+      const nom = el.dataset.mnom || 'archivo';
+      try {
+        const url = await this._mediaURL(el.dataset.mid);
+        if (el.dataset.mtipo === 'audio') {
+          el.innerHTML = `<audio controls preload="metadata"></audio>`;
+          el.querySelector('audio').src = url;
+        } else if (el.dataset.mtipo === 'imagen') {
+          el.innerHTML = `<a target="_blank" rel="noopener"><img alt="${this._esc(nom)}" loading="lazy"></a>`;
+          el.querySelector('a').href = url;
+          el.querySelector('img').src = url;
+        } else {
+          el.innerHTML = `<a download="${this._esc(nom)}">📎 ${this._esc(nom)}</a>`;
+          el.querySelector('a').href = url;
+        }
+      } catch {
+        el.innerHTML = `<div class="bdj-media-err">⚠️ No se pudo cargar el adjunto</div>`;
+        el.dataset.listo = '';
+      }
+    }
   },
 
   abrir(platform, userId, nombre) {

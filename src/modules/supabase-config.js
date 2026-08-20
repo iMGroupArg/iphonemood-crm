@@ -19,7 +19,7 @@ const DB = {
     const [personasRes, cajasRes, stockRes, garantiasRes, ventasRes, ventaItemsRes, ventaPagosRes,
            reparacionesRes, repRepuestosRes, repPagosRes, catGastoRes, gastosRes, cambiosRes,
            gastosFijosRes, cierresRes, inversoresRes, inversorPagosRes, activosFijosRes,
-           proveedoresRes, lotesRes, loteItemsRes, lotePagosRes,
+           proveedoresRes, lotesRes, loteItemsRes, lotePagosRes, proveedorCreditosRes,
            turnosSlotsRes, turnosReservasRes,
            deudasRes, deudaPagosRes, configRes, adelantosRes] = await Promise.all([
       supa.from('personas').select('*'),
@@ -44,6 +44,7 @@ const DB = {
       supa.from('lotes_compra').select('*').order('id', { ascending: false }),
       supa.from('lote_items').select('*'),
       supa.from('lote_pagos').select('*').order('id', { ascending: true }),
+      supa.from('proveedor_creditos').select('*').order('id', { ascending: true }),
       supa.from('turnos_slots').select('*').order('fecha').order('hora_inicio'),
       supa.from('turnos_reservas').select('*').order('creado_en', { ascending: false }),
       supa.from('deudas_manuales').select('*').order('creado_en', { ascending: false }),
@@ -85,12 +86,14 @@ const DB = {
         bateriaPct: s.bateria_pct ?? null, ciclosBateria: s.ciclos_bateria ?? null, ram: s.ram || '',
         estadoProducto: s.estado_producto || '', grado: s.grado || 'Sin grado',
         esim: !!s.esim, tieneCaja: !!s.tiene_caja, numeroSerie: s.numero_serie || '',
-        destacado: !!s.destacado, estadoInventario: s.estado_inventario || 'disponible'
+        destacado: !!s.destacado, estadoInventario: s.estado_inventario || 'disponible',
+        imagenUrl: s.imagen_url || '', comboItems: s.combo_items || ''
       };
     });
 
-    // garantías
-    State.garantias = (garantiasRes.data || []).map(g => ({ id: g.id, nombre: g.nombre, dias: g.dias, color: g.color }));
+    // garantías — tipo ('nuevo'|'usado'|null) es lo que conecta una categoría
+    // del catálogo con la condición del producto vendido, para asignarla sola.
+    State.garantias = (garantiasRes.data || []).map(g => ({ id: g.id, nombre: g.nombre, dias: g.dias, color: g.color, tipo: g.tipo || null }));
 
     // categorías de gasto
     State.categoriasGasto = (catGastoRes.data || []).map(c => ({ id: c.id, nombre: c.nombre, color: c.color }));
@@ -140,6 +143,7 @@ const DB = {
       id: c.id, fecha: this.fmtFecha(c.creado_en), fechaISO: c.creado_en, tipo: c.tipo,
       entrega: Number(c.entrega), recibe: Number(c.recibe), cotiz: Number(c.cotizacion),
       cotizRef: c.cotiz_ref ? Number(c.cotiz_ref) : null,
+      vieneDeVenta: !!c.viene_de_venta,
       origenP: this.personasIdToNombre[c.origen_persona_id] || '', origenB: c.origen_bolsillo,
       destinoP: this.personasIdToNombre[c.destino_persona_id] || '', destinoB: c.destino_bolsillo
     }));
@@ -148,7 +152,11 @@ const DB = {
     const itemsPorVenta = {}, pagosPorVenta = {};
     (ventaItemsRes.data || []).forEach(i => {
       if (!itemsPorVenta[i.venta_id]) itemsPorVenta[i.venta_id] = [];
-      itemsPorVenta[i.venta_id].push({ nombre: i.nombre, precio: Number(i.precio_usd), costo: Number(i.costo_usd), stockId: i.stock_id, imei: i.imei, regalo: i.es_regalo || false });
+      itemsPorVenta[i.venta_id].push({
+        nombre: i.nombre, precio: Number(i.precio_usd), costo: Number(i.costo_usd), stockId: i.stock_id, imei: i.imei, regalo: i.es_regalo || false,
+        garantiaId: i.garantia_id ?? null, garantiaDias: i.garantia_dias ?? null,
+        garantiaInicio: i.garantia_inicio || null, garantiaFin: i.garantia_fin || null,
+      });
     });
     (ventaPagosRes.data || []).forEach(p => {
       if (!pagosPorVenta[p.venta_id]) pagosPorVenta[p.venta_id] = [];
@@ -208,6 +216,7 @@ const DB = {
       id: i.id, loteId: i.lote_id, nombre: i.nombre, cat: i.cat || 'iphone',
       modelo: i.modelo || '', storage: i.storage || '', color: i.color || '',
       cantidad: Number(i.cantidad), precioUsd: Number(i.precio_usd), grado: i.grado || '', notas: i.notas || '',
+      estadoProducto: i.estado_producto || 'Nuevo / Sellado',
       unidades: Array.isArray(i.unidades) ? i.unidades : [],
     }));
     State.lotePagos = (lotePagosRes.data || []).map(p => ({
@@ -217,6 +226,13 @@ const DB = {
       moneda: p.moneda || 'USD', persona: p.persona || '', bolsillo: p.bolsillo || '',
       personaDest: p.persona_dest || '', bolsilloDestino: p.bolsillo_dest || '',
       fecha: p.fecha || '', notas: p.notas || '',
+    }));
+
+    // proveedor_creditos — cuenta corriente CON el proveedor (plata que nos
+    // debe, no que le debemos). Ver comentario en la migración SQL.
+    State.proveedorCreditos = (proveedorCreditosRes.data || []).map(c => ({
+      id: c.id, proveedorId: c.proveedor_id, tipo: c.tipo, montoUsd: Number(c.monto_usd),
+      loteId: c.lote_id, fecha: c.fecha || '', notas: c.notas || '',
     }));
 
     State.turnosSlots = (turnosSlotsRes.data || []).map(s => ({
@@ -269,6 +285,58 @@ const DB = {
     await supa.from('adelantos_socios').delete().eq('id', id);
   },
 
+  // ─── Rubros visibles en la landing pública (precios.html) ───
+  // Se guardan como array JSON en configuracion.landing_categorias. La landing
+  // lo lee al cargar, así que prender o apagar un rubro no requiere deploy.
+  async leerLandingCategorias() {
+    const { data, error } = await supa.from('configuracion')
+      .select('valor').eq('clave', 'landing_categorias').maybeSingle();
+    if (error || !data) return null;
+    try {
+      const lista = JSON.parse(data.valor);
+      return Array.isArray(lista) ? lista : null;
+    } catch { return null; }
+  },
+
+  async guardarLandingCategorias(lista) {
+    await supa.from('configuracion')
+      .upsert({ clave: 'landing_categorias', valor: JSON.stringify(lista) });
+  },
+
+  // ─── Presupuestos con canje ───
+  async listarPresupuestos() {
+    const { data } = await supa.from('presupuestos').select('*').order('creado_en', { ascending: false }).limit(100);
+    return data || [];
+  },
+  async crearPresupuesto(fila) {
+    return await supa.from('presupuestos').insert(fila);
+  },
+  async eliminarPresupuesto(token) {
+    await supa.from('presupuestos').delete().eq('token', token);
+  },
+
+  // ─── Financiación con tarjeta (landing pública) ───
+  // La landing lee configuracion.pagos_config en cada carga. El panel edita
+  // lista_factor + los coeficientes de la promo y de "otras tarjetas".
+  // Se guarda MERGEANDO sobre lo que ya hay, para no pisar claves que el
+  // panel no muestra (regalo, contado_factor).
+  async leerPagosConfig() {
+    const { data, error } = await supa.from('configuracion')
+      .select('valor').eq('clave', 'pagos_config').maybeSingle();
+    if (error || !data) return null;
+    try { return JSON.parse(data.valor); } catch { return null; }
+  },
+
+  async guardarPagosConfig(parcial) {
+    const actual = (await this.leerPagosConfig()) || {};
+    const nuevo = { ...actual, ...parcial };
+    // El formato nuevo reemplaza al viejo: si quedaron las claves viejas,
+    // se eliminan para que no convivan dos fuentes de verdad.
+    delete nuevo.cuotas_fijas; delete nuevo.promos;
+    await supa.from('configuracion')
+      .upsert({ clave: 'pagos_config', valor: JSON.stringify(nuevo) });
+  },
+
   async guardarCotizacionesDB(blue, usdt) {
     State._refUsdtCustomizado = true;
     await Promise.all([
@@ -279,7 +347,13 @@ const DB = {
 
   fmtFecha(iso) {
     if (!iso) return 'Hoy';
-    const d = new Date(iso);
+    // Una fecha sola ("2026-07-30") la interpreta el navegador como medianoche
+    // UTC, y al mostrarla en hora argentina (UTC-3) retrocedía un día.
+    // Cuando no viene la hora, la armamos como fecha local.
+    const soloFecha = /^\d{4}-\d{2}-\d{2}$/.test(String(iso).trim());
+    const d = soloFecha
+      ? (([a, m, dia]) => new Date(a, m - 1, dia))(String(iso).trim().split('-').map(Number))
+      : new Date(iso);
     return d.toLocaleDateString('es-AR', { day: '2-digit', month: '2-digit' });
   },
 
@@ -287,11 +361,24 @@ const DB = {
 
   // ===== ESCRITURAS =====
 
+  // Devuelve true solo si el saldo quedó realmente guardado.
+  // Antes salía en silencio cuando la persona no estaba mapeada o fallaba la
+  // escritura: la pantalla mostraba un saldo y la base tenía otro.
   async actualizarSaldoCaja(persona, bolsillo, nuevoSaldo) {
     const pid = this.personaId(persona);
-    if (!pid) return;
-    await supa.from('cajas').update({ saldo: nuevoSaldo, actualizado_en: new Date().toISOString() })
+    if (!pid) {
+      console.error(`No se encontró la persona "${persona}" — el saldo NO se guardó.`);
+      return false;
+    }
+    const { error, count } = await supa.from('cajas')
+      .update({ saldo: nuevoSaldo, actualizado_en: new Date().toISOString() }, { count: 'exact' })
       .eq('persona_id', pid).eq('bolsillo', bolsillo);
+    if (error) { console.error('Error guardando el saldo de caja:', persona, bolsillo, error); return false; }
+    if (count === 0) {
+      console.error(`No existe la caja "${bolsillo}" de ${persona} — el saldo NO se guardó.`);
+      return false;
+    }
+    return true;
   },
 
   async crearMovimientoCaja({ tipo, descripcion, origenPersona, origenBolsillo, destinoPersona, destinoBolsillo, monto, moneda, creadoPor }) {
@@ -343,17 +430,37 @@ const DB = {
       bateria_pct: obj.bateriaPct || null, ciclos_bateria: obj.ciclosBateria || null, ram: obj.ram || null,
       estado_producto: obj.estadoProducto || null, grado: obj.grado || 'Sin grado',
       esim: !!obj.esim, tiene_caja: !!obj.tieneCaja, numero_serie: obj.numeroSerie || null,
-      destacado: !!obj.destacado, estado_inventario: obj.estadoInventario || 'disponible'
+      destacado: !!obj.destacado, estado_inventario: obj.estadoInventario || 'disponible',
+      imagen_url: obj.imagenUrl || null, combo_items: obj.comboItems || null
     };
     if (idExistente) {
-      const { error, count } = await supa.from('stock').update(row).eq('id', idExistente).select('id');
+      let { error, count } = await supa.from('stock').update(row).eq('id', idExistente).select('id');
+      let camposOmitidos = [];
+      // Mismo paracaídas que el alta: si la base todavía no tiene alguna columna
+      // nueva (migración sin correr), se reintenta sin ella en vez de bloquear
+      // TODA edición de stock. Los campos que no entraron se avisan por toast.
+      if (error && this._esErrorDeColumnaFaltante(error)) {
+        console.warn('guardarProductoStock update: la base rechazó una columna, reintento sin las nuevas:', error.message);
+        const faltante = (error.message || '').match(/'([a-z_]+)' column/)?.[1];
+        const row2 = { ...row };
+        // Se saca la columna que la base nombró; si no la nombró, las más nuevas.
+        const candidatas = faltante ? [faltante] : ['combo_items', 'imagen_url', 'destacado'];
+        candidatas.forEach(c => { if (c in row2) { delete row2[c]; camposOmitidos.push(c); } });
+        const res2 = await supa.from('stock').update(row2).eq('id', idExistente).select('id');
+        error = res2.error; count = res2.count;
+        if (error) camposOmitidos = [];
+      }
       const sinPermiso = !error && count === 0;
-      return { id: idExistente, error: error || (sinPermiso ? new Error('Sin permisos para actualizar este producto. Revisá los permisos en Supabase.') : null) };
+      return { id: idExistente, error: error || (sinPermiso ? new Error('Sin permisos para actualizar este producto. Revisá los permisos en Supabase.') : null), camposOmitidos };
     } else {
       let { data, error } = await supa.from('stock').insert(row).select().single();
-      if (error) {
-        // Fallback: reintentar solo con columnas base si alguna columna nueva no existe
-        console.warn('guardarProductoStock insert falló, reintentando con base:', error.message);
+      let camposOmitidos = [];
+      // Fallback: reintentar solo con columnas base, PERO únicamente si el motivo
+      // es que la base todavía no tiene alguna columna nueva. Antes se reintentaba
+      // ante cualquier error y, si el segundo intento entraba, el producto quedaba
+      // guardado a medias (sin precio de reventa, batería, imagen…) diciendo "listo".
+      if (error && this._esErrorDeColumnaFaltante(error)) {
+        console.warn('guardarProductoStock: la base rechazó una columna, reintento sin las nuevas:', error.message);
         const rowBase = {
           categoria: row.categoria, nombre: row.nombre, imeis: row.imeis, cantidad: row.cantidad,
           costo_usd: row.costo_usd, cotizacion: row.cotizacion, precio_ars: row.precio_ars,
@@ -362,11 +469,24 @@ const DB = {
           estado_producto: row.estado_producto, grado: row.grado,
           estado_inventario: row.estado_inventario,
         };
+        const vacio = v => v === null || v === undefined || v === '' || v === false || v === 0;
+        const omitidos = Object.keys(row).filter(k => !(k in rowBase) && !vacio(row[k]));
         const res2 = await supa.from('stock').insert(rowBase).select().single();
         data = res2.data; error = res2.error;
+        if (!error) camposOmitidos = omitidos;
       }
-      return { id: data?.id, error };
+      return { id: data?.id, error, camposOmitidos };
     }
+  },
+
+  // ¿El error es "esta columna no existe" y no otra cosa (un IMEI duplicado, un
+  // permiso, un dato inválido)? Solo en ese caso tiene sentido reintentar.
+  _esErrorDeColumnaFaltante(error) {
+    const txt = `${error?.code || ''} ${error?.message || ''}`.toLowerCase();
+    return txt.includes('pgrst204')
+        || txt.includes('42703')
+        || txt.includes('schema cache')
+        || (txt.includes('column') && txt.includes('does not exist'));
   },
 
   async registrarMovimientoStock(stockId, tipo, detalle, cantidadAntes, cantidadDespues, datos = null) {
@@ -390,6 +510,16 @@ const DB = {
   async actualizarImeisStock(stockId, imeis) {
     await supa.from('stock').update({ imeis }).eq('id', stockId);
   },
+  // Actualiza solo el precio, sin tocar el resto de la ficha.
+  // Devuelve true solo si la fila se modificó de verdad.
+  async actualizarPrecioStock(stockId, precioARS) {
+    const { error, count } = await supa.from('stock')
+      .update({ precio_ars: precioARS }, { count: 'exact' })
+      .eq('id', stockId);
+    if (error) { console.error('No se pudo actualizar el precio:', stockId, error); return false; }
+    return count !== 0;
+  },
+
   async actualizarCantidadStock(stockId, cantidad) {
     await supa.from('stock').update({ cantidad }).eq('id', stockId);
   },
@@ -400,6 +530,110 @@ const DB = {
 
   async actualizarEstadoInventario(stockId, estado) {
     await supa.from('stock').update({ estado_inventario: estado }).eq('id', stockId);
+  },
+
+  // Libro mayor de cajas: deja registrado cada entrada y salida.
+  // No corta el flujo si falla — el saldo ya se guardó por otro lado —,
+  // pero devuelve false para que quien llama pueda avisarlo.
+  async registrarMovimientoCaja(mov) {
+    try {
+      const { error } = await supa.from('caja_ledger').insert({
+        persona_id:  this.personaId(mov.persona) || null,
+        persona:     mov.persona,
+        bolsillo:    mov.bolsillo,
+        delta:       mov.delta,
+        saldo_post:  mov.saldoPost ?? null,
+        tipo:        mov.tipo || 'otro',
+        referencia:  mov.referencia != null ? String(mov.referencia) : null,
+        descripcion: mov.descripcion || null,
+        // Mismo criterio que el resto del CRM: el nombre si lo hay, si no el mail.
+        creado_por:  (typeof Auth !== 'undefined'
+                      ? (Auth.usuario?.nombre || Auth.usuario?.email || 'Desconocido')
+                      : 'Desconocido'),
+      });
+      if (error) { console.error('No se pudo registrar el movimiento de caja:', mov, error); return false; }
+      return true;
+    } catch (e) {
+      console.error('No se pudo registrar el movimiento de caja:', mov, e);
+      return false;
+    }
+  },
+
+  // Control de cuadre: compara el saldo real de cada caja contra la suma de
+  // sus movimientos. Si difieren, algo se escribió mal y hay que revisarlo.
+  // Devuelve { ok, sinLibro, diferencias: [{persona, bolsillo, saldo, suma, dif}] }
+  async cuadreCajas() {
+    const { data, error } = await supa.from('caja_ledger').select('persona,bolsillo,delta');
+    if (error) return { ok: false, sinLibro: true, diferencias: [] };
+    if (!data || !data.length) return { ok: true, sinLibro: true, diferencias: [] };
+
+    const suma = {};
+    data.forEach(m => {
+      const k = `${m.persona}||${m.bolsillo}`;
+      suma[k] = (suma[k] || 0) + Number(m.delta);
+    });
+
+    const diferencias = [];
+    Object.entries(State.cajas).forEach(([persona, bolsillos]) => {
+      Object.entries(bolsillos).forEach(([bolsillo, saldo]) => {
+        const s = suma[`${persona}||${bolsillo}`] || 0;
+        const dif = Number(saldo) - s;
+        if (Math.abs(dif) > 0.01) diferencias.push({ persona, bolsillo, saldo: Number(saldo), suma: s, dif });
+      });
+    });
+    diferencias.sort((a, b) => Math.abs(b.dif) - Math.abs(a.dif));
+    return { ok: diferencias.length === 0, sinLibro: false, diferencias };
+  },
+
+  // Movimientos del libro, con filtros. `desde` y `hasta` son fechas locales
+  // en formato AAAA-MM-DD; `hasta` se toma inclusive (hasta las 23:59:59).
+  async movimientosCaja({ persona, bolsillo, tipo, desde, hasta, limite = 500 } = {}) {
+    let q = supa.from('caja_ledger').select('*').order('creado_en', { ascending: false }).limit(limite);
+    if (persona)  q = q.eq('persona', persona);
+    if (bolsillo) q = q.eq('bolsillo', bolsillo);
+    if (tipo)     q = q.eq('tipo', tipo);
+    if (desde) {
+      const [a, m, d] = desde.split('-').map(Number);
+      q = q.gte('creado_en', new Date(a, m - 1, d, 0, 0, 0).toISOString());
+    }
+    if (hasta) {
+      const [a, m, d] = hasta.split('-').map(Number);
+      q = q.lte('creado_en', new Date(a, m - 1, d, 23, 59, 59, 999).toISOString());
+    }
+    const { data, error } = await q;
+    if (error) { console.error('No se pudo leer el libro de caja:', error); return []; }
+    return data || [];
+  },
+
+  async actualizarNotasStock(stockId, notas) {
+    await supa.from('stock').update({ notas }).eq('id', stockId);
+  },
+
+  // Baja lógica: no borra la fila para no romper el vínculo con venta_items,
+  // pero la saca del inventario disponible y del selector de ventas.
+  async darDeBajaProductoStock(stockId, motivo) {
+    const { data } = await supa.from('stock').select('notas').eq('id', stockId).maybeSingle();
+    const notas = [(data?.notas || '').trim(), motivo].filter(Boolean).join(' · ');
+    await supa.from('stock')
+      .update({ estado_inventario: 'eliminado', cantidad: 0, imeis: [], notas })
+      .eq('id', stockId);
+  },
+
+  // Busca el equipo que entró como trade-in de una venta (para poder revertirlo
+  // al anularla, incluso después de recargar la página).
+  async buscarStockTradeInDeVenta(ventaId) {
+    const { data } = await supa.from('stock')
+      .select('id')
+      .eq('proveedor', 'Trade-In')
+      .ilike('notas', `%Trade-in de venta #${ventaId}%`)
+      .eq('estado_inventario', 'disponible');
+    return (data || []).map(r => r.id);
+  },
+
+  async cancelarDeudaDeVenta(ventaId) {
+    const { data } = await supa.from('deudas_manuales')
+      .delete().eq('concepto', String(ventaId)).select('id');
+    return (data || []).map(r => r.id);
   },
 
   async crearVenta(draft, estado) {
@@ -428,14 +662,22 @@ const DB = {
     const itemsToInsert = draft.items.map(it => ({
       venta_id: ventaRow.id, stock_id: it.stockId || null, imei: it.imei || null,
       nombre: it.nombre, costo_usd: it.costo || 0, precio_usd: it.precio,
-      es_regalo: !!it.regalo
+      es_regalo: !!it.regalo,
+      garantia_id: it.garantiaId || null, garantia_dias: it.garantiaDias || null,
+      garantia_inicio: it.garantiaInicio || null, garantia_fin: it.garantiaFin || null,
     }));
     if (itemsToInsert.length) {
       const { error: itemsErr } = await supa.from('venta_items').insert(itemsToInsert);
       if (itemsErr) {
-        // Fallback: reintentar sin es_regalo si la columna no existe aún
-        const itemsFallback = itemsToInsert.map(({ es_regalo, ...rest }) => rest);
-        await supa.from('venta_items').insert(itemsFallback);
+        // Fallback: reintentar sin las columnas de garantía si la migración
+        // todavía no se corrió (ver garantia_venta_items_migration.sql)
+        const sinGarantia = itemsToInsert.map(({ garantia_id, garantia_dias, garantia_inicio, garantia_fin, ...rest }) => rest);
+        const { error: err2 } = await supa.from('venta_items').insert(sinGarantia);
+        if (err2) {
+          // Fallback final: reintentar sin es_regalo tampoco, si esa columna no existe
+          const itemsFallback = sinGarantia.map(({ es_regalo, ...rest }) => rest);
+          await supa.from('venta_items').insert(itemsFallback);
+        }
       }
     }
 
@@ -471,12 +713,20 @@ const DB = {
     await supa.from('ventas').delete().eq('id', ventaId); // borra en cascada items y pagos
   },
 
+  // Guarda la cotización usada y devuelve el id del pago.
+  // Sin la cotización, al revertir el cobro se usaba el blue del día de la
+  // reversión y la caja quedaba descuadrada. Sin el id, el pago recién
+  // agregado no se podía eliminar hasta recargar la página.
   async agregarPagoVenta(ventaId, pago) {
-    await supa.from('venta_pagos').insert({
+    const { data, error } = await supa.from('venta_pagos').insert({
       venta_id: ventaId, persona_id: this.personaId(pago.persona),
       bolsillo: pago.bolsillo, monto: pago.monto,
-      es_tarjeta: false, diferencial_ars: 0
-    });
+      es_tarjeta: !!pago.esTarjeta, diferencial_ars: pago.diferencialArs || 0,
+      cotizacion_diferencial: pago.bolsillo?.startsWith('ARS')
+        ? (pago.cotizacionDiferencial || State.refBlue) : null
+    }).select().single();
+    if (error) { console.error('No se pudo guardar el pago:', error); return null; }
+    return data?.id || null;
   },
 
   async eliminarPagoVenta(pagoId) {
@@ -624,9 +874,22 @@ const DB = {
     const loteObj = { id: row.id, proveedorId: row.proveedor_id, nombre: row.nombre, fechaOrden: row.fecha_orden, fechaLlegadaEsperada: row.fecha_llegada_esperada || '', fechaRecepcion: '', estado: 'programado', notas: row.notas };
     State.lotesCompra.unshift(loteObj);
     if (items?.length) {
-      const rows = items.map(i => ({ lote_id: row.id, nombre: i.nombre, cat: i.cat || 'iphone', modelo: i.modelo || '', storage: i.storage || '', color: i.color || '', cantidad: i.cantidad || 1, precio_usd: i.precioUsd || 0, grado: i.grado || '' }));
-      const { data: itemRows } = await supa.from('lote_items').insert(rows).select();
-      (itemRows || []).forEach(i => State.loteItems.push({ id: i.id, loteId: i.lote_id, nombre: i.nombre, cat: i.cat, modelo: i.modelo, storage: i.storage, color: i.color, cantidad: Number(i.cantidad), precioUsd: Number(i.precio_usd), grado: i.grado || '', notas: i.notas || '' }));
+      const rows = items.map(i => ({
+        lote_id: row.id, nombre: i.nombre, cat: i.cat || 'iphone',
+        modelo: i.modelo || i.nombre || '', storage: i.storage || '', color: i.color || '',
+        cantidad: i.cantidad || 1, precio_usd: i.precioUsd || 0, grado: i.grado || '',
+        estado_producto: i.estadoProducto || 'Nuevo / Sellado',
+      }));
+      let { data: itemRows, error } = await supa.from('lote_items').insert(rows).select();
+      if (error && this._esErrorDeColumnaFaltante(error)) {
+        // La columna estado_producto es nueva (ver lote_items_estado_migration.sql).
+        // Si todavía no se corrió la migración, el lote se crea igual sin ese dato.
+        console.warn('lote_items sin columna estado_producto, se guarda sin ella:', error.message);
+        const res2 = await supa.from('lote_items').insert(rows.map(({ estado_producto, ...r }) => r)).select();
+        itemRows = res2.data; error = res2.error;
+      }
+      if (error) console.error('No se pudieron guardar los items del lote:', error);
+      (itemRows || []).forEach(i => State.loteItems.push({ id: i.id, loteId: i.lote_id, nombre: i.nombre, cat: i.cat, modelo: i.modelo, storage: i.storage, color: i.color, cantidad: Number(i.cantidad), precioUsd: Number(i.precio_usd), grado: i.grado || '', estadoProducto: i.estado_producto || 'Nuevo / Sellado', notas: i.notas || '' }));
     }
     return loteObj;
   },
@@ -645,6 +908,24 @@ const DB = {
   async eliminarLotePago(pagoId) {
     const { error } = await supa.from('lote_pagos').delete().eq('id', pagoId);
     if (!error) State.lotePagos = State.lotePagos.filter(p => p.id !== pagoId);
+    return !error;
+  },
+
+  async crearProveedorCredito(c) {
+    const { data: row, error } = await supa.from('proveedor_creditos').insert({
+      proveedor_id: c.proveedorId, tipo: c.tipo, monto_usd: c.montoUsd,
+      lote_id: c.loteId || null, fecha: c.fecha || new Date().toISOString().slice(0, 10),
+      notas: c.notas || '',
+    }).select().single();
+    if (error || !row) return null;
+    const obj = { id: row.id, proveedorId: row.proveedor_id, tipo: row.tipo, montoUsd: Number(row.monto_usd), loteId: row.lote_id, fecha: row.fecha || '', notas: row.notas || '' };
+    State.proveedorCreditos.push(obj);
+    return obj;
+  },
+
+  async eliminarProveedorCredito(id) {
+    const { error } = await supa.from('proveedor_creditos').delete().eq('id', id);
+    if (!error) State.proveedorCreditos = State.proveedorCreditos.filter(c => c.id !== id);
     return !error;
   },
 
@@ -703,6 +984,7 @@ const DB = {
       destino_persona_id: this.personaId(c.destinoP), destino_bolsillo: c.destinoB
     };
     if (c.cotizRef) row.cotiz_ref = c.cotizRef;
+    if (c.vieneDeVenta) row.viene_de_venta = true;
     const { data } = await supa.from('cambios').insert(row).select().single();
     return data?.id;
   },
@@ -757,11 +1039,24 @@ const DB = {
     return { error };
   },
 
-  async agregarGarantia(nombre, dias, color) {
-    const { data } = await supa.from('garantias').insert({ nombre, dias, color }).select().single();
+  async agregarGarantia(nombre, dias, color, tipo) {
+    let { data, error } = await supa.from('garantias').insert({ nombre, dias, color, tipo: tipo || null }).select().single();
+    if (error) {
+      // Fallback si todavía no se corrió la migración que agrega `tipo`.
+      console.warn('agregarGarantia con tipo falló, reintentando sin tipo:', error.message);
+      ({ data } = await supa.from('garantias').insert({ nombre, dias, color }).select().single());
+    }
     return data;
   },
-  async editarGarantia(id, dias) { await supa.from('garantias').update({ dias }).eq('id', id); },
+  async editarGarantia(id, patch) {
+    const { error } = await supa.from('garantias').update(patch).eq('id', id);
+    if (error && 'tipo' in patch) {
+      // Fallback si todavía no se corrió la migración que agrega `tipo`.
+      const { tipo, ...sinTipo } = patch;
+      console.warn('editarGarantia con tipo falló, reintentando sin tipo:', error.message);
+      await supa.from('garantias').update(sinTipo).eq('id', id);
+    }
+  },
   async borrarGarantia(id) { await supa.from('garantias').delete().eq('id', id); },
 
   async agregarCategoriaGasto(nombre, color) {
@@ -863,14 +1158,19 @@ const Auth = {
   async iniciarSesionConGoogle() {
     const { error } = await supa.auth.signInWithOAuth({
       provider: 'google',
-      options: { redirectTo: window.location.origin }
+      // Vuelve a /login (el CRM), no al origin pelado: la raíz ahora es la
+      // landing pública y la sesión se procesaría en la página equivocada.
+      options: { redirectTo: window.location.origin + '/login' }
     });
     if (error) { console.error(error); alert('No se pudo iniciar el login con Google. Probá de nuevo.'); }
   },
 
   async cerrarSesion() {
     await supa.auth.signOut();
-    window.location.reload();
+    // A la landing pública: cerrar sesión es salir del sistema, así que el
+    // destino natural es la web de cara al cliente. Quedarse en /login deja
+    // una pantalla de entrada sin contexto de que la sesión ya se cerró.
+    window.location.href = '/';
   },
 
   async obtenerSesionActual() {

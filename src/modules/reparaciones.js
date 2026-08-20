@@ -537,7 +537,9 @@ const Reparaciones = {
   copiarLinkSeguimiento() {
     const o = State.reparaciones.find(x => x.id === this.currentId);
     if (!o?.tokenSeguimiento) { toast('Esta reparación no tiene link de seguimiento aún.'); return; }
-    const base = location.origin + location.pathname.replace('index.html', '').replace(/\/$/, '');
+    // Ruta absoluta por el mismo motivo que en turnos.js: el pathname del
+    // CRM ya no es index.html sino /login.
+    const base = location.origin;
     const link = `${base}/seguimiento.html?t=${o.tokenSeguimiento}`;
     navigator.clipboard.writeText(link).then(() => {
       toast('Link copiado al portapapeles. Ya podés enviárselo al cliente.');
@@ -938,7 +940,8 @@ const Reparaciones = {
     if (!o) return;
     const pago = { caja: `${persona}-${bolsillo}`, monto, persona, bolsillo };
     o.pagos.push(pago);
-    State.acreditarCaja(persona, bolsillo, monto);
+    State.acreditarCaja(persona, bolsillo, monto,
+      { tipo: 'reparacion', referencia: o.id, descripcion: `Cobro de la reparación ${o.id}` });
     await DB.agregarPagoReparacion(o.id, pago);
     this.renderDetail();
     toast(`${State.fmtARS(monto)} acreditado en caja de ${persona}.`);
@@ -999,7 +1002,8 @@ const Reparaciones = {
       const bolsillo = document.getElementById('rep-e-bolsillo')?.value;
       const pago = { caja: `${persona}-${bolsillo}`, monto: saldo, persona, bolsillo };
       o.pagos.push(pago);
-      State.acreditarCaja(persona, bolsillo, saldo);
+      State.acreditarCaja(persona, bolsillo, saldo,
+        { tipo: 'reparacion', referencia: o.id, descripcion: `Saldo al entregar la reparación ${o.id}` });
       await DB.agregarPagoReparacion(o.id, pago);
     }
     o.estado = 'entregado'; o.equipoDevuelto = true;
@@ -1015,7 +1019,8 @@ const Reparaciones = {
     const o = State.reparaciones.find(x => x.id === this.currentId);
     if (!o) return;
     if (!confirm(`¿Cancelar la orden ${o.id}? Los pagos se revertirán en sus cajas y los repuestos de stock volverán al inventario.`)) return;
-    o.pagos.forEach(p => State.debitarCaja(p.persona, p.bolsillo, p.monto));
+    await Promise.all(o.pagos.map(p => State.debitarCaja(p.persona, p.bolsillo, p.monto,
+      { tipo: 'reparacion_cancelada', referencia: o.id, descripcion: `Se canceló la reparación ${o.id}` })));
     for (const r of (o.repuestos || []).filter(r => r.fromStock && r.stockId)) {
       const item = State.stock.find(s => s.id === r.stockId);
       if (item && !item.imeis) { item.cantidad = (item.cantidad || 0) + 1; await DB.actualizarCantidadStock(r.stockId, item.cantidad); }

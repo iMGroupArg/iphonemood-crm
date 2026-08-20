@@ -1,5 +1,5 @@
 const Cajas = {
-  _tab: 'cajas',   // 'cajas' | 'movimientos'
+  _tab: 'cajas',   // 'cajas' | 'movimientos' | 'libro'
   _movimientos: [],
 
   render() {
@@ -20,6 +20,9 @@ const Cajas = {
     };
 
     c.innerHTML = `
+      <!-- Control de cuadre del libro de movimientos -->
+      <div id="cajas-cuadre" style="margin-bottom:14px"></div>
+
       <!-- KPIs consolidados -->
       <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:18px" class="cajas-kpi-grid">
         <div class="card" style="margin-bottom:0">
@@ -48,6 +51,9 @@ const Cajas = {
         <button onclick="Cajas.setTab('movimientos')" style="padding:8px 16px;font-size:13px;font-weight:600;background:none;border:none;border-bottom:2px solid ${this._tab==='movimientos'?'var(--blue)':'transparent'};color:${this._tab==='movimientos'?'var(--blue)':'var(--text-secondary)'};cursor:pointer">
           <i class="ti ti-arrows-exchange"></i> Movimientos
         </button>
+        <button onclick="Cajas.setTab('libro')" style="padding:8px 16px;font-size:13px;font-weight:600;background:none;border:none;border-bottom:2px solid ${this._tab==='libro'?'var(--blue)':'transparent'};color:${this._tab==='libro'?'var(--blue)':'var(--text-secondary)'};cursor:pointer">
+          <i class="ti ti-book"></i> Libro
+        </button>
         <div style="flex:1"></div>
         <button class="btn btn-primary btn-sm" onclick="Cajas.abrirModalMovimiento()" style="margin-bottom:6px">
           <i class="ti ti-plus"></i> Nuevo movimiento
@@ -56,13 +62,52 @@ const Cajas = {
 
       <!-- Contenido de la pestaña activa -->
       <div id="cajas-tab-content">
-        ${this._tab === 'cajas' ? this._cajasHTML(BOLSILLO_ICON) : this._movimientosHTML()}
+        ${this._tab === 'cajas' ? this._cajasHTML(BOLSILLO_ICON)
+          : this._tab === 'libro' ? this._libroHTML()
+          : this._movimientosHTML()}
       </div>
 
       <div style="font-size:11px;color:var(--text-secondary);margin-top:12px"><i class="ti ti-info-circle"></i> Tocá cualquier saldo para ajustarlo. Para agregar o renombrar personas, andá a Panel de control → Cajas y personas.</div>
     `;
 
+    this.pintarCuadre();
     return c;
+  },
+
+  // Compara cada saldo contra la suma de sus movimientos y lo muestra arriba.
+  // Es la red de seguridad: si un guardado falla, acá se ve enseguida.
+  async pintarCuadre() {
+    let r;
+    try { r = await DB.cuadreCajas(); } catch (e) { console.error(e); return; }
+    const el = document.getElementById('cajas-cuadre');
+    if (!el) return;
+
+    if (r.sinLibro) {
+      el.innerHTML = `<div style="background:var(--amber-light);border:1px solid var(--amber);border-radius:10px;padding:10px 14px;font-size:12.5px;color:var(--amber)">
+        <b>Libro de movimientos sin iniciar.</b> Los saldos funcionan, pero todavía no se puede verificar si cuadran.
+      </div>`;
+      return;
+    }
+
+    if (r.ok) {
+      el.innerHTML = `<div style="background:var(--green-light);border:1px solid var(--green);border-radius:10px;padding:10px 14px;font-size:12.5px;color:var(--green)">
+        <i class="ti ti-circle-check"></i> <b>Cajas cuadradas.</b> Cada saldo coincide con la suma de sus movimientos.
+      </div>`;
+      return;
+    }
+
+    const filas = r.diferencias.map(d => `
+      <div style="display:flex;justify-content:space-between;gap:10px;padding:4px 0;border-top:1px solid rgba(0,0,0,.06)">
+        <span>${d.persona} · ${d.bolsillo}</span>
+        <span>saldo <b>${Math.round(d.saldo).toLocaleString('es-AR')}</b> · libro <b>${Math.round(d.suma).toLocaleString('es-AR')}</b>
+          · <span style="color:var(--red);font-weight:700">${d.dif > 0 ? '+' : ''}${Math.round(d.dif).toLocaleString('es-AR')}</span></span>
+      </div>`).join('');
+
+    el.innerHTML = `<div style="background:var(--red-light);border:1px solid var(--red);border-radius:10px;padding:10px 14px;font-size:12.5px;color:var(--red)">
+      <div style="margin-bottom:4px"><i class="ti ti-alert-triangle"></i> <b>${r.diferencias.length} caja(s) no cuadran</b> con el libro de movimientos.</div>
+      ${filas}
+      <div style="margin-top:6px;font-size:11px;opacity:.85">La diferencia es plata que entró o salió sin quedar registrada. Revisá esas cajas.</div>
+    </div>`;
   },
 
   async setTab(t) {
@@ -70,7 +115,177 @@ const Cajas = {
     if (t === 'movimientos') {
       this._movimientos = await DB.listarMovimientosCaja(200);
     }
+    if (t === 'libro') {
+      if (!this._libroFiltro) this._libroFiltro = this._rangoMes();
+      this._libro = await DB.movimientosCaja(this._libroFiltro);
+    }
     App.goTo('cajas');
+  },
+
+  // ── Filtros de tiempo del Libro ──────────────────────────────────
+  _hoyISO(d = new Date()) {
+    return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+  },
+  _rangoMes() {
+    const h = new Date();
+    return { desde: this._hoyISO(new Date(h.getFullYear(), h.getMonth(), 1)), hasta: this._hoyISO(h) };
+  },
+  _rangoRapido(clave) {
+    const h = new Date();
+    if (clave === 'hoy')  return { desde: this._hoyISO(h), hasta: this._hoyISO(h) };
+    if (clave === '7d')   return { desde: this._hoyISO(new Date(h.getFullYear(), h.getMonth(), h.getDate()-6)), hasta: this._hoyISO(h) };
+    if (clave === 'mes')  return this._rangoMes();
+    if (clave === 'mesAnterior') {
+      const ini = new Date(h.getFullYear(), h.getMonth()-1, 1);
+      const fin = new Date(h.getFullYear(), h.getMonth(), 0);
+      return { desde: this._hoyISO(ini), hasta: this._hoyISO(fin) };
+    }
+    return { desde: '', hasta: '' };  // todo
+  },
+  async setRangoLibro(clave) {
+    this._libroFiltro = { ...(this._libroFiltro || {}), ...this._rangoRapido(clave) };
+    this._libro = await DB.movimientosCaja(this._libroFiltro);
+    App.goTo('cajas');
+  },
+  async aplicarFiltroLibro() {
+    this._libroFiltro = {
+      desde:    document.getElementById('lib-desde')?.value || '',
+      hasta:    document.getElementById('lib-hasta')?.value || '',
+      persona:  document.getElementById('lib-persona')?.value || '',
+      bolsillo: document.getElementById('lib-bolsillo')?.value || '',
+      tipo:     document.getElementById('lib-tipo')?.value || '',
+    };
+    this._libro = await DB.movimientosCaja(this._libroFiltro);
+    App.goTo('cajas');
+  },
+
+  TIPOS_LIBRO: {
+    saldo_inicial:'Saldo inicial', venta:'Venta', venta_anulada:'Venta anulada',
+    venta_fallida:'Venta no guardada', pago_eliminado:'Pago eliminado',
+    gasto:'Gasto', reparacion:'Reparación', reparacion_cancelada:'Reparación cancelada',
+    cueva:'Cueva', cueva_anulada:'Cueva anulada', proveedor:'Proveedor',
+    cuenta_corriente:'Cuenta corriente', movimiento:'Movimiento entre cajas',
+    activo_fijo:'Activo fijo', ajuste:'Ajuste manual', otro:'Otro'
+  },
+
+  exportarLibroExcel() {
+    if (typeof XLSX === 'undefined') { toast('No se pudo cargar el módulo de exportación. Revisá tu conexión.'); return; }
+    const filas = this._libro || [];
+    if (!filas.length) { toast('No hay movimientos para exportar con estos filtros.'); return; }
+
+    const datos = filas.map(m => {
+      const d = new Date(m.creado_en);
+      return {
+        'Fecha':      d.toLocaleDateString('es-AR'),
+        'Hora':       d.toLocaleTimeString('es-AR', { hour:'2-digit', minute:'2-digit' }),
+        'Persona':    m.persona,
+        'Bolsillo':   m.bolsillo,
+        'Concepto':   this.TIPOS_LIBRO[m.tipo] || m.tipo,
+        'Referencia': m.referencia || '',
+        'Detalle':    m.descripcion || '',
+        'Entrada':    Number(m.delta) > 0 ? Number(m.delta) : '',
+        'Salida':     Number(m.delta) < 0 ? Math.abs(Number(m.delta)) : '',
+        'Movimiento': Number(m.delta),
+        'Saldo':      m.saldo_post != null ? Number(m.saldo_post) : '',
+        'Quién':      m.creado_por || '',
+      };
+    });
+
+    const ws = XLSX.utils.json_to_sheet(datos);
+    ws['!cols'] = [{wch:11},{wch:7},{wch:22},{wch:18},{wch:20},{wch:11},{wch:40},{wch:14},{wch:14},{wch:14},{wch:14},{wch:20}];
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Libro de caja');
+    const f = this._libroFiltro || {};
+    const sufijo = f.desde || f.hasta ? `${f.desde || 'inicio'}_a_${f.hasta || 'hoy'}` : 'todo';
+    XLSX.writeFile(wb, `iPhoneMood-LibroCaja-${sufijo}.xlsx`);
+    toast(`${datos.length} movimientos exportados.`);
+  },
+
+  // Libro mayor real: lo que quedó grabado en la base, movimiento por
+  // movimiento, con el saldo resultante y quién lo hizo.
+  _libroHTML() {
+    const filas = this._libro || [];
+    const f = this._libroFiltro || {};
+    const TIPO = this.TIPOS_LIBRO;
+    const fmt = n => Math.round(Number(n)).toLocaleString('es-AR');
+
+    const bolsillos = ['ARS cash','ARS transferencia','USD cash','USD transferencia','USDT'];
+    const sel = 'font-size:12px;padding:6px 8px;border:1px solid var(--border-strong);border-radius:8px;background:var(--bg);color:var(--text)';
+    const btnR = (clave, txt) => `<button class="btn btn-sm" onclick="Cajas.setRangoLibro('${clave}')">${txt}</button>`;
+
+    const entradas = filas.filter(m => Number(m.delta) > 0).reduce((a,m)=>a+Number(m.delta),0);
+    const salidas  = filas.filter(m => Number(m.delta) < 0).reduce((a,m)=>a+Math.abs(Number(m.delta)),0);
+
+    const barra = `
+      <div class="card" style="margin-bottom:12px">
+        <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px">
+          ${btnR('hoy','Hoy')} ${btnR('7d','Últimos 7 días')} ${btnR('mes','Este mes')}
+          ${btnR('mesAnterior','Mes anterior')} ${btnR('todo','Todo')}
+        </div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end">
+          <div><label style="font-size:10px;color:var(--text-secondary);display:block;margin-bottom:3px">Desde</label>
+            <input type="date" id="lib-desde" value="${f.desde || ''}" style="${sel}"></div>
+          <div><label style="font-size:10px;color:var(--text-secondary);display:block;margin-bottom:3px">Hasta</label>
+            <input type="date" id="lib-hasta" value="${f.hasta || ''}" style="${sel}"></div>
+          <div><label style="font-size:10px;color:var(--text-secondary);display:block;margin-bottom:3px">Persona</label>
+            <select id="lib-persona" style="${sel}"><option value="">Todas</option>
+              ${(State.personas||[]).map(p=>`<option ${f.persona===p?'selected':''}>${p}</option>`).join('')}</select></div>
+          <div><label style="font-size:10px;color:var(--text-secondary);display:block;margin-bottom:3px">Bolsillo</label>
+            <select id="lib-bolsillo" style="${sel}"><option value="">Todos</option>
+              ${bolsillos.map(b=>`<option ${f.bolsillo===b?'selected':''}>${b}</option>`).join('')}</select></div>
+          <div><label style="font-size:10px;color:var(--text-secondary);display:block;margin-bottom:3px">Concepto</label>
+            <select id="lib-tipo" style="${sel}"><option value="">Todos</option>
+              ${Object.entries(TIPO).map(([k,v])=>`<option value="${k}" ${f.tipo===k?'selected':''}>${v}</option>`).join('')}</select></div>
+          <button class="btn btn-primary btn-sm" onclick="Cajas.aplicarFiltroLibro()"><i class="ti ti-filter"></i> Aplicar</button>
+          <button class="btn btn-sm" onclick="Cajas.exportarLibroExcel()"><i class="ti ti-file-spreadsheet"></i> Exportar Excel</button>
+        </div>
+        ${filas.length ? `<div style="display:flex;gap:18px;flex-wrap:wrap;margin-top:12px;padding-top:10px;border-top:1px solid var(--border);font-size:12px">
+          <span style="color:var(--text-secondary)">Movimientos: <b style="color:var(--text)">${filas.length}</b></span>
+          <span style="color:var(--text-secondary)">Entradas: <b style="color:var(--green)">+${fmt(entradas)}</b></span>
+          <span style="color:var(--text-secondary)">Salidas: <b style="color:var(--red)">−${fmt(salidas)}</b></span>
+          <span style="color:var(--text-secondary)">Neto: <b style="color:${entradas-salidas>=0?'var(--green)':'var(--red)'}">${entradas-salidas>=0?'+':'−'}${fmt(Math.abs(entradas-salidas))}</b></span>
+        </div>` : ''}
+      </div>`;
+
+    if (!filas.length) {
+      return barra + `<div class="card" style="text-align:center;padding:28px;color:var(--text-secondary);font-size:13px">
+        No hay movimientos en este período. Probá ampliando el rango o tocando “Todo”.
+      </div>`;
+    }
+
+    return barra + `<div class="card" style="padding:0;overflow-x:auto">
+      <table style="width:100%;border-collapse:collapse;font-size:12.5px;min-width:760px">
+        <thead>
+          <tr style="background:var(--bg-secondary);text-align:left">
+            <th style="padding:9px 12px;font-weight:600">Fecha</th>
+            <th style="padding:9px 12px;font-weight:600">Caja</th>
+            <th style="padding:9px 12px;font-weight:600">Concepto</th>
+            <th style="padding:9px 12px;font-weight:600;text-align:right">Movimiento</th>
+            <th style="padding:9px 12px;font-weight:600;text-align:right">Saldo</th>
+            <th style="padding:9px 12px;font-weight:600">Quién</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${filas.map(m => {
+            const d = new Date(m.creado_en);
+            const fecha = d.toLocaleDateString('es-AR',{day:'2-digit',month:'2-digit'}) + ' ' +
+                          d.toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit'});
+            const pos = Number(m.delta) >= 0;
+            const ref = m.referencia ? ` #${m.referencia}` : '';
+            return `<tr style="border-top:1px solid var(--border)">
+              <td style="padding:8px 12px;white-space:nowrap;color:var(--text-secondary)">${fecha}</td>
+              <td style="padding:8px 12px;white-space:nowrap"><b>${m.persona}</b><br><span style="font-size:11px;color:var(--text-secondary)">${m.bolsillo}</span></td>
+              <td style="padding:8px 12px">${TIPO[m.tipo] || m.tipo}${ref}
+                ${m.descripcion ? `<br><span style="font-size:11px;color:var(--text-secondary)">${m.descripcion}</span>` : ''}</td>
+              <td style="padding:8px 12px;text-align:right;white-space:nowrap;font-weight:700;color:${pos?'var(--green)':'var(--red)'}">${pos?'+':'−'}${fmt(Math.abs(m.delta))}</td>
+              <td style="padding:8px 12px;text-align:right;white-space:nowrap;color:var(--text-secondary)">${m.saldo_post != null ? fmt(m.saldo_post) : '—'}</td>
+              <td style="padding:8px 12px;white-space:nowrap">${m.creado_por || '—'}</td>
+            </tr>`;
+          }).join('')}
+        </tbody>
+      </table>
+    </div>
+    <div style="font-size:11px;color:var(--text-secondary);margin-top:8px">Últimos ${filas.length} movimientos.</div>`;
   },
 
   _cajasHTML(BOLSILLO_ICON) {
@@ -392,12 +607,29 @@ const Cajas = {
 
     // Para retiro/depósito el destino es el mismo usuario con bolsillo opuesto
     let destinoPFinal = destinoP, destinoBFinal = destinoB;
+    // El retiro/depósito no cambia de moneda: si sacás de USD transferencia,
+    // entra a USD cash. Antes estaba fijo en ARS y mezclaba monedas.
+    const monedaOrigen = origenB?.startsWith('USD') ? 'USD' : origenB === 'USDT' ? 'USDT' : 'ARS';
     if (tipo === 'retiro_banco') {
       destinoPFinal = origenP;
-      destinoBFinal = 'ARS cash';
+      destinoBFinal = monedaOrigen === 'USD' ? 'USD cash' : monedaOrigen === 'USDT' ? 'USDT' : 'ARS cash';
     } else if (tipo === 'deposito_banco') {
       destinoPFinal = origenP;
-      destinoBFinal = 'ARS transferencia';
+      destinoBFinal = monedaOrigen === 'USD' ? 'USD transferencia' : monedaOrigen === 'USDT' ? 'USDT' : 'ARS transferencia';
+    }
+
+    if (origenP === destinoPFinal && origenB === destinoBFinal) {
+      toast('El origen y el destino son la misma caja: no hay nada que mover.'); return;
+    }
+    // La moneda tiene que coincidir con el bolsillo, si no se mezclan pesos y dólares
+    const monedaBolsillo = origenB?.startsWith('USD') ? 'USD' : origenB === 'USDT' ? 'USDT' : 'ARS';
+    if (moneda !== monedaBolsillo) {
+      toast(`El bolsillo "${origenB}" es en ${monedaBolsillo} pero elegiste ${moneda}. Corregí la moneda.`); return;
+    }
+    const saldoOrigen = State.cajas[origenP]?.[origenB] || 0;
+    if (monto > saldoOrigen + 0.005) {
+      const fmt = monedaBolsillo === 'ARS' ? State.fmtARS(saldoOrigen) : State.fmtUSD(saldoOrigen);
+      if (!confirm(`${origenP} · ${origenB} tiene ${fmt} y estás moviendo más que eso.\n\nEl saldo va a quedar en negativo. ¿Confirmás?`)) return;
     }
 
     const btn = document.getElementById('cmov-btn-guardar');
@@ -412,7 +644,7 @@ const Cajas = {
       });
 
       // 2. Actualizar saldos automáticamente
-      await this._aplicarSaldos({ tipo, origenP, origenB, destinoPFinal, destinoBFinal, monto, moneda });
+      await this._aplicarSaldos({ tipo, origenP, origenB, destinoPFinal, destinoBFinal, monto, moneda, desc });
 
       // 3. Subir comprobante si hay
       if (file && mov?.id) {
@@ -431,24 +663,29 @@ const Cajas = {
     }
   },
 
-  async _aplicarSaldos({ tipo, origenP, origenB, destinoPFinal, destinoBFinal, monto, moneda }) {
-    // Mapear moneda → bolsillo para actualizar origen y destino
-    const bolsilloMoneda = { ARS: origenB, USD: origenB, USDT: 'USDT' };
+  async _aplicarSaldos({ tipo, origenP, origenB, destinoPFinal, destinoBFinal, monto, moneda, desc }) {
+    // Este movimiento pasa por el motor central de cajas (State), igual que las
+    // ventas y los gastos. Antes escribía los saldos por su cuenta, y eso traía
+    // tres problemas: no quedaba asentado en el libro, podía pisarse con otra
+    // escritura simultánea, y usaba Math.max(0, ...) al restar del origen —
+    // o sea que si el origen no tenía saldo suficiente, la diferencia se
+    // perdía y el destino igual recibía todo: plata creada de la nada.
+    const ref = {
+      tipo: tipo === 'retiro_banco' ? 'retiro_banco'
+          : tipo === 'deposito_banco' ? 'deposito_banco' : 'movimiento',
+      descripcion: desc || null,
+    };
 
-    // Restar del origen
+    // Origen y destino iguales: no hay movimiento real que aplicar.
+    if (origenP === destinoPFinal && origenB === destinoBFinal) return;
+
     if (origenP && origenB) {
-      const actualOrigen = (State.cajas[origenP]?.[origenB] || 0) - monto;
-      await DB.actualizarSaldoCaja(origenP, origenB, Math.max(0, actualOrigen));
-      if (!State.cajas[origenP]) State.cajas[origenP] = {};
-      State.cajas[origenP][origenB] = Math.max(0, actualOrigen);
+      await State.debitarCaja(origenP, origenB, monto,
+        { ...ref, descripcion: ref.descripcion || `Sale hacia ${destinoPFinal || '—'} · ${destinoBFinal || '—'}` });
     }
-
-    // Sumar al destino
     if (destinoPFinal && destinoBFinal) {
-      const actualDestino = (State.cajas[destinoPFinal]?.[destinoBFinal] || 0) + monto;
-      await DB.actualizarSaldoCaja(destinoPFinal, destinoBFinal, actualDestino);
-      if (!State.cajas[destinoPFinal]) State.cajas[destinoPFinal] = {};
-      State.cajas[destinoPFinal][destinoBFinal] = actualDestino;
+      await State.acreditarCaja(destinoPFinal, destinoBFinal, monto,
+        { ...ref, descripcion: ref.descripcion || `Viene de ${origenP} · ${origenB}` });
     }
   },
 
@@ -474,15 +711,14 @@ const Cajas = {
       if (!m) return;
       if (!confirm(`¿Revertir este movimiento (${m.monto.toLocaleString('es-AR')} ${m.moneda})?\nSe devolverá el dinero al origen y se quitará del destino.`)) return;
       // Revertir: sumar al origen, restar del destino
+      // Por el motor central, sin recortar en 0: el reverso tiene que devolver
+      // exactamente lo mismo que se movió, aunque el saldo quede negativo.
+      const refRev = { tipo: 'movimiento', descripcion: 'Reverso de un movimiento entre cajas' };
       if (m.origenP && m.origen_bolsillo) {
-        const actual = (State.cajas[m.origenP]?.[m.origen_bolsillo] || 0) + m.monto;
-        State.cajas[m.origenP][m.origen_bolsillo] = actual;
-        await DB.actualizarSaldoCaja(m.origenP, m.origen_bolsillo, actual);
+        await State.acreditarCaja(m.origenP, m.origen_bolsillo, m.monto, refRev);
       }
       if (m.destinoP && m.destino_bolsillo) {
-        const actual = Math.max(0, (State.cajas[m.destinoP]?.[m.destino_bolsillo] || 0) - m.monto);
-        State.cajas[m.destinoP][m.destino_bolsillo] = actual;
-        await DB.actualizarSaldoCaja(m.destinoP, m.destino_bolsillo, actual);
+        await State.debitarCaja(m.destinoP, m.destino_bolsillo, m.monto, refRev);
       }
       await supa.from('caja_movimientos').delete().eq('id', id);
       this._movimientos = await DB.listarMovimientosCaja(200);
@@ -497,10 +733,9 @@ const Cajas = {
     } else if (tipo === 'venta') {
       const [ventaId, pagoId, persona, bolsillo, monto] = parts;
       if (!confirm(`¿Revertir el pago de esta venta (${State.fmtUSD(Number(monto))}) de la caja ${persona}-${bolsillo}?\nEl monto volverá a la caja pero la venta seguirá registrada.`)) return;
-      // Acreditar la caja
-      const actual = (State.cajas[persona]?.[bolsillo] || 0) - Number(monto);
-      State.cajas[persona][bolsillo] = Math.max(0, actual);
-      await DB.actualizarSaldoCaja(persona, bolsillo, Math.max(0, actual));
+      // Sacar de la caja lo que había entrado por ese pago, por el motor central
+      await State.debitarCaja(persona, bolsillo, Number(monto),
+        { tipo: 'pago_eliminado', referencia: ventaId, descripcion: `Se revirtió un pago de la venta #${ventaId}` });
       // Eliminar el pago puntual
       await supa.from('venta_pagos').delete().eq('id', pagoId);
       const v = State.ventas.find(x => x.id == ventaId);
@@ -513,10 +748,9 @@ const Cajas = {
     } else if (tipo === 'lote') {
       const [pagoId, persona, bolsillo, monto, moneda] = parts;
       if (!confirm(`¿Revertir este pago a proveedor (${moneda === 'USDT' ? Number(monto).toLocaleString('es-AR')+' USDT' : State.fmtUSD(Number(monto))}) de la caja ${persona}-${bolsillo}?\nEl monto volverá a la caja.`)) return;
-      // Acreditar la caja
-      const actual = (State.cajas[persona]?.[bolsillo] || 0) + Number(monto);
-      State.cajas[persona][bolsillo] = actual;
-      await DB.actualizarSaldoCaja(persona, bolsillo, actual);
+      // Acreditar la caja por el motor central, para que quede en el libro
+      await State.acreditarCaja(persona, bolsillo, Number(monto),
+        { tipo: 'proveedor', referencia: pagoId, descripcion: 'Se revirtió un pago a proveedor' });
       await DB.eliminarLotePago(pagoId);
       State.lotePagos = State.lotePagos.filter(p => p.id != pagoId);
       this._movimientos = await DB.listarMovimientosCaja(200);
@@ -604,11 +838,19 @@ const Cajas = {
     if (isNaN(nuevo)) { toast('Ingresá un número válido.'); return; }
     document.getElementById('caja-edit-overlay')?.remove();
     if (!State.cajas[persona]) State.cajas[persona] = {};
-    State.cajas[persona][bolsillo] = nuevo;
-    await DB.actualizarSaldoCaja(persona, bolsillo, nuevo);
-    Sheets.caja(persona, bolsillo, nuevo);
+    // Se guarda como diferencia contra el saldo actual, no como valor absoluto:
+    // así el ajuste queda en el libro con su monto real y el motor central puede
+    // revertirlo si la base no confirma la escritura.
+    const actual = State.cajas[persona][bolsillo] || 0;
+    const delta = nuevo - actual;
+    if (!delta) { toast('El saldo no cambió.'); return; }
+    await State.acreditarCaja(persona, bolsillo, delta,
+      { tipo: 'ajuste', descripcion: `Ajuste manual: de ${actual} a ${nuevo}` });
+    // Puede haber quedado en el valor previo si la base rechazó el cambio.
+    const final = State.cajas[persona][bolsillo] || 0;
+    Sheets.caja(persona, bolsillo, final);
     App.goTo('cajas');
-    toast(`Saldo de ${persona} — ${bolsillo} actualizado.`);
+    if (final === nuevo) toast(`Saldo de ${persona} — ${bolsillo} actualizado.`);
   }
 };
 

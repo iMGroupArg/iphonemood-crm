@@ -30,7 +30,7 @@ const CuentaCorriente = {
   },
 
   antiguedadDias(v) {
-    const d = new Date(v.fechaISO || v.fecha);
+    const d = State.parseFecha(v.fechaISO || v.fecha) || new Date();
     return Math.floor((Date.now() - d) / 86400000);
   },
 
@@ -909,13 +909,14 @@ const CuentaCorriente = {
       try {
         const opcion = opciones[idx];
         if (opcion.tipo === 'deuda') {
-          await this._pagarDeudaManual(opcion.id, monto, moneda, persona, bolsillo, notas);
+          await this._pagarDeudaManual(opcion.id, monto, moneda, persona, bolsillo, notas, cotizUsada);
         } else {
           await this._pagarVenta(opcion.id, monto, moneda, persona, bolsillo);
         }
 
         // Acreditar caja en memoria
-        State.acreditarCaja(persona, bolsillo, monto);
+        State.acreditarCaja(persona, bolsillo, monto,
+          { tipo: 'cuenta_corriente', descripcion: 'Cobro de deuda en cuenta corriente' });
 
         close();
         // Refrescar cliente actual
@@ -934,7 +935,7 @@ const CuentaCorriente = {
     });
   },
 
-  async _pagarDeudaManual(deudaId, montoUSD, moneda, persona, bolsillo, notas) {
+  async _pagarDeudaManual(deudaId, montoUSD, moneda, persona, bolsillo, notas, cotizUsada = 1) {
     // montoUSD ya viene convertido a USD desde el llamador; moneda indica el bolsillo de origen
     const { SUPABASE_URL, SUPABASE_ANON_KEY } = window.__APP_CONFIG__;
     const supa2 = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
@@ -948,7 +949,11 @@ const CuentaCorriente = {
     // Actualizar monto_pagado en la deuda
     const deuda = (State.deudas || []).find(d => d.id === deudaId);
     if (!deuda) return;
-    const nuevoPagado = (deuda.montoPagado || 0) + montoUSD;
+    // Convertir el pago a la moneda de la deuda para acumular montoPagado correctamente
+    const montoEnMonedaDeuda = deuda.moneda === 'ARS'
+      ? montoUSD * (cotizUsada || State.refBlue || 1)
+      : montoUSD;
+    const nuevoPagado = (deuda.montoPagado || 0) + montoEnMonedaDeuda;
     const deudaPagada = nuevoPagado >= deuda.monto - 0.5;
     const { error: e2 } = await supa2.from('deudas_manuales').update({
       monto_pagado: nuevoPagado,

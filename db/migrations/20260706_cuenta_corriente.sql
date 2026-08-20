@@ -4,7 +4,7 @@
 -- =====================================================================
 
 -- Deudas manuales (no ligadas a ventas/reparaciones)
-CREATE TABLE IF NOT EXISTS deudas_manuales (
+CREATE TABLE IF NOT EXISTS public.deudas_manuales (
   id             SERIAL PRIMARY KEY,
   cliente        TEXT NOT NULL,
   cliente_tel    TEXT,
@@ -19,9 +19,9 @@ CREATE TABLE IF NOT EXISTS deudas_manuales (
 );
 
 -- Pagos aplicados a deudas manuales
-CREATE TABLE IF NOT EXISTS deuda_pagos (
+CREATE TABLE IF NOT EXISTS public.deuda_pagos (
   id             SERIAL PRIMARY KEY,
-  deuda_id       INTEGER REFERENCES deudas_manuales(id) ON DELETE CASCADE,
+  deuda_id       INTEGER REFERENCES public.deudas_manuales(id) ON DELETE CASCADE,
   monto          DECIMAL(12,2) NOT NULL,
   moneda         TEXT NOT NULL DEFAULT 'USD',
   persona        TEXT,
@@ -32,14 +32,14 @@ CREATE TABLE IF NOT EXISTS deuda_pagos (
 );
 
 -- RLS
-ALTER TABLE deudas_manuales ENABLE ROW LEVEL SECURITY;
-ALTER TABLE deuda_pagos     ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.deudas_manuales ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.deuda_pagos     ENABLE ROW LEVEL SECURITY;
 
-DROP POLICY IF EXISTS "admin_deudas_manuales" ON deudas_manuales;
-DROP POLICY IF EXISTS "admin_deuda_pagos"     ON deuda_pagos;
+DROP POLICY IF EXISTS "admin_deudas_manuales" ON public.deudas_manuales;
+DROP POLICY IF EXISTS "admin_deuda_pagos"     ON public.deuda_pagos;
 
-CREATE POLICY "admin_deudas_manuales" ON deudas_manuales
-  USING (is_authorized_user()) WITH CHECK (is_authorized_user());
+CREATE POLICY "admin_deudas_manuales" ON public.deudas_manuales
+  USING (public.is_authorized_user()) WITH CHECK (public.is_authorized_user());
 
-CREATE POLICY "admin_deuda_pagos" ON deuda_pagos
-  USING (is_authorized_user()) WITH CHECK (is_authorized_user());
+CREATE POLICY "admin_deuda_pagos" ON public.deuda_pagos
+  USING (public.is_authorized_user()) WITH CHECK (public.is_authorized_user());

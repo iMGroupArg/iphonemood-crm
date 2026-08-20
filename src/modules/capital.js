@@ -75,8 +75,19 @@ const Capital = {
       ? CuentaCorriente.totalCuentasPorCobrar()
       : 0;
 
+    // Saldo a favor con proveedores (sobrepagos o anticipos, pendientes de
+    // usar en una próxima compra). Es capital del negocio igual que las
+    // cuentas por cobrar de un cliente — la diferencia es quién debe la
+    // plata, no si es tuya. Antes de este módulo esa plata vivía en la caja
+    // de una "persona" creada como sustituto del proveedor, y sí entraba acá
+    // dentro de cajasUSD; ahora que tiene su propio lugar hay que sumarla
+    // explícitamente o el capital bruto la pierde por el camino.
+    const saldoCreditosProveedores = typeof Proveedores !== 'undefined'
+      ? (State.proveedores || []).reduce((s, p) => s + Proveedores.saldoCredito(p.id), 0)
+      : 0;
+
     // Capital bruto
-    const capitalBruto = valorStock + cajasUSD + pedidosEnTransito + valorActivosFijos + cuentasPorCobrar;
+    const capitalBruto = valorStock + cajasUSD + pedidosEnTransito + valorActivosFijos + cuentasPorCobrar + saldoCreditosProveedores;
 
     // Inversores
     const capitalInvertido = (State.inversores || []).reduce((s, i) => s + (i.capitalInicialUSD || 0), 0);
@@ -85,7 +96,7 @@ const Capital = {
     // Capital neto
     const capitalNeto = capitalBruto - capitalInvertido - totalPagadoInversores;
 
-    return { valorStock, cajasUSD, pedidosEnTransito, valorActivosFijos, cuentasPorCobrar, capitalBruto, capitalInvertido, totalPagadoInversores, capitalNeto };
+    return { valorStock, cajasUSD, pedidosEnTransito, valorActivosFijos, cuentasPorCobrar, saldoCreditosProveedores, capitalBruto, capitalInvertido, totalPagadoInversores, capitalNeto };
   },
 
   // ── RESUMEN ───────────────────────────────────────────────
@@ -130,6 +141,7 @@ const Capital = {
             ...(r.pedidosEnTransito > 0 ? [['Pedidos en tránsito', r.pedidosEnTransito, 'var(--amber)']] : []),
             ['Activos fijos',         r.valorActivosFijos,   'var(--amber)'],
             ...(r.cuentasPorCobrar > 0 ? [['Cuentas por cobrar', r.cuentasPorCobrar, 'var(--blue)']] : []),
+            ...(r.saldoCreditosProveedores > 0 ? [['Saldo a favor con proveedores', r.saldoCreditosProveedores, 'var(--purple)']] : []),
           ].map(([label, val, color]) => `
             <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid var(--border)">
               <span style="font-size:12px;color:var(--text-secondary)">${label}</span>
@@ -570,7 +582,6 @@ const Capital = {
       // Descontar de la caja seleccionada
       if (cajaSeleccionada && valorUSD > 0) {
         const [persona, bolsillo] = cajaSeleccionada.split('||');
-        const saldoActual = State.cajas?.[persona]?.[bolsillo] || 0;
 
         // Convertir el valor USD a la moneda de la caja
         let montoADescontar = valorUSD;
@@ -581,9 +592,9 @@ const Capital = {
           montoADescontar = valorUSD;
         }
 
-        const nuevoSaldo = saldoActual - montoADescontar;
-        await DB.actualizarSaldoCaja(persona, bolsillo, nuevoSaldo);
-        if (State.cajas[persona]) State.cajas[persona][bolsillo] = nuevoSaldo;
+        // Por el motor central, para que el descuento quede en el libro de caja
+        await State.debitarCaja(persona, bolsillo, montoADescontar,
+          { tipo: 'activo_fijo', referencia: data.id, descripcion: `Compra de activo fijo: ${nombre}` });
         toast(`${nombre} agregado. Se descontaron ${bolsillo.startsWith('ARS') ? '$'+montoADescontar.toLocaleString('es-AR') : 'USD '+valorUSD} de ${persona} — ${bolsillo}.`);
       } else {
         toast(`${nombre} agregado a activos fijos.`);

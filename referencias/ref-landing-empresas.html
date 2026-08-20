@@ -1,0 +1,833 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Formación de idiomas para empresas · Bonificada con FUNDAE | YouAndEnglish</title>
+<meta name="description" content="Forma a tu equipo en 8 idiomas con clases en directo de 26 minutos, 100% bonificables con FUNDAE. Calculamos tu crédito y gestionamos todos los trámites.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+:root{
+  --ink:#0C1A17;--ink-2:#33443F;--muted:#647570;--line:#E8EFEC;
+  --bg:#FFFFFF;--bg-soft:#F3FAF8;--bg-mint:#E9F7F2;
+  --teal:#10B7A6;--teal-600:#0E9E90;--teal-700:#0C7E73;--teal-900:#0A4741;
+  --lime:#B7E96C;--lime-600:#A2DC4E;--lime-ink:#2C4210;--amber:#FFB020;
+  --shadow-xs:0 1px 3px rgba(10,71,65,.06);
+  --shadow-sm:0 4px 14px rgba(10,71,65,.08);
+  --shadow:0 12px 34px rgba(10,71,65,.12);
+  --shadow-lg:0 24px 58px rgba(10,71,65,.18);
+  --r-sm:12px;--r:16px;--r-lg:22px;--r-xl:28px;
+  --grad:linear-gradient(135deg,#13C7B4 0%,#0C7E73 100%);
+  --grad-lime:linear-gradient(135deg,#C7F281,#A2DC4E);
+  --maxw:1300px;--s3:16px;--s4:22px;--s5:32px;--s6:46px;--s7:70px;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html{scroll-behavior:smooth;scroll-padding-top:86px}
+body{font-family:'Plus Jakarta Sans',system-ui,-apple-system,Segoe UI,Roboto,sans-serif;color:var(--ink);
+  background:var(--bg);line-height:1.55;font-size:15px;-webkit-font-smoothing:antialiased;overflow-x:hidden}
+a{color:inherit;text-decoration:none}
+img{max-width:100%;display:block}
+.wrap{max-width:var(--maxw);margin:0 auto;padding:0 28px}
+section{position:relative}
+h1,h2,h3{line-height:1.14;letter-spacing:-.025em;font-weight:800}
+h1{font-size:clamp(2rem,3.5vw,3.05rem);letter-spacing:-.032em}
+h2{font-size:clamp(1.55rem,2.6vw,2.25rem)}
+.gt{background:var(--grad);-webkit-background-clip:text;background-clip:text;color:transparent}
+.lead{color:var(--muted);font-size:clamp(.98rem,1.15vw,1.08rem);max-width:60ch}
+.center{text-align:center}.center .lead{margin-left:auto;margin-right:auto}
+.eyebrow{display:inline-flex;align-items:center;gap:7px;font-weight:700;font-size:.72rem;letter-spacing:.1em;
+  text-transform:uppercase;color:var(--teal-700);background:var(--bg-mint);padding:6px 13px;border-radius:999px}
+.sec{padding:var(--s7) 0}
+.sec-soft{background:var(--bg-soft)}
+.sec-head{max-width:720px;margin:0 auto var(--s5)}
+:focus-visible{outline:3px solid var(--teal);outline-offset:3px;border-radius:8px}
+::selection{background:rgba(19,199,180,.25)}
+/* Botones */
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;font-weight:700;font-size:.95rem;
+  padding:13px 24px;border-radius:999px;cursor:pointer;border:none;font-family:inherit;position:relative;overflow:hidden;
+  transition:transform .2s cubic-bezier(.34,1.56,.64,1),box-shadow .25s,background .2s}
+.btn:active{transform:scale(.97)}
+.btn-primary{background:var(--grad);color:#fff;box-shadow:0 10px 22px rgba(16,183,166,.32)}
+.btn-primary:hover{box-shadow:0 16px 34px rgba(16,183,166,.44);transform:translateY(-2px)}
+.btn-lime{background:var(--grad-lime);color:var(--lime-ink);box-shadow:0 10px 22px rgba(162,220,78,.38)}
+.btn-lime:hover{box-shadow:0 16px 34px rgba(162,220,78,.5);transform:translateY(-2px)}
+.btn-ghost{background:#fff;color:var(--teal-700);border:1.5px solid var(--line);box-shadow:var(--shadow-xs)}
+.btn-ghost:hover{border-color:var(--teal);box-shadow:var(--shadow-sm)}
+.btn-sm{padding:10px 17px;font-size:.88rem}
+.btn-lg{padding:15px 30px;font-size:1rem}
+.btn .arrow{transition:transform .2s}.btn:hover .arrow{transform:translateX(4px)}
+.ripple{position:absolute;border-radius:50%;background:rgba(255,255,255,.5);transform:scale(0);animation:rip .6s ease-out;pointer-events:none}
+@keyframes rip{to{transform:scale(2.4);opacity:0}}
+/* Header */
+header{position:sticky;top:0;z-index:60;background:rgba(255,255,255,.9);backdrop-filter:blur(16px);
+  box-shadow:0 1px 0 var(--line);padding:12px 0}
+.nav{display:flex;align-items:center;justify-content:space-between;gap:18px}
+.brand{display:flex;align-items:center;gap:12px}
+.brand img{height:32px}
+.brand .divider{width:1px;height:34px;background:var(--line)}
+.brand .camb{height:40px;object-fit:contain}
+.menu{display:flex;gap:2px;background:var(--bg-soft);padding:5px;border-radius:999px;border:1px solid var(--line)}
+.menu a{padding:8px 14px;border-radius:999px;font-weight:600;font-size:.88rem;color:var(--ink-2);transition:.2s}
+.menu a:hover{background:#fff;color:var(--teal-700)}
+.menu a.active{background:#fff;color:var(--teal-700);box-shadow:var(--shadow-xs),inset 0 0 0 1.5px rgba(16,183,166,.35)}
+.nav-right{display:flex;align-items:center;gap:9px}
+/* HERO */
+.ehero{background:linear-gradient(165deg,#0A4741 0%,#062A26 55%,#07302B 100%);color:#eafcf9;padding:var(--s7) 0;overflow:hidden}
+.ehero:before{content:"";position:absolute;top:-180px;right:-140px;width:540px;height:540px;border-radius:50%;
+  background:radial-gradient(circle,rgba(19,199,180,.24),transparent 66%)}
+.ehero:after{content:"";position:absolute;bottom:-220px;left:-160px;width:500px;height:500px;border-radius:50%;
+  background:radial-gradient(circle,rgba(183,233,108,.13),transparent 66%)}
+.ehero .wrap{position:relative;z-index:2}
+.ehero-grid{display:grid;grid-template-columns:1.08fr .92fr;gap:var(--s6);align-items:center}
+.ehero .eyebrow{background:rgba(255,255,255,.12);color:#c8f2ea}
+.ehero h1{color:#fff;margin:16px 0 14px}
+.ehero .hl{color:var(--lime)}
+.ehero .lead{color:#a9ccc6}
+.ekpis{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-top:var(--s5);max-width:540px}
+.ekpi{background:rgba(255,255,255,.07);border:1px solid rgba(255,255,255,.13);border-radius:var(--r);padding:15px 17px}
+.ekpi b{display:block;font-size:1.55rem;font-weight:800;color:#fff;line-height:1;letter-spacing:-.6px}
+.ekpi small{color:#a9ccc6;font-size:.76rem;font-weight:600}
+.etrust{display:flex;align-items:center;gap:14px;margin-top:var(--s5);flex-wrap:wrap;color:#a9ccc6;font-size:.83rem;font-weight:600}
+.etrust span{display:inline-flex;align-items:center;gap:7px}
+.etrust .ok{color:var(--lime)}
+/* Formulario limpio (como la home) */
+.form-card{background:#fff;color:var(--ink);border-radius:var(--r-xl);padding:32px 28px;box-shadow:var(--shadow-lg);position:relative}
+.form-card .ftitle{font-size:1.15rem;font-weight:800;color:var(--ink-2)}
+.form-card .fgratis{font-size:2.9rem;font-weight:800;letter-spacing:-1.6px;line-height:1;margin-bottom:18px;
+  background:var(--grad);-webkit-background-clip:text;background-clip:text;color:transparent}
+.field{margin-bottom:14px}
+.field input,.field select{width:100%;background:#F5F7F9;border:1.5px solid transparent;border-radius:14px;
+  padding:15px 16px;font-family:inherit;font-size:1rem;color:var(--ink);transition:.2s}
+.field input::placeholder{color:#9aa8a4}
+.field input:focus,.field select:focus{outline:none;background:#fff;border-color:var(--teal);box-shadow:0 0 0 4px rgba(16,183,166,.13)}
+.frow{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.flangline{display:flex;align-items:center;justify-content:space-between;gap:10px;background:var(--bg-mint);
+  border-radius:14px;padding:12px 16px;margin-bottom:14px;font-size:.88rem;font-weight:700;color:var(--teal-700)}
+.flangline a{text-decoration:underline;text-underline-offset:3px;font-weight:700;font-size:.82rem}
+.check{display:flex;align-items:flex-start;gap:9px;font-size:.84rem;color:var(--muted);margin:6px 0 18px}
+.check input{margin-top:3px;accent-color:var(--teal)}
+.check a{color:var(--teal-700);font-weight:700}
+.form-card .btn{width:100%;padding:17px 24px;font-size:1rem;letter-spacing:.03em;text-transform:uppercase}
+.freassure{display:flex;justify-content:center;gap:15px;margin-top:14px;font-size:.75rem;color:var(--muted);font-weight:600;flex-wrap:wrap}
+/* Logos */
+.logos{background:#fff;padding:34px 0 10px}
+.logo-label{text-align:center;color:var(--muted);font-weight:700;font-size:.72rem;letter-spacing:.14em;text-transform:uppercase;margin-bottom:18px}
+.marquee{overflow:hidden;position:relative;-webkit-mask-image:linear-gradient(90deg,transparent,#000 7%,#000 93%,transparent);
+  mask-image:linear-gradient(90deg,transparent,#000 7%,#000 93%,transparent)}
+.marquee-track{display:flex;gap:64px;width:max-content;animation:scroll 34s linear infinite;align-items:center}
+.marquee:hover .marquee-track{animation-play-state:paused}
+.marquee-track img{height:32px;filter:grayscale(1);opacity:.5;object-fit:contain;transition:.3s}
+.marquee-track img:hover{filter:none;opacity:1}
+@keyframes scroll{to{transform:translateX(calc(-50% - 32px))}}
+/* Selector de idiomas */
+.langs{display:grid;grid-template-columns:repeat(4,1fr);gap:14px}
+.lang{background:#fff;border:1.5px solid var(--line);border-radius:var(--r-lg);padding:20px 18px;cursor:pointer;
+  box-shadow:var(--shadow-xs);transition:transform .22s,box-shadow .22s,border-color .22s,background .22s;
+  text-align:left;font-family:inherit;display:flex;flex-direction:column;gap:3px;position:relative}
+.lang:hover{transform:translateY(-5px);box-shadow:var(--shadow);border-color:var(--teal)}
+.lang .flag{font-size:1.9rem;line-height:1;margin-bottom:6px}
+.lang h3{font-size:1.05rem}
+.lang .hi{color:var(--teal-700);font-weight:800;font-size:.92rem}
+.lang.on{border-color:var(--teal);background:var(--bg-mint);box-shadow:0 0 0 4px rgba(16,183,166,.14),var(--shadow-sm)}
+.lang.on:after{content:"✓";position:absolute;top:12px;right:12px;width:24px;height:24px;border-radius:50%;
+  background:var(--grad);color:#fff;font-size:.8rem;font-weight:800;display:grid;place-items:center}
+/* Panel del programa */
+.prog{margin-top:var(--s5);background:#fff;border:1px solid var(--line);border-radius:var(--r-xl);
+  box-shadow:var(--shadow-sm);overflow:hidden;transition:opacity .3s}
+.prog.fade{opacity:0}
+.prog-top{display:grid;grid-template-columns:1.05fr .95fr;gap:0}
+.prog-copy{padding:34px 34px 30px}
+.prog-copy .ptag{display:inline-flex;align-items:center;gap:8px;background:var(--bg-mint);color:var(--teal-700);
+  font-weight:800;font-size:.78rem;padding:6px 13px;border-radius:999px;margin-bottom:14px}
+.prog-copy h3{font-size:1.6rem;margin-bottom:10px}
+.prog-copy p{color:var(--muted);font-size:.96rem;max-width:52ch}
+.prog-skills{display:grid;grid-template-columns:1fr 1fr;gap:9px;margin-top:20px}
+.prog-skills span{display:flex;gap:8px;align-items:center;font-size:.88rem;font-weight:600;color:var(--ink-2)}
+.prog-skills i{width:22px;height:22px;border-radius:7px;background:var(--bg-mint);color:var(--teal-700);
+  display:grid;place-items:center;font-style:normal;font-size:.7rem;font-weight:800;flex-shrink:0}
+.prog-demo{background:linear-gradient(165deg,#0C7E73,#0A4741);color:#eafcf9;padding:34px;display:flex;flex-direction:column;justify-content:center}
+.prog-demo .dh{font-size:.72rem;letter-spacing:.12em;text-transform:uppercase;font-weight:800;color:#8fd8cd;margin-bottom:16px}
+.phrase{background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.13);border-radius:14px;
+  padding:14px 16px;margin-bottom:10px;transition:transform .2s,background .2s}
+.phrase:hover{transform:translateX(4px);background:rgba(255,255,255,.13)}
+.phrase b{display:block;font-size:1.06rem;color:#fff;font-weight:800;letter-spacing:-.01em}
+.phrase small{display:block;color:#9dc4be;font-size:.82rem;margin-top:3px}
+.phrase .rom{color:var(--lime);font-weight:700;font-size:.78rem;letter-spacing:.02em}
+.prog-foot{border-top:1px solid var(--line);padding:18px 34px;display:flex;gap:20px;flex-wrap:wrap;align-items:center;background:var(--bg-soft)}
+.prog-foot span{font-size:.85rem;font-weight:700;color:var(--ink-2);display:inline-flex;align-items:center;gap:8px}
+.prog-foot span b{color:var(--teal-700)}
+/* Calculadora de crédito */
+.calc{display:grid;grid-template-columns:1fr 1fr;gap:0;background:#fff;border:1px solid var(--line);
+  border-radius:var(--r-xl);overflow:hidden;box-shadow:var(--shadow-sm)}
+.calc-in{padding:34px}
+.calc-in h3{font-size:1.25rem;margin-bottom:6px}
+.calc-in>p{color:var(--muted);font-size:.9rem;margin-bottom:22px}
+.calc-f{margin-bottom:16px}
+.calc-f label{display:block;font-size:.76rem;font-weight:800;color:var(--ink-2);margin-bottom:6px}
+.calc-f input,.calc-f select{width:100%;padding:13px 15px;border:1.5px solid var(--line);border-radius:12px;
+  font-family:inherit;font-size:.98rem;background:#fff;color:var(--ink);transition:.2s}
+.calc-f input:focus,.calc-f select:focus{outline:none;border-color:var(--teal);box-shadow:0 0 0 4px rgba(16,183,166,.13)}
+.calc-out{background:linear-gradient(165deg,#0C7E73,#0A4741);color:#eafcf9;padding:34px;display:flex;flex-direction:column;justify-content:center}
+.calc-out .ol{font-size:.75rem;letter-spacing:.12em;text-transform:uppercase;font-weight:800;color:#8fd8cd}
+.calc-out .big{font-size:3.4rem;font-weight:800;letter-spacing:-2px;line-height:1.05;color:var(--lime);margin:10px 0 4px}
+.calc-out .sub{color:#a9ccc6;font-size:.88rem}
+.calc-rows{margin-top:22px;border-top:1px solid rgba(255,255,255,.14);padding-top:16px}
+.calc-rows div{display:flex;justify-content:space-between;gap:12px;padding:7px 0;font-size:.88rem;color:#c6e3de}
+.calc-rows div b{color:#fff;font-weight:800}
+.calc-note{margin-top:16px;font-size:.76rem;color:#8fb5ae;line-height:1.5}
+/* Pasos */
+.steps4{display:grid;grid-template-columns:repeat(4,1fr);gap:16px;counter-reset:s}
+.st4{background:#fff;border:1px solid var(--line);border-radius:var(--r-lg);padding:26px 22px;box-shadow:var(--shadow-xs);transition:transform .22s,box-shadow .22s}
+.st4:hover{transform:translateY(-5px);box-shadow:var(--shadow-sm)}
+.st4 .n{counter-increment:s;width:42px;height:42px;border-radius:13px;background:var(--grad);color:#fff;
+  font-weight:800;display:grid;place-items:center;margin-bottom:13px;box-shadow:0 8px 18px rgba(16,183,166,.28)}
+.st4 .n:before{content:counter(s)}
+.st4 h3{font-size:1.03rem;margin-bottom:5px}
+.st4 p{color:var(--muted);font-size:.88rem}
+/* Tira de 4 continuos */
+.strip4{display:grid;grid-template-columns:repeat(4,1fr);background:#fff;border:1px solid var(--line);
+  border-radius:var(--r-lg);overflow:hidden;box-shadow:var(--shadow-xs)}
+.strip4>div{padding:28px 24px;border-right:1px solid var(--line);transition:background .22s}
+.strip4>div:last-child{border-right:none}
+.strip4>div:hover{background:var(--bg-soft)}
+.strip4 .k{display:grid;place-items:center;width:44px;height:44px;border-radius:13px;background:var(--bg-mint);font-size:1.25rem;margin-bottom:13px}
+.strip4 h3{font-size:1.02rem;margin-bottom:6px}
+.strip4 p{color:var(--muted);font-size:.89rem}
+/* Incluye */
+.inc{display:grid;grid-template-columns:repeat(3,1fr);gap:16px}
+.inc-c{background:#fff;border:1px solid var(--line);border-radius:var(--r-lg);padding:26px 24px;box-shadow:var(--shadow-xs);transition:transform .22s,box-shadow .22s}
+.inc-c:hover{transform:translateY(-5px);box-shadow:var(--shadow-sm)}
+.inc-c .k{font-size:1.5rem;margin-bottom:12px;display:block}
+.inc-c h3{font-size:1.05rem;margin-bottom:7px}
+.inc-c p{color:var(--muted);font-size:.9rem}
+/* Opiniones de empresas */
+.revs{position:relative}
+.revs-viewport{overflow:hidden;padding:12px 4px 22px;-webkit-mask-image:linear-gradient(90deg,transparent,#000 2.5%,#000 97.5%,transparent);
+  mask-image:linear-gradient(90deg,transparent,#000 2.5%,#000 97.5%,transparent)}
+.revs-track{display:flex;gap:18px;transition:transform .7s cubic-bezier(.22,1,.36,1);will-change:transform}
+.rev{flex:0 0 calc((100% - 36px)/3);background:#fff;border:1px solid var(--line);border-radius:var(--r-lg);
+  padding:26px 24px;box-shadow:var(--shadow-xs);display:flex;flex-direction:column;min-height:250px;transition:box-shadow .25s,transform .25s}
+.rev:hover{box-shadow:var(--shadow);transform:translateY(-4px)}
+.rev .stars{color:var(--amber);font-size:.9rem;margin-bottom:10px}
+.rev p{color:var(--ink-2);font-size:.94rem;flex:1}
+.rev .metric{display:inline-flex;align-items:center;gap:7px;background:var(--bg-mint);color:var(--teal-700);
+  font-weight:800;font-size:.78rem;padding:6px 12px;border-radius:999px;margin-top:14px;width:fit-content}
+.rev .top{display:flex;align-items:center;gap:11px;margin-top:14px;padding-top:14px;border-top:1px solid var(--line)}
+.rev .av{width:40px;height:40px;border-radius:12px;display:grid;place-items:center;font-weight:800;color:#fff;font-size:.85rem;flex-shrink:0;background:var(--grad)}
+.rev .who{font-weight:700;font-size:.9rem;line-height:1.25}
+.rev .who small{display:block;color:var(--muted);font-weight:500;font-size:.76rem}
+.revs-nav{display:flex;align-items:center;justify-content:center;gap:16px;margin-top:24px}
+.revs-arrow{width:42px;height:42px;border-radius:50%;border:1.5px solid var(--line);background:#fff;cursor:pointer;
+  display:grid;place-items:center;font-size:1.1rem;color:var(--teal-700);transition:.2s;box-shadow:var(--shadow-xs)}
+.revs-arrow:hover{border-color:var(--teal);box-shadow:var(--shadow-sm);transform:translateY(-2px)}
+.revs-dots{display:flex;gap:7px}
+.revs-dots button{width:8px;height:8px;border-radius:999px;border:none;background:#cfe0db;cursor:pointer;padding:0;transition:.25s}
+.revs-dots button.on{width:26px;background:var(--grad)}
+/* Tabla crédito */
+.credit{width:100%;border-collapse:separate;border-spacing:0;background:#fff;border:1px solid var(--line);
+  border-radius:var(--r-lg);overflow:hidden;box-shadow:var(--shadow-xs)}
+.credit th,.credit td{padding:14px 18px;text-align:left;font-size:.92rem}
+.credit thead th{background:var(--bg-mint);color:var(--teal-700);font-size:.73rem;letter-spacing:.09em;text-transform:uppercase;font-weight:800}
+.credit tbody tr+tr td{border-top:1px solid var(--line)}
+.credit td:last-child{font-weight:800;color:var(--teal-700);text-align:right}
+.note{color:var(--muted);font-size:.82rem;margin-top:14px}
+/* FAQ */
+.faq{max-width:820px;margin:0 auto;display:grid;gap:10px}
+.qa{background:#fff;border:1px solid var(--line);border-radius:var(--r);overflow:hidden;transition:.25s}
+.qa:hover{box-shadow:var(--shadow-xs)}
+.qa.open{border-color:rgba(16,183,166,.5);box-shadow:var(--shadow-sm)}
+.qa .q{width:100%;background:none;border:none;font-family:inherit;font-size:1rem;font-weight:700;color:var(--ink);
+  text-align:left;padding:18px 22px;cursor:pointer;display:flex;justify-content:space-between;align-items:center;gap:16px}
+.qa .q .pm{width:26px;height:26px;border-radius:50%;background:var(--bg-mint);color:var(--teal-700);
+  display:grid;place-items:center;font-weight:800;flex-shrink:0;transition:.25s}
+.qa.open .q .pm{background:var(--grad);color:#fff;transform:rotate(45deg)}
+.qa .a{max-height:0;overflow:hidden;transition:max-height .35s ease}
+.qa .a p{padding:0 22px 20px;color:var(--muted);font-size:.93rem}
+/* Contacto */
+.contact{background:linear-gradient(165deg,#0A4741,#062A26);color:#eafcf9;padding:var(--s7) 0;overflow:hidden}
+.contact:before{content:"";position:absolute;bottom:-220px;left:50%;transform:translateX(-50%);width:680px;height:460px;
+  background:radial-gradient(circle,rgba(19,199,180,.18),transparent 68%)}
+.contact .wrap{position:relative;z-index:2}
+.contact h2{color:#fff}
+.contact .eyebrow{background:rgba(255,255,255,.12);color:#c8f2ea}
+.contact .lead{color:#a9ccc6}
+.cgrid{display:grid;grid-template-columns:repeat(4,1fr);gap:16px;margin-top:var(--s5)}
+.ccard{background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.12);border-radius:var(--r-lg);
+  padding:26px 22px;transition:.25s;backdrop-filter:blur(4px)}
+.ccard:hover{background:rgba(255,255,255,.1);transform:translateY(-4px)}
+.ccard .k{width:46px;height:46px;border-radius:14px;background:var(--grad);display:grid;place-items:center;font-size:1.2rem;margin-bottom:14px}
+.ccard h3{color:#fff;font-size:1.02rem;margin-bottom:6px}
+.ccard p{color:#a9ccc6;font-size:.88rem;line-height:1.6}
+.ccard a{color:#c7f281;font-weight:700}
+.ccard a:hover{text-decoration:underline}
+.cbar{margin-top:var(--s5);background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.12);
+  border-radius:var(--r-xl);padding:26px 30px;display:flex;align-items:center;justify-content:space-between;gap:22px;flex-wrap:wrap}
+.cbar h3{color:#fff;font-size:1.2rem;margin-bottom:4px}
+.cbar p{color:#a9ccc6;font-size:.9rem}
+/* Footer */
+footer{background:#07302B;color:#bfe0da;padding:var(--s6) 0 24px}
+.foot-in{display:flex;align-items:center;justify-content:space-between;gap:20px;flex-wrap:wrap}
+footer a{color:#a9d0c9}footer a:hover{color:#fff}
+footer small{color:#7ba59d;font-size:.83rem}
+/* Reveal */
+.reveal{opacity:0;transform:translateY(20px);transition:opacity .6s ease,transform .7s cubic-bezier(.22,1,.36,1)}
+.reveal.in{opacity:1;transform:none}
+.reveal.d1{transition-delay:.07s}.reveal.d2{transition-delay:.14s}.reveal.d3{transition-delay:.21s}
+/* Responsive */
+@media(max-width:1080px){
+  .menu{display:none}
+  .ehero-grid{grid-template-columns:1fr;gap:var(--s5)}
+  .prog-top{grid-template-columns:1fr}
+  .calc{grid-template-columns:1fr}
+  .langs{grid-template-columns:repeat(4,1fr);gap:11px}
+  .steps4{grid-template-columns:repeat(2,1fr)}
+  .inc{grid-template-columns:repeat(2,1fr)}
+  .cgrid{grid-template-columns:repeat(2,1fr)}
+  .strip4{grid-template-columns:1fr 1fr}
+  .strip4>div:nth-child(2n){border-right:none}
+  .strip4>div:nth-child(-n+2){border-bottom:1px solid var(--line)}
+  .rev{flex:0 0 calc((100% - 18px)/2)}
+}
+@media(max-width:720px){
+  .langs{grid-template-columns:1fr 1fr}
+  .steps4,.inc,.cgrid{grid-template-columns:1fr}
+  .frow{grid-template-columns:1fr}
+  .ekpis{grid-template-columns:1fr}
+  .prog-skills{grid-template-columns:1fr}
+  .rev{flex:0 0 100%}
+  .strip4{grid-template-columns:1fr}
+  .strip4>div{border-right:none;border-bottom:1px solid var(--line)}
+  .strip4>div:last-child{border-bottom:none}
+  .sec{padding:var(--s6) 0}
+  .prog-copy,.prog-demo,.calc-in,.calc-out{padding:26px 22px}
+  .prog-foot{padding:16px 22px}
+  .credit th,.credit td{padding:11px 12px;font-size:.85rem}
+  .brand .camb{height:32px}
+  .brand img{height:28px}
+  .form-card{padding:26px 22px}
+  .nav-right .btn-ghost{display:none}
+}
+@media(prefers-reduced-motion:reduce){*{animation-duration:.001s!important;transition-duration:.001s!important}html{scroll-behavior:auto}}
+
+</style>
+</head>
+<body>
+
+<header>
+  <div class="wrap nav">
+    <a class="brand" href="index.html" aria-label="YouAndEnglish">
+      <img src="https://youandenglish.com/public/images/yae5.png" alt="YouAndEnglish">
+      <span class="divider"></span>
+      <img class="camb" src="https://youandenglish.com/public/images/cambridge-yae.png" alt="Cambridge Assessment English">
+    </a>
+    <nav class="menu" id="menu">
+      <a href="#idiomas">Idiomas</a>
+      <a href="#fundae">FUNDAE</a>
+      <a href="#como">Cómo funciona</a>
+      <a href="#opiniones">Opiniones</a>
+      <a href="#faq">FAQ</a>
+      <a href="#contacto">Contacto</a>
+    </nav>
+    <div class="nav-right">
+      <a href="index.html" class="btn btn-ghost btn-sm">← Home</a>
+      <a href="#solicitar" class="btn btn-primary btn-sm">Solicitar propuesta</a>
+    </div>
+  </div>
+</header>
+
+<!-- ===================== HERO + FORMULARIO ===================== -->
+<section class="ehero" id="solicitar">
+  <div class="wrap ehero-grid">
+    <div>
+      <span class="eyebrow">Formación para empresas · España</span>
+      <h1>Forma a tu equipo en 8 idiomas <span class="hl">sin coste real</span></h1>
+      <p class="lead">Clases en directo de 26 minutos con profesores nativos, dentro de la jornada y 100 % bonificables con FUNDAE. Nosotros gestionamos el crédito, el alta y toda la documentación: tu empresa solo elige el idioma y las personas.</p>
+      <div class="ekpis">
+        <div class="ekpi"><b>+347</b><small>empresas formadas</small></div>
+        <div class="ekpi"><b>+529</b><small>profesores en plantilla</small></div>
+        <div class="ekpi"><b>12 años</b><small>formando equipos</small></div>
+      </div>
+      <div class="etrust">
+        <span><b class="ok">✓</b> Centro autorizado Cambridge</span>
+        <span><b class="ok">✓</b> Entidad organizadora FUNDAE</span>
+        <span><b class="ok">✓</b> 4,9★ en Google</span>
+      </div>
+    </div>
+
+    <div class="form-card">
+      <p class="ftitle">Solicita tu propuesta</p>
+      <div class="fgratis">GRATIS</div>
+      <form id="empForm" novalidate>
+        <div class="field"><input id="c1" type="text" placeholder="Empresa *" required></div>
+        <div class="field"><input id="c2" type="text" placeholder="Nombre y apellidos *" required></div>
+        <div class="field"><input id="c4" type="email" placeholder="Email corporativo *" required></div>
+        <div class="frow">
+          <div class="field"><input id="c3" type="tel" placeholder="Teléfono *" required></div>
+          <div class="field">
+            <select id="c6" aria-label="Personas a formar">
+              <option value="">Nº de personas *</option>
+              <option>1 – 5</option><option>6 – 9</option><option>10 – 49</option>
+              <option>50 – 249</option><option>250 o más</option>
+            </select>
+          </div>
+        </div>
+        <div class="flangline">
+          <span>Idioma: <b id="formLang">Inglés</b></span>
+          <a href="#idiomas">Cambiar idioma</a>
+        </div>
+        <label class="check"><input type="checkbox" required><span>Acepto la <a href="#">política de privacidad</a> y que YouAndEnglish me contacte con la propuesta.</span></label>
+        <button type="submit" class="btn btn-primary">Solicitar propuesta</button>
+        <div class="freassure"><span>🔒 Datos protegidos</span><span>✅ Sin compromiso</span><span>⏱️ Respuesta en 24 h</span></div>
+      </form>
+    </div>
+  </div>
+</section>
+
+<!-- LOGOS -->
+<section class="logos">
+  <div class="wrap">
+    <p class="logo-label reveal">Ya forman a sus equipos con nosotros</p>
+    <div class="marquee reveal">
+      <div class="marquee-track">
+        <img src="https://youandenglish.com/public/images/ryanair.png" alt="Ryanair">
+        <img src="https://youandenglish.com/public/images/ikea.jpg" alt="IKEA">
+        <img src="https://youandenglish.com/public/images/inditex.jpg" alt="Inditex">
+        <img src="https://youandenglish.com/public/images/inversis.jpg" alt="Inversis">
+        <img src="https://youandenglish.com/public/images/simmons.png" alt="Simmons &amp; Simmons">
+        <img src="https://youandenglish.com/public/images/km.jpg" alt="Knowmad Mood">
+        <img src="https://youandenglish.com/public/images/ryanair.png" alt="Ryanair">
+        <img src="https://youandenglish.com/public/images/ikea.jpg" alt="IKEA">
+        <img src="https://youandenglish.com/public/images/inditex.jpg" alt="Inditex">
+        <img src="https://youandenglish.com/public/images/inversis.jpg" alt="Inversis">
+        <img src="https://youandenglish.com/public/images/simmons.png" alt="Simmons &amp; Simmons">
+        <img src="https://youandenglish.com/public/images/km.jpg" alt="Knowmad Mood">
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ===================== IDIOMAS ===================== -->
+<section class="sec" id="idiomas">
+  <div class="wrap">
+    <div class="sec-head center">
+      <span class="eyebrow reveal">Elige el idioma</span>
+      <h2 class="reveal d1" style="margin:12px 0">Un programa para cada idioma,<br>adaptado a lo que hace tu empresa</h2>
+      <p class="lead reveal d2">Pulsa un idioma y verás el programa que prepararíamos para tu equipo. Todos siguen el mismo método: clases en directo, profesor nativo fijo y contenidos construidos sobre el trabajo real de cada persona.</p>
+    </div>
+
+    <div class="langs" id="langs">
+      <button class="lang on" data-k="ingles"><span class="flag">🇬🇧</span><h3>Inglés</h3><span class="hi">Hello!</span></button>
+      <button class="lang" data-k="espanol"><span class="flag">🇪🇸</span><h3>Español</h3><span class="hi">¡Hola!</span></button>
+      <button class="lang" data-k="aleman"><span class="flag">🇩🇪</span><h3>Alemán</h3><span class="hi">Hallo!</span></button>
+      <button class="lang" data-k="italiano"><span class="flag">🇮🇹</span><h3>Italiano</h3><span class="hi">Ciao!</span></button>
+      <button class="lang" data-k="frances"><span class="flag">🇫🇷</span><h3>Francés</h3><span class="hi">Bonjour !</span></button>
+      <button class="lang" data-k="portugues"><span class="flag">🇵🇹</span><h3>Portugués</h3><span class="hi">Olá!</span></button>
+      <button class="lang" data-k="chino"><span class="flag">🇨🇳</span><h3>Chino</h3><span class="hi">你好</span></button>
+      <button class="lang" data-k="japones"><span class="flag">🇯🇵</span><h3>Japonés</h3><span class="hi">こんにちは</span></button>
+    </div>
+
+    <div class="prog reveal" id="prog">
+      <div class="prog-top">
+        <div class="prog-copy">
+          <span class="ptag" id="pTag">🇬🇧 Programa de inglés</span>
+          <h3 id="pTitle">Inglés para empresas</h3>
+          <p id="pDesc"></p>
+          <div class="prog-skills">
+            <span><i>1</i> Reuniones y videollamadas</span>
+            <span><i>2</i> Correos y mensajes escritos</span>
+            <span><i>3</i> Llamadas con cliente y proveedor</span>
+            <span><i>4</i> Presentaciones y demos</span>
+            <span><i>5</i> Negociación y seguimiento</span>
+            <span><i>6</i> Vocabulario propio de tu actividad</span>
+          </div>
+        </div>
+        <div class="prog-demo">
+          <p class="dh" id="pDemoHead">Frases que se trabajan desde la primera clase</p>
+          <div id="pPhrases"></div>
+        </div>
+      </div>
+      <div class="prog-foot">
+        <span><b>Niveles</b> A1 → C2</span>
+        <span><b>Formato</b> individual o grupo reducido</span>
+        <span><b>Duración</b> 26 o 50 minutos</span>
+        <span><b>Profesores</b> nativos y titulados</span>
+        <span><b>FUNDAE</b> 100 % bonificable</span>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ===================== FUNDAE ===================== -->
+<section class="sec sec-soft" id="fundae">
+  <div class="wrap">
+    <div class="sec-head center">
+      <span class="eyebrow reveal">La subvención, en claro</span>
+      <h2 class="reveal d1" style="margin:12px 0">Tu empresa ya tiene un crédito de formación<br>esperando a ser usado</h2>
+      <p class="lead reveal d2">Toda empresa española que cotiza por formación profesional dispone cada año de un crédito para formar a su plantilla. Se consume bonificando los seguros sociales y, si no se usa, <b>caduca el 31 de diciembre</b>. No se acumula al año siguiente.</p>
+    </div>
+
+    <!-- Calculadora -->
+    <div class="calc reveal">
+      <div class="calc-in">
+        <h3>Calcula tu crédito en 10 segundos</h3>
+        <p>Una estimación orientativa a partir de tu plantilla y tu salario medio.</p>
+        <div class="calc-f">
+          <label for="ce">Nº de personas en plantilla</label>
+          <input id="ce" type="number" min="1" max="20000" value="25">
+        </div>
+        <div class="calc-f">
+          <label for="cs">Salario bruto medio anual (€)</label>
+          <input id="cs" type="number" min="12000" max="200000" step="1000" value="28000">
+        </div>
+        <p class="note" style="margin-top:2px">Ajusta los valores y el resultado se recalcula solo.</p>
+      </div>
+      <div class="calc-out">
+        <span class="ol">Crédito estimado para este año</span>
+        <div class="big" id="cOut">3.150 €</div>
+        <p class="sub" id="cSub">Con 25 personas y un salario medio de 28.000 €.</p>
+        <div class="calc-rows">
+          <div><span>Cotización anual por formación</span><b id="cBase">4.200 €</b></div>
+          <div><span>% de bonificación aplicable</span><b id="cPct">75 %</b></div>
+          <div><span>Coste real para tu empresa</span><b>0 €</b></div>
+        </div>
+        <p class="calc-note">Cálculo orientativo. El crédito exacto depende de lo cotizado por formación profesional el año anterior y de la plantilla media. Te lo confirmamos gratis antes de que decidas nada.</p>
+      </div>
+    </div>
+
+    <div style="max-width:860px;margin:var(--s6) auto 0">
+      <table class="credit reveal">
+        <thead><tr><th>Plantilla de la empresa</th><th>Bonificación</th><th>Cofinanciación privada</th></tr></thead>
+        <tbody>
+          <tr><td>De 1 a 5 trabajadores</td><td>Crédito mínimo de 420 €</td><td>0 %</td></tr>
+          <tr><td>De 6 a 9 trabajadores</td><td>100 % del crédito</td><td>0 %</td></tr>
+          <tr><td>De 10 a 49 trabajadores</td><td>75 % del crédito</td><td>10 %</td></tr>
+          <tr><td>De 50 a 249 trabajadores</td><td>60 % del crédito</td><td>20 %</td></tr>
+          <tr><td>De 250 en adelante</td><td>50 % del crédito</td><td>40 %</td></tr>
+        </tbody>
+      </table>
+      <p class="note reveal">Porcentajes orientativos según normativa vigente. <b>Nosotros somos la entidad organizadora</b>: presentamos la comunicación de inicio, custodiamos la documentación y respondemos ante una posible inspección.</p>
+    </div>
+  </div>
+</section>
+
+<!-- ===================== CÓMO FUNCIONA ===================== -->
+<section class="sec" id="como">
+  <div class="wrap">
+    <div class="sec-head center">
+      <span class="eyebrow reveal">Cómo funciona</span>
+      <h2 class="reveal d1" style="margin:12px 0">De la primera llamada al aula, en 48 horas</h2>
+      <p class="lead reveal d2">Tú eliges a quién formar. Del resto nos encargamos nosotros, incluido el papeleo.</p>
+    </div>
+    <div class="steps4">
+      <div class="st4 reveal"><div class="n"></div><h3>Calculamos tu crédito</h3><p>Con tu plantilla y tus cotizaciones te confirmamos el crédito FUNDAE disponible este año y qué cubre.</p></div>
+      <div class="st4 reveal d1"><div class="n"></div><h3>Nivelamos al equipo</h3><p>Prueba de nivel a cada persona (A1–C2) y agrupación por nivel real y disponibilidad horaria.</p></div>
+      <div class="st4 reveal d2"><div class="n"></div><h3>Gestionamos el alta</h3><p>Presentamos la comunicación de inicio en plazo y preparamos toda la documentación obligatoria.</p></div>
+      <div class="st4 reveal d3"><div class="n"></div><h3>Formamos y reportamos</h3><p>Clases en directo e informes mensuales de asistencia y progreso listos para tu departamento.</p></div>
+    </div>
+
+    <div class="strip4 reveal" style="margin-top:var(--s5)">
+      <div><span class="k">👤</span><h3>Profesor fijo</h3><p>Cada empleado da clase siempre con la misma persona. Nada de profesores rotativos.</p></div>
+      <div><span class="k">⏱️</span><h3>26 o 50 minutos</h3><p>Sesiones cortas que caben en la jornada, o clases largas si preferís ese formato.</p></div>
+      <div><span class="k">📊</span><h3>Informes para RR.HH.</h3><p>Asistencia, progreso y aprovechamiento por persona, exportables cuando los necesites.</p></div>
+      <div><span class="k">🎓</span><h3>Certificación oficial</h3><p>Centro autorizado Cambridge y preparación de exámenes oficiales en cada idioma.</p></div>
+    </div>
+  </div>
+</section>
+
+<!-- ===================== QUÉ INCLUYE ===================== -->
+<section class="sec sec-soft">
+  <div class="wrap">
+    <div class="sec-head center">
+      <span class="eyebrow reveal">Qué incluye</span>
+      <h2 class="reveal d1" style="margin:12px 0">Todo lo que tu empresa recibe</h2>
+    </div>
+    <div class="inc">
+      <div class="inc-c reveal"><span class="k">🎯</span><h3>Prueba de nivel y plan</h3><p>Nivelación individual, objetivos por persona y un plan de formación por escrito antes de empezar.</p></div>
+      <div class="inc-c reveal d1"><span class="k">🎥</span><h3>Aula virtual propia</h3><p>Plataforma con reserva de clases, historial, material y grabación de contenidos, sin instalar nada.</p></div>
+      <div class="inc-c reveal d2"><span class="k">👥</span><h3>Coordinador asignado</h3><p>Una persona de contacto para tu empresa que resuelve incidencias, cambios y altas nuevas.</p></div>
+      <div class="inc-c reveal"><span class="k">📚</span><h3>Material y contenidos</h3><p>Contenidos incluidos y adaptados al trabajo real de cada departamento, no un libro genérico.</p></div>
+      <div class="inc-c reveal d1"><span class="k">🗂️</span><h3>Gestión FUNDAE completa</h3><p>Alta, comunicaciones, control de firmas, custodia documental y soporte ante inspección.</p></div>
+      <div class="inc-c reveal d2"><span class="k">📈</span><h3>Informes de progreso</h3><p>Informe inicial, intermedio y final por empleado, más el seguimiento mensual de asistencia.</p></div>
+    </div>
+  </div>
+</section>
+
+<!-- ===================== OPINIONES ===================== -->
+<!-- Sustituir nombre y cita por los reales una vez el cliente lo apruebe por escrito -->
+<section class="sec" id="opiniones">
+  <div class="wrap">
+    <div class="sec-head center">
+      <span class="eyebrow reveal">Empresas que ya lo hacen</span>
+      <h2 class="reveal d1" style="margin:12px 0">No somos nuevos en esto</h2>
+      <p class="lead reveal d2">Llevamos más de una década gestionando formación bonificada para empresas de todos los tamaños y sectores en España.</p>
+    </div>
+
+    <div class="revs reveal" id="revs">
+      <div class="revs-viewport">
+        <div class="revs-track" id="revsTrack">
+          <article class="rev">
+            <span class="stars">★★★★★</span>
+            <p>Formamos a tres departamentos a la vez y no tuvimos que tocar ni un papel. Los informes de asistencia llegaban solos cada mes y la comunicación a FUNDAE la llevaron ellos de principio a fin.</p>
+            <span class="metric">34 personas formadas</span>
+            <div class="top"><span class="av">RF</span><span class="who">Responsable de Formación<small>Sector industrial · 250+ empleados</small></span></div>
+          </article>
+          <article class="rev">
+            <span class="stars">★★★★★</span>
+            <p>Lo que más valoramos es que cada persona tiene siempre el mismo profesor. Eso ha hecho que la asistencia se mantenga alta todo el año, que era justo nuestro problema con la academia anterior.</p>
+            <span class="metric">92 % de asistencia</span>
+            <div class="top"><span class="av">DR</span><span class="who">Dirección de RR.HH.<small>Servicios financieros · 50–249 empleados</small></span></div>
+          </article>
+          <article class="rev">
+            <span class="stars">★★★★★</span>
+            <p>Las clases de 26 minutos fueron la clave: entran en la jornada sin bloquear la agenda de nadie. La gente las hace de verdad, no las cancela como pasaba con las sesiones de una hora.</p>
+            <span class="metric">Clases dentro de jornada</span>
+            <div class="top"><span class="av">RP</span><span class="who">Responsable de Personas<small>Consultoría tecnológica · 50–249 empleados</small></span></div>
+          </article>
+          <article class="rev">
+            <span class="stars">★★★★★</span>
+            <p>Empezamos solo con inglés y acabamos añadiendo francés y portugués para el equipo comercial. Mismo interlocutor, misma plataforma y todo dentro del mismo crédito.</p>
+            <span class="metric">3 idiomas a la vez</span>
+            <div class="top"><span class="av">DC</span><span class="who">Dirección Comercial<small>Distribución · 50–249 empleados</small></span></div>
+          </article>
+          <article class="rev">
+            <span class="stars">★★★★★</span>
+            <p>Somos una empresa pequeña y pensábamos que FUNDAE no era para nosotros. Nos calcularon el crédito, nos explicaron qué cubría y formamos a seis personas sin coste real.</p>
+            <span class="metric">Coste real 0 €</span>
+            <div class="top"><span class="av">GG</span><span class="who">Gerencia<small>Servicios profesionales · 6–9 empleados</small></span></div>
+          </article>
+          <article class="rev">
+            <span class="stars">★★★★★</span>
+            <p>Tuvimos una revisión documental y tenían absolutamente todo preparado: firmas, comunicaciones y certificados. Esa tranquilidad, para el departamento, vale tanto como la formación.</p>
+            <span class="metric">Documentación en regla</span>
+            <div class="top"><span class="av">AF</span><span class="who">Administración y Formación<small>Sector asegurador · 250+ empleados</small></span></div>
+          </article>
+        </div>
+      </div>
+      <div class="revs-nav">
+        <button class="revs-arrow" id="revPrev" aria-label="Anterior">‹</button>
+        <div class="revs-dots" id="revDots"></div>
+        <button class="revs-arrow" id="revNext" aria-label="Siguiente">›</button>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ===================== FAQ ===================== -->
+<section class="sec sec-soft" id="faq">
+  <div class="wrap">
+    <div class="sec-head center">
+      <span class="eyebrow reveal">Preguntas frecuentes</span>
+      <h2 class="reveal d1" style="margin:12px 0">Lo que suele preguntar RR.HH.</h2>
+    </div>
+    <div class="faq">
+      <div class="qa reveal"><button class="q">¿Cuánto le cuesta a mi empresa? <span class="pm">+</span></button><div class="a"><p>Si el crédito FUNDAE cubre el programa, el coste real es 0 €: el importe se recupera bonificando los seguros sociales. Si el crédito no llega a cubrirlo todo, te lo decimos antes de empezar y decides tú si amplías o ajustamos el plan.</p></div></div>
+      <div class="qa reveal"><button class="q">¿Quién se encarga del papeleo de FUNDAE? <span class="pm">+</span></button><div class="a"><p>Nosotros, como entidad organizadora. Damos de alta la formación, presentamos la comunicación de inicio en plazo, controlamos firmas y asistencia, y custodiamos la documentación. Tu departamento no tiene que gestionar nada.</p></div></div>
+      <div class="qa reveal"><button class="q">¿Las clases son individuales o en grupo? <span class="pm">+</span></button><div class="a"><p>Como prefieras. Lo habitual es individual 1 a 1 para dirección y equipos comerciales, y grupos reducidos por nivel para el resto. Se puede combinar dentro de la misma empresa y del mismo programa.</p></div></div>
+      <div class="qa reveal"><button class="q">¿Cuánto duran las clases? <span class="pm">+</span></button><div class="a"><p>El formato recomendado es de 26 minutos, porque encaja dentro de la jornada y mantiene la asistencia alta. También ofrecemos sesiones de 50 minutos si tu empresa prefiere clases más largas o está preparando exámenes oficiales.</p></div></div>
+      <div class="qa reveal"><button class="q">¿Podemos formar en varios idiomas a la vez? <span class="pm">+</span></button><div class="a"><p>Sí. Puedes combinar los 8 idiomas en un mismo plan y en un mismo crédito, con un único interlocutor y unos informes unificados para todo el equipo.</p></div></div>
+      <div class="qa reveal"><button class="q">¿Qué pasa si alguien deja la empresa o se incorpora tarde? <span class="pm">+</span></button><div class="a"><p>Las altas y bajas se gestionan durante el programa. Si alguien causa baja, su plaza se reasigna a otra persona; si alguien entra más tarde, se nivela e incorpora al grupo que le corresponde.</p></div></div>
+      <div class="qa reveal"><button class="q">¿Qué informes recibimos? <span class="pm">+</span></button><div class="a"><p>Un informe inicial de nivel, uno intermedio y uno final por empleado, además del seguimiento mensual de asistencia y aprovechamiento. Todo exportable para justificación interna o auditoría.</p></div></div>
+      <div class="qa reveal"><button class="q">¿Cuánto se tarda en empezar? <span class="pm">+</span></button><div class="a"><p>Desde que aceptas la propuesta, unas 48 horas para nivelar al equipo y organizar horarios. La única condición es respetar el plazo legal de comunicación de inicio a FUNDAE, que gestionamos nosotros.</p></div></div>
+    </div>
+  </div>
+</section>
+
+<!-- ===================== CONTACTO ===================== -->
+<section class="contact" id="contacto">
+  <div class="wrap">
+    <div class="sec-head center">
+      <span class="eyebrow reveal">Contacto</span>
+      <h2 class="reveal d1" style="margin:12px 0">Hablemos de tu equipo</h2>
+      <p class="lead reveal d2">Cuéntanos cuántas personas queréis formar y en qué idiomas. Te respondemos en menos de 24 horas laborables con una propuesta y el crédito que os corresponde.</p>
+    </div>
+
+    <div class="cgrid">
+      <div class="ccard reveal"><div class="k">✉️</div><h3>Email empresas</h3><p><a href="mailto:empresas@youandenglish.com">empresas@youandenglish.com</a><br>Propuestas, altas y facturación.</p></div>
+      <div class="ccard reveal d1"><div class="k">📞</div><h3>Teléfono</h3><p><a href="tel:+34910000000">+34 910 000 000</a><br>Lunes a viernes, 9:00 – 19:00 h.</p></div>
+      <div class="ccard reveal d2"><div class="k">💬</div><h3>WhatsApp</h3><p><a href="#">Escríbenos por WhatsApp</a><br>Respuesta rápida en horario laboral.</p></div>
+      <div class="ccard reveal d3"><div class="k">📍</div><h3>Oficina</h3><p>YAE Palomares SL<br>Madrid, España<br>Cobertura en toda España, online.</p></div>
+    </div>
+
+    <div class="cbar reveal">
+      <div>
+        <h3>¿Prefieres que te llamemos nosotros?</h3>
+        <p>Déjanos tus datos en el formulario y te llamamos cuando mejor te venga.</p>
+      </div>
+      <a href="#solicitar" class="btn btn-lime btn-lg">Solicitar propuesta <span class="arrow">→</span></a>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap foot-in">
+    <small>© 2026 YAE Palomares SL · Madrid, España · Formación de idiomas para empresas</small>
+    <div style="display:flex;gap:18px;font-size:.88rem;flex-wrap:wrap">
+      <a href="index.html">Home</a><a href="#idiomas">Idiomas</a><a href="#fundae">FUNDAE</a><a href="#contacto">Contacto</a>
+    </div>
+  </div>
+</footer>
+
+<script>
+const RM = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+/* ===== Idiomas: cambian el programa sin salir de la página ===== */
+const IDIOMAS = {
+  ingles:{n:'Inglés',adj:'inglés',f:'🇬🇧',
+    d:'El idioma con el que tu equipo trabaja a diario, sea cual sea vuestro sector: clientes, proveedores, filiales, reuniones internacionales y documentación. Partimos de las situaciones reales de cada persona, no de un temario cerrado.',
+    p:[['Nice to meet you.','Encantado de conocerle.'],
+       ['Could you repeat that, please?','¿Puede repetirlo, por favor?'],
+       ['Let us schedule a call for next week.','Agendemos una llamada la semana que viene.']]},
+  espanol:{n:'Español',adj:'español',f:'🇪🇸',
+    d:'Para plantilla internacional que trabaja en España o con equipos españoles. Se trabaja el español que se usa en la empresa: reuniones, correos, trato con clientes y gestiones del día a día.',
+    p:[['Encantado de conocerle.','Fórmula habitual de presentación.'],
+       ['¿Puede repetirlo, por favor?','Para pedir aclaración sin cortar la conversación.'],
+       ['Agendemos una llamada la semana que viene.','Cierre habitual de una reunión.']]},
+  aleman:{n:'Alemán',adj:'alemán',f:'🇩🇪',
+    d:'Para equipos que tratan con clientes, proveedores, matrices o filiales de habla alemana. Trabajamos el alemán profesional que cada persona necesita en su puesto, con el registro formal que espera el interlocutor.',
+    p:[['Freut mich, Sie kennenzulernen.','Encantado de conocerle.'],
+       ['Können Sie das bitte wiederholen?','¿Puede repetirlo, por favor?'],
+       ['Vereinbaren wir einen Termin für nächste Woche.','Fijemos una cita para la semana que viene.']]},
+  italiano:{n:'Italiano',adj:'italiano',f:'🇮🇹',
+    d:'Para quienes trabajan con contrapartes italianas de cualquier ámbito. Se practica el italiano de la relación profesional: llamadas, visitas, correos y seguimiento de acuerdos.',
+    p:[['Piacere di conoscerla.','Encantado de conocerle.'],
+       ['Può ripetere, per favore?','¿Puede repetirlo, por favor?'],
+       ['Fissiamo una chiamata per la prossima settimana.','Fijemos una llamada para la semana que viene.']]},
+  frances:{n:'Francés',adj:'francés',f:'🇫🇷',
+    d:'Para equipos con actividad en Francia, Bélgica, Suiza o el norte de África. Se trabaja el francés profesional en su registro formal, tanto hablado como escrito.',
+    p:[['Enchanté de vous rencontrer.','Encantado de conocerle.'],
+       ['Pouvez-vous répéter, s’il vous plaît ?','¿Puede repetirlo, por favor?'],
+       ['Fixons un rendez-vous pour la semaine prochaine.','Fijemos una cita para la semana que viene.']]},
+  portugues:{n:'Portugués',adj:'portugués',f:'🇵🇹',
+    d:'Portugués de Portugal o de Brasil, según con quién trabaje tu equipo. Se practican reuniones, llamadas y correspondencia con el registro y el acento que cada persona necesita.',
+    p:[['Prazer em conhecê-lo.','Encantado de conocerle.'],
+       ['Pode repetir, por favor?','¿Puede repetirlo, por favor?'],
+       ['Vamos marcar uma reunião para a próxima semana.','Fijemos una reunión para la semana que viene.']]},
+  chino:{n:'Chino',adj:'chino mandarín',f:'🇨🇳',
+    d:'Chino mandarín para equipos que tratan con contrapartes chinas. Empezamos por la conversación y las fórmulas de cortesía que abren puertas, e incorporamos la escritura al ritmo de cada persona.',
+    p:[['很高兴认识您。','Encantado de conocerle.','Hěn gāoxìng rènshi nín'],
+       ['请再说一遍。','¿Puede repetirlo, por favor?','Qǐng zài shuō yí biàn'],
+       ['我们约个时间吧。','Fijemos una cita.','Wǒmen yuē ge shíjiān ba']]},
+  japones:{n:'Japonés',adj:'japonés',f:'🇯🇵',
+    d:'Japonés para equipos con relación profesional en Japón, donde el registro y la cortesía pesan tanto como el mensaje. Se trabaja desde el primer día la conversación real y el trato formal.',
+    p:[['はじめまして。','Encantado de conocerle.','Hajimemashite'],
+       ['もう一度お願いします。','¿Puede repetirlo, por favor?','Mō ichido onegai shimasu'],
+       ['打ち合わせをしましょう。','Organicemos una reunión.','Uchiawase o shimashō']]}
+};
+
+const prog=document.getElementById('prog');
+function pintaIdioma(k){
+  const L=IDIOMAS[k]||IDIOMAS.ingles;
+  prog.classList.add('fade');
+  setTimeout(()=>{
+    document.getElementById('pTag').textContent=L.f+'  Programa de '+L.adj;
+    document.getElementById('pTitle').textContent=L.n+' para empresas';
+    document.getElementById('pDesc').textContent=L.d;
+    document.getElementById('pDemoHead').textContent='Frases de '+L.adj+' que se trabajan desde la primera clase';
+    document.getElementById('pPhrases').innerHTML=L.p.map(fr=>
+      '<div class="phrase"><b>'+fr[0]+'</b>'+(fr[2]?'<span class="rom">'+fr[2]+'</span>':'')+'<small>'+fr[1]+'</small></div>').join('');
+    document.getElementById('formLang').textContent=L.n;
+    prog.classList.remove('fade');
+  },180);
+  document.querySelectorAll('.lang').forEach(b=>b.classList.toggle('on',b.dataset.k===k));
+  history.replaceState(null,'','?idioma='+k);
+}
+document.getElementById('langs').addEventListener('click',e=>{
+  const b=e.target.closest('.lang'); if(!b) return;
+  pintaIdioma(b.dataset.k);
+  prog.scrollIntoView({behavior:'smooth',block:'center'});
+});
+pintaIdioma((new URLSearchParams(location.search).get('idioma')||'ingles').toLowerCase());
+
+/* ===== Calculadora de crédito FUNDAE ===== */
+const eur=n=>Math.round(n).toLocaleString('es-ES')+' €';
+function tramo(n){
+  if(n<=5)  return {pct:1,   txt:'mínimo 420 €'};
+  if(n<=9)  return {pct:1,   txt:'100 %'};
+  if(n<=49) return {pct:.75, txt:'75 %'};
+  if(n<=249)return {pct:.60, txt:'60 %'};
+  return {pct:.50, txt:'50 %'};
+}
+function calcula(){
+  const n=Math.max(1,+document.getElementById('ce').value||1);
+  const s=Math.max(0,+document.getElementById('cs').value||0);
+  const base=n*s*0.006;                 // cotización empresarial por formación (0,6 %)
+  const t=tramo(n);
+  let credito=base*t.pct;
+  if(n<=5) credito=Math.max(credito,420);
+  document.getElementById('cOut').textContent=eur(credito);
+  document.getElementById('cBase').textContent=eur(base);
+  document.getElementById('cPct').textContent=t.txt;
+  document.getElementById('cSub').textContent='Con '+n+(n===1?' persona':' personas')+' y un salario medio de '+eur(s)+'.';
+}
+['ce','cs'].forEach(id=>document.getElementById(id).addEventListener('input',calcula));
+calcula();
+
+/* ===== Carrusel de opiniones ===== */
+(function(){
+  const track=document.getElementById('revsTrack'); if(!track) return;
+  const wrap=document.getElementById('revs'),dots=document.getElementById('revDots');
+  const cards=[...track.children],GAP=18;
+  let per=3,idx=0,max=0,timer=null;
+  const perFor=()=>window.innerWidth<=720?1:window.innerWidth<=1080?2:3;
+  function build(){dots.innerHTML='';for(let i=0;i<=max;i++){const b=document.createElement('button');b.type='button';
+    b.setAttribute('aria-label','Opinión '+(i+1));b.addEventListener('click',()=>{go(i);restart()});dots.appendChild(b)}}
+  function go(i){if(i>max)i=0;if(i<0)i=max;idx=i;
+    track.style.transform='translateX('+(-idx*(cards[0].getBoundingClientRect().width+GAP))+'px)';
+    [...dots.children].forEach((d,j)=>d.classList.toggle('on',j===idx))}
+  function layout(){per=perFor();max=Math.max(0,cards.length-per);if(idx>max)idx=max;build();go(idx)}
+  const play=()=>{if(!RM)timer=setInterval(()=>go(idx+1),4800)},stop=()=>clearInterval(timer),restart=()=>{stop();play()};
+  wrap.addEventListener('mouseenter',stop);wrap.addEventListener('mouseleave',play);
+  document.getElementById('revNext').addEventListener('click',()=>{go(idx+1);restart()});
+  document.getElementById('revPrev').addEventListener('click',()=>{go(idx-1);restart()});
+  let x0=null;
+  track.addEventListener('touchstart',e=>{x0=e.touches[0].clientX;stop()},{passive:true});
+  track.addEventListener('touchend',e=>{if(x0===null)return;const d=e.changedTouches[0].clientX-x0;
+    if(Math.abs(d)>45)go(idx+(d<0?1:-1));x0=null;play()},{passive:true});
+  let rt;window.addEventListener('resize',()=>{clearTimeout(rt);rt=setTimeout(layout,150)});
+  layout();play();
+})();
+
+/* ===== FAQ ===== */
+document.querySelectorAll('.qa .q').forEach(q=>{
+  q.addEventListener('click',()=>{
+    const qa=q.parentElement,a=q.nextElementSibling,abierto=qa.classList.contains('open');
+    document.querySelectorAll('.qa').forEach(x=>{x.classList.remove('open');x.querySelector('.a').style.maxHeight=null});
+    if(!abierto){qa.classList.add('open');a.style.maxHeight=a.scrollHeight+'px'}
+  });
+});
+
+/* ===== Formulario (demo) ===== */
+document.getElementById('empForm').addEventListener('submit',e=>{
+  e.preventDefault();
+  const b=e.target.querySelector('button[type=submit]'),old=b.innerHTML;
+  b.innerHTML='✅ Solicitud enviada · te escribimos en 24 h';b.style.pointerEvents='none';
+  setTimeout(()=>{b.innerHTML=old;b.style.pointerEvents='auto'},3200);
+});
+
+/* ===== Menú activo al hacer scroll ===== */
+const enlaces={};
+document.querySelectorAll('#menu a').forEach(a=>enlaces[a.getAttribute('href').slice(1)]=a);
+const spy=new IntersectionObserver(en=>{en.forEach(e=>{if(e.isIntersecting){
+  document.querySelectorAll('#menu a').forEach(a=>a.classList.remove('active'));
+  const l=enlaces[e.target.id]; if(l)l.classList.add('active');}})},{rootMargin:'-45% 0px -50% 0px'});
+['idiomas','fundae','como','opiniones','faq','contacto'].forEach(id=>{const s=document.getElementById(id);if(s)spy.observe(s)});
+
+/* ===== Reveal + ripple + anclas ===== */
+const io=new IntersectionObserver(en=>{en.forEach(e=>{if(e.isIntersecting){e.target.classList.add('in');io.unobserve(e.target)}})},{threshold:.14});
+document.querySelectorAll('.reveal').forEach(el=>io.observe(el));
+document.querySelectorAll('.btn').forEach(b=>{
+  b.addEventListener('click',e=>{const r=document.createElement('span');r.className='ripple';
+    const c=b.getBoundingClientRect(),d=Math.max(c.width,c.height);
+    r.style.width=r.style.height=d+'px';r.style.left=(e.clientX-c.left-d/2)+'px';r.style.top=(e.clientY-c.top-d/2)+'px';
+    b.appendChild(r);setTimeout(()=>r.remove(),600)});
+});
+document.querySelectorAll('a[href^="#"]').forEach(a=>{
+  a.addEventListener('click',ev=>{const id=a.getAttribute('href');
+    if(id.length>1){const t=document.querySelector(id);if(t){ev.preventDefault();t.scrollIntoView({behavior:'smooth',block:'start'})}}});
+});
+</script>
+
+</body>
+</html>

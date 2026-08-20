@@ -15,6 +15,8 @@ import './proveedores.js';
 import './turnos.js';
 import './cuentacorriente.js';
 import './adelantos.js';
+import './reportes.js';
+import './presupuestos.js';
 import Bandeja from './bandeja.js';
 
 const App = {
@@ -34,6 +36,8 @@ const App = {
     cuentacorriente: { title: 'Cuenta Corriente', module: CuentaCorriente },
     adelantos: { title: 'Adelantos de socios', module: Adelantos },
     bandeja: { title: 'Bandeja WhatsApp', module: Bandeja },
+    presupuestos: { title: 'Presupuestos', module: Presupuestos },
+    reportes: { title: 'Reportes', module: Reportes },
     panel: { title: 'Panel de control', module: Panel },
   },
 

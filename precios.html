@@ -1,0 +1,3049 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1">
+<title>iPhone Mood | Precios y Stock</title>
+<meta name="description" content="Stock disponible de iPhone Mood. iPhones, Mac, iPad, AirPods y más. Granadero Baigorria.">
+<meta name="theme-color" content="#ffffff">
+<link rel="icon" type="image/png" sizes="32x32" href="assets/favicon-32.png">
+<link rel="apple-touch-icon" href="assets/apple-touch-icon.png">
+<!-- Vista previa al pegar el link en WhatsApp / redes -->
+<meta property="og:title" content="iPhone Mood | Precios y Stock">
+<meta property="og:description" content="Stock real de iPhone con precios en USD y pesos actualizados a diario. Granadero Baigorria.">
+<meta property="og:image" content="https://iphonemood.com/assets/logo-mark-512.png">
+<meta property="og:type" content="website">
+<meta name="twitter:card" content="summary">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+<script src="config.js"></script>
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+:root {
+  --black: #1D1D1F;
+  --gray:  #6E6E73;
+  --gray2: #86868B;
+  --gray3: #F5F5F7;
+  --gray4: #E8E8ED;
+  --blue:  #0071E3;
+  --green: #1D8348;
+  --amber: #B7770D;
+  --red:   #C0392B;
+  --border: #D2D2D7;
+  --font: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Helvetica Neue', 'Segoe UI', sans-serif;
+  --radius: 16px;
+}
+html { scroll-behavior: smooth; }
+body { font-family: var(--font); background: #fff; color: var(--black); -webkit-font-smoothing: antialiased; overflow-x: hidden; }
+
+/* ─── TOPBAR ─── */
+.topbar {
+  background: #1D1D1F; color: rgba(255,255,255,.85);
+  font-size: 12.5px; padding: 10px 20px; letter-spacing: .01em;
+  display: flex; align-items: center; justify-content: center; gap: 20px;
+  overflow-x: auto; scrollbar-width: none; white-space: nowrap; min-height: 38px;
+  position: relative; z-index: 50;
+}
+.topbar::-webkit-scrollbar { display: none; }
+.topbar-dot { width: 4px; height: 4px; border-radius: 50%; background: rgba(255,255,255,.4); flex-shrink: 0; }
+
+/* ─── NAV ─── */
+.nav {
+  position: sticky; top: 0; z-index: 100;
+  background: rgba(255,255,255,.9); backdrop-filter: blur(20px) saturate(180%);
+  -webkit-backdrop-filter: blur(20px) saturate(180%);
+  border-bottom: 1px solid var(--border);
+  padding: 0 16px; height: 52px;
+  display: flex; align-items: center; justify-content: space-between;
+  position: sticky; /* referencia para el menú centrado en absolute */
+}
+.nav-logo { display: flex; align-items: center; gap: 7px; font-size: 16px; font-weight: 700; color: var(--black); text-decoration: none; }
+/* Isotipo propio recortado del logo original (assets/logo-mark-512.png).
+   El "IPHONE MOOD" del archivo se dejó afuera a propósito: a 24px de alto
+   sería ilegible. La marca denominativa va como texto HTML acá al lado, que
+   se ve nítido en cualquier pantalla y además Google lo lee. */
+.nav-logo img { width: 26px; height: 26px; object-fit: contain; flex-shrink: 0; display: block; }
+.cotiz-pill { display: none; }
+/* Al saltar a una sección, la nav sticky (52px) le tapaba el arranque: el
+   título quedaba cortado por arriba. `scroll-margin-top` le dice al navegador
+   que deje ese aire al hacer scroll, y sirve para todos los saltos —también
+   los chips de categoría y el botón "Explorar productos". */
+#productos, #canje, #opiniones, #local, #faq { scroll-margin-top: 76px; }
+
+/* Menú de secciones. En PC va centrado en la barra con posición absoluta:
+   así queda al medio de verdad, sin que lo corran el ancho del logo ni el de
+   los botones de la derecha. En mobile no entra al lado del WhatsApp, así que
+   se reemplaza por el panel lateral de más abajo. */
+.nav-links { display: none; }
+@media (min-width: 900px) {
+  .nav-links {
+    display: flex; gap: 2px;
+    position: absolute; left: 50%; transform: translateX(-50%);
+  }
+}
+.nav-links a {
+  position: relative;
+  font-size: 14px; font-weight: 700; color: var(--gray);
+  text-decoration: none; padding: 7px 14px 9px;
+  white-space: nowrap; transition: color .16s;
+}
+/* Subrayado que crece desde el centro. Va en `currentColor`, así hereda
+   automáticamente el color del estado (azul en hover, negro en la sección
+   activa) y no hay que mantener dos colores en paralelo.
+   Se sacó el fondo gris del hover a propósito: con el subrayado ya hay un
+   énfasis claro, y los dos juntos ensuciaban una barra que tiene que
+   competir con el logo y el botón de WhatsApp. */
+.nav-links a::after {
+  content: ''; position: absolute; left: 14px; right: 14px; bottom: 2px;
+  height: 2.5px; border-radius: 2px; background: currentColor;
+  transform: scaleX(0); transform-origin: center;
+  transition: transform .2s cubic-bezier(.4,0,.2,1);
+}
+.nav-links a:hover { color: var(--blue); }
+.nav-links a:hover::after { transform: scaleX(1); }
+/* Sección en la que está parado el visitante: mismo subrayado, en negro,
+   siempre visible. */
+.nav-links a.activo { color: var(--black); }
+.nav-links a.activo::after { transform: scaleX(1); }
+
+/* ─── HAMBURGUESA (mobile) ─── */
+.nav-burger {
+  display: flex; flex-direction: column; justify-content: center; gap: 4px;
+  width: 34px; height: 34px; padding: 0 7px;
+  background: none; border: none; cursor: pointer; flex-shrink: 0;
+  -webkit-tap-highlight-color: transparent;
+}
+.nav-burger span { display: block; height: 2px; border-radius: 2px; background: var(--black); transition: transform .2s, opacity .2s; }
+.nav-burger span:nth-child(2) { width: 75%; }
+@media (min-width: 900px) { .nav-burger { display: none; } }
+
+/* ─── PANEL LATERAL (mobile) ─── */
+.menu-overlay {
+  position: fixed; inset: 0; z-index: 300;
+  background: rgba(0,0,0,.35); opacity: 0; pointer-events: none;
+  transition: opacity .22s;
+}
+.menu-overlay.abierto { opacity: 1; pointer-events: auto; }
+.menu-lateral {
+  position: fixed; top: 0; right: 0; bottom: 0; z-index: 301;
+  width: min(78vw, 300px); background: #fff;
+  transform: translateX(100%); transition: transform .26s cubic-bezier(.4,0,.2,1);
+  display: flex; flex-direction: column; padding: 14px;
+  box-shadow: -12px 0 40px rgba(0,0,0,.16);
+  overflow-y: auto;
+}
+.menu-lateral.abierto { transform: translateX(0); }
+.menu-lateral-hdr {
+  display: flex; align-items: center; justify-content: space-between;
+  font-size: 11px; font-weight: 800; color: var(--gray2);
+  text-transform: uppercase; letter-spacing: .07em;
+  padding: 4px 8px 12px; border-bottom: 1px solid var(--gray4); margin-bottom: 8px;
+}
+.menu-lateral-hdr button {
+  background: var(--gray3); border: none; border-radius: 50%;
+  width: 30px; height: 30px; font-size: 14px; color: var(--gray); cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.menu-lateral > a {
+  display: flex; align-items: center; gap: 11px;
+  padding: 14px 10px; border-radius: 12px;
+  font-size: 15.5px; font-weight: 700; color: var(--black); text-decoration: none;
+  -webkit-tap-highlight-color: transparent;
+}
+.menu-lateral > a:active { background: var(--gray3); }
+.menu-lateral > a span { font-size: 17px; width: 24px; text-align: center; }
+.menu-lateral-pie { margin-top: auto; padding-top: 14px; border-top: 1px solid var(--gray4); }
+.menu-lateral-wa {
+  display: block; text-align: center; background: #25D366; color: #fff;
+  font-size: 14px; font-weight: 700; padding: 13px; border-radius: 12px; text-decoration: none;
+}
+.menu-lateral-login {
+  display: block; text-align: center; color: var(--gray);
+  font-size: 12.5px; font-weight: 600; padding: 12px 0 4px; text-decoration: none;
+}
+
+/* Acceso al CRM: discreto a propósito — es para el equipo, no para clientes. */
+.nav-login {
+  font-size: 12px; font-weight: 600; color: var(--gray);
+  text-decoration: none; padding: 6px 10px; border-radius: 100px;
+  -webkit-tap-highlight-color: transparent;
+}
+.nav-login:hover { color: var(--black); background: var(--gray3); }
+.nav-wa { display: flex; align-items: center; gap: 6px; background: #25D366; color: #fff; font-size: 12px; font-weight: 700; border-radius: 100px; padding: 6px 12px; text-decoration: none; -webkit-tap-highlight-color: transparent; }
+.nav-wa svg { width: 16px; height: 16px; fill: #fff; flex-shrink: 0; }
+
+/* ─── HERO ─── */
+.hero-wrap {
+  display: flex; align-items: center; justify-content: space-between;
+  max-width: 1100px; margin: 0 auto; padding: 0 24px; gap: 20px;
+}
+.hero { padding: 44px 0 36px; flex: 1; min-width: 0; }
+.hero-eye { font-size: 12px; font-weight: 700; color: var(--blue); margin-bottom: 8px; letter-spacing: .04em; text-transform: uppercase; }
+.hero-title { font-size: clamp(28px, 5vw, 54px); font-weight: 800; line-height: 1.05; letter-spacing: -.03em; margin-bottom: 14px; }
+.hero-sub { font-size: 15px; color: var(--gray); line-height: 1.6; margin-bottom: 28px; max-width: 380px; }
+.hero-btns { display: flex; gap: 10px; flex-wrap: wrap; }
+.btn-dark { background: var(--black); color: #fff; border: none; padding: 13px 22px; border-radius: 100px; font-size: 14px; font-weight: 600; cursor: pointer; text-decoration: none; display: inline-block; -webkit-tap-highlight-color: transparent; transition: opacity .15s; }
+.btn-dark:hover { opacity: .85; }
+.btn-outline { background: none; color: var(--black); border: 1.5px solid var(--black); padding: 12px 20px; border-radius: 100px; font-size: 14px; font-weight: 600; cursor: pointer; text-decoration: none; display: inline-block; -webkit-tap-highlight-color: transparent; transition: background .15s; }
+.btn-outline:hover { background: var(--gray3); }
+
+/* hero — tarjetas flotantes */
+.hero-cards { flex-shrink: 0; width: 320px; height: 330px; position: relative; display: none; }
+@media (min-width: 860px) { .hero-cards { display: block; } }
+.hf-card {
+  position: absolute; background: #fff; border-radius: 18px;
+  box-shadow: 0 12px 40px rgba(0,0,0,.13), 0 2px 8px rgba(0,0,0,.05);
+  padding: 13px 15px; display: flex; align-items: center; gap: 11px;
+  border: 1px solid rgba(0,0,0,.05); white-space: nowrap;
+}
+.hf-ico {
+  width: 38px; height: 38px; border-radius: 11px; flex-shrink: 0;
+  display: flex; align-items: center; justify-content: center; font-size: 19px;
+}
+.hf-l1 { font-size: 12.5px; font-weight: 600; color: var(--black); line-height: 1.25; }
+.hf-l2 { font-size: 11px; color: var(--gray); margin-top: 1px; }
+.hf-price { font-size: 15px; font-weight: 700; color: var(--black); line-height: 1.25; }
+
+.hf-1 { top: 8px;   left: 22px;  animation: hfFloat 5s ease-in-out infinite; }
+.hf-2 { top: 92px;  right: 0;    animation: hfFloat 5s ease-in-out infinite .9s; }
+.hf-3 { top: 182px; left: 0;     animation: hfFloat 5s ease-in-out infinite 1.8s; }
+.hf-4 { top: 262px; right: 26px; animation: hfFloat 5s ease-in-out infinite 2.6s; }
+@keyframes hfFloat { 0%,100% { transform: translateY(0) } 50% { transform: translateY(-9px) } }
+@media (prefers-reduced-motion: reduce) { .hf-card { animation: none !important; } }
+
+/* ─── CATEGORY CAROUSEL ─── */
+.cat-showcase {
+  padding: 28px 0 24px; overflow: hidden; position: relative;
+  --item-w: 140px; --item-gap: 12px;
+}
+.cat-showcase::before, .cat-showcase::after {
+  content:''; position: absolute; top: 0; bottom: 0; width: 80px; z-index: 2; pointer-events: none;
+}
+.cat-showcase::before { left: 0; background: linear-gradient(to right, #fff 60%, transparent 100%); }
+.cat-showcase::after  { right: 0; background: linear-gradient(to left,  #fff 60%, transparent 100%); }
+.cat-showcase-track {
+  display: flex; gap: var(--item-gap); width: max-content;
+  will-change: transform;
+}
+.cat-showcase-track.running { animation: catscroll var(--scroll-dur, 18s) linear infinite; }
+/* Modo fijo: pocos rubros entran enteros en pantalla, así que se centran y
+   no se mueven. Las máscaras degradadas de los costados se apagan porque
+   solo tienen sentido para insinuar que hay más contenido fuera de vista. */
+.cat-showcase.fija { padding: 22px 0 18px; }
+.cat-showcase.fija::before, .cat-showcase.fija::after { display: none; }
+.cat-showcase.fija .cat-showcase-track {
+  width: 100%; justify-content: center; flex-wrap: wrap; row-gap: 16px;
+}
+.cat-showcase-track:hover { animation-play-state: paused; }
+@keyframes catscroll {
+  from { transform: translateX(0); }
+  to   { transform: translateX(var(--scroll-dist, -50%)); }
+}
+.cat-show-item {
+  flex-shrink: 0; width: var(--item-w); display: flex; flex-direction: column;
+  align-items: center; gap: 8px;
+  cursor: pointer; -webkit-tap-highlight-color: transparent; transition: transform .18s;
+}
+.cat-show-item:active { transform: scale(.93); }
+@media (hover: hover) { .cat-show-item:hover { transform: translateY(-5px); } }
+.cat-show-circle {
+  width: var(--item-w); height: var(--item-w); border-radius: 20px;
+  background: #fff; border: 1px solid var(--gray4);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 54px; overflow: hidden; transition: box-shadow .18s;
+}
+@media (hover: hover) { .cat-show-item:hover .cat-show-circle { box-shadow: 0 8px 28px rgba(0,0,0,.12); border-color: var(--border); } }
+.cat-show-circle img { width: 88%; height: 88%; object-fit: contain; }
+.cat-show-label { font-size: 12.5px; font-weight: 600; color: var(--black); text-align: center; }
+
+/* ─── HIDE OLD CATS BAR ─── */
+.cats-bar { display: none; }
+
+/* ─── MODEL FILTER BAR ─── */
+.model-bar {
+  background: #fff; border-bottom: 1px solid var(--gray4);
+  padding: 10px 14px; display: none; gap: 8px; align-items: center;
+  overflow-x: auto; scrollbar-width: none;
+}
+.model-bar::-webkit-scrollbar { display: none; }
+.model-bar.show { display: flex; }
+.model-bar-label {
+  font-size: 11px; font-weight: 700; color: var(--gray2);
+  text-transform: uppercase; letter-spacing: .05em; white-space: nowrap; flex-shrink: 0;
+}
+.mpill {
+  flex-shrink: 0; padding: 7px 15px; border-radius: 100px;
+  border: 1.5px solid var(--border); background: #fff;
+  font-size: 13px; font-weight: 600; color: var(--black);
+  cursor: pointer; white-space: nowrap; transition: all .12s;
+  -webkit-tap-highlight-color: transparent;
+}
+.mpill.on { background: var(--black); color: #fff; border-color: var(--black); }
+
+/* ─── WHY improved ─── */
+.why { background: var(--gray3); padding: 48px 20px; margin-top: 8px; }
+.why-inner { max-width: 1100px; margin: 0 auto; }
+.why-eye { font-size: 11px; font-weight: 700; color: var(--blue); text-transform: uppercase; letter-spacing: .06em; margin-bottom: 6px; }
+.why-title { font-size: 26px; font-weight: 700; margin-bottom: 24px; }
+.why-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+@media (min-width: 640px) { .why-grid { grid-template-columns: repeat(4,1fr); gap: 18px; } }
+.why-card { background: #fff; border-radius: 18px; padding: 22px 18px; display: flex; flex-direction: column; gap: 12px; }
+@media (min-width: 640px) { .why-card { padding: 28px 22px; gap: 14px; } }
+.why-icon-wrap { width: 44px; height: 44px; border-radius: 13px; display: flex; align-items: center; justify-content: center; font-size: 22px; }
+@media (min-width: 640px) { .why-icon-wrap { width: 52px; height: 52px; border-radius: 15px; font-size: 26px; } }
+.why-icon-wrap.red { background: #FFE8E8; }
+.why-icon-wrap.green { background: #E5F7ED; }
+.why-icon-wrap.blue { background: #E3F0FF; }
+.why-icon-wrap.purple { background: #F0E8FF; }
+.why-text strong { display: block; font-size: 14px; font-weight: 700; margin-bottom: 4px; }
+.why-text span { font-size: 12.5px; color: var(--gray); line-height: 1.5; }
+@media (min-width: 640px) { .why-text strong { font-size: 16px; } .why-text span { font-size: 13.5px; } }
+
+/* ─── TRADE-IN SECTION ─── */
+.tradein {
+  background: radial-gradient(ellipse at 60% 80%, #2a1f5e 0%, #0f0f1a 60%);
+  padding: 52px 20px 56px; color: #fff; overflow: hidden; position: relative;
+}
+.tradein-inner { max-width: 1100px; margin: 0 auto; }
+.tradein-chip {
+  display: inline-block; border: 1px solid rgba(255,255,255,.25);
+  border-radius: 100px; padding: 6px 14px;
+  font-size: 11px; font-weight: 700; letter-spacing: .08em; color: rgba(255,255,255,.8);
+  text-transform: uppercase; margin-bottom: 20px;
+}
+.tradein-title {
+  font-size: clamp(28px, 6vw, 48px); font-weight: 800; line-height: 1.1;
+  letter-spacing: -.02em; margin-bottom: 14px; max-width: 560px;
+}
+.tradein-sub { font-size: 15px; color: rgba(255,255,255,.6); line-height: 1.6; max-width: 420px; margin-bottom: 28px; }
+.tradein-cta-wrap { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; margin-bottom: 8px; }
+.tradein-btn {
+  background: #fff; color: #1D1D1F; border: none; border-radius: 100px;
+  padding: 14px 24px; font-size: 15px; font-weight: 700; cursor: pointer;
+  text-decoration: none; display: inline-block; -webkit-tap-highlight-color: transparent;
+  transition: background .15s;
+}
+.tradein-btn:active { background: #e8e8e8; }
+.tradein-note { font-size: 12px; color: rgba(255,255,255,.4); margin-top: 10px; }
+
+.tradein-phones {
+  display: flex; align-items: center; justify-content: center; gap: 0;
+  margin-top: 36px; position: relative;
+}
+.tradein-phone {
+  width: 42%; max-width: 200px;
+  display: flex; align-items: center; justify-content: center;
+  position: relative; flex-shrink: 0;
+}
+.tradein-phone svg,
+.tradein-phone img {
+  width: 100%; height: auto; display: block;
+  filter: drop-shadow(0 30px 55px rgba(0,0,0,.6));
+}
+/* Las fotos del bucket son cuadradas (1200x1200) con el equipo centrado y
+   mucho aire alrededor; `contain` con una altura fija las hace ocupar un
+   alto parejo sin importar cuánto margen traiga cada una. */
+.tradein-phone img { height: 300px; object-fit: contain; }
+.tradein-phone.old { z-index: 1; animation: tiFloatL 5.5s ease-in-out infinite; }
+.tradein-phone.new { z-index: 2; animation: tiFloatR 5.5s ease-in-out infinite 1.1s; }
+@keyframes tiFloatL {
+  0%,100% { transform: rotate(-7deg) translate(4px, 6px) }
+  50%     { transform: rotate(-7deg) translate(4px, -8px) }
+}
+@keyframes tiFloatR {
+  0%,100% { transform: rotate(6deg) translate(-4px, -6px) scale(1.08) }
+  50%     { transform: rotate(6deg) translate(-4px, 8px) scale(1.08) }
+}
+@media (prefers-reduced-motion: reduce) {
+  .tradein-phone.old, .tradein-phone.new { animation: none; }
+  .tradein-phone.old { transform: rotate(-7deg) translateX(14px); }
+  .tradein-phone.new { transform: rotate(6deg) translateX(-14px) scale(1.08); }
+}
+.tradein-arrow {
+  position: relative;
+  width: 44px; height: 44px; border-radius: 50%;
+  background: rgba(255,255,255,.22); backdrop-filter: blur(10px);
+  border: 1px solid rgba(255,255,255,.28);
+  box-shadow: 0 8px 24px rgba(0,0,0,.4);
+  display: flex; align-items: center; justify-content: center;
+  z-index: 5; font-size: 18px; flex-shrink: 0; margin: 0 -6px;
+}
+
+/* layout: texto + foto lado a lado en desktop */
+@media (min-width: 720px) {
+  .tradein-inner { display: flex; align-items: center; gap: 40px; }
+  .tradein-text { flex: 1; }
+  .tradein-phones { flex: 0 0 340px; margin-top: 0; }
+  .tradein-phone { max-width: 165px; }
+}
+
+/* ─── REVIEWS ─── */
+.reviews-section { background: #fff; padding: 44px 0 48px; overflow: hidden; }
+.reviews-inner { max-width: 900px; margin: 0 auto; padding: 0 16px; }
+.reviews-header { display: flex; flex-direction: column; align-items: center; gap: 12px; margin-bottom: 32px; text-align: center; }
+.reviews-title { font-size: 22px; font-weight: 700; color: var(--black); }
+.reviews-google-logo { display: flex; align-items: center; gap: 8px; font-size: 15px; font-weight: 600; color: var(--gray); }
+.reviews-score { display: flex; align-items: center; gap: 8px; }
+.reviews-score-num { font-size: 40px; font-weight: 800; color: var(--black); line-height: 1; }
+.reviews-stars { color: #FBBC04; font-size: 22px; letter-spacing: 2px; }
+.reviews-count { font-size: 13px; color: var(--gray); }
+.reviews-track-wrap { overflow: hidden; }
+.reviews-track { display: flex; gap: 14px; width: max-content; will-change: transform; }
+.reviews-track.running { animation: reviewscroll var(--rev-dur, 56s) linear infinite; }
+.reviews-track:hover { animation-play-state: paused; }
+@keyframes reviewscroll { from{transform:translateX(0)} to{transform:translateX(var(--rev-dist,-50%))} }
+.rev-card {
+  width: 280px; flex-shrink: 0;
+  background: #fff; border: 1.5px solid var(--gray4);
+  border-radius: 16px; padding: 18px 16px;
+  display: flex; flex-direction: column; gap: 10px;
+  transition: transform .18s, box-shadow .18s, border-color .18s;
+}
+@media (hover: hover) {
+  .rev-card:hover { transform: translateY(-5px); box-shadow: 0 10px 28px rgba(0,0,0,.12); border-color: var(--border); }
+}
+.rev-top { display: flex; align-items: center; gap: 10px; }
+.rev-avatar {
+  width: 38px; height: 38px; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 17px; font-weight: 700; color: #fff; flex-shrink: 0;
+}
+.rev-name { font-size: 13px; font-weight: 700; color: var(--black); }
+.rev-date { font-size: 11px; color: var(--gray); }
+.rev-stars { color: #FBBC04; font-size: 14px; letter-spacing: 1px; }
+.rev-text { font-size: 13px; color: var(--gray); line-height: 1.5; }
+.rev-g-icon { margin-left: auto; flex-shrink: 0; }
+
+/* ─── LOCAL SECTION ─── */
+.local-section { max-width: 1100px; margin: 0 auto; padding: 40px 16px; }
+.local-eye { font-size: 11px; font-weight: 700; color: var(--blue); text-transform: uppercase; letter-spacing: .06em; margin-bottom: 4px; }
+.local-title { font-size: 22px; font-weight: 700; margin-bottom: 6px; }
+.local-sub { font-size: 14px; color: var(--gray); margin-bottom: 20px; line-height: 1.5; }
+.local-map-wrap { border-radius: 20px; overflow: hidden; margin-bottom: 24px; height: 220px; }
+.local-map-wrap iframe { width: 100%; height: 100%; border: none; display: block; }
+.local-rows { border-top: 1px solid var(--gray4); }
+.local-row { display: flex; justify-content: space-between; align-items: center; padding: 14px 0; border-bottom: 1px solid var(--gray4); }
+.local-row-label { font-size: 14px; color: var(--gray); }
+.local-row-val { font-size: 14px; font-weight: 700; color: var(--black); text-align: right; }
+.local-btns { display: flex; gap: 10px; margin-top: 20px; flex-wrap: wrap; }
+
+/* ─── FAQ ─── */
+.faq-section { background: var(--gray3); padding: 40px 16px; }
+.faq-inner { max-width: 900px; margin: 0 auto; }
+.faq-eye { font-size: 11px; font-weight: 700; color: var(--blue); text-transform: uppercase; letter-spacing: .06em; margin-bottom: 4px; }
+.faq-title { font-size: 22px; font-weight: 700; margin-bottom: 24px; }
+.faq-item { border-bottom: 1px solid var(--border); }
+.faq-q {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 18px 0; cursor: pointer; gap: 16px;
+  font-size: 15px; font-weight: 600; color: var(--black);
+  -webkit-tap-highlight-color: transparent;
+}
+.faq-icon { flex-shrink: 0; width: 24px; height: 24px; border-radius: 50%; border: 1.5px solid var(--gray); display: flex; align-items: center; justify-content: center; color: var(--gray); font-size: 18px; transition: transform .2s, background .2s; font-weight: 300; line-height: 1; }
+.faq-item.open .faq-icon { transform: rotate(45deg); background: var(--black); border-color: var(--black); color: #fff; }
+.faq-a { font-size: 14px; color: var(--gray); line-height: 1.6; padding-bottom: 16px; display: none; }
+.faq-item.open .faq-a { display: block; }
+
+/* ─── CATS ─── */
+.cats-bar { border-top: 1px solid var(--gray4); border-bottom: 1px solid var(--gray4); }
+.cats-scroll { display: flex; overflow-x: auto; scrollbar-width: none; padding: 0 8px; }
+.cats-scroll::-webkit-scrollbar { display: none; }
+.cat-item { flex-shrink: 0; display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 14px 16px; cursor: pointer; border-bottom: 2px solid transparent; transition: border-color .15s; -webkit-tap-highlight-color: transparent; }
+.cat-item.on { border-bottom-color: var(--black); }
+.cat-item.on .cat-name { color: var(--black); font-weight: 700; }
+.cat-emoji { font-size: 30px; width: 44px; height: 44px; display: flex; align-items: center; justify-content: center; }
+.cat-name { font-size: 11px; font-weight: 500; color: var(--gray); white-space: nowrap; }
+
+/* ─── FILTER BAR ─── */
+.fbar { padding: 10px 14px; background: #fff; display: flex; gap: 8px; flex-wrap: wrap; align-items: center; border-bottom: 1px solid var(--gray4); }
+.srch-wrap { position: relative; flex: 1; min-width: 180px; }
+.srch-ico { position: absolute; left: 12px; top: 50%; transform: translateY(-50%); font-size: 13px; pointer-events: none; color: var(--gray2); }
+.srch { width: 100%; padding: 9px 12px 9px 32px; background: var(--gray3); border: none; border-radius: 10px; font-size: 14px; color: var(--black); outline: none; -webkit-appearance: none; }
+.srch::placeholder { color: var(--gray2); }
+.pills { display: flex; gap: 6px; overflow-x: auto; scrollbar-width: none; }
+.pills::-webkit-scrollbar { display: none; }
+.pill { flex-shrink: 0; padding: 6px 13px; border-radius: 100px; border: 1px solid var(--border); background: #fff; font-size: 12.5px; font-weight: 500; color: var(--gray); cursor: pointer; white-space: nowrap; transition: all .12s; -webkit-tap-highlight-color: transparent; }
+.pill.on { background: var(--black); color: #fff; border-color: var(--black); }
+
+/* ─── SECTION ─── */
+.section { max-width: 1100px; margin: 0 auto; padding: 24px 14px 24px; }
+.sec-hdr { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 18px; }
+.sec-eye { font-size: 11px; font-weight: 700; color: var(--blue); text-transform: uppercase; letter-spacing: .06em; margin-bottom: 3px; }
+.sec-title { font-size: 20px; font-weight: 700; }
+.sec-count { font-size: 13px; color: var(--gray2); }
+
+/* ─── GRID ─── */
+.grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; }
+@media (min-width: 540px) { .grid { grid-template-columns: repeat(3, 1fr); } }
+@media (min-width: 820px) { .grid { grid-template-columns: repeat(4, 1fr); gap: 14px; } }
+
+/* ─── CARD — Apple-inspired ─── */
+.card {
+  background: #f5f5f7; border-radius: 22px;
+  overflow: hidden; display: flex; flex-direction: column; cursor: pointer;
+  transition: box-shadow .22s, transform .22s; -webkit-tap-highlight-color: transparent;
+  position: relative;
+}
+.card:active { transform: scale(.97); }
+@media (hover: hover) { .card:hover { box-shadow: 0 12px 36px rgba(0,0,0,.13); transform: translateY(-4px); } }
+
+/* Caja de imagen de tamaño FIJO y proporción idéntica en PC y mobile.
+   Antes era `height:200px` fija: en desktop la tarjeta mide ~257px de ancho
+   (caja apaisada) y en mobile ~176px (caja vertical), así que la misma foto
+   se veía con dos tamaños distintos según el dispositivo. Con aspect-ratio
+   cuadrado la caja escala con el ancho de la tarjeta y la proporción es la
+   misma siempre. El `padding` es el único margen de aire: la imagen ocupa
+   el 100% del hueco restante y `contain` la centra sin recortarla, así una
+   foto de 2 equipos y una de 1 equipo ocupan exactamente la misma caja. */
+.card-img {
+  background: #f5f5f7; padding: 18px 16px;
+  display: flex; align-items: center; justify-content: center;
+  aspect-ratio: 1 / 1; overflow: hidden; position: relative;
+}
+.card-img img { width: 100%; height: 100%; object-fit: contain; display: block; }
+.card-img-emoji { font-size: 68px; line-height: 1; }
+
+.card-cond-badge {
+  position: absolute; top: 10px; left: 10px;
+  font-size: 10px; font-weight: 700; padding: 4px 9px;
+  border-radius: 20px; pointer-events: none; white-space: nowrap; letter-spacing: .01em;
+}
+.card-cond-badge.badge-seal { background: rgba(0,100,220,.1); color: #0055cc; }
+.card-cond-badge.badge-new  { background: rgba(40,167,80,.1); color: #1a7a40; }
+.card-cond-badge.badge-used { background: rgba(180,130,0,.12); color: #8a5a00; }
+
+.card-body { padding: 6px 16px 18px; display: flex; flex-direction: column; gap: 0; flex: 1; }
+.card-name {
+  font-size: 14px; font-weight: 600; color: var(--black); line-height: 1.3;
+  margin-bottom: 6px; min-height: 2.6em;
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+}
+
+/* detail row (color dot + color · storage) */
+.card-detail-row { display: flex; align-items: center; gap: 6px; margin-bottom: 10px; min-height: 16px; }
+.card-color-dot { width: 11px; height: 11px; border-radius: 50%; border: 1.5px solid rgba(0,0,0,.12); flex-shrink: 0; }
+.card-detail-text { font-size: 12px; color: var(--gray); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+.card-price-row { margin-top: auto; }
+.card-usd { font-size: 20px; font-weight: 700; color: var(--black); display: block; }
+/* Insignia de la promo más fuerte. Sin `nowrap` ni ellipsis a propósito:
+   si el texto no entra, preferimos que baje de línea antes que cortarse —
+   una oferta cortada a la mitad no comunica nada. El ancho se limita al de
+   la tarjeta para que la píldora nunca desborde. */
+.card-offer {
+  display: inline-block; max-width: 100%;
+  font-size: 10.5px; font-weight: 800; line-height: 1.3;
+  color: #0A3D91; background: #E8F1FF; border: 1px solid #C7DDFF;
+  padding: 4px 8px; border-radius: 20px;
+  margin-top: 7px; margin-bottom: 1px;
+  letter-spacing: -.01em;
+}
+
+/* Es un <a> con href real (?p=slug) y no un <button>: así se puede abrir en
+   pestaña nueva, copiar el link y Google lo puede seguir. El click normal lo
+   intercepta el JS para no recargar la página. */
+.card-info-btn {
+  margin-top: 12px; width: 100%; display: block; text-align: center;
+  padding: 9px 0; border-radius: 980px;
+  border: none; background: var(--black);
+  font-size: 13px; font-weight: 600; color: #fff;
+  text-decoration: none;
+  cursor: pointer; transition: background .15s;
+}
+.card-info-btn:hover { background: #333; }
+
+.badge { font-size: 9.5px; font-weight: 700; padding: 3px 7px; border-radius: 6px; }
+.badge-new  { background: #E8F8EE; color: var(--green); }
+.badge-used { background: #FEF3E2; color: var(--amber); }
+.badge-seal { background: #EBF4FF; color: var(--blue); }
+
+/* ─── WHY ─── */
+.why { background: var(--gray3); padding: 36px 16px; margin-top: 8px; }
+.why-inner { max-width: 900px; margin: 0 auto; }
+.why-title { font-size: 20px; font-weight: 700; margin-bottom: 16px; }
+.why-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+@media (min-width: 640px) { .why-grid { grid-template-columns: repeat(4,1fr); } }
+.why-card { background: #fff; border-radius: 14px; padding: 16px; display: flex; align-items: flex-start; gap: 10px; }
+.why-icon { font-size: 20px; flex-shrink: 0; }
+.why-text strong { display: block; font-size: 13px; font-weight: 700; margin-bottom: 2px; }
+.why-text span { font-size: 11.5px; color: var(--gray); line-height: 1.4; }
+
+/* ─── NOTE / FOOTER ─── */
+.note { text-align: center; padding: 14px 20px; font-size: 11.5px; color: var(--gray2); background: #fff; border-top: 1px solid var(--gray4); line-height: 1.5; }
+footer { background: #1D1D1F; color: rgba(255,255,255,.5); padding: 24px 20px; font-size: 12px; text-align: center; line-height: 1.9; }
+/* Versión blanca: sobre el fondo #1D1D1F del pie, la negra sería invisible. */
+.footer-logo { width: 34px; height: 34px; object-fit: contain; display: block; margin: 0 auto 10px; opacity: .9; }
+footer a { color: rgba(255,255,255,.5); text-decoration: none; }
+footer strong { color: rgba(255,255,255,.85); }
+
+/* ─── WA FLOAT ─── */
+.wa-float { position: fixed; bottom: 20px; right: 16px; z-index: 9999; width: 56px; height: 56px; border-radius: 50%; background: #25D366; box-shadow: 0 4px 20px rgba(37,211,102,.5); display: flex; align-items: center; justify-content: center; text-decoration: none; transition: transform .15s; -webkit-tap-highlight-color: transparent; }
+.wa-float svg { width: 30px; height: 30px; fill: #fff; }
+.wa-float:active { transform: scale(.91); }
+
+/* ─── EMPTY / SKELETON ─── */
+.empty { text-align: center; padding: 64px 20px; color: var(--gray2); grid-column: 1/-1; }
+.empty-icon { font-size: 44px; margin-bottom: 10px; }
+.skel { background: linear-gradient(90deg, var(--gray3) 0%, #eaeaea 50%, var(--gray3) 100%); background-size: 200% 100%; animation: sk 1.3s infinite; border-radius: var(--radius); }
+@keyframes sk { 0%{background-position:200%} 100%{background-position:-200%} }
+
+/* ═══════════════════════════════════
+   FICHA DE PRODUCTO (página completa)
+   Antes era un bottom-sheet que tapaba a medias el listado. Ahora ocupa
+   toda la pantalla y tiene URL propia (?p=slug), así el botón "atrás" del
+   celular vuelve al listado y el link se puede mandar por WhatsApp.
+═══════════════════════════════════ */
+.modal-overlay {
+  position: fixed; inset: 0; z-index: 500;
+  background: #fff; display: none; align-items: stretch;
+  -webkit-tap-highlight-color: transparent;
+}
+.modal-overlay.open { display: flex; animation: fadeIn .18s; }
+@keyframes fadeIn { from{opacity:0} to{opacity:1} }
+
+.modal-sheet {
+  background: #fff; width: 100%; height: 100%; overflow-y: auto;
+  animation: pageIn .22s cubic-bezier(.4,0,.2,1);
+  -webkit-overflow-scrolling: touch;
+}
+@keyframes pageIn { from{transform:translateY(14px);opacity:0} to{transform:translateY(0);opacity:1} }
+
+/* barra superior fija con volver + breadcrumb (estilo OneClick) */
+.ficha-topbar {
+  position: sticky; top: 0; z-index: 20; background: rgba(255,255,255,.92);
+  backdrop-filter: saturate(180%) blur(14px); -webkit-backdrop-filter: saturate(180%) blur(14px);
+  border-bottom: 1px solid var(--gray4);
+  display: flex; align-items: center; gap: 10px; padding: 10px 14px;
+}
+.ficha-back {
+  background: var(--gray3); border: none; border-radius: 50%;
+  width: 34px; height: 34px; font-size: 17px; cursor: pointer; flex-shrink: 0;
+  display: flex; align-items: center; justify-content: center; color: var(--black);
+  -webkit-tap-highlight-color: transparent;
+}
+.ficha-back:active { transform: scale(.92); }
+.ficha-crumb {
+  font-size: 12.5px; color: var(--gray2); overflow: hidden;
+  text-overflow: ellipsis; white-space: nowrap;
+}
+.ficha-crumb b { color: var(--black); font-weight: 600; }
+
+.ficha-inner { max-width: 1100px; margin: 0 auto; }
+/* En desktop la foto va a la izquierda y los datos a la derecha, como en
+   cualquier e-commerce; en mobile queda una columna sola. */
+@media (min-width: 900px) {
+  .ficha-inner { display: grid; grid-template-columns: 1fr 1fr; gap: 40px; padding: 32px 24px 60px; align-items: start; }
+  .ficha-inner .modal-img { position: sticky; top: 76px; border-radius: 22px; max-height: none; }
+  .ficha-inner .modal-body { padding: 0; }
+}
+
+/* Misma lógica que .card-img: caja cuadrada y la foto ocupa todo el hueco.
+   Antes era apaisada (1.4) con tope de 240px y la imagen limitada al 70%
+   del ancho, así que en el celu quedaba chica y con dos bandas grises a los
+   costados. El tope en `vh` evita que en pantallas altas la foto se coma
+   toda la vista y empuje el precio fuera del scroll inicial. */
+.modal-img { background: var(--gray3); width: 100%; aspect-ratio: 1 / 1; max-height: 44vh; padding: 22px; display: flex; align-items: center; justify-content: center; font-size: 90px; overflow: hidden; }
+.modal-img img { width: 100%; height: 100%; object-fit: contain; }
+.modal-body { padding: 20px 20px 32px; }
+
+/* ─── FICHA TÉCNICA + DESCRIPCIÓN ─── */
+.ficha-sec { margin-top: 26px; }
+.ficha-sec-title {
+  font-size: 11px; font-weight: 800; color: var(--gray2);
+  text-transform: uppercase; letter-spacing: .07em; margin-bottom: 10px;
+}
+.ficha-desc { font-size: 14px; line-height: 1.65; color: var(--gray); }
+.ficha-specs { width: 100%; border-collapse: collapse; font-size: 13.5px; }
+.ficha-specs tr { border-bottom: 1px solid var(--gray4); }
+.ficha-specs tr:last-child { border-bottom: none; }
+.ficha-specs th {
+  text-align: left; font-weight: 600; color: var(--gray2);
+  padding: 11px 12px 11px 0; width: 40%; vertical-align: top; white-space: nowrap;
+}
+.ficha-specs td { padding: 11px 0; color: var(--black); vertical-align: top; }
+.ficha-nota { font-size: 11.5px; color: var(--gray2); margin-top: 10px; line-height: 1.5; }
+
+/* ─── PRESUPUESTO CON CANJE ───
+   Vive dentro de precios.html a propósito, no en un archivo aparte: así usa
+   el MISMO motor de cuotas que la ficha de producto (cuotasDe/notaCoef) y no
+   hay dos cálculos que puedan dar números distintos para lo mismo. */
+.pres-canje {
+  background: linear-gradient(135deg, #0E7C4A 0%, #14A05F 100%);
+  color: #fff; border-radius: 16px; padding: 16px; margin: 16px 0;
+}
+.pres-canje-top { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
+/* Miniatura del equipo que entrega. El fondo claro es necesario: las fotos
+   son PNG con fondo transparente y un iPhone negro sobre el verde del bloque
+   se perdería. */
+.pres-canje-body { display: flex; align-items: center; gap: 14px; }
+.pres-canje-foto {
+  width: 74px; height: 74px; flex-shrink: 0;
+  background: rgba(255,255,255,.92); border-radius: 14px; padding: 7px;
+  display: flex; align-items: center; justify-content: center;
+}
+.pres-canje-foto img { width: 100%; height: 100%; object-fit: contain; }
+.pres-canje-foto .img-emoji { font-size: 32px; }
+.pres-canje-datos { min-width: 0; flex: 1; }
+.pres-canje-badge {
+  background: rgba(255,255,255,.2); font-size: 10px; font-weight: 800;
+  padding: 4px 9px; border-radius: 20px; letter-spacing: .03em;
+}
+.pres-canje-equipo { font-size: 14px; font-weight: 700; margin-bottom: 2px; }
+.pres-canje-detalle { font-size: 11.5px; color: rgba(255,255,255,.75); margin-bottom: 12px; }
+.pres-canje-valor { font-size: 26px; font-weight: 800; letter-spacing: -.02em; }
+.pres-canje-lbl { font-size: 11px; color: rgba(255,255,255,.8); }
+
+/* Cuenta: precio − canje = saldo. Se muestra completa para que el cliente
+   entienda de dónde sale el número, no solo el resultado. */
+.pres-cuenta { border: 1px solid var(--gray4); border-radius: 14px; padding: 4px 14px; margin: 16px 0; }
+.pres-cuenta-fila {
+  display: flex; align-items: baseline; justify-content: space-between; gap: 12px;
+  padding: 11px 0; font-size: 14px; border-bottom: 1px solid var(--gray4);
+}
+.pres-cuenta-fila:last-child { border-bottom: none; }
+.pres-cuenta-fila .lbl { color: var(--gray); }
+.pres-cuenta-fila .val { font-weight: 600; color: var(--black); white-space: nowrap; }
+.pres-cuenta-fila.resta .val { color: #14A05F; }
+.pres-cuenta-fila.total { padding: 15px 0; }
+.pres-cuenta-fila.total .lbl { font-weight: 700; color: var(--black); font-size: 15px; }
+.pres-cuenta-fila.total .val { font-size: 24px; font-weight: 800; letter-spacing: -.02em; }
+
+.pres-aviso {
+  background: #FFF8E7; border: 1px solid #FFE08A; border-radius: 12px;
+  padding: 12px 14px; font-size: 12px; color: #7A5800; line-height: 1.55; margin-top: 20px;
+}
+.pres-meta { font-size: 11.5px; color: var(--gray2); text-align: center; margin-top: 14px; line-height: 1.6; }
+
+/* ─── ENVÍOS (perfumería) ───
+   El umbral sale de una constante en el JS, no está escrito acá: cuando
+   llegue el carrito va a tener que leer el mismo número para decidir si
+   cobra el envío. Un solo lugar donde cambiarlo. */
+.envio-box {
+  display: flex; align-items: flex-start; gap: 11px;
+  background: #F0FAF4; border: 1px solid #C6E9D5; border-radius: 14px;
+  padding: 13px 15px; margin-top: 18px;
+}
+.envio-box .ico { font-size: 19px; line-height: 1.2; flex-shrink: 0; }
+.envio-box b { display: block; font-size: 13.5px; color: #14683F; margin-bottom: 3px; }
+.envio-box span { font-size: 12.5px; color: #2E7D55; line-height: 1.5; }
+
+/* ─── CONTENIDO DEL COMBO ─── */
+.combo-lista { list-style: none; margin: 0; padding: 0; }
+.combo-lista li {
+  display: flex; align-items: flex-start; gap: 9px;
+  padding: 10px 0; border-bottom: 1px solid var(--gray4);
+  font-size: 14px; color: var(--black); line-height: 1.4;
+}
+.combo-lista li:last-child { border-bottom: none; }
+.combo-lista li::before { content: '✓'; color: var(--green); font-weight: 800; flex-shrink: 0; }
+/* Aviso en la tarjeta del listado, para que se note que es un paquete */
+.card-combo {
+  display: inline-block; margin-top: 6px;
+  font-size: 10px; font-weight: 700; color: #1a7a40;
+  background: #E8F8EE; border-radius: 20px; padding: 3px 8px;
+}
+
+.modal-cat { font-size: 11px; font-weight: 700; color: var(--blue); text-transform: uppercase; letter-spacing: .06em; margin-bottom: 4px; }
+.modal-name { font-size: 22px; font-weight: 800; line-height: 1.15; margin-bottom: 4px; }
+.modal-detail { font-size: 14px; color: var(--gray); margin-bottom: 16px; }
+
+/* price hero */
+.modal-price-hero { display: flex; align-items: flex-end; gap: 10px; margin-bottom: 4px; }
+.modal-usd { font-size: 32px; font-weight: 800; }
+.modal-ars { font-size: 14px; color: var(--gray2); font-weight: 500; padding-bottom: 4px; }
+
+/* regalo banner */
+.regalo-banner {
+  background: #FFF8E7; border: 1px solid #FFE08A; border-radius: 12px;
+  padding: 11px 14px; font-size: 13px; color: #7A5800; line-height: 1.45;
+  margin: 14px 0 4px;
+}
+
+/* payment section */
+.pay-section { margin-top: 20px; }
+.pay-section-title {
+  font-size: 11px; font-weight: 800; color: var(--gray2);
+  text-transform: uppercase; letter-spacing: .07em;
+  margin-bottom: 8px; display: flex; align-items: center; gap: 6px;
+}
+.pay-lista-note { font-size: 11.5px; color: var(--gray2); margin-bottom: 8px; }
+
+/* efectivo row */
+.pay-cash-row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.pay-cash-card {
+  background: var(--gray3); border-radius: 12px; padding: 14px;
+  display: flex; flex-direction: column; gap: 2px;
+}
+.pay-cash-label { font-size: 11px; color: var(--gray2); font-weight: 600; }
+.pay-cash-amount { font-size: 20px; font-weight: 800; color: var(--black); line-height: 1.1; }
+.pay-cash-sub { font-size: 10.5px; color: var(--gray2); }
+
+/* cuotas grid */
+.pay-cuotas-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.pay-cuota-card {
+  background: var(--gray3); border-radius: 12px; padding: 13px 12px;
+  display: flex; flex-direction: column; gap: 2px;
+}
+.pay-cuota-n { font-size: 11px; font-weight: 700; color: var(--gray2); }
+.pay-cuota-amount { font-size: 17px; font-weight: 800; color: var(--black); line-height: 1.15; }
+.pay-cuota-mes { font-size: 10px; color: var(--gray2); font-weight: 500; }
+.pay-cuota-nota { font-size: 10px; color: var(--gray); margin-top: 2px; font-style: italic; }
+
+/* promo especial */
+.pay-promo-card {
+  background: #F0F7FF; border: 1px solid #C0D9F5; border-radius: 12px; padding: 13px 12px;
+  display: flex; flex-direction: column; gap: 2px;
+}
+.pay-cuota-nota.promo { color: var(--blue); font-style: normal; font-weight: 700; }
+
+/* ─── PROMO DESTACADA ───
+   Va arriba de las tarjetas comunes y con fondo lleno: es la oferta que
+   más se vende, así que tiene que ganarle visualmente a todo lo demás
+   de la ficha (el resto de la página es blanco y gris claro). */
+.promo-hero {
+  margin-top: 18px; border-radius: 16px; padding: 16px 16px 14px;
+  background: linear-gradient(135deg, #0A3D91 0%, #1565D8 55%, #2E86F0 100%);
+  color: #fff; box-shadow: 0 8px 24px rgba(10,61,145,.22);
+}
+.promo-hero-top { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 10px; }
+.promo-hero-badge {
+  background: #FFD64A; color: #4A3200; font-size: 10px; font-weight: 800;
+  padding: 4px 9px; border-radius: 20px; letter-spacing: .03em; white-space: nowrap;
+}
+.promo-hero-vig {
+  font-size: 11px; font-weight: 600; color: rgba(255,255,255,.92);
+  background: rgba(255,255,255,.16); padding: 4px 9px; border-radius: 20px;
+}
+.promo-hero-title { font-size: 15px; font-weight: 800; margin-bottom: 12px; letter-spacing: -.01em; }
+.promo-hero-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.promo-hero-card {
+  background: rgba(255,255,255,.14); border: 1px solid rgba(255,255,255,.2);
+  border-radius: 12px; padding: 12px; display: flex; flex-direction: column; gap: 2px;
+}
+.promo-hero-n { font-size: 11px; font-weight: 700; color: rgba(255,255,255,.75); }
+.promo-hero-amount { font-size: 19px; font-weight: 800; line-height: 1.1; }
+.promo-hero-mes { font-size: 10px; color: rgba(255,255,255,.7); font-weight: 500; }
+.promo-hero-nota { font-size: 10.5px; font-weight: 700; color: #FFD64A; margin-top: 3px; }
+
+/* ─── CUOTAS BANCARIZADAS ───
+   Píldoras a la vista, una por plan. Antes estaban plegadas en un <details>
+   para ahorrar alto en el celu, pero escondidas no venden: el cliente que
+   compara financiación tiene que abrir para ver el número. Cada píldora
+   suma dos datos que la competencia no muestra: la etiqueta de descuento o
+   interés, y el total financiado (que además hay que informar por ley). */
+.cuota-pill {
+  display: flex; align-items: center; gap: 12px;
+  background: var(--gray3); border: 1px solid transparent;
+  border-radius: 14px; padding: 12px 14px; margin-bottom: 8px;
+  transition: border-color .15s, background .15s;
+}
+.cuota-pill:last-child { margin-bottom: 0; }
+@media (hover: hover) { .cuota-pill:hover { background: #fff; border-color: var(--gray4); } }
+
+.cuota-pill-main { display: flex; align-items: baseline; gap: 7px; flex-wrap: wrap; min-width: 0; }
+.cuota-pill-n { font-size: 13px; color: var(--gray); white-space: nowrap; }
+.cuota-pill-monto { font-size: 18px; font-weight: 800; color: var(--black); letter-spacing: -.01em; }
+
+.cuota-pill-side { margin-left: auto; text-align: right; flex-shrink: 0; }
+.cuota-pill-badge {
+  display: inline-block; font-size: 10px; font-weight: 800;
+  padding: 3px 8px; border-radius: 20px; white-space: nowrap; letter-spacing: .01em;
+}
+/* Verde = te ahorrás plata · azul = ni ganás ni perdés · gris = recargo.
+   El color hace legible de un vistazo cuál plan conviene. */
+.cuota-pill-badge.off   { background: #E8F8EE; color: #1a7a40; }
+.cuota-pill-badge.cero  { background: #E8F1FF; color: #0A3D91; }
+.cuota-pill-badge.mas   { background: var(--gray4); color: var(--gray); }
+.cuota-pill-total { display: block; font-size: 10.5px; color: var(--gray2); margin-top: 3px; white-space: nowrap; }
+
+@media (max-width: 380px) {
+  .cuota-pill { padding: 11px 12px; gap: 8px; }
+  .cuota-pill-monto { font-size: 16.5px; }
+}
+
+/* payment breakdown (legacy compat) */
+.pay-title { font-size: 12px; font-weight: 700; color: var(--gray); text-transform: uppercase; letter-spacing: .06em; margin: 20px 0 10px; }
+.pay-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.pay-card { background: var(--gray3); border-radius: 12px; padding: 12px 14px; }
+.pay-label { font-size: 11px; color: var(--gray2); font-weight: 600; margin-bottom: 4px; }
+.pay-amount { font-size: 15px; font-weight: 800; color: var(--black); }
+.pay-sub { font-size: 10.5px; color: var(--gray2); margin-top: 2px; }
+
+/* divider */
+.mdiv { height: 1px; background: var(--gray4); margin: 20px 0; }
+
+/* inquiry type */
+.inq-title { font-size: 14px; font-weight: 700; margin-bottom: 12px; }
+.inq-opts { display: flex; flex-direction: column; gap: 8px; }
+.inq-opt { display: flex; align-items: center; gap: 12px; padding: 14px; border: 1.5px solid var(--gray4); border-radius: 12px; cursor: pointer; transition: border-color .12s; -webkit-tap-highlight-color: transparent; }
+.inq-opt.sel { border-color: var(--black); background: var(--gray3); }
+.inq-opt-icon { font-size: 22px; flex-shrink: 0; }
+.inq-opt-text strong { display: block; font-size: 14px; font-weight: 700; }
+.inq-opt-text span { font-size: 12px; color: var(--gray); }
+.inq-radio { width: 18px; height: 18px; border: 2px solid var(--border); border-radius: 50%; margin-left: auto; flex-shrink: 0; display: flex; align-items: center; justify-content: center; }
+.inq-radio.sel { border-color: var(--black); background: var(--black); }
+.inq-radio.sel::after { content:''; width: 7px; height: 7px; border-radius: 50%; background: #fff; }
+
+/* turno panel */
+.turno-panel { display: none; margin-top: 14px; }
+.turno-panel.show { display: block; }
+.turno-sub { font-size: 12px; font-weight: 700; color: var(--gray); text-transform: uppercase; letter-spacing: .05em; margin-bottom: 8px; }
+.date-opts { display: flex; gap: 7px; flex-wrap: wrap; }
+.date-btn { padding: 8px 13px; border: 1.5px solid var(--border); border-radius: 10px; font-size: 12px; font-weight: 600; cursor: pointer; background: #fff; -webkit-tap-highlight-color: transparent; transition: all .12s; }
+.date-btn.sel { border-color: var(--black); background: var(--black); color: #fff; }
+/* hora select */
+.hora-select {
+  width: 100%; margin-top: 8px; padding: 12px 14px;
+  border: 1.5px solid var(--border); border-radius: 12px;
+  font-size: 14px; font-weight: 600; color: var(--black);
+  background: #fff; outline: none; -webkit-appearance: none; cursor: pointer;
+}
+.hora-select:focus { border-color: var(--black); }
+
+/* name field */
+.name-field { margin-top: 14px; }
+.name-field label { font-size: 12px; font-weight: 700; color: var(--gray); display: block; margin-bottom: 6px; }
+.name-field label .req { color: var(--red); }
+.name-field input { width: 100%; padding: 12px 14px; border: 1.5px solid var(--border); border-radius: 12px; font-size: 14px; color: var(--black); outline: none; -webkit-appearance: none; }
+.name-field input:focus { border-color: var(--black); }
+.name-field input.error { border-color: var(--red); }
+
+/* CTA button */
+.wa-cta {
+  width: 100%; margin-top: 20px; padding: 16px;
+  background: #25D366; color: #fff; border: none; border-radius: 14px;
+  font-size: 16px; font-weight: 700; cursor: pointer; display: flex;
+  align-items: center; justify-content: center; gap: 10px;
+  -webkit-tap-highlight-color: transparent; transition: background .12s;
+}
+.wa-cta:active { background: #1ebe5d; }
+.wa-cta svg { width: 22px; height: 22px; fill: #fff; }
+
+@media (max-width: 360px) {
+  .card-usd { font-size: 16px; }
+  .card-name { font-size: 13px; }
+}
+</style>
+</head>
+<body>
+
+<!-- TOPBAR -->
+<div class="topbar">
+  <span>Envíos a todo el país</span>
+  <span class="topbar-dot"></span>
+  <span>Local en Granadero Baigorria</span>
+  <span class="topbar-dot"></span>
+  <span>Hasta 12 cuotas</span>
+</div>
+
+<!-- NAV -->
+<nav class="nav">
+  <a class="nav-logo" href="#">
+    <img src="assets/logo-mark-512.png" alt="iPhone Mood" width="26" height="26">
+    iPhone Mood
+  </a>
+  <nav class="nav-links" id="nav-links" aria-label="Secciones">
+    <a href="#productos" data-sec="productos" onclick="irASeccion('productos');return false">Productos</a>
+    <a href="#canje" data-sec="canje" onclick="irASeccion('canje');return false">Plan canje</a>
+    <a href="#opiniones" data-sec="opiniones" onclick="irASeccion('opiniones');return false">Opiniones</a>
+    <a href="#local" data-sec="local" onclick="irASeccion('local');return false">Local</a>
+    <a href="#faq" data-sec="faq" onclick="irASeccion('faq');return false">Preguntas</a>
+  </nav>
+  <div style="display:flex;align-items:center;gap:8px">
+    <a class="nav-login" href="/login" rel="nofollow">Ingresar</a>
+    <span class="cotiz-pill" id="cotiz-nav">Blue: …</span>
+    <a class="nav-wa" href="https://wa.me/5493416907597" target="_blank">
+      <svg viewBox="0 0 448 512"><path d="M380.9 97.1C339 55.1 283.2 32 223.9 32c-122.4 0-222 99.6-222 222 0 39.1 10.2 77.3 29.6 111L0 480l117.7-30.9c32.4 17.7 68.9 27 106.1 27h.1c122.3 0 224.1-99.6 224.1-222 0-59.3-25.2-115-67.1-157zm-157 341.6c-33.2 0-65.7-8.9-94-25.7l-6.7-4-69.8 18.3L72 359.2l-4.4-7c-18.5-29.4-28.2-63.3-28.2-98.2 0-101.7 82.8-184.5 184.6-184.5 49.3 0 95.6 19.2 130.4 54.1 34.8 34.9 56.2 81.2 56.1 130.5 0 101.8-84.9 184.6-186.6 184.6zm101.2-138.2c-5.5-2.8-32.8-16.2-37.9-18-5.1-1.9-8.8-2.8-12.5 2.8-3.7 5.6-14.3 18-17.6 21.8-3.2 3.7-6.5 4.2-12 1.4-32.6-16.3-54-29.1-75.5-66-5.7-9.8 5.7-9.1 16.3-30.3 1.8-3.7.9-6.9-.5-9.7-1.4-2.8-12.5-30.1-17.1-41.2-4.5-10.8-9.1-9.3-12.5-9.5-3.2-.2-6.9-.2-10.6-.2-3.7 0-9.7 1.4-14.8 6.9-5.1 5.6-19.4 19-19.4 46.3 0 27.3 19.9 53.7 22.6 57.4 2.8 3.7 39.1 59.7 94.8 83.8 35.2 15.2 49 16.5 66.6 13.9 10.7-1.6 32.8-13.4 37.4-26.4 4.6-13 4.6-24.1 3.2-26.4-1.3-2.5-5-3.9-10.5-6.6z"/></svg>
+      WhatsApp
+    </a>
+    <button class="nav-burger" id="nav-burger" onclick="toggleMenu(true)" aria-label="Abrir menú" aria-expanded="false">
+      <span></span><span></span><span></span>
+    </button>
+  </div>
+</nav>
+
+<!-- MENÚ LATERAL (mobile) -->
+<div class="menu-overlay" id="menu-overlay" onclick="toggleMenu(false)"></div>
+<aside class="menu-lateral" id="menu-lateral" aria-label="Menú de secciones" aria-hidden="true">
+  <div class="menu-lateral-hdr">
+    <span>Secciones</span>
+    <button onclick="toggleMenu(false)" aria-label="Cerrar menú">✕</button>
+  </div>
+  <a href="#productos" onclick="irASeccion('productos');return false"><span>🛍️</span> Productos</a>
+  <a href="#canje" onclick="irASeccion('canje');return false"><span>🔄</span> Plan canje</a>
+  <a href="#opiniones" onclick="irASeccion('opiniones');return false"><span>⭐</span> Opiniones</a>
+  <a href="#local" onclick="irASeccion('local');return false"><span>📍</span> Local</a>
+  <a href="#faq" onclick="irASeccion('faq');return false"><span>❓</span> Preguntas</a>
+  <div class="menu-lateral-pie">
+    <a class="menu-lateral-wa" href="https://wa.me/5493416907597" target="_blank">Escribinos por WhatsApp</a>
+    <a class="menu-lateral-login" href="/login" rel="nofollow">Ingresar al sistema</a>
+  </div>
+</aside>
+
+<!-- HERO -->
+<div class="hero-wrap">
+  <div class="hero">
+    <div class="hero-eye">NUEVOS INGRESOS</div>
+    <div class="hero-title">Productos<br>destacados.</div>
+    <div class="hero-sub">iPhone, Mac, iPad, AirPods y más. Stock real con precios en USD y ARS actualizados a diario.</div>
+    <div class="hero-btns">
+      <a class="btn-dark" href="#productos" onclick="smoothTo('productos');return false">Explorar productos</a>
+      <a class="btn-outline" href="https://wa.me/5493416907597" target="_blank">Ver por WhatsApp</a>
+    </div>
+  </div>
+  <div class="hero-cards" aria-hidden="true">
+    <div class="hf-card hf-1">
+      <div class="hf-ico" style="background:#EAF2FE">📱</div>
+      <div>
+        <div class="hf-l1" id="hf-modelo">iPhone</div>
+        <div class="hf-price" id="hf-precio">—</div>
+      </div>
+    </div>
+    <div class="hf-card hf-2">
+      <div class="hf-ico" style="background:#E7F7EE">💳</div>
+      <div>
+        <div class="hf-l1">12 cuotas sin interés</div>
+        <div class="hf-l2">Con bancos adheridos</div>
+      </div>
+    </div>
+    <div class="hf-card hf-3">
+      <div class="hf-ico" style="background:#FEF3E0">🔒</div>
+      <div>
+        <div class="hf-l1">Sellados y usados</div>
+        <div class="hf-l2">Con garantía real</div>
+      </div>
+    </div>
+    <div class="hf-card hf-4">
+      <div class="hf-ico" style="background:#FDECEC">⭐</div>
+      <div>
+        <div class="hf-l1">5.0 en Google</div>
+        <div class="hf-l2">Local en Baigorria</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- CATEGORY CAROUSEL -->
+<div class="cat-showcase">
+  <div class="cat-showcase-track" id="cat-showcase-track"></div>
+</div>
+
+<!-- CATEGORY ROW (filter) -->
+<div class="cats-bar">
+  <div class="cats-scroll" id="cats-row"></div>
+</div>
+
+<!-- MODEL FILTER BAR (iPhone) -->
+<div class="model-bar" id="model-bar">
+  <span class="model-bar-label" id="model-bar-label">Modelo</span>
+  <div id="model-pills" style="display:flex;gap:8px"></div>
+</div>
+
+<!-- FILTER BAR -->
+<div class="fbar" id="fbar">
+  <div class="srch-wrap">
+    <span class="srch-ico">🔍</span>
+    <input class="srch" id="q" type="search" placeholder="Buscar…" autocomplete="off" autocorrect="off" spellcheck="false">
+  </div>
+  <div class="pills" id="sto-pills"></div>
+  <div class="pills" id="cond-pills"></div>
+</div>
+
+<!-- PRODUCTS -->
+<div class="section" id="productos">
+  <div class="sec-hdr">
+    <div>
+      <div class="sec-eye" id="sec-eye">Productos disponibles</div>
+      <div class="sec-title" id="sec-title">Todo el stock</div>
+    </div>
+    <div class="sec-count" id="sec-count"></div>
+  </div>
+  <div class="grid" id="grid">
+    <div class="skel" style="height:260px"></div>
+    <div class="skel" style="height:260px"></div>
+    <div class="skel" style="height:260px"></div>
+    <div class="skel" style="height:260px"></div>
+  </div>
+</div>
+
+<!-- WHY -->
+<div class="why">
+  <div class="why-inner">
+    <div class="why-eye">POR QUÉ ELEGIRNOS</div>
+    <div class="why-title">Todo antes de elegir.</div>
+    <div class="why-grid">
+      <div class="why-card">
+        <div class="why-icon-wrap red">⭐</div>
+        <div class="why-text"><strong>Productos seleccionados</strong><span>Nuevos y usados, revisados antes de llegar a tus manos.</span></div>
+      </div>
+      <div class="why-card">
+        <div class="why-icon-wrap green">⚡</div>
+        <div class="why-text"><strong>Atención rápida</strong><span>Consultas directas por WhatsApp, sin vueltas.</span></div>
+      </div>
+      <div class="why-card">
+        <div class="why-icon-wrap blue">💳</div>
+        <div class="why-text"><strong>Hasta 12 cuotas</strong><span>Con las tarjetas que ya tenés, sin sorpresas.</span></div>
+      </div>
+      <div class="why-card">
+        <div class="why-icon-wrap purple">🛡️</div>
+        <div class="why-text"><strong>Compra con confianza</strong><span>Local físico en Granadero Baigorria y garantía real.</span></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- TRADE-IN -->
+<div class="tradein" id="canje">
+  <div class="tradein-inner">
+    <div class="tradein-text">
+      <div class="tradein-chip">Tomamos tu usado</div>
+      <div class="tradein-title">Tu iPhone actual es parte de pago.</div>
+      <div class="tradein-sub">Contanos qué modelo tenés, su capacidad, porcentaje de batería y estado general. Te decimos cuánto vale y qué diferencia necesitás para cambiarlo.</div>
+      <div class="tradein-cta-wrap">
+        <a class="tradein-btn" href="https://wa.me/5493416907597?text=Hola!%20Quiero%20cotizar%20mi%20iPhone%20usado." target="_blank">Cotizar mi iPhone →</a>
+      </div>
+      <div class="tradein-note">Respuesta personalizada · Sin compromiso</div>
+    </div>
+    <div class="tradein-phones" aria-hidden="true" id="tradein-phones">
+      <div class="tradein-phone old">
+        <svg viewBox="0 0 150 300" xmlns="http://www.w3.org/2000/svg">
+          <rect x="3" y="3" width="144" height="294" rx="26" fill="#5C6B7A"/>
+          <rect x="6" y="6" width="138" height="288" rx="23" fill="#8FA3B5"/>
+          <rect x="10" y="10" width="130" height="280" rx="20" fill="#0E1116"/>
+          <rect x="14" y="14" width="122" height="272" rx="17" fill="#1E2A38"/>
+          <rect x="58" y="14" width="34" height="9" rx="4.5" fill="#0A0D11"/>
+          <circle cx="40" cy="52" r="17" fill="#0F141A"/>
+          <circle cx="40" cy="52" r="7.5" fill="#2C3E50"/>
+          <circle cx="35" cy="47" r="2.5" fill="#5B7C99" opacity=".8"/>
+        </svg>
+      </div>
+      <div class="tradein-arrow">→</div>
+      <div class="tradein-phone new">
+        <svg viewBox="0 0 150 300" xmlns="http://www.w3.org/2000/svg">
+          <defs>
+            <linearGradient id="tiEdge" x1="0" y1="0" x2="1" y2="1">
+              <stop offset="0%" stop-color="#8E8E93"/>
+              <stop offset="45%" stop-color="#48484A"/>
+              <stop offset="100%" stop-color="#7C7C80"/>
+            </linearGradient>
+            <linearGradient id="tiBack" x1="0" y1="0" x2="1" y2="1">
+              <stop offset="0%" stop-color="#3A3A3C"/>
+              <stop offset="60%" stop-color="#1C1C1E"/>
+              <stop offset="100%" stop-color="#2C2C2E"/>
+            </linearGradient>
+          </defs>
+          <rect x="2" y="2" width="146" height="296" rx="28" fill="url(#tiEdge)"/>
+          <rect x="6" y="6" width="138" height="288" rx="25" fill="url(#tiBack)"/>
+          <rect x="61" y="13" width="28" height="8" rx="4" fill="#0A0A0B"/>
+          <rect x="16" y="34" width="62" height="62" rx="20" fill="#26262A"/>
+          <circle cx="34" cy="52" r="12" fill="#0B0B0C"/>
+          <circle cx="34" cy="52" r="5.5" fill="#1F3A4D"/>
+          <circle cx="30.5" cy="48.5" r="2" fill="#6FA8C8" opacity=".85"/>
+          <circle cx="60" cy="52" r="12" fill="#0B0B0C"/>
+          <circle cx="60" cy="52" r="5.5" fill="#1F3A4D"/>
+          <circle cx="56.5" cy="48.5" r="2" fill="#6FA8C8" opacity=".85"/>
+          <circle cx="34" cy="78" r="12" fill="#0B0B0C"/>
+          <circle cx="34" cy="78" r="5.5" fill="#1F3A4D"/>
+          <circle cx="30.5" cy="74.5" r="2" fill="#6FA8C8" opacity=".85"/>
+          <circle cx="62" cy="80" r="5" fill="#3A3A3C"/>
+          <rect x="1" y="70" width="3" height="34" rx="1.5" fill="#9A9AA0"/>
+          <rect x="1" y="112" width="3" height="26" rx="1.5" fill="#9A9AA0"/>
+          <rect x="146" y="86" width="3" height="44" rx="1.5" fill="#9A9AA0"/>
+        </svg>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- RESEÑAS GOOGLE -->
+<div class="reviews-section" id="opiniones">
+  <div class="reviews-inner">
+    <div class="reviews-header">
+      <div class="reviews-title">Nuestros clientes nos califican así</div>
+      <div class="reviews-score">
+        <span class="reviews-score-num" id="reviews-score-num">5.0</span>
+        <div>
+          <div class="reviews-stars">★★★★★</div>
+          <div class="reviews-count" id="reviews-count">103 reseñas en Google</div>
+        </div>
+      </div>
+      <div class="reviews-google-logo">
+        <svg width="18" height="18" viewBox="0 0 48 48"><path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"/><path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"/><path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"/><path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.18 1.48-4.97 2.31-8.16 2.31-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"/></svg>
+        Reseñas de Google
+      </div>
+    </div>
+  </div>
+  <div class="reviews-track-wrap">
+    <div class="reviews-track" id="reviews-track"></div>
+  </div>
+</div>
+
+<!-- NUESTRO LOCAL -->
+<div class="local-section" id="local">
+  <div class="local-eye">NUESTRO LOCAL</div>
+  <div class="local-title">Comprá con la tranquilidad<br>de saber dónde estamos.</div>
+  <div class="local-sub">Estamos dentro del Complejo Náutico Tifón — Granadero Baigorria. Vení, conocé los productos y recibí atención personalizada.</div>
+  <div class="local-map-wrap">
+    <iframe
+      src="https://www.google.com/maps/embed?pb=!1m18!1m12!1m3!1d3352.2845203050397!2d-60.69840669999993!3d-32.837717600000005!2m3!1f0!2f0!3f0!3m2!1i1024!2i768!4f13.1!3m3!1m2!1s0x95b651005f79fa37%3A0x4fb8b1e135dd9c93!2siphone%20Mood!5e0!3m2!1sen!2sus!4v1785318845800!5m2!1sen!2sus"
+      allowfullscreen loading="lazy" referrerpolicy="strict-origin-when-cross-origin">
+    </iframe>
+  </div>
+  <div class="local-rows">
+    <div class="local-row">
+      <span class="local-row-label">Ubicación</span>
+      <span class="local-row-val">Complejo Náutico Tifón · Granadero Baigorria, Santa Fe</span>
+    </div>
+    <div class="local-row">
+      <span class="local-row-label">Seguridad</span>
+      <span class="local-row-val">Privada · Monitoreo 24/7</span>
+    </div>
+    <div class="local-row">
+      <span class="local-row-label">Horarios</span>
+      <span class="local-row-val">Lunes a sábados · 8 a 20 h</span>
+    </div>
+    <div class="local-row">
+      <span class="local-row-label">Atención</span>
+      <span class="local-row-val">Solo con turno previo</span>
+    </div>
+  </div>
+  <div class="local-btns">
+    <a class="btn-dark" href="https://wa.me/5493416907597?text=Hola!%20Quiero%20sacar%20un%20turno." target="_blank">Sacar turno</a>
+    <a class="btn-outline" href="https://share.google/biN7yQOM5S7czZFbt" target="_blank">Cómo llegar</a>
+  </div>
+</div>
+
+<!-- FAQ -->
+<div class="faq-section" id="faq">
+  <div class="faq-inner">
+    <div class="faq-eye">PREGUNTAS FRECUENTES</div>
+    <div class="faq-title">Todo antes de elegir.</div>
+    <div class="faq-item open">
+      <div class="faq-q" onclick="toggleFaq(this)">
+        <span>¿Realizan envíos a todo el país?</span>
+        <div class="faq-icon">+</div>
+      </div>
+      <div class="faq-a">Sí, hacemos envíos a todo el país por Andreani o correo a elección. El costo de envío se coordina por WhatsApp antes de confirmar.</div>
+    </div>
+    <div class="faq-item">
+      <div class="faq-q" onclick="toggleFaq(this)">
+        <span>¿Aceptan celulares usados?</span>
+        <div class="faq-icon">+</div>
+      </div>
+      <div class="faq-a">Sí, tomamos tu equipo usado como parte de pago. Consultá el valor de tu celular por WhatsApp y te cotizamos al instante.</div>
+    </div>
+    <div class="faq-item">
+      <div class="faq-q" onclick="toggleFaq(this)">
+        <span>¿Puedo pagar en cuotas?</span>
+        <div class="faq-icon">+</div>
+      </div>
+      <div class="faq-a">Sí, aceptamos hasta 12 cuotas con tarjeta de crédito. También tenés promos especiales con Banco Macro. Consultá los planes de pago en el detalle de cada producto.</div>
+    </div>
+    <div class="faq-item">
+      <div class="faq-q" onclick="toggleFaq(this)">
+        <span>¿Los precios en ARS se actualizan seguido?</span>
+        <div class="faq-icon">+</div>
+      </div>
+      <div class="faq-a">Los precios en ARS se calculan automáticamente sobre la cotización del dólar blue de Rosario y se actualizan a diario. El valor exacto se confirma al momento del pago.</div>
+    </div>
+    <div class="faq-item">
+      <div class="faq-q" onclick="toggleFaq(this)">
+        <span>¿Venden fragancias y accesorios?</span>
+        <div class="faq-icon">+</div>
+      </div>
+      <div class="faq-a">Sí, además de tecnología Apple contamos con fragancias de diseñador y árabes, y una variedad de accesorios para celulares. Consultanos por WhatsApp para ver el stock completo.</div>
+    </div>
+  </div>
+</div>
+
+<div class="note">⚠️ Precios en ARS calculados al blue de Rosario, actualizados a diario. El valor exacto se confirma al momento del pago.</div>
+
+<footer>
+  <img class="footer-logo" src="assets/logo-mark-blanco-512.png" alt="" width="34" height="34">
+  <strong>iPhone Mood</strong><br>
+  Granadero Baigorria · Solo con turno previo<br>
+  <a href="https://wa.me/5493416907597">+54 9 3416 90-7597</a>
+</footer>
+
+<!-- WA FLOAT -->
+<a class="wa-float" href="https://wa.me/5493416907597" target="_blank" aria-label="WhatsApp">
+  <svg viewBox="0 0 24 24" fill="#fff" xmlns="http://www.w3.org/2000/svg">
+    <path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z"/>
+  </svg>
+</a>
+
+<!-- FICHA DE PRODUCTO — se muestra en la ruta ?p=<slug> -->
+<div class="modal-overlay" id="modal-overlay">
+  <div class="modal-sheet" id="modal-sheet">
+    <div class="ficha-topbar">
+      <button class="ficha-back" onclick="closeModal()" aria-label="Volver al listado">←</button>
+      <div class="ficha-crumb" id="m-crumb"></div>
+    </div>
+
+    <div class="ficha-inner">
+    <div class="modal-img" id="m-img"></div>
+
+    <div class="modal-body">
+      <div class="modal-cat" id="m-cat"></div>
+      <div class="modal-name" id="m-name"></div>
+      <div class="modal-detail" id="m-detail"></div>
+
+      <div class="modal-price-hero">
+        <div class="modal-usd" id="m-usd"></div>
+      </div>
+
+      <!-- PAGOS (generado por JS) -->
+      <div id="m-pagos"></div>
+
+      <!-- FICHA TÉCNICA + DESCRIPCIÓN (generado por JS) -->
+      <div id="m-ficha"></div>
+
+      <div class="mdiv"></div>
+
+      <!-- INQUIRY TYPE -->
+      <div class="inq-title">¿Cómo querés contactarnos?</div>
+      <div class="inq-opts" id="inq-opts">
+        <div class="inq-opt sel" data-inq="turno" onclick="selInq(this)">
+          <span class="inq-opt-icon">📅</span>
+          <div class="inq-opt-text">
+            <strong>Pedir turno para verlo en persona</strong>
+            <span>Vení al local en Granadero Baigorria</span>
+          </div>
+          <div class="inq-radio sel"></div>
+        </div>
+        <div class="inq-opt" data-inq="disponibilidad" onclick="selInq(this)">
+          <span class="inq-opt-icon">📦</span>
+          <div class="inq-opt-text">
+            <strong>Consultar disponibilidad</strong>
+            <span>¿Está en stock? ¿Puedo reservarlo?</span>
+          </div>
+          <div class="inq-radio"></div>
+        </div>
+        <div class="inq-opt" data-inq="duda" onclick="selInq(this)">
+          <span class="inq-opt-icon">❓</span>
+          <div class="inq-opt-text">
+            <strong>Tengo una duda</strong>
+            <span>Garantía, características, pago, etc.</span>
+          </div>
+          <div class="inq-radio"></div>
+        </div>
+      </div>
+
+      <!-- TURNO PANEL -->
+      <div class="turno-panel show" id="turno-panel">
+        <div class="mdiv" style="margin:14px 0 12px"></div>
+        <div class="turno-sub">¿Qué día preferís?</div>
+        <div class="date-opts" id="date-opts"></div>
+        <div class="turno-sub" style="margin-top:14px">Hora del turno</div>
+        <select class="hora-select" id="hora-select">
+          <option value="">— Seleccioná un horario —</option>
+        </select>
+      </div>
+
+      <!-- NAME FIELD -->
+      <div class="name-field">
+        <label>Tu nombre <span class="req">*</span></label>
+        <input type="text" id="m-nombre" placeholder="ej: Martín" autocomplete="given-name">
+      </div>
+
+      <!-- CTA -->
+      <button class="wa-cta" onclick="enviarWA()">
+        <svg viewBox="0 0 448 512"><path d="M380.9 97.1C339 55.1 283.2 32 223.9 32c-122.4 0-222 99.6-222 222 0 39.1 10.2 77.3 29.6 111L0 480l117.7-30.9c32.4 17.7 68.9 27 106.1 27h.1c122.3 0 224.1-99.6 224.1-222 0-59.3-25.2-115-67.1-157zm-157 341.6c-33.2 0-65.7-8.9-94-25.7l-6.7-4-69.8 18.3L72 359.2l-4.4-7c-18.5-29.4-28.2-63.3-28.2-98.2 0-101.7 82.8-184.5 184.6-184.5 49.3 0 95.6 19.2 130.4 54.1 34.8 34.9 56.2 81.2 56.1 130.5 0 101.8-84.9 184.6-186.6 184.6zm101.2-138.2c-5.5-2.8-32.8-16.2-37.9-18-5.1-1.9-8.8-2.8-12.5 2.8-3.7 5.6-14.3 18-17.6 21.8-3.2 3.7-6.5 4.2-12 1.4-32.6-16.3-54-29.1-75.5-66-5.7-9.8 5.7-9.1 16.3-30.3 1.8-3.7.9-6.9-.5-9.7-1.4-2.8-12.5-30.1-17.1-41.2-4.5-10.8-9.1-9.3-12.5-9.5-3.2-.2-6.9-.2-10.6-.2-3.7 0-9.7 1.4-14.8 6.9-5.1 5.6-19.4 19-19.4 46.3 0 27.3 19.9 53.7 22.6 57.4 2.8 3.7 39.1 59.7 94.8 83.8 35.2 15.2 49 16.5 66.6 13.9 10.7-1.6 32.8-13.4 37.4-26.4 4.6-13 4.6-24.1 3.2-26.4-1.3-2.5-5-3.9-10.5-6.6z"/></svg>
+        Enviar consulta por WhatsApp
+      </button>
+    </div>
+    </div>
+  </div>
+</div>
+
+<script>
+const { SUPABASE_URL, SUPABASE_ANON_KEY } = window.__APP_CONFIG__;
+const supa = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+const CATS = [
+  { id:'todos',     label:'Todos',       emoji:'🛍️' },
+  // Sin `img`: antes apuntaban al CDN de Apple, que rota sus URLs con cada
+  // ciclo de producto (son direcciones con el año/modelo en el nombre) y las
+  // da de baja sin aviso — hoy 4 de las 5 ya devuelven 404. No rompía la
+  // vista porque había un onerror que caía al emoji, pero seguía gastando
+  // una petición de red que siempre fallaba y quedaba en la consola como
+  // error. Usar el emoji directo evita depender de un tercero que se puede
+  // caer en cualquier momento sin que nos enteremos.
+  { id:'iphone',   label:'iPhone',      emoji:'📱' },
+  { id:'mac',      label:'Mac',         emoji:'💻' },
+  { id:'ipad',     label:'iPad',        emoji:'🖥️' },
+  { id:'watch',    label:'Apple Watch', emoji:'⌚' },
+  { id:'audio',    label:'AirPods',     emoji:'🎧' },
+  { id:'android',  label:'Android',     emoji:'🤖' },
+  { id:'accesorio',label:'Accesorios',  emoji:'🔌' },
+  { id:'cargador', label:'Cargadores',  emoji:'⚡' },
+  // Estas dos faltaban y sí existen en el stock: sin la entrada acá, los 23
+  // productos de esas categorías se publicaban igual pero sin chip propio,
+  // así que solo aparecían entrando por "Todos" o buscándolos por nombre.
+  { id:'perfumeria', label:'Perfumería', emoji:'🧴' },
+  { id:'repuesto', label:'Repuestos',   emoji:'🔧' },
+  { id:'gaming',   label:'Gaming',      emoji:'🎮' },
+  { id:'herramienta', label:'Herramientas', emoji:'🛠️' },
+  { id:'otro',     label:'Otros',       emoji:'📦' },
+];
+const CAT = Object.fromEntries(CATS.map(c => [c.id, c]));
+
+// Rubros que se publican en la landing. NO está hardcodeado: sale de la
+// clave `landing_categorias` de la tabla `configuracion`, que se prende y
+// apaga desde Panel → Landing pública en el CRM.
+// El fallback es solo iPhone a propósito: si la config falta o viene rota,
+// preferimos publicar de menos y no de más (los repuestos, por ejemplo, son
+// consumo interno del taller y no deberían aparecer nunca por accidente).
+const CATS_VISIBLES_FALLBACK = ['iphone'];
+let catsVisibles = new Set(CATS_VISIBLES_FALLBACK);
+
+let todos = [], cotiz = 1, pagosConfig = null;
+let catSel = 'iphone', stoSel = 'todos', condSel = 'todos', modelSel = 'todos', query = '';
+let modalProd = null, inqSel = 'turno', dateSel = '', timeSel = 'mañana (10 a 13hs)';
+
+// Config por defecto — se sobreescribe con lo que haya en Supabase
+// ─── CONFIGURACIÓN DE FINANCIACIÓN ───
+// El `coef` es el MULTIPLICADOR DEL TOTAL sobre el precio de lista, no el de
+// la cuota mensual. O sea: total = precio_lista × coef, y cuota = total / n.
+// Se eligió así porque es como Franco piensa el negocio: 0.86 se lee directo
+// como "15% off" y 1.05 como "5% de interés". El formato anterior guardaba el
+// coeficiente ya dividido por la cantidad de cuotas (0.1433658 para 6 cuotas),
+// que es el mismo número pero imposible de leer de un vistazo.
+//   `mostrar: false` deja la cuota fuera de la landing sin borrar el número,
+//   para poder volver a prenderla sin recargarlo.
+const PAGOS_DEFAULT = {
+  regalo: "🎁 Todos los equipos incluyen cargador, funda y templado de regalo. Comprando un equipo nuevo, llevate un cargador original Apple por 45 USD.",
+  contado_factor: 1,
+  lista_factor: 1.45,
+  promo: {
+    titulo: "🏦 Promo Banco Macro",
+    vigencia: "Agosto · jueves a sábado",
+    cuotas: [
+      { n: 3,  mostrar: false, coef: null },
+      { n: 6,  mostrar: true,  coef: 0.86 },
+      { n: 9,  mostrar: false, coef: null },
+      { n: 12, mostrar: true,  coef: 1.00 },
+    ]
+  },
+  otros: {
+    titulo: "Otras tarjetas de crédito",
+    cuotas: [
+      { n: 3,  mostrar: true, coef: 0.90 },
+      { n: 6,  mostrar: true, coef: 1.00 },
+      { n: 9,  mostrar: true, coef: 1.05 },
+      { n: 12, mostrar: true, coef: 1.10 },
+    ]
+  }
+};
+
+// Etiqueta derivada del coeficiente, para que nunca se contradiga con el
+// número: si Franco cambia 0.86 por 0.80, el cartel pasa solo de 14% a 20%.
+function notaCoef(coef) {
+  if (coef == null) return '';
+  if (Math.abs(coef - 1) < 0.005) return 'SIN INTERÉS';
+  if (coef < 1) return `${Math.round((1 - coef) * 100)}% OFF`;
+  return `+${Math.round((coef - 1) * 100)}% de interés`;
+}
+
+// Cuotas que se publican de un bloque, ya calculadas en pesos.
+function cuotasDe(bloque, listaARS) {
+  return (bloque?.cuotas || [])
+    .filter(c => c.mostrar !== false && c.coef != null && c.coef > 0)
+    .map(c => {
+      const total = Math.round(listaARS * c.coef);
+      return { n: c.n, total, mes: Math.round(total / c.n), nota: c.nota || notaCoef(c.coef) };
+    });
+}
+
+// Convierte el formato viejo (coeficiente por cuota, `cuotas_fijas`+`promos`)
+// al nuevo. Existe para que la landing no se rompa en la ventana entre este
+// deploy y la primera vez que Franco guarde desde el panel.
+function normalizarPagos(cfg) {
+  if (!cfg || cfg.promo || cfg.otros) return cfg;
+  const conv = arr => (arr || []).map(c => ({ n: c.n, mostrar: true, coef: +(c.coef * c.n).toFixed(4), nota: c.nota }));
+  const pr = (cfg.promos || [])[0];
+  return {
+    ...cfg,
+    promo: pr ? { titulo: pr.titulo, vigencia: PAGOS_DEFAULT.promo.vigencia, cuotas: conv(pr.cuotas) } : null,
+    otros: { titulo: PAGOS_DEFAULT.otros.titulo, cuotas: conv(cfg.cuotas_fijas) },
+  };
+}
+
+/* ─── INIT ─── */
+async function init() {
+  // Cargar cotización y config de pagos en paralelo
+  const [cfgRes, pagosRes, catsRes, stockRes] = await Promise.all([
+    supa.from('configuracion').select('valor').eq('clave', 'ref_blue').single(),
+    supa.from('configuracion').select('valor').eq('clave', 'pagos_config').single(),
+    supa.from('configuracion').select('valor').eq('clave', 'landing_categorias').single(),
+    // Vista pública: solo columnas de catálogo. El costo, el precio
+    // mayorista, el proveedor, los IMEI y las series NO salen de la base.
+    // El filtro de disponible/tasado ya lo hace la vista.
+    supa.from('stock_publico')
+      .select('*')
+      .order('categoria').order('nombre'),
+    // Va en el mismo lote y no se desestructura: sólo tiene que estar
+    // resuelto antes del primer render() para no pedir fotos inexistentes.
+    cargarIndiceImagenes()
+  ]);
+
+  if (cfgRes.data) cotiz = Number(cfgRes.data.valor) || 1;
+  document.getElementById('cotiz-nav').textContent = 'Blue: $' + cotiz.toLocaleString('es-AR');
+
+  try {
+    pagosConfig = normalizarPagos(pagosRes.data ? JSON.parse(pagosRes.data.valor) : PAGOS_DEFAULT);
+  } catch(e) { pagosConfig = PAGOS_DEFAULT; }
+
+  // Rubros habilitados. Un array vacío se ignora a propósito: si alguien
+  // apaga todo por error, la landing queda con iPhone en vez de vacía.
+  try {
+    const lista = catsRes.data ? JSON.parse(catsRes.data.valor) : null;
+    const base = Array.isArray(lista) && lista.length ? lista : CATS_VISIBLES_FALLBACK;
+    // Se expande por grupo: prender "Perfumería" en el panel tiene que traer
+    // también decants y combos, que son sub-tipos suyos y no rubros aparte.
+    catsVisibles = new Set(base.flatMap(catsDe));
+  } catch(e) { catsVisibles = new Set(CATS_VISIBLES_FALLBACK.flatMap(catsDe)); }
+
+  const raw = (stockRes.data || []).filter(p => qty(p) > 0 && catsVisibles.has(p.categoria));
+  // Agrupar duplicados por categoria + modelo + storage + color + condición (ignora diferencias de precio)
+  const grouped = {};
+  raw.forEach(p => {
+    const condP = ((p.estado_producto||'').toLowerCase().includes('sellado')||((p.estado_producto||'').toLowerCase().includes('sealed'))) ? 'sellado' : ((p.estado_producto||'').toLowerCase().includes('nuevo') ? 'nuevo' : 'usado');
+    // `nombre` va en la clave porque `modelo` solo no alcanza para identificar:
+    // sin él, dos perfumes de la misma marca, o una batería y un vidrio del
+    // mismo iPhone, se fusionaban en una sola tarjeta con la suma de unidades.
+    const key = [p.categoria, p.modelo||p.nombre, p.storage||'', p.color||'', condP, p.nombre||''].join('|');
+    if (!grouped[key]) { grouped[key] = { ...p, _qty: qty(p) }; }
+    else {
+      grouped[key]._qty += qty(p);
+    }
+  });
+  todos = Object.values(grouped);
+  buildHeroCard();
+  buildTradeIn();
+  buildShowcase();
+  buildReviews();
+  actualizarPuntajeGoogle();
+  buildCats();
+  buildFilters();
+  render();
+  // Después de render() porque necesita `todos` ya cargado para resolver el slug.
+  abrirDesdeURL();
+  iniciarMenuActivo();
+
+  document.getElementById('q').addEventListener('input', e => { query = e.target.value.trim().toLowerCase(); render(); });
+  buildDateOpts();
+}
+
+/* tarjeta flotante del hero: muestra el iPhone más barato disponible */
+function buildHeroCard() {
+  const el = document.getElementById('hf-precio');
+  const nm = document.getElementById('hf-modelo');
+  if (!el) return;
+  const iph = todos.filter(p =>
+    (p.categoria || '').toLowerCase() === 'iphone' &&
+    /^\s*iphone\s/i.test(p.modelo || p.nombre || '') &&
+    pUSD(p) > 0
+  );
+  if (!iph.length) return;
+  const barato = iph.reduce((a, b) => pUSD(b) < pUSD(a) ? b : a);
+  el.textContent = 'Desde ' + fUSD(pUSD(barato));
+  if (nm) nm.textContent = barato.modelo || 'iPhone';
+}
+
+/* ─── HELPERS ─── */
+// Misma fórmula que State.getStock() en el CRM: el mayor entre IMEIs cargados y
+// cantidad declarada. Antes los IMEIs pisaban la cantidad, y un lote de 5 con 1
+// IMEI identificado se publicaba acá como 1 sola unidad.
+function qty(p) { return p._qty ?? (Number(p.unidades) || 0); }
+function pUSD(p) { return Number(p.precio_usd) || 0; }
+function pARS(p) { return Math.round(pUSD(p) * cotiz); }
+function cond(p) {
+  const e = (p.estado_producto || '').toLowerCase();
+  if (e.includes('sellado') || e.includes('sealed')) return 'sellado';
+  if (e.includes('nuevo')) return 'nuevo';
+  return 'usado';
+}
+function fARS(n) { return '$' + Math.round(n).toLocaleString('es-AR'); }
+function fUSD(n) { return 'USD ' + Math.round(n).toLocaleString('es-AR'); }
+function esc(s) { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+function bestOffer() {
+  // La insignia de la tarjeta muestra la mejor oferta visible: primero una
+  // cuota sin interés de la promo, después el mayor plan de "otras tarjetas".
+  const cfg = pagosConfig || PAGOS_DEFAULT;
+  const sinInteres = (cfg.promo?.cuotas || [])
+    .filter(c => c.mostrar !== false && c.coef != null && Math.abs(c.coef - 1) < 0.005)
+    .map(c => c.n);
+  if (sinInteres.length) return `${Math.max(...sinInteres)} cuotas sin interés`;
+  const visibles = (cfg.otros?.cuotas || []).filter(c => c.mostrar !== false && c.coef != null).map(c => c.n);
+  return visibles.length ? `Hasta ${Math.max(...visibles)} cuotas` : null;
+}
+
+/* ═══════════════════════════════════
+   IMÁGENES POR CONVENCIÓN DE NOMBRE
+   La foto NO se carga por artículo. Se sube una sola vez al bucket público
+   `products` de Supabase con el nombre del modelo, y la página arma la URL
+   sola. El campo `imagen_url` del stock se IGNORA a propósito desde el
+   2026-08-18 (Franco dejó de usar los links de Drive): la única fuente de
+   fotos es el bucket, y sin foto se muestra el emoji de la categoría.
+   Convención (todo en minúscula, sin acentos, separado con guiones):
+     iphone-17-pro-256gb-naranja-cosmico.png   ← modelo + storage + color
+     iphone-17-pro-naranja-cosmico.png         ← modelo + color
+     iphone-17-pro.png                         ← modelo solo (comodín)
+   Se prueban de más específico a más genérico y, si no hay ninguna, queda
+   el emoji de la categoría como está hoy.
+═══════════════════════════════════ */
+// El bucket se llama `products` (lo creó Franco a mano el 2026-08-18; el
+// `productos` original del SQL no le abría en el panel y se descartó).
+const IMG_BASE = `${SUPABASE_URL}/storage/v1/object/public/products/`;
+
+// Rubros donde `modelo` NO identifica al producto. El CRM reutiliza los campos
+// según el rubro: en perfumería/decant `modelo` es la MARCA, `color` la familia
+// olfativa (Árabe/Nicho/Diseñador) y `storage` la concentración (EDP/EDT); en
+// repuestos `modelo` es el equipo COMPATIBLE, no la pieza. En los dos casos el
+// producto real está en `nombre`: agrupar o titular por `modelo` mezcla cosas
+// distintas (dos perfumes Armaf en una tarjeta, o una batería y un vidrio de
+// cámara de iPhone 13 en la misma).
+// Tiene que coincidir con la lista CANÓNICA del CRM, que es
+// `Stock.CATS_NOMBRE_LIBRE` en src/modules/stock.js:18. Esta copia existe
+// porque precios.html es una página suelta y no importa módulos del CRM, así
+// que es el único lugar que hay que sincronizar a mano: si allá se agrega un
+// rubro de nombre libre y acá no, vuelven las fusiones de productos distintos.
+// `herramienta` todavía no tiene filas en el stock pero ya existe en el CRM.
+const CATS_IDENT_NOMBRE = new Set(['perfumeria', 'decant', 'combo', 'accesorio', 'repuesto', 'herramienta', 'gaming', 'otro']);
+
+// Rubros que en la landing se muestran juntos bajo un solo chip. El cliente
+// que busca fragancias quiere ver todo en un lado; la separación entre frasco
+// completo, decant y combo es un sub-filtro adentro, no tres secciones.
+// El CRM ya agrupa perfumeria+decant igual (Stock.GRUPOS.perfumeria).
+const GRUPOS_CAT = {
+  perfumeria: ['perfumeria', 'decant', 'combo'],
+};
+// Rubros que cubre un chip (él mismo si no encabeza ningún grupo).
+function catsDe(id) { return GRUPOS_CAT[id] || [id]; }
+// Chip bajo el que se muestra un producto.
+function chipDe(cat) {
+  for (const [chip, miembros] of Object.entries(GRUPOS_CAT)) if (miembros.includes(cat)) return chip;
+  return cat;
+}
+// Etiquetas del sub-filtro de perfumería.
+const SUBCATS = {
+  perfumeria: 'Perfumes completos',   // nicho · diseñador · árabe
+  combo: 'Combo experiencias',        // packs armados con decants
+  decant: 'Decants',
+};
+// El orden del sub-filtro es comercial, no alfabético: primero el producto
+// principal, después el pack (que es lo que más conviene empujar) y al final
+// la prueba suelta.
+const SUBCATS_ORDEN = ['perfumeria', 'combo', 'decant'];
+
+// Estado del filtro por familia olfativa (el campo `color` en perfumería).
+let famSel = 'todos';
+
+// Rubros que se venden en PESOS y no en dólares. Un perfume de USD 61 no se
+// cotiza así en el mostrador: el cliente pregunta el precio en pesos. En
+// estos rubros la ficha muestra pesos como precio principal, y se ocultan
+// las cosas propias del negocio de celulares (el regalo de cargador/funda,
+// el precio en dólares y el pago en crypto).
+const RUBROS_EN_PESOS = new Set(['perfumeria', 'decant', 'combo']);
+
+// Piso de compra para el envío sin cargo. Vive acá porque el carrito que
+// viene después va a necesitar el mismo número para decidir si lo cobra.
+const ENVIO_GRATIS_DESDE = 100000;
+const enPesos = p => RUBROS_EN_PESOS.has(p?.categoria);
+
+// "Sellado" es lenguaje de celulares. En perfumería lo equivalente es que el
+// frasco viene cerrado de fábrica: "Nuevo / Original".
+function estadoVisible(p) {
+  const e = p?.estado_producto || '';
+  if (enPesos(p) && /sellado/i.test(e)) return 'Nuevo / Original';
+  return e;
+}
+let subSel = 'todos';
+function usaNombre(p) { return CATS_IDENT_NOMBRE.has(p.categoria) || !p.modelo; }
+
+// Texto que identifica al producto, sea cual sea el rubro.
+function identidadProd(p) {
+  return (usaNombre(p) ? (p.nombre || p.modelo) : (p.modelo || p.nombre)) || '';
+}
+
+// Los nombres de perfumería vienen del stock separados con barras
+// ("ARMAF | Club de nuit | EDT | 100ml"), que es cómodo para cargar pero se
+// lee mal en una tarjeta pública. Se muestran con punto medio, que es el
+// mismo separador que ya usa el resto de la landing.
+function limpiarTitulo(s) {
+  return (s || '').replace(/\s*\|\s*/g, ' · ').replace(/\s{2,}/g, ' ').trim();
+}
+
+function slugify(s) {
+  return (s || '')
+    .toString().toLowerCase()
+    .normalize('NFD').replace(/[\u0300-\u036f]/g, '')  // saca acentos: "cósmico" → "cosmico"
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+}
+
+// Índice de lo que hay realmente en el bucket, leído UNA vez al cargar.
+// Sin esto habría que descubrir la foto a fuerza de prueba y error: con ~80
+// productos y 6 variantes de nombre cada uno son cientos de requests que
+// terminan en 404 mientras el bucket esté a medio llenar. Con el índice se
+// pide sólo la imagen que existe. Si la lectura falla (bucket todavía sin
+// crear), queda en null y se vuelve al modo prueba y error, que igual funciona.
+
+// El índice guarda el nombre NORMALIZADO como clave y el real como valor.
+// Motivo: un archivo subido como "TOM FORD.PNG" o "iPhone 15 Azul.png" no
+// coincidía con ningún candidato (que se generan en minúscula y con guiones)
+// y la foto simplemente no aparecía, sin ningún error visible. Normalizando
+// al indexar, el nombre con el que se sube deja de importar.
+let _archivosBucket = null;   // Map<nombreNormalizado, nombreReal>
+
+function normalizarNombreArchivo(nombre) {
+  const punto = nombre.lastIndexOf('.');
+  const base = punto > 0 ? nombre.slice(0, punto) : nombre;
+  const ext = punto > 0 ? nombre.slice(punto + 1).toLowerCase() : '';
+  return `${slugify(base)}.${ext}`;
+}
+
+async function cargarIndiceImagenes() {
+  try {
+    const { data, error } = await supa.storage.from('products').list('', { limit: 1000 });
+    if (error || !data) return;
+    _archivosBucket = new Map();
+    data.forEach(f => {
+      const real = f.name || '';
+      if (!real) return;
+      // El nombre real va sin normalizar en el valor: es el que hay que
+      // pedirle al servidor.
+      _archivosBucket.set(normalizarNombreArchivo(real), real);
+    });
+  } catch { /* se deja null a propósito */ }
+}
+
+// Lista de URLs a probar, de más específica a más genérica.
+function imgCandidatos(p) {
+  const out = [];
+
+  const modelo = slugify(identidadProd(p));
+  const color  = usaNombre(p) ? '' : slugify(p.color);
+  const sto    = usaNombre(p) ? '' : slugify(p.storage);
+  if (!modelo) return out;
+
+  const base = [];
+  if (color && sto) base.push(`${modelo}-${sto}-${color}`);
+  if (color)        base.push(`${modelo}-${color}`);
+  base.push(modelo);
+
+  // Comodín sin el tamaño, como último recurso. Un decant de 5ml y uno de
+  // 10ml de la misma fragancia llevan la misma foto, pero sus nombres
+  // ("Khamrah 5ml" / "Khamrah 10ml") dan archivos distintos: sin esto habría
+  // que subir la misma imagen dos veces. Con `khamrah.png` alcanza para los
+  // dos. Va al final para que, si algún día se quiere diferenciar el tamaño,
+  // el archivo específico siga ganando.
+  const sinTamano = modelo.replace(/-\d+(?:-\d+)?-?ml\b/g, '').replace(/-+$/, '');
+  if (sinTamano && sinTamano !== modelo) base.push(sinTamano);
+
+  // Variante con la categoría adelante, y va primero. Hace falta porque hay
+  // modelos que se llaman igual en dos categorías: el repuesto de pantalla
+  // "iPhone 14" y el teléfono "iPhone 14" dan los dos `iphone-14.png`, y sin
+  // esto el repuesto mostraría la foto del teléfono entero. Con esto se puede
+  // subir `repuesto-iphone-14.png` y queda desambiguado.
+  const cat = slugify(p.categoria);
+  const nombres = cat ? [...base.map(n => `${cat}-${n}`), ...base] : base;
+
+  // .png primero porque es lo que conserva el fondo transparente de las
+  // fotos de prensa de Apple; .jpg queda como red de seguridad.
+  const archivos = nombres.flatMap(n => [`${n}.png`, `${n}.jpg`]);
+  if (_archivosBucket) {
+    // Con el índice sabemos exactamente cuál existe: se pide una sola. Se
+    // busca por nombre normalizado y se pide por el nombre REAL, que puede
+    // tener mayúsculas o espacios.
+    const clave = archivos.find(a => _archivosBucket.has(a));
+    if (clave) out.push(IMG_BASE + encodeURIComponent(_archivosBucket.get(clave)));
+  } else {
+    // Sin índice hay que descubrirla a los tumbos, así que se prueban solo
+    // los nombres sin prefijo para no disparar el doble de requests fallidos.
+    base.flatMap(n => [`${n}.png`, `${n}.jpg`]).forEach(a => out.push(IMG_BASE + a));
+  }
+  return out;
+}
+
+// Va probando la lista guardada en data-fb. Cuando se acaba, muestra el emoji.
+function imgFallback(el) {
+  const resto = (el.dataset.fb || '').split('|').filter(Boolean);
+  if (resto.length) {
+    el.dataset.fb = resto.slice(1).join('|');
+    el.src = resto[0];
+    return;
+  }
+  el.style.display = 'none';
+  const ph = el.parentNode.querySelector('.img-emoji');
+  if (ph) ph.style.display = 'flex';
+}
+
+// Devuelve el HTML de una imagen con toda la cadena de fallback ya cargada.
+function imgHtml(p, alt, emoji, { lazy = true, cls = '' } = {}) {
+  const cands = imgCandidatos(p);
+  const ph = `<span class="img-emoji ${cls}" style="display:${cands.length ? 'none' : 'flex'}">${emoji}</span>`;
+  if (!cands.length) return ph;
+  return `<img src="${esc(cands[0])}" alt="${esc(alt)}"${lazy ? ' loading="lazy"' : ''}
+    data-fb="${esc(cands.slice(1).join('|'))}" onerror="imgFallback(this)">${ph}`;
+}
+
+/* ═══════════════════════════════════
+   FICHAS DE PRODUCTO
+   Texto propio de iPhone Mood — NO se copia de la competencia ni de Apple:
+   el texto de ellos es material con derechos de autor y además Google
+   castiga el contenido duplicado, así que copiarlo perjudicaría el
+   posicionamiento en vez de ayudarlo.
+   La descripción se escribe pensando en lo que pregunta el cliente en el
+   local, no en el folleto de Apple.
+═══════════════════════════════════ */
+const FICHAS = {
+  'iphone 17 pro max': {
+    desc: 'El tope de línea: la pantalla más grande de la familia y la batería que más rinde de todos los iPhone. Es el que conviene si grabás mucho video, jugás, o simplemente no querés pensar en el cargador hasta la noche.',
+    specs: [
+      ['Pantalla', '6,9" Super Retina XDR OLED · ProMotion 120 Hz'],
+      ['Chip', 'A19 Pro'],
+      ['Cámaras', 'Triple sistema de 48 MP: principal, ultra gran angular y teleobjetivo'],
+      ['Cámara frontal', '18 MP Center Stage'],
+      ['Batería', 'Hasta 39 h de reproducción de video'],
+      ['Conector', 'USB-C'],
+      ['Resistencia', 'IP68 — agua y polvo'],
+    ],
+  },
+  'iphone 17 pro': {
+    desc: 'Toda la potencia del Pro Max en un cuerpo más manejable. Mismo chip y mismas tres cámaras de 48 MP; cambia el tamaño de pantalla y la duración de batería.',
+    specs: [
+      ['Pantalla', '6,3" Super Retina XDR OLED · ProMotion 120 Hz'],
+      ['Chip', 'A19 Pro'],
+      ['Cámaras', 'Triple sistema de 48 MP: principal, ultra gran angular y teleobjetivo'],
+      ['Cámara frontal', '18 MP Center Stage'],
+      ['Batería', 'Hasta 31 h de reproducción de video'],
+      ['Conector', 'USB-C'],
+      ['Resistencia', 'IP68 — agua y polvo'],
+    ],
+  },
+  'iphone 17': {
+    desc: 'El modelo base dejó de ser "el modelo base": este año suma pantalla de 120 Hz, que era lo único grande que lo separaba de los Pro en el uso diario. Para la mayoría de la gente es el que mejor relación precio-calidad tiene de toda la línea.',
+    specs: [
+      ['Pantalla', '6,3" Super Retina XDR OLED · ProMotion 120 Hz'],
+      ['Chip', 'A19'],
+      ['Cámaras', 'Doble sistema de 48 MP: principal y ultra gran angular'],
+      ['Cámara frontal', '18 MP Center Stage'],
+      ['Batería', 'Hasta 30 h de reproducción de video'],
+      ['Conector', 'USB-C'],
+      ['Resistencia', 'IP68 — agua y polvo'],
+    ],
+  },
+  'iphone 16 pro max': {
+    desc: 'Generación anterior de tope de línea, y sigue siendo muchísimo teléfono. El teleobjetivo de 5x es el que más se nota si sacás fotos de lejos (recitales, canchas, viajes).',
+    specs: [
+      ['Pantalla', '6,9" Super Retina XDR OLED · ProMotion 120 Hz'],
+      ['Chip', 'A18 Pro'],
+      ['Cámaras', '48 MP principal + 48 MP ultra gran angular + teleobjetivo 5x'],
+      ['Cámara frontal', '12 MP TrueDepth'],
+      ['Batería', 'Hasta 33 h de reproducción de video'],
+      ['Conector', 'USB-C'],
+      ['Resistencia', 'IP68 — agua y polvo'],
+    ],
+  },
+  'iphone 16 pro': {
+    desc: 'El Pro de la generación anterior, en formato más chico. Mismo chip y mismas cámaras que el Pro Max, con menos pantalla y menos batería.',
+    specs: [
+      ['Pantalla', '6,3" Super Retina XDR OLED · ProMotion 120 Hz'],
+      ['Chip', 'A18 Pro'],
+      ['Cámaras', '48 MP principal + 48 MP ultra gran angular + teleobjetivo 5x'],
+      ['Cámara frontal', '12 MP TrueDepth'],
+      ['Batería', 'Hasta 27 h de reproducción de video'],
+      ['Conector', 'USB-C'],
+      ['Resistencia', 'IP68 — agua y polvo'],
+    ],
+  },
+  'iphone 16': {
+    desc: 'Chip moderno, USB-C y botón de acción, sin pagar el precio de un Pro. Buena opción si venís de un iPhone 11, 12 o 13: el salto se siente en todo.',
+    specs: [
+      ['Pantalla', '6,1" Super Retina XDR OLED'],
+      ['Chip', 'A18'],
+      ['Cámaras', '48 MP principal + 12 MP ultra gran angular'],
+      ['Cámara frontal', '12 MP TrueDepth'],
+      ['Batería', 'Hasta 22 h de reproducción de video'],
+      ['Conector', 'USB-C'],
+      ['Resistencia', 'IP68 — agua y polvo'],
+    ],
+  },
+  'iphone 15 pro max': {
+    desc: 'El primero con cuerpo de titanio y teleobjetivo de 5x. Bastante más liviano de lo que uno espera para el tamaño que tiene.',
+    specs: [
+      ['Pantalla', '6,7" Super Retina XDR OLED · ProMotion 120 Hz'],
+      ['Chip', 'A17 Pro'],
+      ['Cámaras', '48 MP principal + 12 MP ultra gran angular + teleobjetivo 5x'],
+      ['Cámara frontal', '12 MP TrueDepth'],
+      ['Batería', 'Hasta 29 h de reproducción de video'],
+      ['Conector', 'USB-C'],
+      ['Resistencia', 'IP68 — agua y polvo'],
+    ],
+  },
+  'iphone 15 pro': {
+    desc: 'Titanio, botón de acción y USB-C en el formato compacto. Sigue siendo un teléfono muy rápido para el precio al que se consigue hoy.',
+    specs: [
+      ['Pantalla', '6,1" Super Retina XDR OLED · ProMotion 120 Hz'],
+      ['Chip', 'A17 Pro'],
+      ['Cámaras', '48 MP principal + 12 MP ultra gran angular + teleobjetivo 3x'],
+      ['Cámara frontal', '12 MP TrueDepth'],
+      ['Batería', 'Hasta 23 h de reproducción de video'],
+      ['Conector', 'USB-C'],
+      ['Resistencia', 'IP68 — agua y polvo'],
+    ],
+  },
+  'iphone 15': {
+    desc: 'El primero de la línea base con USB-C y Dynamic Island. Cámara principal de 48 MP: se nota bastante contra un 13 o un 14.',
+    specs: [
+      ['Pantalla', '6,1" Super Retina XDR OLED · Dynamic Island'],
+      ['Chip', 'A16 Bionic'],
+      ['Cámaras', '48 MP principal + 12 MP ultra gran angular'],
+      ['Cámara frontal', '12 MP TrueDepth'],
+      ['Batería', 'Hasta 20 h de reproducción de video'],
+      ['Conector', 'USB-C'],
+      ['Resistencia', 'IP68 — agua y polvo'],
+    ],
+  },
+  'iphone 14 pro max': {
+    desc: 'Fue el tope de línea de su año y todavía se defiende de sobra: pantalla de 120 Hz, cámara de 48 MP y muy buena batería. De los usados, es el que mejor relación precio-prestaciones tiene.',
+    specs: [
+      ['Pantalla', '6,7" Super Retina XDR OLED · ProMotion 120 Hz · Dynamic Island'],
+      ['Chip', 'A16 Bionic'],
+      ['Cámaras', '48 MP principal + 12 MP ultra gran angular + teleobjetivo 3x'],
+      ['Cámara frontal', '12 MP TrueDepth'],
+      ['Batería', 'Hasta 29 h de reproducción de video'],
+      ['Conector', 'Lightning'],
+      ['Resistencia', 'IP68 — agua y polvo'],
+    ],
+  },
+  'iphone 14 pro': {
+    desc: 'El Pro compacto de su generación: 120 Hz, Dynamic Island y cámara de 48 MP. Entra cómodo en el bolsillo y rinde como un teléfono bastante más caro.',
+    specs: [
+      ['Pantalla', '6,1" Super Retina XDR OLED · ProMotion 120 Hz · Dynamic Island'],
+      ['Chip', 'A16 Bionic'],
+      ['Cámaras', '48 MP principal + 12 MP ultra gran angular + teleobjetivo 3x'],
+      ['Cámara frontal', '12 MP TrueDepth'],
+      ['Batería', 'Hasta 23 h de reproducción de video'],
+      ['Conector', 'Lightning'],
+      ['Resistencia', 'IP68 — agua y polvo'],
+    ],
+  },
+  'iphone 14': {
+    desc: 'La puerta de entrada más razonable al ecosistema hoy. Hace todo lo que necesita la mayoría —fotos, redes, mensajería, banco— sin quedarse corto, y recibe actualizaciones de iOS por varios años más.',
+    specs: [
+      ['Pantalla', '6,1" Super Retina XDR OLED'],
+      ['Chip', 'A15 Bionic'],
+      ['Cámaras', '12 MP principal + 12 MP ultra gran angular'],
+      ['Cámara frontal', '12 MP TrueDepth'],
+      ['Batería', 'Hasta 20 h de reproducción de video'],
+      ['Conector', 'Lightning'],
+      ['Resistencia', 'IP68 — agua y polvo'],
+    ],
+  },
+};
+// Se ordena de clave más larga a más corta para que "iphone 17 pro max"
+// gane antes que "iphone 17 pro" y que "iphone 17".
+const FICHAS_KEYS = Object.keys(FICHAS)
+  .map(k => [slugify(k), FICHAS[k]])
+  .sort((a, b) => b[0].length - a[0].length);
+
+function fichaDe(p) {
+  const m = slugify(p.modelo || p.nombre);
+  if (!m) return null;
+  return (FICHAS_KEYS.find(([k]) => m.includes(k)) || [])[1] || null;
+}
+
+// El contenido del combo viene como texto con un ítem por renglón.
+function comboItems(p) {
+  return (p.combo_items || '').split(/\r?\n/).map(t => t.trim()).filter(Boolean);
+}
+
+function fichaHtml(p) {
+  // Los combos muestran qué incluyen. Va antes que la ficha técnica porque
+  // es lo primero que el cliente necesita saber para entender el precio.
+  const items = comboItems(p);
+  const comboHtml = items.length
+    ? `<div class="ficha-sec">
+         <div class="ficha-sec-title">Qué incluye este combo</div>
+         <ul class="combo-lista">${items.map(t => `<li>${esc(t)}</li>`).join('')}</ul>
+       </div>` : '';
+
+  const f = fichaDe(p);
+  if (!f) return comboHtml;
+  const desc = f.desc
+    ? `<div class="ficha-sec">
+         <div class="ficha-sec-title">Sobre este equipo</div>
+         <div class="ficha-desc">${esc(f.desc)}</div>
+       </div>` : '';
+  const specs = f.specs?.length
+    ? `<div class="ficha-sec">
+         <div class="ficha-sec-title">Ficha técnica</div>
+         <table class="ficha-specs">
+           ${f.specs.map(([k, v]) => `<tr><th>${esc(k)}</th><td>${esc(v)}</td></tr>`).join('')}
+         </table>
+         <div class="ficha-nota">Datos de referencia del modelo. La autonomía real depende del uso
+           y, en equipos usados, del estado de la batería que figura arriba.</div>
+       </div>` : '';
+  return comboHtml + desc + specs;
+}
+// Trae el puntaje y la cantidad de reseñas reales desde Google Places
+// (vía /api/google-reviews, que cachea 7 días del lado del servidor —
+// no le pega a Google en cada visita). El texto de las 20 tarjetas de
+// abajo sigue siendo curado a mano, solo estos dos números son en vivo.
+// Si la función no está configurada o falla, se deja el valor fijo del
+// HTML tal cual está — la sección nunca se rompe por esto.
+async function actualizarPuntajeGoogle() {
+  try {
+    const r = await fetch('/api/google-reviews');
+    if (!r.ok) return;
+    const { rating, total } = await r.json();
+    if (typeof rating === 'number') {
+      document.getElementById('reviews-score-num').textContent = rating.toFixed(1);
+    }
+    if (typeof total === 'number') {
+      document.getElementById('reviews-count').textContent = `${total} reseñas en Google`;
+    }
+  } catch { /* sin conexión al endpoint: se queda con el valor fijo del HTML */ }
+}
+
+function buildReviews() {
+  const REVIEWS = [
+    { name:'Camila Bonetto',     date:'hace 1 mes',    text:'Unos genios los chicos! El viernes consulté por la promo con el banco y el sábado ya lo tenía! Me respondieron todas las dudas y me explicaron todo antes de comprar un iPhone. Súper recomendable.', color:'#EA4335' },
+    { name:'Nanci Alarcon',      date:'hace 1 semana', text:'Excelente atención personalizada. Me asesoraron con mucha paciencia, respondieron todas mis dudas y hicieron que la compra fuera una muy buena experiencia. ¡Muy recomendable!', color:'#4285F4' },
+    { name:'Nicolas Costantino', date:'hace 1 mes',    text:'Excelente servicio. Responden muy amablemente todas las consultas y atienden de 1ra. Me atendió Lautaro. Los precios son los mejores. Entregué mi equipo y me llevé otro. Recomiendo!', color:'#34A853' },
+    { name:'Santi Ferriol',      date:'hace 1 mes',    text:'Excelente y rapidísima atención de Franco, muy amable y paciente. Gracias!', color:'#FBBC04' },
+    { name:'Camila',             date:'hace 2 meses',  text:'Ayer los contacté y hoy ya me llevé el celular 🙌 10 puntos. Super atentos, me tomaron el anterior como parte de pago a re buen precio. El local está en Tifón con seguridad privada. Muy recomendable!', color:'#EA4335' },
+    { name:'samuel pertile',     date:'hace 2 meses',  text:'Compre mi celu y demas cosas ahi y son de lo mejores super recomiendo.', color:'#4285F4' },
+    { name:'Lourdes Bernal',     date:'hace 7 meses',  text:'Valió la pena ir desde Rosario hasta Baigorria, no solo por tener la mejor oferta, también por su atención destacada desde la primera consulta. 100% recomendados!', color:'#34A853' },
+    { name:'Alina Jorge',        date:'hace 4 meses',  text:'Excelente atención! El muchacho que me atendió fue super amable y simpático! Me resolvió parte del inconveniente en el momento. Recomiendo 100%.', color:'#FBBC04' },
+    { name:'Pamela Bocutti',     date:'hace 7 meses',  text:'Excelente atención personalizada, el lugar es tranquilo! Muy buen asesoramiento y muy buena financiación. Productos 100% originales! Los chicos super amables. Totalmente recomendable.', color:'#EA4335' },
+    { name:'Melani Agüero',      date:'hace 5 meses',  text:'Excelente servicio, muy buenos precios y nos tuvieron toda la paciencia del mundo 🙌', color:'#4285F4' },
+    { name:'Fernanda Nieto',     date:'hace un año',   text:'Fue impecable todo. La información recibida, la atención y los tiempos de entrega. Se pudo resolver en el día ya que era para un regalo. Nos atendio Lautaro. Muchas gracias.', color:'#34A853' },
+    { name:'Francesca Furlotti', date:'hace un año',   text:'La mejor atención y los mejores precios del mercado, atención personalizada y oficina con seguridad en una hermosa zona.', color:'#FBBC04' },
+    { name:'Daiana Abate',       date:'hace un año',   text:'Excelente atención de parte de los chicos.. nunca dejaron de contestarme a cada pregunta o duda, y siempre con la mejor onda. Por eso los recomiendo. Gracias!', color:'#EA4335' },
+    { name:'Sabrina Panseri',    date:'hace un año',   text:'La verdad que muy buena atención total confianza y súper recomendable, los precios increíble y buscan la forma de pago más cómoda para el cliente.', color:'#4285F4' },
+    { name:'Gabriel Meliá',      date:'hace un año',   text:'Excelente atención...Excelentes precios...Excelentes productos...los mejores lejos!', color:'#34A853' },
+    { name:'Martina de Toro',    date:'hace 6 meses',  text:'nada malo que decir, la atención fue excelente y los precios que manejan son espectaculares! sin dudas voy a seguir comprando ahí.', color:'#FBBC04' },
+    { name:'Carmela Galvan',     date:'hace 10 meses', text:'Compré mi primer iPhone y la atención desde el momento 1 fue excelente, me explicaron todo de manera clara y muy amable! Los volvería a elegir 👌', color:'#EA4335' },
+    { name:'Ruben Albachiaro',   date:'hace un año',   text:'Muy buena atención. Respondieron rápido a mis consultas y el lugar es seguro porque está dentro de tifón. Respetaron el precio de la publicación.', color:'#4285F4' },
+    { name:'Julian MB6',         date:'hace un año',   text:'Todo excelente en cuanto a ubicación, la atención evacuaron mis dudas de manera muy clara, y los equipos se encuentran en muy buenas condiciones con garantía y a precio del mercado.', color:'#34A853' },
+    { name:'Camila D. López Miño', date:'hace un año', text:'Me atendió Lautaro, excelente atención y predisposición, me explico todo y respondió sin problemas las mil preguntas que hice. 5 ⭐ gracias.', color:'#FBBC04' },
+  ];
+  const el = document.getElementById('reviews-track');
+  if (!el) return;
+  function makeCard(r, hidden) {
+    const initials = r.name.split(' ').map(w=>w[0]).join('').toUpperCase().slice(0,2);
+    return `<div class="rev-card"${hidden?' aria-hidden="true"':''}>
+      <div class="rev-top">
+        <div class="rev-avatar" style="background:${r.color}">${initials}</div>
+        <div><div class="rev-name">${r.name}</div><div class="rev-date">${r.date}</div></div>
+        <div class="rev-g-icon"><svg width="18" height="18" viewBox="0 0 48 48"><path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"/><path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"/><path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"/><path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.18 1.48-4.97 2.31-8.16 2.31-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"/></svg></div>
+      </div>
+      <div class="rev-stars">★★★★★</div>
+      <div class="rev-text">${r.text}</div>
+    </div>`;
+  }
+  const cardW = 280 + 14;
+  const setW = REVIEWS.length * cardW;
+  el.innerHTML = REVIEWS.map(r => makeCard(r, false)).join('') + REVIEWS.map(r => makeCard(r, true)).join('');
+  el.style.setProperty('--rev-dist', `-${setW}px`);
+  // 8s por tarjeta (antes 4s): tiempo suficiente para leer 2-3 líneas de texto
+  // mientras la tarjeta cruza la pantalla, antes se sentía ilegible.
+  el.style.setProperty('--rev-dur', `${REVIEWS.length * 8}s`);
+  requestAnimationFrame(() => requestAnimationFrame(() => el.classList.add('running')));
+}
+
+function smoothTo(id) { document.getElementById(id)?.scrollIntoView({behavior:'smooth',block:'start'}); }
+
+/* ─── MENÚ DE SECCIONES ─── */
+// Abre/cierra el panel lateral. Bloquea el scroll del fondo mientras está
+// abierto para que el dedo no arrastre la página de atrás.
+function toggleMenu(abrir) {
+  document.getElementById('menu-lateral').classList.toggle('abierto', abrir);
+  document.getElementById('menu-overlay').classList.toggle('abierto', abrir);
+  document.getElementById('menu-lateral').setAttribute('aria-hidden', String(!abrir));
+  document.getElementById('nav-burger').setAttribute('aria-expanded', String(abrir));
+  document.body.style.overflow = abrir ? 'hidden' : '';
+}
+
+// Un solo camino para ir a una sección, lo llamen desde la barra o el panel:
+// así el panel siempre se cierra y nunca queda tapando el destino.
+function irASeccion(id) {
+  toggleMenu(false);
+  smoothTo(id);
+}
+
+// Marca en la barra la sección que se está viendo. Se usa el punto de la
+// pantalla justo debajo de la nav como "cursor": la sección que lo contiene
+// es la activa. Es más estable que IntersectionObserver con secciones de
+// alturas muy distintas, donde varias entran en pantalla a la vez.
+function iniciarMenuActivo() {
+  const links = [...document.querySelectorAll('.nav-links a[data-sec]')];
+  if (!links.length) return;
+  const secciones = links.map(a => ({ a, el: document.getElementById(a.dataset.sec) })).filter(x => x.el);
+
+  let pendiente = false;
+  const marcar = () => {
+    pendiente = false;
+    const cursor = window.scrollY + 90;   // apenas debajo de la nav
+    let activa = null;
+    for (const s of secciones) {
+      if (s.el.offsetTop <= cursor) activa = s;
+    }
+    links.forEach(a => a.classList.toggle('activo', !!activa && a === activa.a));
+  };
+  // El scroll dispara muchísimo; se agenda un solo recálculo por frame.
+  window.addEventListener('scroll', () => {
+    if (!pendiente) { pendiente = true; requestAnimationFrame(marcar); }
+  }, { passive: true });
+  marcar();
+}
+
+/* ─── FAQ ─── */
+function toggleFaq(el) {
+  const item = el.closest('.faq-item');
+  const isOpen = item.classList.contains('open');
+  document.querySelectorAll('.faq-item').forEach(i => i.classList.remove('open'));
+  if (!isOpen) item.classList.add('open');
+}
+
+/* ─── CATEGORY CAROUSEL ─── */
+// Cuántos rubros hay que tener para que el desfile de categorías tenga
+// sentido. Con 1 solo rubro se veía la MISMA tarjeta repetida girando en
+// loop, porque el carrusel duplica los items 4 veces para el scroll infinito.
+const SHOWCASE_MIN_CARRUSEL = 6;  // 6 o más: se anima (no entran en pantalla)
+const SHOWCASE_MIN_VISIBLE  = 2;  // 2 a 5: fijos; 1 o 0: no se muestra
+
+function buildShowcase() {
+  const present = todos.map(p => p.categoria).filter(Boolean);
+  const chips = new Set(present.map(chipDe));
+  const items = CATS.filter(c => c.id !== 'todos' && chips.has(c.id));
+  const el = document.getElementById('cat-showcase-track');
+  const sec = el && el.closest('.cat-showcase');
+  if (!el || !sec) return;
+
+  if (items.length < SHOWCASE_MIN_VISIBLE) { sec.style.display = 'none'; return; }
+  sec.style.display = '';
+  const animar = items.length >= SHOWCASE_MIN_CARRUSEL;
+  sec.classList.toggle('fija', !animar);
+
+  function makeItem(c, aria) {
+    const foto = fotoDeCategoria(c.id);
+    const inner = foto
+      ? `<img src="${esc(foto)}" alt="${c.label}" loading="lazy"
+             onerror="this.replaceWith(Object.assign(document.createElement('span'),{textContent:'${c.emoji}',style:'font-size:52px'}))">`
+      : `<span style="font-size:54px">${c.emoji}</span>`;
+    return `<div class="cat-show-item" onclick="selCat('${c.id}');smoothTo('productos')" ${aria||''}>
+      <div class="cat-show-circle">${inner}</div>
+      <div class="cat-show-label">${c.label}</div>
+    </div>`;
+  }
+
+  // Modo fijo: una sola copia, sin duplicados ni animación.
+  if (!animar) {
+    el.classList.remove('running');
+    el.style.removeProperty('--scroll-dist');
+    el.style.removeProperty('--scroll-dur');
+    el.innerHTML = items.map(c => makeItem(c)).join('');
+    return;
+  }
+
+  // Modo carrusel: 4 copias para que el loop infinito no muestre el corte.
+  const copies = 4;
+  let html = '';
+  for (let i = 0; i < copies; i++) {
+    html += items.map(c => makeItem(c, i === 0 ? '' : 'aria-hidden="true"')).join('');
+  }
+  el.innerHTML = html;
+
+  // Distancia exacta de un set completo, para que el salto sea invisible
+  const itemW = 140 + 12; // --item-w + --item-gap
+  const setW = items.length * itemW;
+  const dur = Math.max(10, items.length * 2.8); // velocidad según cantidad
+  el.style.setProperty('--scroll-dist', `-${setW}px`);
+  el.style.setProperty('--scroll-dur', `${dur}s`);
+  requestAnimationFrame(() => requestAnimationFrame(() => el.classList.add('running')));
+}
+
+/* ─── TRADE-IN: fotos reales en vez de los dibujos ───
+   La sección "tomamos tu usado" tenía dos iPhone dibujados a mano en SVG.
+   Si hay fotos en el bucket, se reemplazan por equipos de verdad: a la
+   izquierda el modelo más viejo del catálogo (representa el usado que
+   entrega el cliente) y a la derecha el más nuevo (el que se lleva).
+   No están fijos a un modelo: se eligen del stock, así que la sección se
+   actualiza sola cuando entra una generación nueva. Si no hay fotos
+   suficientes, quedan los SVG originales y no se toca nada. */
+function buildTradeIn() {
+  const cont = document.getElementById('tradein-phones');
+  if (!cont || !_archivosBucket || !_archivosBucket.size) return;
+
+  // Número de generación del modelo ("iPhone 17 Pro Max" → 17). Sirve para
+  // ordenar viejo→nuevo sin depender de fechas que no tenemos.
+  const gen = p => {
+    const m = (p.modelo || p.nombre || '').match(/\b(\d{1,2})\b/);
+    return m ? Number(m[1]) : 0;
+  };
+  const conFoto = todos
+    .filter(p => p.categoria === 'iphone' && gen(p) > 0 && imgCandidatos(p).length)
+    .sort((a, b) => gen(a) - gen(b));
+  if (conFoto.length < 2) return;   // sin variedad, mejor dejar los dibujos
+
+  const viejo = conFoto[0];
+  const nuevo = conFoto[conFoto.length - 1];
+  if (gen(viejo) === gen(nuevo)) return;  // misma generación: no cuenta la historia
+
+  const foto = (prod, cls) =>
+    `<div class="tradein-phone ${cls}">
+       <img src="${esc(imgCandidatos(prod)[0])}" alt="" loading="lazy" crossorigin="anonymous">
+     </div>`;
+
+  cont.innerHTML = foto(viejo, 'old') + '<div class="tradein-arrow">→</div>' + foto(nuevo, 'new');
+  cont.querySelectorAll('img').forEach(normalizarAlto);
+}
+
+// Las fotos son cuadradas pero cada una trae distinto margen transparente:
+// el iPhone 13 ocupa el 86% del alto del lienzo y el 17 Pro Max el 68%. Con la
+// misma altura de caja, el equipo viejo se vería MÁS grande que el nuevo, que
+// es justo al revés de lo que cuenta la sección. Esto mide el recuadro real
+// del equipo en un canvas y compensa con un escalado, para que los dos se
+// vean del mismo alto. Si el navegador bloquea la lectura del canvas, se sale
+// sin tocar nada y queda el tamaño tal cual: peor encuadre, nunca roto.
+function normalizarAlto(img) {
+  const aplicar = () => {
+    try {
+      const N = 120;                       // muestreo chico: alcanza y es instantáneo
+      const cv = document.createElement('canvas');
+      cv.width = N; cv.height = N;
+      const cx = cv.getContext('2d', { willReadFrequently: true });
+      cx.drawImage(img, 0, 0, N, N);
+      const d = cx.getImageData(0, 0, N, N).data;
+      let arriba = -1, abajo = -1;
+      for (let y = 0; y < N; y++) {
+        for (let x = 0; x < N; x++) {
+          if (d[(y * N + x) * 4 + 3] > 20) { if (arriba < 0) arriba = y; abajo = y; break; }
+        }
+      }
+      if (arriba < 0 || abajo <= arriba) return;
+      const ocupa = (abajo - arriba + 1) / N;
+      // 0.86 es el mejor caso observado; se toma como referencia para no
+      // agrandar de más una foto que ya venía bien encuadrada.
+      const factor = Math.min(1.45, 0.86 / ocupa);
+      if (factor > 1.02) img.style.transform = `scale(${factor.toFixed(3)})`;
+    } catch { /* canvas bloqueado por CORS: se deja como está */ }
+  };
+  if (img.complete && img.naturalWidth) aplicar();
+  else img.addEventListener('load', aplicar, { once: true });
+}
+
+// Foto que representa a un rubro en el carrusel de arriba. Dos caminos:
+//
+//   1. `cat-<rubro>.png` en el bucket — la imagen que Franco elija a mano.
+//      Es el control fino: si querés que perfumería muestre un Tom Ford que
+//      ni siquiera está en stock, subís ese archivo y listo.
+//   2. Si no existe, la foto del producto MÁS CARO del rubro que tenga
+//      imagen. Se mantiene solo y muestra lo más aspiracional, que es lo que
+//      conviene en una vitrina.
+//
+// Sin ninguna de las dos, queda el emoji de siempre.
+function fotoDeCategoria(catId) {
+  if (_archivosBucket) {
+    const propio = [`cat-${catId}.png`, `cat-${catId}.jpg`].find(f => _archivosBucket.has(f));
+    if (propio) return IMG_BASE + encodeURIComponent(_archivosBucket.get(propio));
+  }
+  const delRubro = todos
+    .filter(p => chipDe(p.categoria) === catId)
+    .sort((a, b) => (Number(b.precio_usd) || 0) - (Number(a.precio_usd) || 0));
+  for (const p of delRubro) {
+    const cands = imgCandidatos(p);
+    if (cands.length) return cands[0];
+  }
+  return null;
+}
+
+/* ─── CAT ROW ─── */
+function buildCats() {
+  const present = todos.map(p => p.categoria).filter(Boolean);
+  const chips = new Set(present.map(chipDe));
+  const rubros = CATS.filter(c => c.id !== 'todos' && chips.has(c.id)).map(c => c.id);
+  const row = document.getElementById('cats-row');
+  const bar = row && row.closest('.cats-bar');
+  // Con un solo rubro, la barra sería "Todos | iPhone": dos botones que
+  // llevan exactamente al mismo listado. Se oculta entera.
+  if (bar) bar.style.display = rubros.length < 2 ? 'none' : '';
+
+  const visible = ['todos', ...rubros];
+  row.innerHTML = visible.map(id => {
+    const c = CAT[id] || { label: id, emoji: '📦' };
+    return `<div class="cat-item${id===catSel?' on':''}" onclick="selCat('${id}')">
+      <div class="cat-emoji">${c.emoji}</div>
+      <div class="cat-name">${c.label}</div>
+    </div>`;
+  }).join('');
+}
+
+function selCat(id) {
+  catSel = id; stoSel = 'todos'; condSel = 'todos'; modelSel = 'todos'; subSel = 'todos'; famSel = 'todos';
+  buildCats(); buildFilters(); render();
+  smoothTo('productos');
+}
+
+/* ─── SECONDARY FILTERS ─── */
+const pfn = {};
+function mkPill(key, label, on, fn) {
+  pfn[key] = fn;
+  return `<button class="pill${on?' on':''}" onclick="pfn['${key}']()">${label}</button>`;
+}
+// Ordena capacidades de menor a mayor. Convierte TB a GB porque
+// parseInt("1TB") da 1 y dejaba el terabyte ANTES de 128GB.
+function sortSto(a,b){
+  const gb = s => {
+    const n = parseFloat(s) || 0;
+    return /tb/i.test(s) ? n * 1024 : n;
+  };
+  return gb(a) - gb(b);
+}
+
+/* sort iPhone models: iPhone 13 < 14 < 15 < 16, Pro after base, Pro Max last */
+function sortModels(a, b) {
+  const num = s => { const m = s.match(/\d+/); return m ? parseInt(m[0]) : 0; };
+  const rank = s => s.includes('Pro Max') ? 3 : s.includes('Pro') ? 2 : s.includes('Plus') ? 1 : 0;
+  if (num(a) !== num(b)) return num(a) - num(b);
+  return rank(a) - rank(b);
+}
+
+// Generación del modelo: "iPhone 17 Pro Max" → "17". El filtro de arriba
+// agrupa por línea en vez de listar cada variante: con 11 modelos en stock
+// la barra se volvía una lista larguísima donde el cliente tenía que saber
+// de antemano si buscaba el Pro o el Pro Max. Eligiendo "Línea 17" ve las
+// tres variantes juntas y compara, que es como se decide una compra.
+function lineaDe(modelo) {
+  const m = (modelo || '').match(/\b(\d{1,2})\b/);
+  return m ? m[1] : '';
+}
+
+function buildFilters() {
+  const sub = catSel === 'todos' ? todos : todos.filter(p => catsDe(catSel).includes(p.categoria));
+
+  /* ── Barra de sub-filtro: "Modelo" en iPhone, "Tipo" en perfumería ── */
+  const mb = document.getElementById('model-bar');
+  const mp = document.getElementById('model-pills');
+  const mlbl = document.getElementById('model-bar-label');
+
+  if (catSel === 'perfumeria') {
+    modelSel = 'todos';
+    // Solo se ofrecen los tipos que realmente tienen stock: si no cargó
+    // ningún combo todavía, el botón "Combos" no aparece vacío.
+    const tipos = SUBCATS_ORDEN.filter(c => sub.some(p => p.categoria === c));
+    if (tipos.length > 1) {
+      if (subSel !== 'todos' && !tipos.includes(subSel)) subSel = 'todos';
+      mlbl.textContent = 'Tipo';
+      mp.innerHTML = `<button class="mpill${subSel==='todos'?' on':''}" onclick="subSel='todos';buildFilters();render()">Todos</button>`
+        + tipos.map(c => `<button class="mpill${subSel===c?' on':''}" onclick="subSel='${c}';buildFilters();render()">${SUBCATS[c]||c}</button>`).join('');
+      mb.classList.add('show');
+    } else {
+      subSel = 'todos';
+      mb.classList.remove('show');
+    }
+  } else if (catSel === 'iphone') {
+    subSel = 'todos';
+    mlbl.textContent = 'Modelo';
+    const lineas = [...new Set(sub.map(p => lineaDe(p.modelo)).filter(Boolean))]
+      .sort((a, b) => Number(a) - Number(b));
+    if (lineas.length > 1) {
+      if (modelSel !== 'todos' && !lineas.includes(modelSel)) modelSel = 'todos';
+      mp.innerHTML = `<button class="mpill${modelSel==='todos'?' on':''}" onclick="modelSel='todos';buildFilters();render()">Todos</button>`
+        + lineas.map(l => `<button class="mpill${modelSel===l?' on':''}" onclick="modelSel='${l}';buildFilters();render()">Línea ${l}</button>`).join('');
+      mb.classList.add('show');
+    } else {
+      mb.classList.remove('show');
+    }
+  } else {
+    mb.classList.remove('show');
+    modelSel = 'todos';
+    subSel = 'todos';
+  }
+
+  /* ── Filter by selected model for storage/condition sub-filters ── */
+  const sub2 = modelSel === 'todos' ? sub : sub.filter(p => p.modelo === modelSel);
+  const storages = [...new Set(sub2.map(p => p.storage).filter(Boolean))].sort(sortSto);
+  const conds    = [...new Set(sub2.map(cond))];
+
+  const sp = document.getElementById('sto-pills');
+  sp.innerHTML = storages.length > 1
+    ? mkPill('st-all','Todo',stoSel==='todos',()=>{stoSel='todos';buildFilters();render();})
+      + storages.map(s=>mkPill('st-'+s,s,stoSel===s,()=>{stoSel=s;buildFilters();render();})).join('')
+    : '';
+
+  const cp = document.getElementById('cond-pills');
+  if (catSel === 'perfumeria') {
+    // En perfumería el estado no dice nada (prácticamente todo es nuevo y
+    // cerrado), pero la familia olfativa sí: es el primer criterio con el
+    // que alguien elige un perfume. Se ocupa el mismo lugar de la barra en
+    // vez de sumar una tercera fila de filtros.
+    condSel = 'todos';
+    const familias = [...new Set(sub2.map(p => p.color).filter(Boolean))].sort();
+    if (familias.length > 1) {
+      if (famSel !== 'todos' && !familias.includes(famSel)) famSel = 'todos';
+      cp.innerHTML = mkPill('f-all','Todas',famSel==='todos',()=>{famSel='todos';buildFilters();render();})
+        + familias.map(f => mkPill('f-'+f, f, famSel===f, () => { famSel=f; buildFilters(); render(); })).join('');
+    } else {
+      // Con una sola familia cargada el filtro no separa nada. Se esconde
+      // hasta que haya al menos dos con stock.
+      famSel = 'todos';
+      cp.innerHTML = '';
+    }
+    return;
+  }
+
+  famSel = 'todos';
+  cp.innerHTML = conds.length > 1
+    ? mkPill('c-all','Todos',condSel==='todos',()=>{condSel='todos';buildFilters();render();})
+      + (conds.includes('nuevo')   ? mkPill('c-n','✨ Nuevo',condSel==='nuevo',()=>{condSel='nuevo';buildFilters();render();}) : '')
+      + (conds.includes('sellado') ? mkPill('c-s','🔒 Sellado',condSel==='sellado',()=>{condSel='sellado';buildFilters();render();}) : '')
+      + (conds.includes('usado')   ? mkPill('c-u','♻️ Usado',condSel==='usado',()=>{condSel='usado';buildFilters();render();}) : '')
+    : '';
+}
+
+/* ─── RENDER ─── */
+function colorToCSS(color) {
+  if (!color) return '#ccc';
+  const c = color.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g,'');
+  const map = {
+    'negro':'#1c1c1e','black':'#1c1c1e','negro azabache':'#1c1c1e',
+    'blanco':'#f2f2f7','white':'#f2f2f7','blanco estrella':'#f5f0e8','starlight':'#f5f0e8',
+    'plata':'#c7c7cc','silver':'#c7c7cc','titanio natural':'#c8b89a','natural titanium':'#c8b89a',
+    'titanio blanco':'#e8e0d5','white titanium':'#e8e0d5','titanio negro':'#3d3731','black titanium':'#3d3731',
+    'titanio desierto':'#c8a882','desert titanium':'#c8a882','titanio arena':'#c8a882',
+    'gris espacial':'#6e6e73','space gray':'#6e6e73','gris sidereo':'#6e6e73',
+    'azul':'#4f8ef7','blue':'#4f8ef7','azul profundo':'#1a3a6b','deep purple':'#6e4d8e',
+    'morado profundo':'#6e4d8e','lila':'#b5a0d0','purpura':'#9b59b6',
+    'verde':'#34a853','green':'#34a853','verde medianoche':'#1d3a2a','midnight green':'#1d3a2a',
+    'medianoche':'#1c2033','midnight':'#1c2033',
+    'rojo':'#e03030','red':'#e03030','product red':'#e03030',
+    'rosa':'#f7a8b8','pink':'#f7a8b8','rosado':'#f7a8b8',
+    'amarillo':'#f5d800','yellow':'#f5d800',
+    'naranja':'#f56300','orange':'#f56300',
+    'coral':'#f4634a','lavanda':'#c8b0d0','lavender':'#c8b0d0',
+    'tormenta azul':'#4f6a8e','storm blue':'#4f6a8e','azul tormenta':'#4f6a8e',
+    'ultramar':'#2c4fb3','ultramarine':'#2c4fb3',
+    'cian':'#00b4c8','teal':'#3a7a72',
+    'dorado':'#c9a84c','gold':'#c9a84c','oro':'#c9a84c',
+    'grafito':'#4a4a4f','graphite':'#4a4a4f','titanio':'#a89880','titanium':'#a89880',
+  };
+  for (const [k,v] of Object.entries(map)) {
+    if (c.includes(k)) return v;
+  }
+  return '#b0b0b5';
+}
+
+function sortProducts(a, b) {
+  // 1. Newer iPhone model first — only applies when modelo starts with "iPhone"
+  const isIphone = s => /^iphone/i.test(s||'');
+  const modelNum = s => { const m = (s||'').match(/iPhone\s*(\d+)/i); return m ? parseInt(m[1]) : -1; };
+  const modelRank = s => (s||'').includes('Pro Max') ? 3 : (s||'').includes('Pro') ? 2 : (s||'').includes('Plus') ? 1 : 0;
+  const na = modelNum(a.modelo), nb = modelNum(b.modelo);
+  if (na !== nb) return nb - na; // newest first
+  const ra = modelRank(a.modelo), rb = modelRank(b.modelo);
+  if (ra !== rb) return rb - ra;
+  // 2. Sealed/New before Used
+  const condOrder = c => c === 'nuevo' ? 0 : c === 'sellado' ? 1 : 2;
+  return condOrder(cond(a)) - condOrder(cond(b));
+}
+
+function render() {
+  const fil = todos.filter(p => {
+    if (catSel !== 'todos' && !catsDe(catSel).includes(p.categoria)) return false;
+    if (subSel !== 'todos' && p.categoria !== subSel) return false;
+    if (famSel !== 'todos' && p.color !== famSel) return false;
+    if (modelSel !== 'todos' && lineaDe(p.modelo) !== modelSel) return false;
+    if (stoSel !== 'todos' && p.storage !== stoSel) return false;
+    if (condSel !== 'todos' && cond(p) !== condSel) return false;
+    if (query) {
+      const t = [p.nombre,p.modelo,p.storage,p.color,p.categoria].filter(Boolean).join(' ').toLowerCase();
+      if (!t.includes(query)) return false;
+    }
+    return true;
+  }).sort(sortProducts);
+
+  const catObj = CAT[catSel] || {};
+  document.getElementById('sec-eye').textContent = catSel==='todos' ? 'Productos disponibles' : (catObj.label||catSel);
+  document.getElementById('sec-title').textContent = catSel==='todos' ? 'Todo el stock' : 'Disponibles ahora';
+  document.getElementById('sec-count').textContent = fil.length ? `${fil.length} producto${fil.length!==1?'s':''}` : '';
+
+  const grid = document.getElementById('grid');
+  if (!fil.length) {
+    grid.innerHTML = '<div class="empty"><div class="empty-icon">🔍</div><p>Sin resultados.</p></div>';
+    return;
+  }
+
+  const offer = bestOffer();
+  grid.innerHTML = fil.map((p, i) => {
+    const u = pUSD(p);
+    let modelTitle = identidadProd(p) || 'Producto';
+    // El recorte de storage y color solo aplica a los rubros con campos
+    // estructurados (ahí van aparte, en la fila de detalle). En perfumería o
+    // repuestos el nombre es libre y recortarlo le comería parte del producto.
+    if (!usaNombre(p)) {
+      modelTitle = modelTitle.replace(/\s*\d+\s*[GT]B\b/gi, '');
+      if (p.color) modelTitle = modelTitle.replace(new RegExp('\\s*' + p.color.replace(/[.*+?^${}()|[\]\\]/g,'\\$&') + '\\s*$', 'i'), '');
+    }
+    modelTitle = limpiarTitulo(modelTitle) || (p.nombre || 'Producto');
+    const c = cond(p);
+    const badgeCls = c==='sellado'?'badge-seal':c==='nuevo'?'badge-new':'badge-used';
+    // Mismo criterio que la ficha: en perfumería "sellado" se dice "original".
+    const badgeIcon = c==='sellado' ? (enPesos(p) ? '✨ Original' : '🔒 Sellado')
+                    : c==='nuevo' ? '✨ Nuevo' : '♻️ Usado';
+    // Sin `estado_producto` cargado no se muestra badge. `cond()` cae en
+    // "usado" cuando el campo está vacío, que sirve para agrupar y filtrar
+    // pero NO para mostrarlo: afirmaría en público que un perfume cerrado o
+    // una funda nueva son usados. Dato faltante ≠ dato en "usado".
+    const badgeHtml = (p.estado_producto || '').trim()
+      ? `<span class="card-cond-badge ${badgeCls}">${badgeIcon}</span>` : '';
+    const emoji = (CAT[p.categoria]||{emoji:'📦'}).emoji;
+    const imgContent = imgHtml(p, modelTitle, emoji, { cls: 'card-img-emoji' });
+    const colorCSS = colorToCSS(p.color);
+    // En perfumería el detalle es marca · familia · concentración, y el punto
+    // de color no va: "Árabe" es una familia olfativa, no un color, y pintarlo
+    // daba un círculo de un color inventado al lado.
+    const detailParts = usaNombre(p)
+      ? [p.modelo, p.color, p.storage].filter(Boolean)
+      : [p.color, p.storage].filter(Boolean);
+    const mostrarPunto = !usaNombre(p) && !!p.color;
+    // La batería solo tiene sentido en usados: un sellado siempre es 100%,
+    // mostrarla ahí sería ruido. En usados es un dato clave para decidir.
+    if (c === 'usado' && p.bateria_pct != null) detailParts.push(`🔋 ${p.bateria_pct}%`);
+    const detailRow = `<div class="card-detail-row">
+      ${mostrarPunto ? `<span class="card-color-dot" style="background:${colorCSS}"></span>` : ''}
+      <span class="card-detail-text">${esc(detailParts.join(' · '))}</span>
+    </div>`;
+    const offerRow = offer ? `<div class="card-offer">${esc(offer)}</div>` : '';
+    const nCombo = comboItems(p).length;
+    const comboRow = nCombo ? `<div class="card-combo">🎁 ${nCombo} productos</div>` : '';
+    return `<div class="card" onclick="openModal(${i})">
+      <div class="card-img">${imgContent}${badgeHtml}</div>
+      <div class="card-body">
+        <div class="card-name">${esc(modelTitle)}</div>
+        ${detailRow}
+        ${comboRow}
+        <div class="card-price-row">
+          <span class="card-usd">${enPesos(p) ? fARS(pARS(p)) : fUSD(u)}</span>
+        </div>
+        ${offerRow}
+        <a class="card-info-btn" href="?p=${esc(slugProd(p))}"
+           onclick="event.stopPropagation();event.preventDefault();openModal(${i})">Más información</a>
+      </div>
+    </div>`;
+  }).join('');
+
+  // guardar índice para el modal
+  window._filProd = fil;
+}
+
+/* ═══════════════════════════════════
+   FICHA DE PRODUCTO — ruteo con ?p=<slug>
+   La ficha no es un modal más: tiene URL propia. Eso hace que el botón
+   "atrás" del celular vuelva al listado (y no saque al cliente del sitio),
+   y que el link se pueda mandar por WhatsApp y abra directo en el producto.
+═══════════════════════════════════ */
+function slugProd(p) {
+  // En los rubros de nombre libre el nombre ya trae concentración y ml, así que
+  // agregarle storage/color repetiría datos; alcanza con identidad + condición.
+  // En los rubros de nombre libre el rubro entra en el slug: el mismo nombre
+  // puede existir en dos rubros distintos ("Club de nuit women 10ML" cargado
+  // como perfume y como decant) y sin esto los dos productos compartirían
+  // dirección web — uno quedaría inalcanzable por link directo.
+  const partes = usaNombre(p)
+    ? [p.categoria, identidadProd(p), cond(p)]
+    : [identidadProd(p), p.storage, p.color, cond(p)];
+  return slugify(partes.filter(Boolean).join(' '));
+}
+
+// true cuando la ficha abierta agregó una entrada al historial. Si es así,
+// cerrar debe hacer history.back() para no dejar basura en el historial;
+// si se entró directo por link compartido, no hay nada atrás a donde volver.
+let _fichaEnHistorial = false;
+
+// Se mantiene el nombre openModal(idx) porque es lo que llaman las tarjetas.
+function openModal(idx) {
+  const p = window._filProd?.[idx];
+  if (p) abrirFicha(p);
+}
+
+function abrirFicha(p, { push = true } = {}) {
+  if (!p) return;
+  renderFicha(p);
+  if (push) {
+    const slug = slugProd(p);
+    history.pushState({ p: slug }, '', '?p=' + slug);
+    _fichaEnHistorial = true;
+  }
+  document.getElementById('modal-overlay').classList.add('open');
+  document.getElementById('modal-sheet').scrollTop = 0;
+  document.body.style.overflow = 'hidden';
+}
+
+function closeModal() {
+  // Con historial propio delegamos en el back del navegador: el popstate de
+  // abajo es el que termina cerrando. Así el botón de la barra y el gesto de
+  // atrás del celular hacen exactamente lo mismo.
+  if (_fichaEnHistorial) { history.back(); return; }
+  cerrarFicha();
+}
+
+function cerrarFicha() {
+  document.getElementById('modal-overlay').classList.remove('open');
+  document.body.style.overflow = '';
+  // Limpia el ?p= si quedó (caso: se entró directo por link compartido).
+  if (new URLSearchParams(location.search).get('p')) {
+    history.replaceState({}, '', location.pathname);
+  }
+}
+
+function prodPorSlug(slug) {
+  return todos.find(x => slugProd(x) === slug) || null;
+}
+
+window.addEventListener('popstate', () => {
+  const slug = new URLSearchParams(location.search).get('p');
+  const p = slug ? prodPorSlug(slug) : null;
+  if (p) { abrirFicha(p, { push: false }); return; }
+  _fichaEnHistorial = false;
+  cerrarFicha();
+});
+
+// Link compartido: si la página abre ya con ?p=…, se muestra la ficha.
+function abrirDesdeURL() {
+  // El presupuesto tiene prioridad: si el link trae token, es lo que el
+  // cliente vino a ver.
+  const token = new URLSearchParams(location.search).get('presupuesto');
+  if (token) { abrirPresupuesto(token); return; }
+
+  const slug = new URLSearchParams(location.search).get('p');
+  if (!slug) return;
+  const p = prodPorSlug(slug);
+  if (p) abrirFicha(p, { push: false });
+  // Si el equipo ya se vendió, el slug no matchea: se limpia la URL y queda
+  // el listado normal en vez de una pantalla vacía.
+  else history.replaceState({}, '', location.pathname);
+}
+
+/* ═══════════════════════════════════
+   PRESUPUESTO CON CANJE  —  ?presupuesto=<token>
+   Reusa la ficha de producto: misma pantalla, mismo motor de cuotas. Lo que
+   cambia es que el precio a financiar no es el del equipo sino el SALDO
+   después de descontar el canje.
+═══════════════════════════════════ */
+async function abrirPresupuesto(token) {
+  const { data, error } = await supa.rpc('presupuesto_por_token', { p_token: token });
+  if (error || !data) {
+    renderPresupuestoVencido();
+    return;
+  }
+  renderPresupuesto(data);
+  document.getElementById('modal-overlay').classList.add('open');
+  document.getElementById('modal-sheet').scrollTop = 0;
+  document.body.style.overflow = 'hidden';
+}
+
+function renderPresupuestoVencido() {
+  document.getElementById('m-crumb').innerHTML = 'Presupuesto';
+  document.getElementById('m-img').innerHTML = '<span class="img-emoji" style="display:flex">⏳</span>';
+  document.getElementById('m-cat').textContent = '';
+  document.getElementById('m-name').textContent = 'Este presupuesto ya no está disponible';
+  document.getElementById('m-detail').textContent = 'Puede haber vencido o el link estar incompleto. Escribinos y te pasamos uno nuevo al momento.';
+  document.getElementById('m-usd').textContent = '';
+  document.getElementById('m-pagos').innerHTML = '';
+  document.getElementById('m-ficha').innerHTML = '';
+  document.getElementById('modal-overlay').classList.add('open');
+  document.body.style.overflow = 'hidden';
+}
+
+function renderPresupuesto(d) {
+  const prod = d.producto || {};
+  const ti = d.trade_in || null;
+  const cot = Number(d.cotizacion) || 1;
+  const cfg = normalizarPagos(d.pagos_cfg || PAGOS_DEFAULT);
+
+  const precioUSD = Number(prod.precio_usd) || 0;
+  const canjeUSD  = ti ? (Number(ti.valor_usd) || 0) : 0;
+  // El saldo nunca baja de cero: si el canje vale más que el equipo, la
+  // diferencia se conversa aparte, no se muestra un precio negativo.
+  const saldoUSD  = Math.max(0, precioUSD - canjeUSD);
+
+  // Los factores se aplican sobre el SALDO, no sobre el precio de lista del
+  // equipo: es lo que el cliente realmente va a pagar.
+  const contadoARS = Math.round(saldoUSD * cot * (cfg.contado_factor ?? 1));
+  const listaARS   = Math.round(saldoUSD * cot * (cfg.lista_factor ?? 1.45));
+
+  // ── cabecera: mismo layout que la ficha ──
+  const nombre = prod.nombre || [prod.modelo, prod.storage, prod.color].filter(Boolean).join(' ') || 'Equipo';
+  const emoji = (CAT[prod.categoria] || { emoji: '📱' }).emoji;
+  document.getElementById('m-img').innerHTML = imgHtml(prod, nombre, emoji, { lazy: false });
+  document.getElementById('m-crumb').innerHTML = `Presupuesto${d.cliente ? ' · <b>' + esc(d.cliente) + '</b>' : ''}`;
+  document.getElementById('m-cat').textContent = 'Presupuesto personalizado';
+  document.getElementById('m-name').textContent = nombre;
+  document.getElementById('m-detail').textContent = [prod.storage, prod.color, prod.estado_producto].filter(Boolean).join(' · ');
+  document.getElementById('m-usd').textContent = fUSD(saldoUSD);
+
+  // ── canje + cuenta ──
+  const detTI = ti ? [ti.storage, ti.color, ti.estado, ti.bateria_pct ? `🔋 ${ti.bateria_pct}%` : ''].filter(Boolean).join(' · ') : '';
+  // El canje se guarda sin rubro (siempre son equipos), así que se arma un
+  // producto mínimo para que `imgHtml` pueda buscar la foto por convención,
+  // igual que en el listado.
+  const tiProd = ti ? { categoria: 'iphone', modelo: ti.modelo, nombre: ti.modelo, storage: ti.storage, color: ti.color } : null;
+  const canjeHtml = ti ? `
+    <div class="pres-canje">
+      <div class="pres-canje-top"><span class="pres-canje-badge">🔄 TU EQUIPO EN PARTE DE PAGO</span></div>
+      <div class="pres-canje-body">
+        <div class="pres-canje-foto">${imgHtml(tiProd, ti.modelo || '', '📱', { lazy: false })}</div>
+        <div class="pres-canje-datos">
+          <div class="pres-canje-equipo">${esc(ti.modelo || 'Tu equipo')}</div>
+          ${detTI ? `<div class="pres-canje-detalle">${esc(detTI)}</div>` : ''}
+          <div class="pres-canje-lbl">Queda cotizado en</div>
+          <div class="pres-canje-valor">${fUSD(canjeUSD)}</div>
+        </div>
+      </div>
+    </div>` : '';
+
+  const cuentaHtml = ti ? `
+    <div class="pres-cuenta">
+      <div class="pres-cuenta-fila"><span class="lbl">${esc(nombre)}</span><span class="val">${fUSD(precioUSD)}</span></div>
+      <div class="pres-cuenta-fila resta"><span class="lbl">Tu ${esc(ti.modelo || 'equipo')} en parte de pago</span><span class="val">− ${fUSD(canjeUSD)}</span></div>
+      <div class="pres-cuenta-fila total"><span class="lbl">Saldo a abonar</span><span class="val">${fUSD(saldoUSD)}</span></div>
+    </div>` : '';
+
+  // ── formas de pago sobre el saldo (mismo motor que la ficha) ──
+  const regaloHtml = cfg.regalo ? `<div class="regalo-banner">${esc(cfg.regalo)}</div>` : '';
+
+  const cashHtml = `
+    <div class="pay-section">
+      <div class="pay-section-title">💵 Efectivo / Contado</div>
+      <div class="pay-cash-row">
+        <div class="pay-cash-card">
+          <div class="pay-cash-label">Dólares</div>
+          <div class="pay-cash-amount">${fUSD(saldoUSD)}</div>
+          <div class="pay-cash-sub">Precio directo</div>
+        </div>
+        <div class="pay-cash-card">
+          <div class="pay-cash-label">Pesos</div>
+          <div class="pay-cash-amount">${fARS(contadoARS)}</div>
+          <div class="pay-cash-sub">Blue $${cot.toLocaleString('es-AR')}</div>
+        </div>
+      </div>
+    </div>`;
+
+  const cPromo = cuotasDe(cfg.promo, listaARS);
+  const promoHtml = cPromo.length ? `
+    <div class="promo-hero">
+      <div class="promo-hero-top">
+        <span class="promo-hero-badge">⭐ LA MÁS ELEGIDA</span>
+        ${cfg.promo?.vigencia ? `<span class="promo-hero-vig">${esc(cfg.promo.vigencia)}</span>` : ''}
+      </div>
+      <div class="promo-hero-title">${esc(cfg.promo?.titulo || 'Promo bancaria')}</div>
+      <div class="promo-hero-grid">
+        ${cPromo.map(c => `<div class="promo-hero-card">
+          <div class="promo-hero-n">${c.n} cuotas</div>
+          <div class="promo-hero-amount">${fARS(c.mes)}</div>
+          <div class="promo-hero-mes">/mes · total ${fARS(c.total)}</div>
+          ${c.nota ? `<div class="promo-hero-nota">${esc(c.nota)}</div>` : ''}
+        </div>`).join('')}
+      </div>
+    </div>` : '';
+
+  const cOtros = cuotasDe(cfg.otros, listaARS);
+  const claseBadge = n => /off/i.test(n) ? 'off' : /sin inter/i.test(n) ? 'cero' : 'mas';
+  const otrosHtml = cOtros.length ? `
+    <div class="pay-section">
+      <div class="pay-section-title">💳 ${esc(cfg.otros?.titulo || 'Otras tarjetas de crédito')}</div>
+      <div class="pay-lista-note">Valor de lista a financiar: <strong>${fARS(listaARS)}</strong></div>
+      ${cOtros.map(c => `<div class="cuota-pill">
+        <div class="cuota-pill-main">
+          <span class="cuota-pill-n">${c.n} cuotas de</span>
+          <span class="cuota-pill-monto">${fARS(c.mes)}</span>
+        </div>
+        <div class="cuota-pill-side">
+          ${c.nota ? `<span class="cuota-pill-badge ${claseBadge(c.nota)}">${esc(c.nota)}</span>` : ''}
+          <span class="cuota-pill-total">total ${fARS(c.total)}</span>
+        </div>
+      </div>`).join('')}
+    </div>` : '';
+
+  document.getElementById('m-pagos').innerHTML =
+    canjeHtml + cuentaHtml + regaloHtml + cashHtml + promoHtml + otrosHtml;
+
+  // ── aviso legal + validez ──
+  const avisoCanje = ti ? `<div class="pres-aviso">
+      ⚠️ <strong>Sobre la cotización de tu equipo:</strong> está sujeta al estado estético y al
+      funcionamiento. Trabajamos solo con usados en excelente estado, así que si al revisarlo
+      aparecen fallas, golpes o rayaduras, el equipo se recotiza o se indica que no se puede
+      tomar como parte de pago.
+    </div>` : '';
+
+  // Los importes en pesos salen del blue congelado al emitir el presupuesto.
+  // Si no se aclara, un cliente que abre el link una semana después puede
+  // reclamar un precio en pesos que ya no existe.
+  const avisoDolar = `<div class="pres-aviso">
+      💵 <strong>Sobre los valores en pesos:</strong> están calculados con el dólar blue a
+      $${cot.toLocaleString('es-AR')} del día de emisión. Como el dólar se mueve, los montos en pesos
+      se actualizan al momento de cerrar la operación. Los valores en dólares no cambian
+      dentro de la validez de este presupuesto.
+    </div>`;
+  const fecha = d.creado_en ? new Date(d.creado_en).toLocaleDateString('es-AR', { day: 'numeric', month: 'long', year: 'numeric' }) : '';
+  const vence = d.vence_en ? new Date(d.vence_en).toLocaleDateString('es-AR', { day: 'numeric', month: 'long' }) : '';
+  document.getElementById('m-ficha').innerHTML = avisoCanje + avisoDolar + `
+    <div class="pres-meta">
+      ${fecha ? `Presupuesto emitido el ${fecha}.` : ''}
+      ${vence ? `<br>Válido hasta el ${vence}.` : ''}
+      ${d.notas ? `<br>${esc(d.notas)}` : ''}
+    </div>`;
+
+  // El botón de WhatsApp arranca la conversación con el contexto puesto.
+  modalProd = { nombre: `${nombre} (presupuesto con canje)`, categoria: prod.categoria };
+  inqSel = 'disponibilidad';
+  document.querySelectorAll('.inq-opt').forEach(el => {
+    const sel = el.dataset.inq === 'disponibilidad';
+    el.classList.toggle('sel', sel);
+    el.querySelector('.inq-radio').classList.toggle('sel', sel);
+  });
+  document.getElementById('turno-panel').classList.remove('show');
+}
+
+function renderFicha(p) {
+  modalProd = p;
+  inqSel = 'turno';
+  dateSel = '';
+
+  const nombre = limpiarTitulo(p.nombre || [p.modelo,p.storage,p.color].filter(Boolean).join(' ')) || 'Producto';
+  const detParts = [p.storage,p.color];
+  // Mismo criterio que en la tarjeta: la batería solo aporta en usados.
+  if (cond(p) === 'usado' && p.bateria_pct != null) detParts.push(`🔋 ${p.bateria_pct}%`);
+  const det = detParts.filter(Boolean).join(' · ');
+  const emoji = (CAT[p.categoria]||{emoji:'📦'}).emoji;
+  const u = pUSD(p), a = pARS(p);
+  const catObj = CAT[p.categoria]||{label:p.categoria||''};
+
+  // imagen — misma cadena de fallback que la tarjeta, sin lazy porque acá
+  // la foto es lo primero que se ve.
+  document.getElementById('m-img').innerHTML = imgHtml(p, nombre, emoji, { lazy: false });
+
+  // breadcrumb de la barra superior
+  document.getElementById('m-crumb').innerHTML =
+    `Inicio / ${esc(catObj.label)} / <b>${esc(nombre)}</b>`;
+
+  document.getElementById('m-cat').textContent = catObj.label;
+  document.getElementById('m-name').textContent = nombre;
+  document.getElementById('m-detail').textContent = det || estadoVisible(p);
+  // En los rubros que se venden en pesos, el número grande es el peso.
+  document.getElementById('m-usd').textContent = enPesos(p) ? fARS(a) : fUSD(u);
+
+  // ── Cálculos con config de pagos ──
+  const cfg = pagosConfig || PAGOS_DEFAULT;
+  const contadoARS  = Math.round(u * cotiz * (cfg.contado_factor ?? 1));
+  const listaARS    = Math.round(u * cotiz * (cfg.lista_factor   ?? 1.45));
+
+  // Banner regalo
+  // El regalo (cargador, funda, templado) solo aplica a equipos.
+  const regaloHtml = (cfg.regalo && !enPesos(p))
+    ? `<div class="regalo-banner">${esc(cfg.regalo)}</div>` : '';
+
+  // Efectivo / contado
+  // En pesos: una sola tarjeta, sin la referencia al blue (que solo tiene
+  // sentido cuando el precio de lista está en dólares).
+  const cashHtml = enPesos(p) ? `
+    <div class="pay-section">
+      <div class="pay-section-title">💵 Efectivo / Contado</div>
+      <div class="pay-cash-row" style="grid-template-columns:1fr">
+        <div class="pay-cash-card">
+          <div class="pay-cash-label">Pesos</div>
+          <div class="pay-cash-amount">${fARS(contadoARS)}</div>
+          <div class="pay-cash-sub">Precio directo</div>
+        </div>
+      </div>
+    </div>` : `
+    <div class="pay-section">
+      <div class="pay-section-title">💵 Efectivo / Contado</div>
+      <div class="pay-cash-row">
+        <div class="pay-cash-card">
+          <div class="pay-cash-label">Dólares</div>
+          <div class="pay-cash-amount">${fUSD(u)}</div>
+          <div class="pay-cash-sub">Precio directo</div>
+        </div>
+        <div class="pay-cash-card">
+          <div class="pay-cash-label">Pesos</div>
+          <div class="pay-cash-amount">${fARS(contadoARS)}</div>
+          <div class="pay-cash-sub">Blue $${cotiz.toLocaleString('es-AR')}</div>
+        </div>
+      </div>
+    </div>`;
+
+  // ── Otras tarjetas: una píldora por plan, todas a la vista ──
+  const cuotasOtros = cuotasDe(cfg.otros, listaARS);
+  // La clase del badge sale del coeficiente, no del texto: si mañana la nota
+  // cambia de redacción, el color sigue siendo el correcto.
+  const claseBadge = nota =>
+    /off/i.test(nota) ? 'off' : /sin inter/i.test(nota) ? 'cero' : 'mas';
+  const cuotasHtml = cuotasOtros.length ? `
+    <div class="pay-section">
+      <div class="pay-section-title">💳 ${esc(cfg.otros?.titulo || 'Otras tarjetas de crédito')}</div>
+      <div class="pay-lista-note">Valor de lista a financiar: <strong>${fARS(listaARS)}</strong></div>
+      ${cuotasOtros.map(c => `<div class="cuota-pill">
+          <div class="cuota-pill-main">
+            <span class="cuota-pill-n">${c.n} cuotas de</span>
+            <span class="cuota-pill-monto">${fARS(c.mes)}</span>
+          </div>
+          <div class="cuota-pill-side">
+            ${c.nota ? `<span class="cuota-pill-badge ${claseBadge(c.nota)}">${esc(c.nota)}</span>` : ''}
+            <span class="cuota-pill-total">total ${fARS(c.total)}</span>
+          </div>
+        </div>`).join('')}
+    </div>` : '';
+
+  // ── Promo destacada: arriba de las demás y con fondo lleno ──
+  const cuotasPromo = cuotasDe(cfg.promo, listaARS);
+  const promosHtml = cuotasPromo.length ? `
+    <div class="promo-hero">
+      <div class="promo-hero-top">
+        <span class="promo-hero-badge">⭐ LA MÁS ELEGIDA</span>
+        ${cfg.promo?.vigencia ? `<span class="promo-hero-vig">${esc(cfg.promo.vigencia)}</span>` : ''}
+      </div>
+      <div class="promo-hero-title">${esc(cfg.promo?.titulo || 'Promo bancaria')}</div>
+      <div class="promo-hero-grid">
+        ${cuotasPromo.map(c => `<div class="promo-hero-card">
+            <div class="promo-hero-n">${c.n} cuotas</div>
+            <div class="promo-hero-amount">${fARS(c.mes)}</div>
+            <div class="promo-hero-mes">/mes · total ${fARS(c.total)}</div>
+            ${c.nota ? `<div class="promo-hero-nota">${esc(c.nota)}</div>` : ''}
+          </div>`).join('')}
+      </div>
+    </div>` : '';
+
+  // Crypto: solo en equipos. Un perfume de $96.000 no se paga en USDT.
+  const cryptoHtml = enPesos(p) ? '' : `
+    <div class="pay-section">
+      <div class="pay-section-title">₿ Crypto</div>
+      <div class="pay-cash-row">
+        <div class="pay-cash-card">
+          <div class="pay-cash-label">USDT / BTC</div>
+          <div class="pay-cash-amount">${fUSD(u)} USDT</div>
+          <div class="pay-cash-sub">Precio dólares</div>
+        </div>
+      </div>
+    </div>`;
+
+  // Orden deliberado: regalo, efectivo, PROMO destacada, resto de tarjetas, crypto.
+  // Envíos: por ahora es informativo y la compra sigue cerrándose por
+  // WhatsApp. Cuando exista el carrito, este mismo umbral decide el costo.
+  const envioHtml = enPesos(p) ? `
+    <div class="envio-box">
+      <span class="ico">🚚</span>
+      <div>
+        <b>Hacemos envíos a todo el país</b>
+        <span>Sin cargo en compras desde ${fARS(ENVIO_GRATIS_DESDE)}. Por debajo de ese monto,
+        coordinamos el costo por WhatsApp. También podés retirarlo en el local con turno previo.</span>
+      </div>
+    </div>` : '';
+
+  document.getElementById('m-pagos').innerHTML =
+    regaloHtml + cashHtml + promosHtml + cuotasHtml + cryptoHtml + envioHtml;
+
+  // Ficha técnica + descripción (vacío si el modelo no está en el catálogo)
+  document.getElementById('m-ficha').innerHTML = fichaHtml(p);
+
+  // reset opciones
+  document.querySelectorAll('.inq-opt').forEach(el => {
+    el.classList.toggle('sel', el.dataset.inq === 'turno');
+    el.querySelector('.inq-radio').classList.toggle('sel', el.dataset.inq === 'turno');
+  });
+  document.getElementById('turno-panel').classList.add('show');
+  document.querySelectorAll('.date-btn').forEach(b => b.classList.remove('sel'));
+  document.querySelectorAll('.time-btn').forEach((b,i) => b.classList.toggle('sel', i===0));
+  timeSel = 'mañana (10 a 13hs)';
+  document.getElementById('m-nombre').value = '';
+}
+
+/* ─── INQUIRY ─── */
+function selInq(el) {
+  inqSel = el.dataset.inq;
+  document.querySelectorAll('.inq-opt').forEach(o => {
+    o.classList.toggle('sel', o===el);
+    o.querySelector('.inq-radio').classList.toggle('sel', o===el);
+  });
+  document.getElementById('turno-panel').classList.toggle('show', inqSel === 'turno');
+}
+
+function selTime(el) {
+  timeSel = el.dataset.t;
+  document.querySelectorAll('.time-btn').forEach(b => b.classList.toggle('sel', b===el));
+}
+
+/* ─── DATE OPTIONS ─── */
+function buildDateOpts() {
+  const dias = ['Dom','Lun','Mar','Mié','Jue','Vie','Sáb'];
+  const meses = ['ene','feb','mar','abr','may','jun','jul','ago','sep','oct','nov','dic'];
+  const opts = [];
+  const today = new Date();
+  let d = new Date(today);
+  d.setDate(d.getDate() + 1);
+  while (opts.length < 6) {
+    if (d.getDay() !== 0) { // skip Sunday only
+      opts.push({ label: `${dias[d.getDay()]} ${d.getDate()} ${meses[d.getMonth()]}`, val: `${dias[d.getDay()]} ${d.getDate()} de ${meses[d.getMonth()]}` });
+    }
+    d.setDate(d.getDate() + 1);
+  }
+  document.getElementById('date-opts').innerHTML = opts.map(o =>
+    `<button class="date-btn" onclick="selDate(this,'${o.val}')">${o.label}</button>`
+  ).join('');
+
+  const horaEl = document.getElementById('hora-select');
+  horaEl.innerHTML = '<option value="">— Seleccioná un horario —</option>';
+  for (let h = 8; h <= 20; h++) {
+    horaEl.innerHTML += `<option value="${h}:00">${h}:00 hs</option>`;
+  }
+}
+
+function selDate(el, val) {
+  dateSel = val;
+  document.querySelectorAll('.date-btn').forEach(b => b.classList.toggle('sel', b===el));
+}
+
+/* ─── SEND WA ─── */
+function enviarWA() {
+  if (!modalProd) return;
+  const nombreCliente = document.getElementById('m-nombre').value.trim();
+  if (!nombreCliente) {
+    const inp = document.getElementById('m-nombre');
+    inp.focus();
+    inp.style.borderColor = 'var(--red)';
+    setTimeout(() => inp.style.borderColor = '', 2000);
+    return;
+  }
+
+  const nombre = modalProd.nombre || [modalProd.modelo,modalProd.storage,modalProd.color].filter(Boolean).join(' ') || 'un producto';
+  const det = [modalProd.storage,modalProd.color].filter(Boolean).join(' · ');
+  const u = pUSD(modalProd), a = pARS(modalProd);
+  const horaCliente = document.getElementById('hora-select')?.value || '';
+
+  let msg = `Hola! Soy ${nombreCliente}.\n\n`;
+  msg += `Me interesa: *${nombre}*${det?' ('+det+')':''}\n`;
+  msg += `Precio: ${fUSD(u)} / ${fARS(a)} ARS\n\n`;
+
+  if (inqSel === 'turno') {
+    msg += `📅 *Quiero pedir un turno para verlo en persona.*\n`;
+    if (dateSel) msg += `Día preferido: ${dateSel}\n`;
+    if (horaCliente) msg += `Horario: ${horaCliente} hs\n`;
+  } else if (inqSel === 'disponibilidad') {
+    msg += `📦 *Consulta: ¿Está disponible este equipo?*\n`;
+    msg += `¿Puedo reservarlo?\n`;
+  } else {
+    msg += `❓ *Tengo una consulta sobre este producto.*\n`;
+  }
+
+  window.open(`https://wa.me/5493416907597?text=${encodeURIComponent(msg)}`, '_blank');
+}
+
+init();
+</script>
+</body>
+</html>

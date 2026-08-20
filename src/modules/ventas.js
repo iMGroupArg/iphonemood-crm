@@ -25,7 +25,12 @@ const Ventas = {
     const mobile = this.isMobile();
     c.innerHTML = `
       <div style="padding:${mobile?'8px 12px':'12px 22px'};border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;gap:8px;flex-shrink:0">
-        <div style="display:flex;gap:4px;overflow-x:auto;-webkit-overflow-scrolling:touch;white-space:nowrap" id="ventas-periodo-tabs"></div>
+        <div style="display:flex;gap:4px;overflow-x:auto;-webkit-overflow-scrolling:touch;white-space:nowrap;flex:1 1 auto;min-width:0" id="ventas-periodo-tabs"></div>
+        <select id="ventas-nicho" onchange="Ventas.setNicho(this.value)" title="Filtrar por tipo de negocio" style="flex-shrink:0;font-size:12px;padding:5px 8px;border:1px solid var(--border-strong);border-radius:8px;background:var(--bg-secondary);color:var(--text);${this._nicho?'border-color:var(--blue)':''}">
+          <option value="">Todos los rubros</option>
+          ${Reportes.NICHOS.map(n=>`<option value="${n.id}" ${this._nicho===n.id?'selected':''}>${n.emoji} ${n.label}</option>`).join('')}
+        </select>
+        <button class="btn" style="flex-shrink:0" onclick="Ventas.exportarDetalleExcel()" title="Exportar el detalle de las ventas del período"><i class="ti ti-file-spreadsheet"></i>${mobile?'':' Exportar'}</button>
         <button class="btn btn-primary" style="flex-shrink:0" onclick="Ventas.openNew()"><i class="ti ti-plus"></i>${mobile?' Nueva':' Nueva venta'}</button>
       </div>
       <div id="ventas-rango-libre" style="display:none;padding:8px ${mobile?'12':'22'}px;border-bottom:1px solid var(--border);gap:8px;align-items:center;flex-wrap:wrap">
@@ -42,11 +47,35 @@ const Ventas = {
     return c;
   },
 
+  _nicho: '',   // filtro de tipo de negocio para el export
+
+  setNicho(n) { this._nicho = n; this.renderList(); this.renderMetricas(); },
+
+  // Operaciones de cueva (ARS→USD) dentro del mismo período elegido en Ventas.
+  // Se usa tanto en las métricas de pantalla como en el export, para que el
+  // diferencial de tipo de cambio salga por el mismo criterio en los dos lados.
+  // periodo interno -> descriptor que entiende State.cambiosEnPeriodo()
+  _periodoParaCueva() {
+    const map = { hoy: 'hoy', semana: 'semana', mes: 'mes', 'mes-especifico': 'mes-especifico', libre: 'libre' };
+    return {
+      tipo: map[this.periodoVentas] || 'todo',
+      mes: this.periodoMes, desde: this.periodoDesde, hasta: this.periodoHasta,
+    };
+  },
+
+  cambiosDelPeriodo() {
+    return State.cambiosEnPeriodo(this._periodoParaCueva());
+  },
+
+  difCambioDelPeriodo() {
+    return State.spreadCuevaDelPeriodo(this._periodoParaCueva()) / (State.refBlue || 1);
+  },
+
   ventasDelPeriodo() {
     const hoy = new Date(); hoy.setHours(0,0,0,0);
     return State.ventas.filter(v => {
       if (!v.fechaISO) return true;
-      const f = new Date(v.fechaISO); f.setHours(0,0,0,0);
+      const f = State.parseFecha(v.fechaISO) || new Date(0); f.setHours(0,0,0,0);
       if (this.periodoVentas === 'hoy') return f.getTime() === hoy.getTime();
       if (this.periodoVentas === 'semana') { const d=new Date(hoy); d.setDate(d.getDate()-7); return f>=d; }
       if (this.periodoVentas === 'mes') return f.getFullYear()===hoy.getFullYear()&&f.getMonth()===hoy.getMonth();
@@ -105,6 +134,195 @@ const Ventas = {
     this.renderMetricas(); this.renderList();
   },
 
+  // Resultado económico de una venta, con un criterio único para todo el CRM.
+  //
+  //   margenBruto : precio pactado − costo (la ganancia comercial, se cuenta
+  //                 aunque la venta esté financiada)
+  //   diferencial : cobraste MÁS que el precio (recargo de tarjeta) → suma
+  //   quebranto   : cobraste MENOS y la venta ya está CERRADA → resta.
+  //                 Es plata que no vas a ver: descuento, comisión del posnet
+  //                 o redondeo. Antes se ignoraba y la ganancia salía inflada.
+  //   pendiente   : cobraste menos pero la venta sigue ABIERTA → no toca la
+  //                 ganancia, es algo por cobrar.
+  resultadoVenta(v) {
+    const total   = (v.items || []).reduce((a, i) => a + i.precio, 0);
+    const costo   = (v.items || []).reduce((a, i) => a + (i.costo || 0), 0);
+    const cobrado = (v.pagos || []).reduce((a, p) => a + p.monto, 0) + (v.tradeIn?.valor || 0);
+    const margenBruto = total - costo;
+    const diferencial = Math.max(0, cobrado - total);
+    const faltante    = Math.max(0, total - cobrado);
+    const cerrada     = v.estado === 'cerrada';
+    const quebranto   = cerrada ? faltante : 0;
+    const pendiente   = cerrada ? 0 : faltante;
+    return {
+      total, costo, cobrado, margenBruto, diferencial, quebranto, pendiente,
+      margenReal: margenBruto + diferencial - quebranto,
+    };
+  },
+
+  // Nombre legible del período activo, para el archivo exportado
+  _nombrePeriodo() {
+    const p = this.periodoVentas;
+    if (p === 'hoy')    return 'hoy';
+    if (p === 'semana') return 'ultimos-7-dias';
+    if (p === 'mes')    return 'mes-actual';
+    if (p === 'mes-especifico') return this.periodoMes || 'mes';
+    if (p === 'libre')  return `${this.periodoDesde || 'inicio'}_a_${this.periodoHasta || 'hoy'}`;
+    return 'todo';
+  },
+
+  // Exporta el detalle completo de las ventas del filtro activo:
+  // una hoja resumen + dispositivos + accesorios + pagos.
+  exportarDetalleExcel() {
+    if (typeof XLSX === 'undefined') { toast('No se pudo cargar el módulo de exportación. Revisá tu conexión.'); return; }
+    const nicho = this._nicho || '';
+    const enNicho = i => !nicho || Reportes.nichoDe(i) === nicho;
+    const ventas = this.ventasDelPeriodo()
+      .filter(v => !nicho || v.items.some(enNicho));
+    if (!ventas.length) {
+      toast(nicho ? 'No hay ventas de ese rubro en el período.' : 'No hay ventas en el período seleccionado.');
+      return;
+    }
+
+    const DISP = ['iphone','android','mac','ipad','watch'];
+    const esDisp = i => { const p = State.stock.find(s => s.id === i.stockId); return p ? DISP.includes(p.cat) : false; };
+    const n = x => Number(Number(x || 0).toFixed(2));
+
+    const hojaVentas = [], hojaDisp = [], hojaAcc = [], hojaPagos = [];
+    const nombreNicho = id => Reportes.NICHOS.find(x => x.id === id)?.label || id;
+
+    ventas.forEach(v => {
+      const r = this.resultadoVenta(v);
+      const items = v.items.filter(enNicho);
+      const disp = items.filter(esDisp);
+      const acc  = items.filter(i => !esDisp(i));
+      const subDisp = disp.reduce((a, i) => a + i.precio, 0);
+      const subAcc  = acc.reduce((a, i) => a + i.precio, 0);
+      const totalPagos = (v.pagos || []).reduce((a, p) => a + p.monto, 0);
+      // Con filtro de rubro, los subtotales y el costo son solo de ese rubro
+      const subtotal  = nicho ? subDisp + subAcc : r.total;
+      const costoFila = nicho ? items.reduce((a, i) => a + (i.costo || 0), 0) : r.costo;
+      // Rubros presentes en esta venta (puede mezclar más de uno, ej. un
+      // iPhone + un perfume en la misma operación).
+      const nichosVenta = [...new Set(items.map(i => Reportes.nichoDe(i)))].map(nombreNicho).join(', ');
+
+      hojaVentas.push({
+        'Venta': v.id, 'Fecha': v.fecha, 'Cliente': v.cliente, 'Vendedor': v.vendedor || '',
+        'Nicho': nichosVenta,
+        'Tipo': v.tipoVenta || 'minorista', 'Estado': v.estado === 'cerrada' ? 'Cerrada' : 'Abierta',
+        'Subtotal dispositivos': n(subDisp), 'Subtotal accesorios': n(subAcc), 'SUBTOTAL': n(subtotal),
+        'Trade-in': n(v.tradeIn?.valor || 0), 'Total pagos': n(totalPagos),
+        'Total cobrado': n(r.cobrado), 'Saldo': n(r.total - r.cobrado),
+        'Costo': n(costoFila), 'Ganancia bruta': n(subtotal - costoFila),
+        'Diferencial tarjeta': n(r.diferencial), 'Sin cobrar': n(r.quebranto),
+        'Pendiente': n(r.pendiente), 'Ganancia real': n(r.margenReal),
+      });
+
+      disp.forEach(i => {
+        const p = State.stock.find(s => s.id === i.stockId);
+        hojaDisp.push({
+          'Venta': v.id, 'Fecha': v.fecha, 'Cliente': v.cliente,
+          'Nicho': nombreNicho(Reportes.nichoDe(i)),
+          'Dispositivo': i.nombre, 'Condición': p?.estadoProducto || '',
+          'IMEI': i.imei || '', 'Regalo': i.regalo ? 'Sí' : '',
+          'Precio compra': n(i.costo), 'Precio venta': n(i.precio),
+          'Profit': n(i.precio - (i.costo || 0)),
+        });
+      });
+
+      acc.forEach(i => {
+        hojaAcc.push({
+          'Venta': v.id, 'Fecha': v.fecha, 'Cliente': v.cliente,
+          'Nicho': nombreNicho(Reportes.nichoDe(i)),
+          'Accesorio': i.nombre, 'Cantidad': i.cantidad || 1, 'Regalo': i.regalo ? 'Sí' : '',
+          'Costo': n(i.costo), 'Precio total': n(i.precio),
+          'Profit': n(i.precio - (i.costo || 0)),
+        });
+      });
+
+      (v.pagos || []).forEach(p => {
+        const esARS = p.bolsillo?.startsWith('ARS');
+        const cotiz = p.cotizacionDiferencial || null;
+        hojaPagos.push({
+          'Venta': v.id, 'Fecha': v.fecha, 'Cliente': v.cliente,
+          'Caja': p.persona || '', 'Bolsillo': p.bolsillo || '',
+          'Monto USD': n(p.monto),
+          'Monto en caja': esARS && cotiz ? n(p.monto * cotiz) : n(p.monto),
+          'Cotización': esARS ? (cotiz || '') : '',
+          'Tarjeta': p.esTarjeta ? 'Sí' : '',
+          'Diferencial ARS': n(p.diferencialArs || 0),
+        });
+      });
+    });
+
+    // Fila de totales al pie del resumen
+    const tot = (campo) => n(hojaVentas.reduce((a, x) => a + (Number(x[campo]) || 0), 0));
+    hojaVentas.push({
+      'Venta': '', 'Fecha': '', 'Cliente': 'TOTALES', 'Vendedor': '', 'Tipo': '', 'Estado': '',
+      'Subtotal dispositivos': tot('Subtotal dispositivos'), 'Subtotal accesorios': tot('Subtotal accesorios'),
+      'SUBTOTAL': tot('SUBTOTAL'), 'Trade-in': tot('Trade-in'), 'Total pagos': tot('Total pagos'),
+      'Total cobrado': tot('Total cobrado'), 'Saldo': tot('Saldo'), 'Costo': tot('Costo'),
+      'Ganancia bruta': tot('Ganancia bruta'), 'Diferencial tarjeta': tot('Diferencial tarjeta'),
+      'Sin cobrar': tot('Sin cobrar'), 'Pendiente': tot('Pendiente'), 'Ganancia real': tot('Ganancia real'),
+    });
+
+    // ── Diferencial de tipo de cambio del mismo período (operaciones de cueva)
+    // No sale de las ventas, pero suma a la ganancia final del período.
+    const cambios = this.cambiosDelPeriodo();
+    const difCambio = this.difCambioDelPeriodo();
+    const hojaCambio = cambios.map(c => {
+      const spreadARS = State.calcSpreadARS(c);
+      return {
+        'Fecha': c.fecha, 'Operación': 'ARS → USD',
+        'Sale de': `${c.origenP} · ${c.origenB}`, 'Entrega (ARS)': n(c.entrega),
+        'Entra a': `${c.destinoP} · ${c.destinoB}`, 'Recibe (USD)': n(c.recibe),
+        'Cotización': n(c.cotiz),
+        'Spread (ARS)': n(spreadARS), 'Spread (USD)': n(spreadARS / (State.refBlue || 1)),
+      };
+    });
+
+    // ── Resumen del período: es donde cierra la ganancia final
+    // Ojo: hojaVentas ya trae la fila TOTALES al pie, así que se excluye
+    const t = (campo) => n(hojaVentas
+      .filter(x => x.Cliente !== 'TOTALES')
+      .reduce((a, x) => a + (Number(x[campo]) || 0), 0));
+    const gananciaBruta = t('Ganancia bruta');
+    const difTarjeta    = t('Diferencial tarjeta');
+    const sinCobrar     = t('Sin cobrar');
+    const pendiente     = t('Pendiente');
+    const gananciaFinal = n(gananciaBruta + difTarjeta + difCambio - sinCobrar);
+    const hojaResumen = [
+      { 'Concepto': 'Período',                        'Detalle': this._nombrePeriodo() + (nicho ? ` · ${nicho}` : ''), 'USD': '' },
+      { 'Concepto': 'Ventas',                         'Detalle': `${ventas.length} operación(es)`,                     'USD': '' },
+      { 'Concepto': 'Volumen vendido',                'Detalle': 'Suma de los subtotales',                             'USD': t('SUBTOTAL') },
+      { 'Concepto': 'Costo',                          'Detalle': 'Costo de lo vendido',                                'USD': t('Costo') },
+      { 'Concepto': 'Ganancia bruta',                 'Detalle': 'Precio − costo',                                     'USD': gananciaBruta },
+      { 'Concepto': 'Diferencial con tarjeta',        'Detalle': 'Cobrado por encima del precio (recargo posnet)',     'USD': difTarjeta },
+      { 'Concepto': 'Diferencial por tipo de cambio', 'Detalle': `Spread de ${cambios.length} operación(es) de cueva`, 'USD': n(difCambio) },
+      { 'Concepto': 'Sin cobrar (ventas cerradas)',   'Detalle': 'Descuentos y comisiones — resta',                    'USD': -sinCobrar },
+      { 'Concepto': 'GANANCIA FINAL',                 'Detalle': 'Bruta + tarjeta + tipo de cambio − sin cobrar',      'USD': gananciaFinal },
+      { 'Concepto': 'Por cobrar (ventas abiertas)',   'Detalle': 'No descontado — plata que te deben',                 'USD': pendiente },
+    ];
+
+    const wb = XLSX.utils.book_new();
+    const agregar = (datos, nombre, anchos) => {
+      if (!datos.length) return;
+      const ws = XLSX.utils.json_to_sheet(datos);
+      ws['!cols'] = anchos.map(w => ({ wch: w }));
+      XLSX.utils.book_append_sheet(wb, ws, nombre);
+    };
+    agregar(hojaResumen, 'Resumen',     [32,52,14]);
+    agregar(hojaVentas, 'Ventas',       [8,10,24,16,18,12,10,20,18,12,10,12,13,10,10,14,17,11,11,13]);
+    agregar(hojaDisp,   'Dispositivos', [8,10,24,18,32,16,18,8,13,12,11]);
+    agregar(hojaAcc,    'Accesorios',   [8,10,24,18,30,9,8,11,12,11]);
+    agregar(hojaPagos,  'Pagos',        [8,10,24,18,18,12,14,12,9,15]);
+    agregar(hojaCambio, 'Tipo de cambio',[10,12,24,15,24,14,12,14,14]);
+
+    const sufN = nicho ? `-${nicho}` : '';
+    XLSX.writeFile(wb, `iPhoneMood-Ventas-${this._nombrePeriodo()}${sufN}.xlsx`);
+    toast(`${ventas.length} venta(s) exportadas.`);
+  },
+
   renderMetricas() {
     const el=document.getElementById('ventas-metricas');
     if (!el) return;
@@ -112,34 +330,22 @@ const Ventas = {
 
     const volumen = ventas.reduce((s,v) => s + v.items.reduce((a,i) => a + i.precio, 0), 0);
     const unidades = ventas.reduce((s,v) => s + v.items.reduce((a,i) => a + (i.cantidad||1), 0), 0);
-    const margenReal = ventas.reduce((s,v) => s + v.items.reduce((a,i) => a + (i.precio - (i.costo||0)), 0), 0);
+    // Un solo criterio para todo: ver resultadoVenta()
+    const res = ventas.map(v => this.resultadoVenta(v));
+    const margenBruto  = res.reduce((s,r) => s + r.margenBruto, 0);
+    const diferencial  = res.reduce((s,r) => s + r.diferencial, 0);
+    const quebranto    = res.reduce((s,r) => s + r.quebranto, 0);
+    const porCobrar    = res.reduce((s,r) => s + r.pendiente, 0);
+    // Margen real = lo comercial menos lo que quedó sin cobrar en ventas cerradas
+    const margenReal   = margenBruto - quebranto;
     const margenXEquipo = ventas.length ? margenReal / ventas.length : 0;
     const rentabilidad = volumen > 0 ? (margenReal / volumen * 100) : 0;
-    const diferencial = ventas.reduce((s,v) => {
-      const totalVenta = v.items.reduce((a,i) => a + i.precio, 0);
-      const totalPagado = (v.pagos||[]).reduce((a,p) => a + p.monto, 0) + (v.tradeIn?.valor||0);
-      return s + Math.max(0, totalPagado - totalVenta);
-    }, 0);
     const ticketProm = ventas.length ? volumen / ventas.length : 0;
 
     // Diferencial de tipo de cambio (ARS→USD) del período — spread Cueva
-    const cambiosPeriodo = (State.cambios || []).filter(c => {
-      if (c.tipo !== 'ars-usd') return false;
-      if (!c.fechaISO) return true;
-      const f = new Date(c.fechaISO); f.setHours(0,0,0,0);
-      const hoy = new Date(); hoy.setHours(0,0,0,0);
-      if (this.periodoVentas === 'hoy') return f.getTime() === hoy.getTime();
-      if (this.periodoVentas === 'semana') { const d=new Date(hoy); d.setDate(d.getDate()-7); return f>=d; }
-      if (this.periodoVentas === 'mes') return f.getFullYear()===hoy.getFullYear()&&f.getMonth()===hoy.getMonth();
-      if (this.periodoVentas === 'mes-especifico') return c.fechaISO.slice(0,7) === this.periodoMes;
-      if (this.periodoVentas === 'libre') {
-        if (this.periodoDesde && f < new Date(this.periodoDesde)) return false;
-        if (this.periodoHasta && f > new Date(this.periodoHasta)) return false;
-      }
-      return true;
-    });
-    const difCambio = cambiosPeriodo.reduce((s,c) => s + State.calcSpreadARS(c), 0) / (State.refBlue || 1);
-    const margenTotal = margenReal + diferencial + difCambio;
+    const cambiosPeriodo = this.cambiosDelPeriodo();
+    const difCambio = this.difCambioDelPeriodo();
+    const margenTotal = margenReal + diferencial + difCambio;  // diferencial no está dentro de margenReal: no se duplica
 
     if (this.isMobile()) {
       el.innerHTML = `
@@ -169,12 +375,14 @@ const Ventas = {
       { label:'Rentabilidad',              val:`${rentabilidad.toFixed(1)}%`,sub:'Margen real ÷ volumen vendido',                   emoji:'📊', color:rentabilidad>=0?'var(--green)':'var(--red)' },
       { label:'Margen por venta',          val:State.fmtUSD(margenXEquipo), sub:'Margen real ÷ cantidad de ventas',                emoji:margenXEquipo>=0?'📈':'📉', color:margenXEquipo>=0?'var(--green)':'var(--red)' },
       { label:'MARGEN TOTAL',              val:State.fmtUSD(margenTotal),   sub:'Ventas + tarjeta + tipo de cambio',               emoji:'🏆', color:margenTotal>=0?'var(--green)':'var(--red)' },
-      { label:'Margen real (ventas)',       val:State.fmtUSD(margenReal),    sub:'Precio venta − costo (sin diferenciales)',        emoji:margenReal>=0?'✅':'⚠️', color:margenReal>=0?'var(--green)':'var(--red)' },
+      { label:'Margen real (ventas)',       val:State.fmtUSD(margenReal),    sub:quebranto>0?`Precio − costo − ${State.fmtUSD(quebranto)} sin cobrar`:'Precio venta − costo',emoji:margenReal>=0?'✅':'⚠️', color:margenReal>=0?'var(--green)':'var(--red)' },
       { label:'Diferencial tarjeta',        val:State.fmtUSD(diferencial),  sub:'Ganancia por recargo posnet',                     emoji:'💳', color:'var(--purple)' },
+      { label:'Sin cobrar (cerradas)',      val:State.fmtUSD(quebranto),    sub:'Ya descontado del margen real',                   emoji:'🔻', color:quebranto>0?'var(--red)':'var(--text-secondary)' },
+      { label:'Por cobrar (abiertas)',      val:State.fmtUSD(porCobrar),    sub:'Financiado — todavía no descontado',              emoji:'⏳', color:porCobrar>0?'var(--amber)':'var(--text-secondary)' },
       { label:'Dif. tipo de cambio',        val:State.fmtUSD(difCambio),    sub:`${cambiosPeriodo.length} op. ARS→USD en el período`,emoji:'💱', color:difCambio>=0?'var(--green)':'var(--red)' },
       { label:'Ticket promedio',            val:State.fmtUSD(ticketProm),   sub:'Volumen ÷ cantidad de ventas',                    emoji:'🧾', color:'var(--text)' },
     ];
-    el.style.cssText = 'padding:14px 22px;border-bottom:1px solid var(--border);display:grid;grid-template-columns:repeat(9,1fr);gap:8px';
+    el.style.cssText = 'padding:14px 22px;border-bottom:1px solid var(--border);display:grid;grid-template-columns:repeat(11,1fr);gap:8px';
     el.innerHTML = kpis.map((k,i)=>`
       <div class="card" style="padding:10px 12px;margin-bottom:0;display:flex;flex-direction:column;gap:4px;min-height:90px${i===4?';border:1px solid var(--green);box-shadow:0 0 0 1px var(--green)20':''}">
         <label style="font-size:9.5px;color:var(--text-secondary);display:block;line-height:1.2;${i===4?'font-weight:700;color:var(--green)':''}">${k.label}</label>
@@ -1320,6 +1528,29 @@ const Ventas = {
   prevStep() { if (this.step > 0) { this.step--; this.renderStep(); } },
 
   async confirmSale() {
+    // Candado anti doble clic: guardar la venta tarda varios segundos y el
+    // botón seguía activo. Un segundo clic ejecutaba todo de nuevo con el
+    // mismo borrador: venta duplicada, stock descontado dos veces y caja
+    // acreditada dos veces.
+    if (this._guardandoVenta) return;
+    this._guardandoVenta = true;
+    const btnConfirmar = document.getElementById('venta-btn-next');
+    if (btnConfirmar) {
+      btnConfirmar.disabled = true;
+      btnConfirmar.textContent = 'Guardando…';
+    }
+    try {
+      await this._confirmSale();
+    } finally {
+      this._guardandoVenta = false;
+      if (btnConfirmar && document.body.contains(btnConfirmar)) {
+        btnConfirmar.disabled = false;
+        btnConfirmar.textContent = 'Confirmar venta';
+      }
+    }
+  },
+
+  async _confirmSale() {
     const d = this.draft;
     const total = d.items.reduce((s, i) => s + i.precio, 0);
     const pagado = d.pagos.reduce((s, p) => s + Ventas.montoSinDiferencial(p), 0) + (d.tradeIn?.valor || 0);
@@ -1330,6 +1561,7 @@ const Ventas = {
 
     // Descontar stock de los ítems que vinieron de inventario (memoria + base de datos)
     const stockMovs = [];
+    const noDescontados = [];
     for (const it of d.items) {
       if (it.stockId) {
         const removed = State.descontarStock(it.stockId, it.imei);
@@ -1337,11 +1569,42 @@ const Ventas = {
           stockMovs.push(removed);
           const item = State.stock.find(s => s.id === it.stockId);
           if (item) {
+            // Guardar SIEMPRE las dos columnas: con IMEI se escribía solo
+            // `imeis` y `cantidad` quedaba vieja, dejando el equipo disponible.
             if (item.imeis) await DB.actualizarImeisStock(it.stockId, item.imeis);
-            else await DB.actualizarCantidadStock(it.stockId, item.cantidad);
+            if (item.cantidad !== undefined) await DB.actualizarCantidadStock(it.stockId, item.cantidad);
+          }
+        } else {
+          // Antes esto se ignoraba: la venta se guardaba igual y el equipo
+          // seguía figurando en stock, sin ningún aviso.
+          noDescontados.push(it.nombre + (it.imei ? ` (IMEI ${it.imei})` : ''));
+        }
+
+        // Garantía automática según la condición del producto (nuevo/usado),
+        // usando el catálogo de Panel → Garantías. Antes este campo no se
+        // completaba en NINGÚN punto del flujo de venta — ni acá ni al
+        // agregar el ítem — así que el resumen de garantías de toda venta
+        // daba 0 sin importar qué se vendiera. Se asigna acá (no al agregar
+        // el ítem al carrito) para usar la fecha real de la venta, no la
+        // fecha en que se armó el borrador.
+        const stockDeItem = State.stock.find(s => s.id === it.stockId || s.id == it.stockId);
+        if (stockDeItem) {
+          const condicion = Stock.condicionDe(stockDeItem); // 'nuevo' | 'usado'
+          const gar = (State.garantias || []).find(g => g.tipo === condicion);
+          if (gar) {
+            it.garantiaId = gar.id;
+            it.garantiaDias = gar.dias;
+            it.garantiaInicio = d.fechaVenta;
+            const fin = new Date(d.fechaVenta);
+            fin.setDate(fin.getDate() + gar.dias);
+            it.garantiaFin = fin.toISOString().slice(0, 10);
           }
         }
       }
+    }
+    if (noDescontados.length) {
+      toast(`⚠️ No se pudo descontar del stock: ${noDescontados.join(', ')}. Revisalo a mano en Stock.`);
+      console.warn('Ítems vendidos que no se descontaron del stock:', noDescontados);
     }
 
     // Ingresar el equipo del Trade-In al stock
@@ -1353,7 +1616,11 @@ const Ventas = {
       const nombre = [ti.modelo, ti.storage, ti.color].filter(Boolean).join(' ') || ti.modelo;
       const tiObj = {
         cat: ti.cat || 'iphone', nombre, costoUSD: ti.valor,
-        cantidad: imeis.length > 0 ? 0 : 1, imeis, cotiz: State.refBlue, precioARS: null,
+        // La columna precio_ars es obligatoria en la base: con null el alta fallaba
+        // siempre y el equipo nunca entraba al stock. Entra en 0 (sin tasar): así
+        // queda fuera de la web pública (precios.html solo lista precio_ars > 0)
+        // hasta que se le ponga precio a mano.
+        cantidad: imeis.length > 0 ? imeis.length : 1, imeis, cotiz: State.refBlue, precioARS: 0,
         proveedor: 'Trade-In', custodio: ti.custodio || '',
         notas: [ti.notas, `Trade-in de venta a ${d.cliente}`].filter(Boolean).join(' | '),
         estadoInventario: estadoInv, grado: ti.grado || 'Sin grado',
@@ -1365,26 +1632,38 @@ const Ventas = {
         tiObj.id = tiId;
         State.stock.push(tiObj);
         savedTradeInId = tiId;
+      } else {
+        // Antes este error se descartaba en silencio: la venta se guardaba igual
+        // y el equipo recibido desaparecía sin dejar rastro.
+        console.error('No se pudo dar de alta el equipo del trade-in:', tiErr);
+        toast(`⚠️ La venta se guardó, pero el equipo "${nombre}" NO entró al stock. Cargalo a mano desde Stock.`);
       }
     }
 
     // Acreditar pagos en las cajas correspondientes (memoria + base de datos)
-    d.pagos.forEach(p => {
+    await Promise.all(d.pagos.map(p => {
       let montoEnBolsillo = p.monto;
-      if (p.bolsillo.startsWith('ARS')) montoEnBolsillo = p.monto * State.refBlue;
-      State.acreditarCaja(p.persona, p.bolsillo, montoEnBolsillo);
-    });
+      if (p.bolsillo.startsWith('ARS')) montoEnBolsillo = p.monto * (p.cotizacionDiferencial || State.refBlue);
+      return State.acreditarCaja(p.persona, p.bolsillo, montoEnBolsillo,
+        { tipo: 'venta', descripcion: `Cobro de venta a ${d.cliente}` });
+    }));
 
     // Guardar la venta en Supabase
     const ventaId = await DB.crearVenta(d, estado);
     if (!ventaId) {
+      // Sacar el equipo del trade-in que ya se había dado de alta: si la venta
+      // no se guardó, ese teléfono no entró. Antes quedaba colgado en el stock.
+      if (savedTradeInId) {
+        await DB.darDeBajaProductoStock(savedTradeInId, 'Baja: la venta no se llegó a guardar');
+        State.stock = State.stock.filter(s => s.id !== savedTradeInId);
+      }
       // Revertir stock descontado
       for (const mov of stockMovs) {
         State.restaurarStock(mov.stockId, mov.imei);
         const item = State.stock.find(s => s.id === mov.stockId || s.id == mov.stockId);
         if (item) {
           if (item.imeis) await DB.actualizarImeisStock(mov.stockId, item.imeis);
-          else await DB.actualizarCantidadStock(mov.stockId, item.cantidad);
+          if (item.cantidad !== undefined) await DB.actualizarCantidadStock(mov.stockId, item.cantidad);
           if (State.getStock(item) > 0 && item.estadoInventario !== 'disponible') {
             item.estadoInventario = 'disponible';
             await DB.actualizarEstadoInventario(mov.stockId, 'disponible');
@@ -1392,17 +1671,27 @@ const Ventas = {
         }
       }
       // Revertir pagos acreditados
-      d.pagos.forEach(p => {
+      await Promise.all(d.pagos.map(p => {
         let montoEnBolsillo = p.monto;
-        if (p.bolsillo.startsWith('ARS')) montoEnBolsillo = p.monto * State.refBlue;
-        State.debitarCaja(p.persona, p.bolsillo, montoEnBolsillo);
-      });
+        if (p.bolsillo.startsWith('ARS')) montoEnBolsillo = p.monto * (p.cotizacionDiferencial || State.refBlue);
+        return State.debitarCaja(p.persona, p.bolsillo, montoEnBolsillo,
+          { tipo: 'venta_fallida', descripcion: 'Reverso: la venta no se pudo guardar' });
+      }));
       toast('Hubo un problema guardando la venta. Probá de nuevo.');
       return;
     }
 
     if (savedTradeInId && d.tradeIn) {
       const ti = d.tradeIn;
+      // Dejar el número de venta en las notas del equipo recibido: es lo que
+      // permite encontrarlo y darlo de baja si después se anula la venta,
+      // incluso tras recargar la página.
+      const notasConVenta = [ti.notas, `Trade-in de venta #${ventaId} — ${d.cliente}`]
+        .filter(Boolean).join(' | ');
+      await DB.actualizarNotasStock(savedTradeInId, notasConVenta);
+      const enMemoria = State.stock.find(s => s.id === savedTradeInId);
+      if (enMemoria) enMemoria.notas = notasConVenta;
+
       DB.registrarMovimientoStock(
         savedTradeInId, 'trade_in',
         `Recibido como trade-in de ${d.cliente} en venta #${ventaId}`,
@@ -1414,7 +1703,7 @@ const Ventas = {
     const venta = {
       id: ventaId, fecha: 'Hoy', cliente: d.cliente, vendedor: d.vendedor,
       items: d.items, pagos: d.pagos.map(p => ({ id: p.id || null, caja: `${p.persona}-${p.bolsillo}`, monto: p.monto, persona: p.persona, bolsillo: p.bolsillo, esTarjeta: !!p.esTarjeta, diferencialArs: p.diferencialArs || 0, cotizacionDiferencial: p.cotizacionDiferencial || null })),
-      estado, tradeIn: d.tradeIn, stockMovs
+      estado, tradeIn: d.tradeIn, stockMovs, tradeInStockId: savedTradeInId
     };
     State.ventas.unshift(venta);
 
@@ -1627,7 +1916,15 @@ const Ventas = {
                 <div style="font-size:12px;color:var(--text-secondary)">Subtotal Dispositivos: ${State.fmtUSD(itemsDispositivos.reduce((s,i)=>s+i.precio,0))}</div>
                 <div style="font-size:12px;color:var(--text-secondary)">Subtotal Accesorios: ${State.fmtUSD(itemsAccesorios.reduce((s,i)=>s+i.precio,0))}</div>
                 <div style="font-size:16px;font-weight:700;margin-top:6px">Subtotal: ${State.fmtUSD(total)}</div>
-                ${(()=>{ const pt = v.items.reduce((s,i)=>s+(i.precio-(i.costo||0)),0); return `<div style="font-size:12px;color:${pt>=0?'var(--green)':'var(--red)'}">Profit: ${pt>=0?'+':''}${State.fmtUSD(pt)}</div>`; })()}
+                ${(()=>{
+                  const r = Ventas.resultadoVenta(v);
+                  const c = r.margenReal>=0?'var(--green)':'var(--red)';
+                  let extra = '';
+                  if (r.quebranto > 0.005) extra = `<div style="font-size:10.5px;color:var(--red)">− ${State.fmtUSD(r.quebranto)} que no se cobraron</div>`;
+                  else if (r.diferencial > 0.005) extra = `<div style="font-size:10.5px;color:var(--purple)">incluye +${State.fmtUSD(r.diferencial)} de recargo</div>`;
+                  else if (r.pendiente > 0.005) extra = `<div style="font-size:10.5px;color:var(--amber)">${State.fmtUSD(r.pendiente)} pendiente de cobro</div>`;
+                  return `<div style="font-size:12px;color:${c}">Profit: ${r.margenReal>=0?'+':''}${State.fmtUSD(r.margenReal)}</div>${extra}`;
+                })()}
               </div>
             </div>
 
@@ -1758,8 +2055,8 @@ const Ventas = {
 
     const fmtFecha = (iso) => {
       if (!iso) return '—';
-      const d = new Date(iso);
-      if (isNaN(d)) return iso;
+      const d = State.parseFecha(iso);
+      if (!d || isNaN(d)) return iso;
       return d.toLocaleDateString('es-AR', { day:'2-digit', month:'2-digit', year:'numeric' });
     };
     const fechaVentaFmt = v.fecha === 'Hoy' ? fmtFecha(new Date().toISOString()) : fmtFecha(v.fecha);
@@ -2120,7 +2417,9 @@ const Ventas = {
     const v = State.ventas.find(x => x.id === id);
     if (!v) return;
     const total = v.items.reduce((s, i) => s + i.precio, 0);
-    const pagado = v.pagos.reduce((s, p) => s + p.monto, 0);
+    // El trade-in cuenta como parte de pago: sin sumarlo, el saldo pendiente
+    // salía inflado y se cobraba de más.
+    const pagado = v.pagos.reduce((s, p) => s + p.monto, 0) + (v.tradeIn?.valor || 0);
     const saldo = Math.max(0, total - pagado);
     const personaOpts = State.personas.map(p => `<option>${p}</option>`).join('');
     const overlay = document.createElement('div');
@@ -2133,11 +2432,7 @@ const Ventas = {
           <div style="font-size:11px;color:var(--text-secondary)">${v.cliente} · Saldo pendiente: <b style="color:var(--amber)">USD ${saldo.toFixed(2)}</b></div>
         </div>
         <div style="padding:18px;display:flex;flex-direction:column;gap:12px">
-          <div>
-            <label style="font-size:11px;color:var(--text-secondary);display:block;margin-bottom:4px">Monto (USD)</label>
-            <input type="number" id="cobro-monto" value="${saldo.toFixed(2)}" min="0" step="0.01"
-              style="width:100%;font-size:16px;font-weight:700;padding:9px 12px;background:var(--bg-secondary);border:1px solid var(--border-strong);border-radius:8px;color:var(--text)">
-          </div>
+          <!-- 1) Dónde entra la plata: define la moneda del monto -->
           <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
             <div>
               <label style="font-size:11px;color:var(--text-secondary);display:block;margin-bottom:4px">Caja</label>
@@ -2145,11 +2440,34 @@ const Ventas = {
             </div>
             <div>
               <label style="font-size:11px;color:var(--text-secondary);display:block;margin-bottom:4px">Forma de pago</label>
-              <select id="cobro-bolsillo" style="width:100%;font-size:13px;padding:8px 10px;background:var(--bg-secondary);border:1px solid var(--border-strong);border-radius:8px;color:var(--text)">
+              <select id="cobro-bolsillo" onchange="Ventas._cobroRefrescar()" style="width:100%;font-size:13px;padding:8px 10px;background:var(--bg-secondary);border:1px solid var(--border-strong);border-radius:8px;color:var(--text)">
                 <option>ARS cash</option><option>ARS transferencia</option><option>USD cash</option><option>USD transferencia</option><option>USDT</option>
               </select>
             </div>
           </div>
+
+          <!-- 2) Cotización, solo si la caja es en pesos -->
+          <div id="cobro-cotiz-wrap">
+            <label style="font-size:11px;color:var(--text-secondary);display:block;margin-bottom:4px">
+              Cotización usada <span style="font-weight:400">(blue de hoy: $${State.refBlue.toLocaleString('es-AR')})</span>
+            </label>
+            <div style="display:flex;gap:6px;margin-bottom:5px;flex-wrap:wrap">
+              <button class="btn btn-sm" onclick="Ventas._cobroSetCotiz(${State.refBlue})">Blue $${State.refBlue.toLocaleString('es-AR')}</button>
+              ${State.refOficial ? `<button class="btn btn-sm" onclick="Ventas._cobroSetCotiz(${State.refOficial})">Oficial $${State.refOficial.toLocaleString('es-AR')}</button>` : ''}
+            </div>
+            <input type="number" id="cobro-cotiz" value="${State.refBlue}" min="1" step="1" oninput="Ventas._cobroRefrescar()"
+              style="width:100%;font-size:13px;font-weight:600;padding:8px 10px;background:var(--bg-secondary);border:1px solid var(--border-strong);border-radius:8px;color:var(--text)">
+          </div>
+
+          <!-- 3) El monto, en la moneda de la caja elegida -->
+          <div>
+            <label id="cobro-monto-label" style="font-size:11px;color:var(--text-secondary);display:block;margin-bottom:4px">Monto</label>
+            <input type="number" id="cobro-monto" value="" min="0" step="0.01" placeholder="0" oninput="Ventas._cobroRefrescar()"
+              style="width:100%;font-size:17px;font-weight:700;padding:10px 12px;background:var(--bg-secondary);border:1px solid var(--border-strong);border-radius:8px;color:var(--text)">
+            <button class="btn btn-sm" id="cobro-btn-saldo" onclick="Ventas._cobroCompletarSaldo()" style="margin-top:6px">Completar el saldo</button>
+          </div>
+
+          <div id="cobro-equiv" style="font-size:12px;color:var(--text-secondary);background:var(--bg-secondary);border-radius:8px;padding:9px 11px;min-height:38px"></div>
         </div>
         <div style="padding:12px 18px;border-top:1px solid var(--border);display:flex;justify-content:flex-end;gap:8px">
           <button class="btn" onclick="document.getElementById('cobro-overlay').remove()">Cancelar</button>
@@ -2157,23 +2475,89 @@ const Ventas = {
         </div>
       </div>`;
     document.body.appendChild(overlay);
-    setTimeout(() => document.getElementById('cobro-monto')?.select(), 60);
+    this._cobroSaldoUSD = saldo;
+    this._cobroRefrescar();
+    setTimeout(() => document.getElementById('cobro-monto')?.focus(), 60);
+  },
+
+  // El monto se carga en la moneda de la caja elegida: pesos si es una caja en
+  // ARS, dólares si no. Antes solo aceptaba dólares y no se podía registrar una
+  // transferencia en pesos sin hacer la cuenta a mano.
+  _cobroDatos() {
+    const bolsillo = document.getElementById('cobro-bolsillo')?.value || '';
+    const esARS = bolsillo.startsWith('ARS');
+    const cotiz = parseFloat(document.getElementById('cobro-cotiz')?.value) || State.refBlue;
+    const ingresado = parseFloat(document.getElementById('cobro-monto')?.value) || 0;
+    const montoUSD = esARS ? (cotiz > 0 ? ingresado / cotiz : 0) : ingresado;
+    return { bolsillo, esARS, cotiz, ingresado, montoUSD };
+  },
+
+  _cobroSetCotiz(v) {
+    const el = document.getElementById('cobro-cotiz');
+    if (el) { el.value = v; this._cobroRefrescar(); }
+  },
+
+  _cobroCompletarSaldo() {
+    const { esARS, cotiz } = this._cobroDatos();
+    const el = document.getElementById('cobro-monto');
+    if (!el) return;
+    const saldo = this._cobroSaldoUSD || 0;
+    el.value = esARS ? Math.round(saldo * cotiz) : +saldo.toFixed(2);
+    this._cobroRefrescar();
+  },
+
+  _cobroRefrescar() {
+    const { esARS, cotiz, ingresado, montoUSD } = this._cobroDatos();
+    const wrap = document.getElementById('cobro-cotiz-wrap');
+    if (wrap) wrap.style.display = esARS ? 'block' : 'none';
+    const lbl = document.getElementById('cobro-monto-label');
+    if (lbl) lbl.textContent = esARS ? 'Monto en PESOS que entra a la caja' : 'Monto en USD';
+    const btn = document.getElementById('cobro-btn-saldo');
+    const saldo = this._cobroSaldoUSD || 0;
+    if (btn) btn.textContent = esARS
+      ? `Completar el saldo ($${Math.round(saldo * cotiz).toLocaleString('es-AR')})`
+      : `Completar el saldo (${State.fmtUSD(saldo)})`;
+
+    const eq = document.getElementById('cobro-equiv');
+    if (!eq) return;
+    if (!ingresado) { eq.textContent = esARS
+      ? 'Ingresá los pesos que recibís. Se convierten a dólares con la cotización de arriba.'
+      : 'Ingresá el monto en dólares.'; return; }
+    const restante = saldo - montoUSD;
+    const detalle = esARS
+      ? `Entran <b>$${Math.round(ingresado).toLocaleString('es-AR')}</b> = <b>${State.fmtUSD(montoUSD)}</b> a cuenta de la venta.`
+      : `Entran <b>${State.fmtUSD(montoUSD)}</b> a la caja.`;
+    const cierre = restante <= 0.005
+      ? `<span style="color:var(--green)">Cubre el saldo — la venta queda cerrada.</span>`
+      : `<span style="color:var(--amber)">Quedan ${State.fmtUSD(restante)} pendientes.</span>`;
+    eq.innerHTML = `${detalle}<br>${cierre}`;
   },
 
   async submitCobro(id) {
-    const monto = parseFloat(document.getElementById('cobro-monto')?.value) || 0;
-    if (!monto) { toast('Ingresá un monto.'); return; }
+    const { esARS, cotiz, ingresado, montoUSD } = this._cobroDatos();
+    if (!ingresado) { toast('Ingresá un monto.'); return; }
+    if (esARS && cotiz <= 0) { toast('Ingresá una cotización válida.'); return; }
+    const monto = +montoUSD.toFixed(2);   // en la venta los pagos van en USD
+    if (!monto) { toast('El monto convertido da cero. Revisá la cotización.'); return; }
     const persona  = document.getElementById('cobro-persona')?.value;
     const bolsillo = document.getElementById('cobro-bolsillo')?.value;
     const v = State.ventas.find(x => x.id === id);
     if (!v) { toast('Error: venta no encontrada.'); return; }
     document.getElementById('cobro-overlay')?.remove();
-    const pago = { persona, bolsillo, monto, caja: `${persona}-${bolsillo}`, esTarjeta: false, diferencialArs: 0 };
+    // Guardar la cotización usada: es lo que permite revertir el cobro por el
+    // mismo importe aunque el blue haya cambiado.
+    const pago = {
+      persona, bolsillo, monto, caja: `${persona}-${bolsillo}`,
+      esTarjeta: false, diferencialArs: 0,
+      cotizacionDiferencial: esARS ? cotiz : null,
+    };
     v.pagos.push(pago);
-    let montoEnBolsillo = monto;
-    if (bolsillo.startsWith('ARS')) montoEnBolsillo = monto * State.refBlue;
-    State.acreditarCaja(persona, bolsillo, montoEnBolsillo);
-    await DB.agregarPagoVenta(id, pago);
+    // A la caja en pesos entra exactamente lo que se tipeó, sin re-redondeos
+    const montoEnBolsillo = esARS ? ingresado : monto;
+    State.acreditarCaja(persona, bolsillo, montoEnBolsillo,
+      { tipo: 'venta', referencia: id, descripcion: `Cobro adicional de la venta #${id}` });
+    // Guardar el id que devuelve la base para poder eliminar este pago sin recargar.
+    pago.id = await DB.agregarPagoVenta(id, pago);
     const total = v.items.reduce((s, i) => s + i.precio, 0);
     const pagado = v.pagos.reduce((s, p) => s + p.monto, 0) + (v.tradeIn?.valor || 0);
     if (pagado >= total) {
@@ -2181,7 +2565,9 @@ const Ventas = {
       await DB.actualizarEstadoVenta(id, 'cerrada');
       toast(`Cobro registrado. Venta #${id} cerrada ✓`);
     } else {
-      toast(`Cobro de USD ${monto.toFixed(2)} registrado en caja de ${persona}.`);
+      toast(esARS
+        ? `Cobro de $${Math.round(ingresado).toLocaleString('es-AR')} (${State.fmtUSD(monto)}) registrado en caja de ${persona}.`
+        : `Cobro de ${State.fmtUSD(monto)} registrado en caja de ${persona}.`);
     }
     this.renderList();
     this.viewSale(id);
@@ -2209,7 +2595,8 @@ const Ventas = {
       if (pago) {
         let montoEnBolsillo = pago.monto;
         if (pago.bolsillo?.startsWith('ARS')) montoEnBolsillo = pago.monto * (pago.cotizacionDiferencial || State.refBlue);
-        State.debitarCaja(pago.persona, pago.bolsillo, montoEnBolsillo);
+        State.debitarCaja(pago.persona, pago.bolsillo, montoEnBolsillo,
+          { tipo: 'pago_eliminado', referencia: ventaId, descripcion: `Se eliminó un pago de la venta #${ventaId}` });
       }
       v.pagos = v.pagos.filter(p => p.id !== pagoId);
       const total = v.items.reduce((s, i) => s + i.precio, 0);
@@ -2237,11 +2624,8 @@ const Ventas = {
       State.restaurarStock(m.stockId, m.imei);
       const item = State.stock.find(s => s.id === m.stockId || s.id == m.stockId);
       if (item) {
-        if (item.imeis) {
-          await DB.actualizarImeisStock(m.stockId, item.imeis);
-        } else {
-          await DB.actualizarCantidadStock(m.stockId, item.cantidad);
-        }
+        if (item.imeis) await DB.actualizarImeisStock(m.stockId, item.imeis);
+        if (item.cantidad !== undefined) await DB.actualizarCantidadStock(m.stockId, item.cantidad);
         // Siempre restaurar el estado a disponible si tiene stock
         if (State.getStock(item) > 0 && item.estadoInventario !== 'disponible') {
           item.estadoInventario = 'disponible';
@@ -2250,16 +2634,61 @@ const Ventas = {
       }
     }
     // Revertir cajas usando la cotización original del pago, no la actual
-    v.pagos.forEach(p => {
+    // Esperar a que la plata vuelva ANTES de borrar la venta: si algo falla,
+    // no queremos quedarnos sin la venta y sin la reversión.
+    await Promise.all(v.pagos.map(p => {
       let montoEnBolsillo = p.monto;
       if (p.bolsillo?.startsWith('ARS')) montoEnBolsillo = p.monto * (p.cotizacionDiferencial || State.refBlue);
-      State.debitarCaja(p.persona, p.bolsillo, montoEnBolsillo);
-    });
+      return State.debitarCaja(p.persona, p.bolsillo, montoEnBolsillo,
+        { tipo: 'venta_anulada', referencia: id, descripcion: `Se anuló la venta #${id}` });
+    }));
+    // Dar de baja el equipo que había entrado como trade-in: la venta deja de
+    // existir, así que ese teléfono ya no es tuyo. Antes quedaba en el stock.
+    const avisos = [];
+    let idsTradeIn = v.tradeInStockId ? [v.tradeInStockId] : [];
+    if (!idsTradeIn.length && v.tradeIn?.valor > 0) {
+      // Venta cargada de la base (o tras recargar): buscarlo por la nota.
+      try { idsTradeIn = await DB.buscarStockTradeInDeVenta(id); } catch (e) { console.error(e); }
+    }
+    for (const tiId of idsTradeIn) {
+      const item = State.stock.find(s => s.id === tiId || s.id == tiId);
+      // Si ya se vendió o se movió, no lo tocamos: avisamos para revisarlo.
+      if (item && item.estadoInventario && item.estadoInventario !== 'disponible') {
+        avisos.push(`el equipo del trade-in ya no estaba disponible (${item.nombre})`);
+        continue;
+      }
+      await DB.darDeBajaProductoStock(tiId, `Baja: se anuló la venta #${id}`);
+      if (item) {
+        item.estadoInventario = 'eliminado';
+        item.cantidad = 0;
+        // getStock() lee cantidadDeclarada, no cantidad: si no se pone en 0
+        // el equipo sigue contando como una unidad en pantalla.
+        item.cantidadDeclarada = 0;
+        if (item.imeis) item.imeis = [];
+      }
+    }
+    if (!idsTradeIn.length && v.tradeIn?.valor > 0) {
+      avisos.push('no se encontró el equipo del trade-in en el stock, revisalo a mano');
+    }
+
+    // Cancelar la deuda a plazos que la venta hubiera generado.
+    let deudasBorradas = [];
+    try { deudasBorradas = await DB.cancelarDeudaDeVenta(id); } catch (e) { console.error(e); }
+    if (deudasBorradas.length) {
+      State.deudas = (State.deudas || []).filter(x => !deudasBorradas.includes(x.id));
+    }
+
     await DB.anularVenta(id);
     State.ventas = State.ventas.filter(x => x.id !== id);
     this.closeModal();
     this.renderList();
-    toast(`Venta #${id} anulada. Stock restaurado y pagos revertidos en las cajas de origen.`);
+
+    const extra = [
+      idsTradeIn.length ? 'equipo del trade-in dado de baja' : '',
+      deudasBorradas.length ? 'deuda cancelada' : '',
+    ].filter(Boolean).join(', ');
+    toast(`Venta #${id} anulada. Stock restaurado y pagos revertidos${extra ? ', ' + extra : ''}.`);
+    if (avisos.length) toast('⚠️ ' + avisos.join(' · '));
   }
 };
 

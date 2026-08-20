@@ -4,25 +4,94 @@ const Stock = {
   currentGroup: 'dispositivos', // 'dispositivos' | 'accesorios' | 'perfumeria'
   currentEstado: 'todos', // 'todos' | 'disponible' | 'vendido' | 'reservado' | 'en_reparacion'
   currentCondicion: 'todos', // 'todos' | 'nuevo' | 'usado'
-  CAT_LABELS: { iphone:'iPhone', android:'Android', mac:'Mac', ipad:'iPad', watch:'Watch', audio:'Audio', perfumeria:'Perfumería', decant:'Decant', accesorio:'Accesorio', repuesto:'Repuesto', herramienta:'Herramienta', otro:'Otro' },
-  CAT_CLASS: { iphone:'b-blue', android:'b-teal', mac:'b-blue', ipad:'b-blue', watch:'b-blue', audio:'b-purple', perfumeria:'b-green', decant:'b-teal', accesorio:'b-purple', repuesto:'b-amber', herramienta:'b-amber', otro:'b-gray' },
+  CAT_LABELS: { iphone:'iPhone', android:'Android', mac:'Mac', ipad:'iPad', watch:'Watch', audio:'Audio', gaming:'Gaming', perfumeria:'Perfumería', decant:'Decant', combo:'Combo', accesorio:'Accesorio', repuesto:'Repuesto', herramienta:'Herramienta', otro:'Otro' },
+  CAT_CLASS: { iphone:'b-blue', android:'b-teal', mac:'b-blue', ipad:'b-blue', watch:'b-blue', audio:'b-purple', gaming:'b-purple', perfumeria:'b-green', decant:'b-teal', combo:'b-green', accesorio:'b-purple', repuesto:'b-amber', herramienta:'b-amber', otro:'b-gray' },
   CATS_IMEI: ['iphone','android','mac','ipad'],
+  // Rubros donde el producto se identifica por su NOMBRE y no por un modelo de
+  // catálogo. En ellos, modelo/color/storage guardan otra cosa (en perfumería,
+  // marca/categoría/concentración; en repuestos, el modelo compatible).
+  //
+  // Esta es la lista CANÓNICA: `Proveedores.CATS_NOMBRE_LIBRE` la lee de acá.
+  // La landing tiene la suya (`CATS_IDENT_NOMBRE` en precios.html) porque es una
+  // página suelta que no importa módulos: si se agrega un rubro acá, hay que
+  // sumarlo allá también o vuelve a fusionar productos distintos en una tarjeta.
+  CATS_NOMBRE_LIBRE: ['perfumeria','decant','combo','accesorio','repuesto','herramienta','gaming','otro'],
+  // `combo` queda AFUERA a propósito: esta lista activa los campos de marca /
+  // categoría olfativa / concentración, y un combo es un paquete de varios
+  // productos distintos — esos tres campos no le aplican. Solo necesita
+  // nombre libre y precio, que es lo que da `CATS_NOMBRE_LIBRE`.
+  CATS_PERFUME: ['perfumeria','decant'],
+  esNombreLibre(cat) { return this.CATS_NOMBRE_LIBRE.includes(cat); },
+  esPerfume(cat) { return this.CATS_PERFUME.includes(cat); },
   // Agrupación de rubros para las pestañas grandes del panel
   GRUPOS: {
     dispositivos: { label: 'Dispositivos', icon: 'ti-device-mobile', cats: ['iphone','android','mac','ipad','watch','audio'] },
     accesorios: { label: 'Accesorios', icon: 'ti-plug', cats: ['accesorio'] },
-    perfumeria: { label: 'Perfumería', icon: 'ti-droplet', cats: ['perfumeria', 'decant'] },
+    perfumeria: { label: 'Perfumería', icon: 'ti-droplet', cats: ['perfumeria', 'decant', 'combo'] },
+    gaming: { label: 'Gaming', icon: 'ti-device-gamepad-2', cats: ['gaming'] },
     taller: { label: 'Taller', icon: 'ti-tool', cats: ['herramienta','repuesto'] },
   },
   ESTADO_INV_LABEL: { disponible:'Disponible', vendido:'Vendido', reservado:'Reservado', en_reparacion:'En reparación' },
   ESTADO_INV_CLASS: { disponible:'b-green', vendido:'b-gray', reservado:'b-amber', en_reparacion:'b-purple' },
-  TIPO_MOV_LABEL: { alta:'Alta', baja_venta:'Baja por venta', ajuste_cantidad:'Ajuste de cantidad', imei_agregado:'IMEI agregado', imei_quitado:'IMEI quitado', edicion:'Edición', trade_in:'Trade-In Recibido' },
-  TIPO_MOV_CLASS: { alta:'b-green', baja_venta:'b-red', ajuste_cantidad:'b-amber', imei_agregado:'b-blue', imei_quitado:'b-gray', edicion:'b-purple', trade_in:'b-green' },
+  TIPO_MOV_LABEL: { alta:'Alta', baja:'Eliminado', baja_venta:'Baja por venta', ajuste_cantidad:'Ajuste de cantidad', imei_agregado:'IMEI agregado', imei_quitado:'IMEI quitado', edicion:'Edición', precio:'Cambio de precio', trade_in:'Trade-In Recibido' },
+  TIPO_MOV_CLASS: { alta:'b-green', baja:'b-red', baja_venta:'b-red', ajuste_cantidad:'b-amber', imei_agregado:'b-blue', imei_quitado:'b-gray', edicion:'b-purple', precio:'b-amber', trade_in:'b-green' },
   pendingImeis: [],
 
   // El stock real de un producto se calcula en State.getStock (compartido con
   // Ventas, Dashboard y Reparaciones, para que todos los módulos coincidan).
   stockReal(p) { return State.getStock(p); },
+
+  // ── Catálogo dinámico ────────────────────────────────────────────
+  // Las listas fijas (MODELOS_POR_CAT, SPECS_POR_MODELO) son el punto de partida,
+  // pero lo que realmente hay en el stock manda: si entra por Proveedores un
+  // iPhone 17 Lavanda 256GB, o cualquier modelo/color que no estaba en la lista,
+  // aparece solo en los filtros y en los desplegables del formulario.
+
+  // Valores distintos que existen hoy en el stock para un campo.
+  _valoresEnStock(campo, filtro = () => true) {
+    return [...new Set(
+      State.stock.filter(filtro).map(p => String(p[campo] || '').trim()).filter(Boolean)
+    )];
+  },
+
+  // Modelos de una categoría: los del catálogo fijo (en su orden) + los que
+  // aparezcan en el stock real y no estuvieran en la lista.
+  modelosParaCat(cat) {
+    const fijos = this.MODELOS_POR_CAT[cat] || [];
+    const extras = this._valoresEnStock('modelo', p => p.cat === cat)
+      .filter(m => !fijos.some(f => f.toLowerCase() === m.toLowerCase()))
+      .sort((a, b) => a.localeCompare(b, 'es'));
+    return [...fijos, ...extras];
+  },
+
+  // Lo mismo para todas las categorías de un grupo, agrupado por categoría.
+  modelosPorCatDelGrupo(grupo) {
+    const cats = this.GRUPOS[grupo]?.cats || [];
+    const out = {};
+    cats.forEach(c => { const m = this.modelosParaCat(c); if (m.length) out[c] = m; });
+    return out;
+  },
+
+  // ¿De este producto HAY? Cuenta lo disponible, reservado y en reparación con
+  // unidades; no lo vendido ni lo que quedó en cero.
+  hayUnidades(p) {
+    return (p.estadoInventario || 'disponible') !== 'vendido' && this.stockReal(p) > 0;
+  },
+
+  // Modelos para el DESPLEGABLE DE FILTRO: solo los que hoy tenés en stock.
+  // Ojo, no confundir con modelosParaCat(), que sí trae el catálogo completo
+  // porque es la lista para CARGAR un producto nuevo. Filtrar por un modelo que
+  // no tenés no sirve para nada: el filtro mostraba las 57 opciones del catálogo
+  // aunque tuvieras 6 modelos.
+  modelosConStockPorCatDelGrupo(grupo) {
+    const cats = this.GRUPOS[grupo]?.cats || [];
+    const out = {};
+    cats.forEach(c => {
+      const modelos = this._valoresEnStock('modelo', p => p.cat === c && this.hayUnidades(p));
+      if (modelos.length) out[c] = modelos.sort((a, b) => a.localeCompare(b, 'es', { numeric: true }));
+    });
+    return out;
+  },
 
   // Productos del grupo actualmente seleccionado (Dispositivos / Accesorios / Perfumería)
   productosDelGrupo(grupo) {
@@ -113,11 +182,17 @@ const Stock = {
     } else {
       const total = grupo.length;
       const disponibles = grupo.filter(p => (p.estadoInventario||'disponible') === 'disponible' && this.stockReal(p) > 0).length;
-      const vendidos = grupo.filter(p => p.estadoInventario === 'vendido' || this.stockReal(p) === 0).length;
-      const valorDisponible = grupo.filter(p => (p.estadoInventario||'disponible')!=='vendido').reduce((a,p)=>a + p.costoUSD * this.stockReal(p), 0);
-      const valorVendidoPotencial = grupo.reduce((a,p)=>{
+      // Mismo criterio que la pestaña "Vendido" de abajo: antes el KPI sumaba
+      // además todo lo que tuviera 0 unidades, y los dos números no coincidían.
+      const vendidos = grupo.filter(p => (p.estadoInventario||'disponible') === 'vendido').length;
+      const enPie = grupo.filter(p => (p.estadoInventario||'disponible') !== 'vendido');
+      const valorDisponible = enPie.reduce((a,p)=>a + p.costoUSD * this.stockReal(p), 0);
+      // Cuánto entraría si se vendiera lo que HAY. Los vendidos quedan afuera:
+      // antes se les contaba 1 unidad a cada uno, así que este número crecía solo
+      // mes a mes con el histórico de ventas y no significaba nada.
+      const valorVendidoPotencial = enPie.reduce((a,p)=>{
         const precioUSD = p.cotiz ? p.precioARS / p.cotiz : 0;
-        return a + precioUSD * Math.max(this.stockReal(p), p.estadoInventario==='vendido'?1:0);
+        return a + precioUSD * this.stockReal(p);
       }, 0);
       document.getElementById('stock-kpis').innerHTML = `
         <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px" class="stock-kpi-grid">
@@ -183,12 +258,12 @@ const Stock = {
       </select>
       <select id="pf-marca" onchange="Stock.renderTable()" style="font-size:12px;padding:5px 8px;border:1px solid var(--border-strong);border-radius:8px;max-width:140px">
         <option value="">Marca</option>
-        ${Object.entries(this.PERFUME_MARCAS).map(([cat,marcas])=>`<optgroup label="${cat}">${marcas.map(m=>`<option>${m}</option>`).join('')}</optgroup>`).join('')}
+        ${Object.entries(this.marcasPerfumeria()).map(([cat,marcas])=>`<optgroup label="${State.esc(cat)}">${marcas.map(m=>`<option value="${State.esc(m)}">${State.esc(m)}</option>`).join('')}</optgroup>`).join('')}
       </select>
     ` : `
       <select id="stock-filter-modelo" onchange="Stock.onModeloFilterChange()" style="font-size:12px;padding:5px 8px;border:1px solid var(--border-strong);border-radius:8px;max-width:160px">
         <option value="">Todos los modelos</option>
-        ${Object.entries(this.MODELOS_POR_CAT).map(([cat,modelos])=>`<optgroup label="${this.CAT_LABELS[cat]||cat}">${modelos.map(m=>`<option value="${m}">${m}</option>`).join('')}</optgroup>`).join('')}
+        ${Object.entries(this.modelosConStockPorCatDelGrupo(this.currentGroup)).map(([cat,modelos])=>`<optgroup label="${this.CAT_LABELS[cat]||cat}">${modelos.map(m=>`<option value="${State.esc(m)}">${State.esc(m)}</option>`).join('')}</optgroup>`).join('')}
       </select>
       <select id="stock-filter-color" onchange="Stock.renderTable()" style="font-size:12px;padding:5px 8px;border:1px solid var(--border-strong);border-radius:8px;max-width:140px">
         <option value="">Todos los colores</option>
@@ -210,8 +285,10 @@ const Stock = {
             <input type="text" id="stock-search" placeholder="Buscar..." oninput="Stock.renderTable()" style="font-size:12px;padding:6px 10px;border:1px solid var(--border-strong);border-radius:8px;flex:1;min-width:120px">
             ${extraSelects}
           </div>
+          <div id="stock-seleccion-bar" style="display:none"></div>
           <div class="body-pad" style="padding:0;overflow-y:auto;-webkit-overflow-scrolling:touch;flex:1;min-height:0">
             <table class="stock-table-desktop"><thead><tr>
+              <th style="width:34px"><input type="checkbox" id="stock-check-todos" onchange="Stock.toggleTodos(this.checked)" title="Seleccionar todo lo filtrado"></th>
               <th>Producto</th><th>Color</th><th>Batería</th><th>Costo USD</th><th>Precio venta USD</th><th>Margen</th><th>Stock</th><th>IMEI</th><th>Estado</th><th></th>
             </tr></thead><tbody id="stock-tbody"></tbody></table>
             <div class="stock-cards-mobile" id="stock-cards"></div>
@@ -237,8 +314,10 @@ const Stock = {
             <input type="text" id="stock-search" placeholder="Buscar..." oninput="Stock.renderTable()" style="font-size:12px;padding:5px 10px;border:1px solid var(--border-strong);border-radius:8px;width:180px;flex-shrink:0">
             ${extraSelects}
           </div>
+          <div id="stock-seleccion-bar" style="display:none"></div>
           <div class="body-pad" style="padding:0;overflow-y:auto;-webkit-overflow-scrolling:touch;flex:1;min-height:0">
             <table class="stock-table-desktop"><thead><tr>
+              <th style="width:34px"><input type="checkbox" id="stock-check-todos" onchange="Stock.toggleTodos(this.checked)" title="Seleccionar todo lo filtrado"></th>
               <th>Producto</th><th>Color</th><th>Batería</th><th>Costo USD</th><th>Precio venta USD</th><th>Margen</th><th>Stock</th><th>IMEI</th><th>Estado</th><th></th>
             </tr></thead><tbody id="stock-tbody"></tbody></table>
             <div class="stock-cards-mobile" id="stock-cards"></div>
@@ -269,7 +348,32 @@ const Stock = {
       </button>`;
     }).join('');
   },
-  setGrupo(g) { this.currentGroup = g; this.currentTab = 'all'; this.currentEstado = 'todos'; this.currentCondicion = 'todos'; this.renderKpis(); this.renderGrupoTabs(); this.renderEstadoTabs(); this.renderCondicionTabs(); this.renderTabs(); this._actualizarColoresDisponibles(); this.renderTable(); },
+  setGrupo(g) {
+    this.currentGroup = g;
+    this.currentTab = 'all';
+    this.currentEstado = 'todos';
+    this.currentCondicion = 'todos';
+    // La selección era de productos del grupo anterior: si no se limpia, la barra
+    // azul sigue ofreciendo "Editar precio" sobre productos que ya no se ven.
+    this._sel.clear();
+    // renderView() rearma toda la barra de filtros. Antes no se llamaba, así que
+    // los filtros de Perfumería (categoría/concentración/marca) no aparecían nunca
+    // si entrabas por Dispositivos, y un filtro de modelo del grupo anterior
+    // quedaba aplicado dejando la tabla vacía sin motivo visible.
+    this.renderView();
+  },
+
+  // Marcas de perfumería: las del catálogo + las que ya existan en el stock.
+  marcasPerfumeria() {
+    const out = {};
+    Object.entries(this.PERFUME_MARCAS).forEach(([cat, marcas]) => { out[cat] = [...marcas]; });
+    const conocidas = Object.values(this.PERFUME_MARCAS).flat().map(m => m.toLowerCase());
+    const extras = this._valoresEnStock('modelo', p => this.esPerfume(p.cat))
+      .filter(m => !conocidas.includes(m.toLowerCase()))
+      .sort((a, b) => a.localeCompare(b, 'es'));
+    if (extras.length) out['Otras'] = extras;
+    return out;
+  },
 
   renderEstadoTabs() {
     const grupo = this.productosDelGrupo(this.currentGroup);
@@ -285,19 +389,32 @@ const Stock = {
 
   renderCondicionTabs() {
     const grupo = this.productosDelGrupo(this.currentGroup);
-    const esNuevo = p => (p.estadoProducto || '') === 'Nuevo / Sellado';
     const counts = {
       todos: grupo.length,
-      nuevo: grupo.filter(esNuevo).length,
-      usado: grupo.filter(p => !esNuevo(p)).length,
+      nuevo: grupo.filter(p => this.condicionDe(p) === 'nuevo').length,
+      usado: grupo.filter(p => this.condicionDe(p) === 'usado').length,
+      sindato: grupo.filter(p => this.condicionDe(p) === 'sindato').length,
     };
     const labels = { todos: '📦 Todos', nuevo: '✨ Nuevo / Sellado', usado: '🔄 Usado' };
+    // El chip de "sin dato" solo aparece si hay productos así, y desaparece solo
+    // cuando se termina de completar el campo.
+    if (counts.sindato > 0) labels.sindato = '❓ Sin estado cargado';
     document.getElementById('stock-condicion-tabs').innerHTML = Object.entries(labels).map(([key, label]) => {
       const active = this.currentCondicion === key;
       return `<button onclick="Stock.setCondicionFiltro('${key}')" style="cursor:pointer;font-size:11px;padding:4px 9px;border-radius:14px;border:1px solid ${active?'var(--blue)':'var(--border-strong)'};background:${active?'var(--blue-light)':'transparent'};color:${active?'var(--blue)':'var(--text-secondary)'};font-weight:${active?'600':'400'};display:inline-flex;align-items:center;gap:4px;white-space:nowrap">${label} <span style="font-size:10px;opacity:.75">${counts[key]}</span></button>`;
     }).join('');
   },
   setCondicionFiltro(c) { this.currentCondicion = c; this.renderCondicionTabs(); this.renderTable(); },
+
+  // Nuevo / usado / sin dato. Antes "usado" era simplemente "todo lo que no dice
+  // Nuevo / Sellado", así que los productos con el campo vacío se afirmaban como
+  // usados — y hasta ahora el campo ni siquiera se podía cargar en accesorios,
+  // perfumería o repuestos. Sin dato es su propia categoría: no se inventa.
+  condicionDe(p) {
+    const e = (p.estadoProducto || '').trim();
+    if (!e) return 'sindato';
+    return e === 'Nuevo / Sellado' ? 'nuevo' : 'usado';
+  },
 
   renderTabs() {
     const catsDelGrupo = this.GRUPOS[this.currentGroup]?.cats || [];
@@ -319,7 +436,8 @@ const Stock = {
     if (!marcaSelect) return;
     const prev = marcaSelect.value;
     marcaSelect.innerHTML = '<option value="">— Elegir —</option>';
-    const fuentes = cat ? { [cat]: this.PERFUME_MARCAS[cat] || [] } : this.PERFUME_MARCAS;
+    const todas = this.marcasPerfumeria();
+    const fuentes = cat ? { [cat]: todas[cat] || [] } : todas;
     Object.entries(fuentes).forEach(([grupo, marcas]) => {
       const og = document.createElement('optgroup');
       og.label = grupo;
@@ -334,7 +452,8 @@ const Stock = {
     if (!marcaSelect) return;
     const prev = marcaSelect.value;
     marcaSelect.innerHTML = '<option value="">Todas las marcas</option>';
-    const fuentes = cat ? { [cat]: this.PERFUME_MARCAS[cat] || [] } : this.PERFUME_MARCAS;
+    const todas = this.marcasPerfumeria();
+    const fuentes = cat ? { [cat]: todas[cat] || [] } : todas;
     Object.entries(fuentes).forEach(([grupo, marcas]) => {
       const og = document.createElement('optgroup');
       og.label = grupo;
@@ -354,14 +473,152 @@ const Stock = {
     if (!colorSelect) return;
     const modeloFiltro = document.getElementById('stock-filter-modelo')?.value || '';
     const catsDelGrupo = this.GRUPOS[this.currentGroup]?.cats || [];
+    // Mismo criterio que el filtro de modelos: solo colores de lo que hay.
     const colores = [...new Set(
       State.stock
-        .filter(s => catsDelGrupo.includes(s.cat) && s.color && (!modeloFiltro || s.modelo === modeloFiltro))
+        .filter(s => catsDelGrupo.includes(s.cat) && s.color && this.hayUnidades(s)
+                  && (!modeloFiltro || (s.modelo || '').toLowerCase() === modeloFiltro.toLowerCase()))
         .map(s => s.color)
-    )].sort();
+    )].sort((a, b) => a.localeCompare(b, 'es'));
     const valorActual = colorSelect.value;
     colorSelect.innerHTML = `<option value="">Todos los colores</option>` +
-      colores.map(c => `<option value="${c}" ${c === valorActual ? 'selected' : ''}>${c}</option>`).join('');
+      colores.map(c => `<option value="${State.esc(c)}" ${c === valorActual ? 'selected' : ''}>${State.esc(c)}</option>`).join('');
+  },
+
+  // ── Selección múltiple para editar precios en lote ────────────────
+  _sel: new Set(),
+  _ultimosFiltrados: [],
+
+  toggleUno(id, activo) {
+    if (activo) this._sel.add(String(id)); else this._sel.delete(String(id));
+    this.pintarBarraSeleccion();
+  },
+
+  toggleTodos(activo) {
+    this._ultimosFiltrados.forEach(p => {
+      if (activo) this._sel.add(String(p.id)); else this._sel.delete(String(p.id));
+    });
+    document.querySelectorAll('.stock-check').forEach(c => { c.checked = activo; });
+    this.pintarBarraSeleccion();
+  },
+
+  limpiarSeleccion() {
+    this._sel.clear();
+    document.querySelectorAll('.stock-check').forEach(c => { c.checked = false; });
+    const t = document.getElementById('stock-check-todos'); if (t) t.checked = false;
+    this.pintarBarraSeleccion();
+  },
+
+  _seleccionados() {
+    return State.stock.filter(p => this._sel.has(String(p.id)));
+  },
+
+  pintarBarraSeleccion() {
+    const bar = document.getElementById('stock-seleccion-bar');
+    if (!bar) return;
+    const sel = this._seleccionados();
+    if (!sel.length) { bar.style.display = 'none'; bar.innerHTML = ''; return; }
+    const nombres = [...new Set(sel.map(p => p.nombre))];
+    bar.style.display = 'block';
+    bar.innerHTML = `
+      <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:9px 22px;background:var(--blue-light);border-bottom:1px solid rgba(10,132,255,.3)">
+        <b style="font-size:13px;color:var(--blue)">${sel.length} producto(s) seleccionado(s)</b>
+        <span style="font-size:11.5px;color:var(--text-secondary)">${State.esc(nombres.slice(0,2).join(' · '))}${nombres.length>2?` y ${nombres.length-2} más`:''}</span>
+        <div style="flex:1"></div>
+        <button class="btn btn-sm btn-primary" onclick="Stock.abrirPrecioLote()"><i class="ti ti-tag"></i> Editar precio</button>
+        <button class="btn btn-sm" onclick="Stock.limpiarSeleccion()">Limpiar</button>
+      </div>`;
+  },
+
+  abrirPrecioLote() {
+    const sel = this._seleccionados();
+    if (!sel.length) return;
+    // Si todos tienen el mismo precio, lo proponemos como valor inicial
+    const precios = [...new Set(sel.map(p => p.cotiz ? +(p.precioARS / p.cotiz).toFixed(2) : 0))];
+    const sugerido = precios.length === 1 ? precios[0] : '';
+    const costoMax = Math.max(...sel.map(p => p.costoUSD || 0));
+    const host = document.getElementById('stock-modal-host') || document.body;
+    const div = document.createElement('div');
+    div.id = 'precio-lote-overlay';
+    div.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.5);display:flex;align-items:center;justify-content:center;z-index:600;padding:20px';
+    div.innerHTML = `
+      <div style="background:var(--bg-elevated);border:1px solid var(--border-strong);border-radius:var(--radius-xl);width:min(400px,96vw);overflow:hidden" onclick="event.stopPropagation()">
+        <div style="padding:14px 18px;border-bottom:1px solid var(--border)">
+          <div style="font-size:14px;font-weight:700">Editar precio de ${sel.length} producto(s)</div>
+          <div style="font-size:11px;color:var(--text-secondary)">Costo más alto de la selección: USD ${costoMax}</div>
+        </div>
+        <div style="padding:18px">
+          <label style="font-size:11px;color:var(--text-secondary);display:block;margin-bottom:4px">Nuevo precio de venta (USD)</label>
+          <input type="number" id="pl-precio" value="${sugerido}" min="0" step="0.01" placeholder="0"
+            oninput="Stock._previewPrecioLote()"
+            style="width:100%;font-size:17px;font-weight:700;padding:10px 12px;background:var(--bg-secondary);border:1px solid var(--border-strong);border-radius:8px;color:var(--text)">
+          <div id="pl-preview" style="font-size:11.5px;color:var(--text-secondary);margin-top:8px;min-height:32px"></div>
+        </div>
+        <div style="padding:12px 18px;border-top:1px solid var(--border);display:flex;justify-content:flex-end;gap:8px">
+          <button class="btn" onclick="document.getElementById('precio-lote-overlay').remove()">Cancelar</button>
+          <button class="btn btn-primary" id="pl-guardar" onclick="Stock.guardarPrecioLote()"><i class="ti ti-check"></i> Aplicar a los ${sel.length}</button>
+        </div>
+      </div>`;
+    div.addEventListener('click', e => { if (e.target === div) div.remove(); });
+    host.appendChild(div);
+    this._previewPrecioLote();
+    setTimeout(() => document.getElementById('pl-precio')?.select(), 60);
+  },
+
+  _previewPrecioLote() {
+    const el = document.getElementById('pl-preview');
+    if (!el) return;
+    const usd = parseFloat(document.getElementById('pl-precio')?.value) || 0;
+    const sel = this._seleccionados();
+    if (!usd) { el.innerHTML = 'Ingresá el precio que querés dejar en los productos elegidos.'; return; }
+    const margenes = sel.map(p => p.costoUSD > 0 ? Math.round(((usd - p.costoUSD) / p.costoUSD) * 100) : 0);
+    const min = Math.min(...margenes), max = Math.max(...margenes);
+    const bajo = margenes.some(m => m < 0);
+    // El ARS que se guarda sale de la cotización de CADA producto, no del blue de
+    // hoy: mostrar "al blue de hoy" era mentirle al usuario sobre lo que se graba.
+    const arsList = sel.map(p => Math.round(usd * (p.cotiz || State.refBlue)));
+    const arsMin = Math.min(...arsList), arsMax = Math.max(...arsList);
+    const enARS = arsMin === arsMax
+      ? State.fmtARS(arsMin)
+      : `${State.fmtARS(arsMin)} a ${State.fmtARS(arsMax)}`;
+    el.innerHTML = `Quedan a <b>${State.fmtUSD(usd)}</b> (${enARS} según la cotización guardada de cada producto).<br>
+      Margen resultante: <b style="color:${bajo?'var(--red)':'var(--green)'}">${min===max ? (min>=0?'+':'')+min+'%' : `${min}% a ${max}%`}</b>
+      ${bajo ? ' <span style="color:var(--red)">— alguno queda por debajo del costo</span>' : ''}`;
+  },
+
+  async guardarPrecioLote() {
+    const usd = parseFloat(document.getElementById('pl-precio')?.value);
+    if (!(usd >= 0)) { toast('Ingresá un precio válido.'); return; }
+    const sel = this._seleccionados();
+    if (!sel.length) return;
+    const btn = document.getElementById('pl-guardar');
+    if (btn) { btn.disabled = true; btn.textContent = 'Guardando…'; }
+
+    let ok = 0, fallaron = [];
+    for (const p of sel) {
+      // Se respeta la cotización guardada de cada producto: así el precio en
+      // dólares queda exacto y no se altera su histórico.
+      const cotiz = p.cotiz || State.refBlue;
+      const anteriorUSD = p.cotiz ? (p.precioARS / p.cotiz) : 0;
+      const nuevoARS = Math.round(usd * cotiz);
+      const guardado = await DB.actualizarPrecioStock(p.id, nuevoARS);
+      if (guardado) {
+        p.precioARS = nuevoARS;
+        ok++;
+        // Cambiar el precio de a uno dejaba rastro y en lote no: justo al revés
+        // de lo que conviene auditar.
+        const unidades = this.stockReal(p);
+        await DB.registrarMovimientoStock(p.id, 'precio',
+          `Precio de venta en lote: ${State.fmtUSD(anteriorUSD)} → ${State.fmtUSD(usd)} (${sel.length} productos)`,
+          unidades, unidades);
+      } else { fallaron.push(p.nombre); }
+    }
+
+    document.getElementById('precio-lote-overlay')?.remove();
+    this.limpiarSeleccion();
+    this.renderKpis(); this.renderTable();
+    if (fallaron.length) toast(`${ok} actualizado(s). No se pudo con: ${[...new Set(fallaron)].join(', ')}`);
+    else toast(`Precio actualizado en ${ok} producto(s).`);
   },
 
   renderTable() {
@@ -376,10 +633,9 @@ const Stock = {
       if (!catsDelGrupo.includes(s.cat)) return false;
       if (this.currentTab !== 'all' && s.cat !== this.currentTab) return false;
       if (this.currentEstado !== 'todos' && (s.estadoInventario||'disponible') !== this.currentEstado) return false;
-      if (this.currentCondicion === 'nuevo' && (s.estadoProducto || '') !== 'Nuevo / Sellado') return false;
-      if (this.currentCondicion === 'usado' && (s.estadoProducto || '') === 'Nuevo / Sellado') return false;
+      if (this.currentCondicion !== 'todos' && this.condicionDe(s) !== this.currentCondicion) return false;
       if (q && !s.nombre.toLowerCase().includes(q)) return false;
-      if (modeloFiltro && (s.modelo || '') !== modeloFiltro) return false;
+      if (modeloFiltro && (s.modelo || '').toLowerCase() !== modeloFiltro.toLowerCase()) return false;
       if (colorFiltro && (s.color || '') !== colorFiltro) return false;
       // Filtros exclusivos de perfumería (color=categoria, storage=concentracion, modelo=marca)
       if (pfCat && (s.color || '') !== pfCat) return false;
@@ -390,17 +646,25 @@ const Stock = {
     const tbody = document.getElementById('stock-tbody');
     const cardsHost = document.getElementById('stock-cards');
     if (!tbody) return;
+    this._ultimosFiltrados = rows;   // lo que ve el usuario, para "seleccionar todo"
 
     if (!rows.length) {
-      tbody.innerHTML = `<tr><td colspan="10"><div class="empty-state"><i class="ti ti-box"></i>Sin productos que coincidan</div></td></tr>`;
+      tbody.innerHTML = `<tr><td colspan="11"><div class="empty-state"><i class="ti ti-box"></i>Sin productos que coincidan</div></td></tr>`;
       if (cardsHost) cardsHost.innerHTML = `<div class="empty-state"><i class="ti ti-box"></i>Sin productos que coincidan</div>`;
+      // Igual hay que repintar: si no, la barra de selección queda colgada con
+      // productos que el filtro actual ya no muestra.
+      this.pintarBarraSeleccion();
+      const todosVacio = document.getElementById('stock-check-todos');
+      if (todosVacio) todosVacio.checked = false;
       return;
     }
 
     const filaTabla = (p) => {
       const stock = this.stockReal(p);
       const costoARS = p.costoUSD * p.cotiz;
-      const margin = Math.round(((p.precioARS - costoARS) / costoARS) * 100);
+      // Sin costo o sin cotización el margen no existe (daba NaN o Infinity, y en
+      // las tarjetas de mobile se veía "-100%" en los equipos sin tasar).
+      const margin = costoARS > 0 ? Math.round(((p.precioARS - costoARS) / costoARS) * 100) : null;
       const precioUSD = p.cotiz ? (p.precioARS / p.cotiz) : 0;
       const esIMEI = this.CATS_IMEI.includes(p.cat);
       const detalleStock = esIMEI ? `${stock} <span style="font-size:9px;color:var(--text-secondary)">(${(p.imeis||[]).length} IMEI)</span>` : `${stock}`;
@@ -412,20 +676,24 @@ const Stock = {
     tbody.innerHTML = rows.map(p => {
       const { margin, precioUSD, esIMEI, detalleStock, statusBadge } = filaTabla(p);
       return `<tr>
+        <td style="text-align:center"><input type="checkbox" class="stock-check" value="${p.id}" ${this._sel.has(String(p.id))?'checked':''} onchange="Stock.toggleUno('${p.id}', this.checked)"></td>
         <td>
-          <b>${p.nombre}</b>
-          ${p.cat === 'repuesto' && p.modelo ? `<div style="font-size:10px;color:var(--amber)"><i class="ti ti-device-mobile" style="font-size:9px"></i> ${p.modelo}</div>` : ''}
-          ${p.notas ? `<div style="font-size:10px;color:var(--text-secondary)">${p.notas}</div>` : ''}
+          <b>${State.esc(p.nombre)}</b>
+          ${p.cat === 'repuesto' && p.modelo ? `<div style="font-size:10px;color:var(--amber)"><i class="ti ti-device-mobile" style="font-size:9px"></i> ${State.esc(p.modelo)}</div>` : ''}
+          ${p.notas ? `<div style="font-size:10px;color:var(--text-secondary)">${State.esc(p.notas)}</div>` : ''}
         </td>
-        <td style="font-size:11.5px">${p.color||'—'}</td>
+        <td style="font-size:11.5px">${State.esc(p.color) || '—'}</td>
         <td style="font-size:11.5px">${p.bateriaPct != null ? `<span style="color:${p.bateriaPct>=80?'var(--green)':p.bateriaPct>=60?'var(--amber)':'var(--red)'}">${p.bateriaPct}%</span>` : '—'}</td>
         <td>USD ${p.costoUSD}</td>
         <td>${precioUSD ? State.fmtUSD(precioUSD) + `<div style="font-size:10px;color:var(--text-secondary)">${State.fmtARS(p.precioARS)}</div>` : '<span style="color:var(--text-secondary)">—</span>'}</td>
-        <td style="color:${margin>=0?'var(--green)':'var(--red)'}">${precioUSD ? (margin>=0?'+':'') + margin + '%' : '—'}</td>
+        <td style="color:${margin >= 0 ? 'var(--green)' : 'var(--red)'}">${(precioUSD && margin != null) ? (margin>=0?'+':'') + margin + '%' : '—'}</td>
         <td>${detalleStock}</td>
-        <td style="font-size:10.5px;color:var(--text-secondary)">${esIMEI ? (p.imeis||[]).join('<br>') || '—' : '—'}</td>
+        <td style="font-size:10.5px;color:var(--text-secondary)">${esIMEI ? (p.imeis||[]).map(i => State.esc(i)).join('<br>') || '—' : '—'}</td>
         <td>${statusBadge}</td>
-        <td><button class="btn btn-sm" onclick="Stock.openDrawer('edit','${p.id}')" title="Editar">✏️</button></td>
+        <td style="white-space:nowrap">
+          <button class="btn btn-sm" onclick="Stock.openDrawer('edit','${p.id}')" title="Editar">✏️</button>
+          ${this.stockReal(p) > 1 ? `<button class="btn btn-sm" onclick="Stock.separarUnidades('${p.id}')" title="Separar en unidades individuales" style="margin-left:4px">✂️</button>` : ''}
+        </td>
       </tr>`;
     }).join('');
 
@@ -435,27 +703,31 @@ const Stock = {
         return `<div class="stock-card" onclick="Stock.openDrawer('edit','${p.id}')">
           <div class="stock-card-top">
             <div style="min-width:0;flex:1">
-              <div class="stock-card-name">${p.nombre}</div>
+              <div class="stock-card-name">${State.esc(p.nombre)}</div>
               <span class="badge ${this.CAT_CLASS[p.cat]||'b-gray'}" style="margin-top:4px">${this.CAT_LABELS[p.cat]||p.cat}</span>
-              ${p.cat === 'repuesto' && p.modelo ? `<div style="font-size:10.5px;color:var(--amber);margin-top:3px"><i class="ti ti-device-mobile" style="font-size:9px"></i> ${p.modelo}</div>` : ''}
-              ${['perfumeria','decant'].includes(p.cat) ? `<div style="font-size:10.5px;color:var(--text-secondary);margin-top:3px">${[p.modelo,p.storage,p.color].filter(Boolean).join(' · ')}</div>` : ''}
+              ${p.cat === 'repuesto' && p.modelo ? `<div style="font-size:10.5px;color:var(--amber);margin-top:3px"><i class="ti ti-device-mobile" style="font-size:9px"></i> ${State.esc(p.modelo)}</div>` : ''}
+              ${this.esPerfume(p.cat) ? `<div style="font-size:10.5px;color:var(--text-secondary);margin-top:3px">${State.esc([p.modelo,p.storage,p.color].filter(Boolean).join(' · '))}</div>` : ''}
             </div>
             ${statusBadge}
           </div>
           <div class="stock-card-grid">
             <div><label>Costo</label><span>USD ${p.costoUSD}</span></div>
             <div><label>Venta</label><span>${State.fmtUSD(precioUSD)}</span></div>
-            <div><label>Margen</label><span style="color:${margin>=0?'var(--green)':'var(--red)'}">${margin>=0?'+':''}${margin}%</span></div>
+            <div><label>Margen</label><span style="color:${margin >= 0 ? 'var(--green)' : 'var(--red)'}">${(precioUSD && margin != null) ? (margin>=0?'+':'') + margin + '%' : '—'}</span></div>
             <div><label>Stock</label><span>${detalleStock}</span></div>
           </div>
           <div class="stock-card-bottom">
-            <span><i class="ti ti-truck"></i> ${p.proveedor}</span>
-            <span><i class="ti ti-user"></i> ${p.custodio||'Sin asignar'}</span>
+            <span><i class="ti ti-truck"></i> ${State.esc(p.proveedor)}</span>
+            <span><i class="ti ti-user"></i> ${State.esc(p.custodio) || 'Sin asignar'}</span>
           </div>
-          ${p.notas ? `<div class="stock-card-notas">${p.notas}</div>` : ''}
+          ${p.notas ? `<div class="stock-card-notas">${State.esc(p.notas)}</div>` : ''}
         </div>`;
       }).join('');
     }
+    // La selección sobrevive a los filtros: repintamos la barra con lo que quede
+    this.pintarBarraSeleccion();
+    const todos = document.getElementById('stock-check-todos');
+    if (todos) todos.checked = rows.length > 0 && rows.every(p => this._sel.has(String(p.id)));
   },
 
   // ===== HISTORIAL =====
@@ -472,11 +744,11 @@ const Stock = {
       <tbody>
         ${movs.map(m => `<tr>
           <td style="white-space:nowrap;font-size:11.5px">${this.fmtFechaHora(m.creado_en)}</td>
-          <td>${nombrePorId[m.stock_id] || '(producto eliminado)'}</td>
+          <td>${State.esc(nombrePorId[m.stock_id]) || '(producto eliminado)'}</td>
           <td><span class="badge ${this.TIPO_MOV_CLASS[m.tipo]||'b-gray'}">${this.TIPO_MOV_LABEL[m.tipo]||m.tipo}</span></td>
-          <td style="font-size:11.5px;color:var(--text-secondary)">${m.detalle || '—'}</td>
+          <td style="font-size:11.5px;color:var(--text-secondary)">${State.esc(m.detalle) || '—'}</td>
           <td style="font-size:11.5px">${m.cantidad_antes ?? '—'} → ${m.cantidad_despues ?? '—'}</td>
-          <td style="font-size:11.5px">${m.usuario_nombre || '—'}</td>
+          <td style="font-size:11.5px">${State.esc(m.usuario_nombre) || '—'}</td>
         </tr>`).join('')}
       </tbody></table>
     `;
@@ -497,7 +769,7 @@ const Stock = {
       <div style="display:flex;justify-content:space-between;align-items:center;padding:7px 0;border-bottom:1px solid var(--border);font-size:11.5px">
         <div>
           <span class="badge ${this.TIPO_MOV_CLASS[m.tipo]||'b-gray'}">${this.TIPO_MOV_LABEL[m.tipo]||m.tipo}</span>
-          <span style="color:var(--text-secondary);margin-left:6px">${m.detalle || ''}</span>${extraLink}
+          <span style="color:var(--text-secondary);margin-left:6px">${State.esc(m.detalle)}</span>${extraLink}
         </div>
         <div style="text-align:right;color:var(--text-secondary)">
           <div>${this.fmtFechaHora(m.creado_en)}</div>
@@ -514,7 +786,7 @@ const Stock = {
     return d.toLocaleDateString('es-AR', { day:'2-digit', month:'2-digit' }) + ' ' + d.toLocaleTimeString('es-AR', { hour:'2-digit', minute:'2-digit' });
   },
 
-  CAT_ICONS: { iphone:'ti-device-mobile', android:'ti-device-mobile', mac:'ti-device-laptop', ipad:'ti-device-ipad', watch:'ti-device-watch', audio:'ti-headphones', perfumeria:'ti-droplet', decant:'ti-flask', accesorio:'ti-plug', repuesto:'ti-components', herramienta:'ti-tool', otro:'ti-box' },
+  CAT_ICONS: { iphone:'ti-device-mobile', android:'ti-device-mobile', mac:'ti-device-laptop', ipad:'ti-device-ipad', watch:'ti-device-watch', audio:'ti-headphones', gaming:'ti-device-gamepad-2', perfumeria:'ti-droplet', decant:'ti-flask', combo:'ti-gift', accesorio:'ti-plug', repuesto:'ti-components', herramienta:'ti-tool', otro:'ti-box' },
   MODELOS_POR_CAT: {
     iphone: ['iPhone 11','iPhone 12','iPhone 12 Pro','iPhone 12 Pro Max','iPhone 13','iPhone 13 Mini','iPhone 13 Pro','iPhone 13 Pro Max','iPhone 14','iPhone 14 Plus','iPhone 14 Pro','iPhone 14 Pro Max','iPhone 15','iPhone 15 Plus','iPhone 15 Pro','iPhone 15 Pro Max','iPhone 16','iPhone 16 Plus','iPhone 16 Pro','iPhone 16 Pro Max','iPhone 16e','iPhone 17','iPhone 17 Plus','iPhone 17 Pro','iPhone 17 Pro Max'],
     android: ['Samsung Galaxy S23','Samsung Galaxy S24','Samsung Galaxy S24+','Samsung Galaxy S24 Ultra','Samsung Galaxy A54','Samsung Galaxy A34','Motorola G84','Motorola G54','Motorola Edge 40','Xiaomi 13'],
@@ -570,9 +842,36 @@ const Stock = {
     'iPad Pro 13"':       { s:['256GB','512GB','1TB','2TB'],     c:['Plata','Negro Espacial'] },
   },
 
+  // Todos los modelos conocidos (catálogo fijo + los que existan en el stock).
+  todosLosModelos() {
+    return [...new Set(Object.keys(this.MODELOS_POR_CAT).flatMap(c => this.modelosParaCat(c)))];
+  },
+
+  // Ejemplo de nombre según el rubro. En perfumería marca el formato estándar:
+  // Marca + producto + concentración + ml, todo en el nombre.
+  placeholderNombre(cat) {
+    if (cat === 'perfumeria') return 'ej: Armaf Club de Nuit Intense Man EDP 105ml';
+    if (cat === 'decant') return 'ej: Lattafa Asad EDP 5ml (decant)';
+    if (cat === 'combo') return 'ej: Combo 3 decants Árabes 5ml';
+    if (cat === 'repuesto') return 'ej: Batería, Pantalla, Flex de carga…';
+    if (cat === 'herramienta') return 'ej: Pistola de calor, iSclack, destornillador pentalobe…';
+    if (cat === 'gaming') return 'ej: PlayStation 5 Slim Digital 1TB';
+    return 'ej: Cargador 20W, Vidrio templado…';
+  },
+
   specsParaModelo(modelo) {
-    const specs = this.SPECS_POR_MODELO[modelo];
-    return specs || { s: this.STORAGE_OPCIONES, c: this.COLOR_OPCIONES };
+    const base = this.SPECS_POR_MODELO[modelo] || { s: this.STORAGE_OPCIONES, c: this.COLOR_OPCIONES };
+    if (!modelo) return base;
+    // Sumamos storages y colores que ya existan en el stock para ese modelo: así
+    // un color cargado a mano una vez queda disponible para la próxima.
+    const esDelModelo = p => String(p.modelo || '').toLowerCase() === String(modelo).toLowerCase();
+    const mezclar = (fijos, campo) => {
+      const extras = this._valoresEnStock(campo, esDelModelo)
+        .filter(v => !fijos.some(f => f.toLowerCase() === v.toLowerCase()))
+        .sort((a, b) => a.localeCompare(b, 'es'));
+      return [...fijos, ...extras];
+    };
+    return { s: mezclar(base.s, 'storage'), c: mezclar(base.c, 'color') };
   },
   ESTADO_OPCIONES: ['Nuevo / Sellado','Excelente','Muy bueno','Bueno','Con detalles'],
   GRADO_OPCIONES: ['Sin grado','A+','A','B','C'],
@@ -600,6 +899,11 @@ const Stock = {
     const esIMEI = this.CATS_IMEI.includes(p.cat);
     const esPhone = ['iphone','android'].includes(p.cat);
     const cantidadDeclarada = p.cantidadDeclarada ?? p.cantidad ?? (esIMEI ? 0 : 1);
+    const estadoProductoInicial = p.estadoProducto || (mode === 'new' ? 'Nuevo / Sellado' : '');
+    const modelosCat = this.modelosParaCat(p.cat);
+    const todosModelos = this.todosLosModelos();
+    const modeloEsLibre = !!p.modelo && !modelosCat.includes(p.modelo);
+    const modeloRepuestoLibre = !!p.modelo && !todosModelos.includes(p.modelo);
 
     host.innerHTML = `
       <div class="drawer-bg" style="position:fixed;inset:0;background:rgba(0,0,0,.35);display:flex;justify-content:flex-end;z-index:100" onclick="if(event.target===this) Stock.closeDrawer()">
@@ -675,19 +979,26 @@ const Stock = {
                   <label style="font-size:11px;color:var(--text-secondary);font-weight:600;display:block;margin-bottom:4px">Modelo *</label>
                   <select id="f-modelo" onchange="Stock.toggleModeloOtro();Stock._actualizarSpecsDropdowns(this.value==='__otro__'?'':this.value)" style="width:100%;font-size:12px;padding:7px 10px;border:1px solid var(--border-strong);border-radius:8px">
                     <option value="">Seleccionar modelo</option>
-                    ${(this.MODELOS_POR_CAT[p.cat]||[]).map(m => `<option ${p.modelo===m?'selected':''}>${m}</option>`).join('')}
-                    <option value="__otro__" ${p.modelo && !(this.MODELOS_POR_CAT[p.cat]||[]).includes(p.modelo) ? 'selected':''}>Otro (escribir)</option>
+                    ${modelosCat.map(m => `<option value="${State.esc(m)}" ${p.modelo===m?'selected':''}>${State.esc(m)}</option>`).join('')}
+                    <option value="__otro__" ${modeloEsLibre ? 'selected':''}>Otro (escribir)</option>
                   </select>
-                  <input type="text" id="f-modelo-otro" value="${p.modelo && !(this.MODELOS_POR_CAT[p.cat]||[]).includes(p.modelo) ? p.modelo : ''}" placeholder="Escribí el modelo" style="width:100%;font-size:12px;padding:7px 10px;border:1px solid var(--border-strong);border-radius:8px;margin-top:6px;display:${p.modelo && !(this.MODELOS_POR_CAT[p.cat]||[]).includes(p.modelo) ? 'block':'none'}">
+                  <input type="text" id="f-modelo-otro" value="${modeloEsLibre ? State.esc(p.modelo) : ''}" placeholder="Escribí el modelo" style="width:100%;font-size:12px;padding:7px 10px;border:1px solid var(--border-strong);border-radius:8px;margin-top:6px;display:${modeloEsLibre ? 'block':'none'}">
                 </div>
 
-                <div id="f-nombre-libre-wrap" style="display:${['perfumeria','accesorio','repuesto','herramienta','otro'].includes(p.cat)?'block':'none'};margin-bottom:12px">
+                <div id="f-nombre-libre-wrap" style="display:${this.esNombreLibre(p.cat)?'block':'none'};margin-bottom:12px">
                   <label style="font-size:11px;color:var(--text-secondary);font-weight:600;display:block;margin-bottom:4px">Nombre ${p.cat==='herramienta'?'de la herramienta':p.cat==='repuesto'?'del repuesto':'del producto'} *</label>
-                  <input type="text" id="f-nombre-libre" value="${['perfumeria','decant','accesorio','repuesto','herramienta','otro'].includes(p.cat) ? (p.nombre||'') : ''}" placeholder="${p.cat==='herramienta'?'ej: Pistola de calor, iSclack, destornillador pentalobe…':p.cat==='repuesto'?'ej: Batería, Pantalla, Flex de carga…':p.cat==='decant'?'ej: Decant Lattafa Asad 5ml':'ej: Dior Sauvage 100ml'}" style="width:100%;font-size:12px;padding:7px 10px;border:1px solid var(--border-strong);border-radius:8px">
+                  <input type="text" id="f-nombre-libre" value="${this.esNombreLibre(p.cat) ? State.esc(p.nombre||'') : ''}" placeholder="${this.placeholderNombre(p.cat)}" style="width:100%;font-size:12px;padding:7px 10px;border:1px solid var(--border-strong);border-radius:8px">
+                </div>
+
+                <!-- CONTENIDO DEL COMBO — un ítem por renglón -->
+                <div id="f-combo-wrap" style="display:${p.cat==='combo'?'block':'none'};margin-bottom:12px">
+                  <label style="font-size:11px;color:var(--text-secondary);font-weight:600;display:block;margin-bottom:4px">¿Qué incluye el combo?</label>
+                  <textarea id="f-combo-items" rows="4" placeholder="Un producto por renglón, por ejemplo:&#10;Decant Lattafa Asad 5ml&#10;Decant Dior Sauvage 5ml&#10;Armaf Club de Nuit 105ml" style="width:100%;font-size:12px;padding:7px 10px;border:1px solid var(--border-strong);border-radius:8px;font-family:inherit;resize:vertical">${State.esc(p.comboItems||'')}</textarea>
+                  <div class="hint" style="font-size:10px;color:var(--text-secondary);margin-top:3px">Se muestra como lista en la landing. Ojo: vender el combo <strong>no descuenta</strong> estos productos del stock, eso se hace a mano.</div>
                 </div>
 
                 <!-- CAMPOS ESPECÍFICOS DE PERFUMERÍA / DECANT -->
-                <div id="f-perfume-wrap" style="display:${['perfumeria','decant'].includes(p.cat)?'block':'none'};margin-bottom:12px">
+                <div id="f-perfume-wrap" style="display:${this.esPerfume(p.cat)?'block':'none'};margin-bottom:12px">
                   <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px">
                     <div>
                       <label style="font-size:11px;color:var(--text-secondary);font-weight:600;display:block;margin-bottom:4px">Categoría</label>
@@ -720,17 +1031,17 @@ const Stock = {
                   <select id="f-modelo-repuesto" onchange="Stock.toggleModeloRepuestoOtro()" style="width:100%;font-size:12px;padding:7px 10px;border:1px solid var(--border-strong);border-radius:8px">
                     <option value="">— Universal / sin modelo específico —</option>
                     <optgroup label="iPhone">
-                      ${this.MODELOS_POR_CAT.iphone.map(m => `<option value="${m}" ${p.modelo===m?'selected':''}>${m}</option>`).join('')}
+                      ${this.modelosParaCat('iphone').map(m => `<option value="${State.esc(m)}" ${p.modelo===m?'selected':''}>${State.esc(m)}</option>`).join('')}
                     </optgroup>
                     <optgroup label="Android / Otra marca">
-                      ${this.MODELOS_POR_CAT.android.map(m => `<option value="${m}" ${p.modelo===m?'selected':''}>${m}</option>`).join('')}
+                      ${this.modelosParaCat('android').map(m => `<option value="${State.esc(m)}" ${p.modelo===m?'selected':''}>${State.esc(m)}</option>`).join('')}
                     </optgroup>
                     <optgroup label="iPad / Mac">
-                      ${[...this.MODELOS_POR_CAT.ipad, ...this.MODELOS_POR_CAT.mac].map(m => `<option value="${m}" ${p.modelo===m?'selected':''}>${m}</option>`).join('')}
+                      ${[...this.modelosParaCat('ipad'), ...this.modelosParaCat('mac')].map(m => `<option value="${State.esc(m)}" ${p.modelo===m?'selected':''}>${State.esc(m)}</option>`).join('')}
                     </optgroup>
-                    <option value="__otro__" ${p.modelo && !Object.values(this.MODELOS_POR_CAT).flat().includes(p.modelo) && p.modelo !== '' ? 'selected' : ''}>Otra marca / modelo (escribir)</option>
+                    <option value="__otro__" ${modeloRepuestoLibre ? 'selected' : ''}>Otra marca / modelo (escribir)</option>
                   </select>
-                  <input type="text" id="f-modelo-repuesto-otro" placeholder="ej: Samsung Galaxy A54, Motorola G84…" value="${p.modelo && !Object.values(this.MODELOS_POR_CAT).flat().includes(p.modelo) && p.modelo !== '' ? p.modelo : ''}" style="width:100%;font-size:12px;padding:7px 10px;border:1px solid var(--border-strong);border-radius:8px;margin-top:6px;display:${p.modelo && !Object.values(this.MODELOS_POR_CAT).flat().includes(p.modelo) && p.modelo !== '' ? 'block' : 'none'}">
+                  <input type="text" id="f-modelo-repuesto-otro" placeholder="ej: Samsung Galaxy A54, Motorola G84…" value="${modeloRepuestoLibre ? State.esc(p.modelo) : ''}" style="width:100%;font-size:12px;padding:7px 10px;border:1px solid var(--border-strong);border-radius:8px;margin-top:6px;display:${modeloRepuestoLibre ? 'block' : 'none'}">
                 </div>
 
                 <div id="f-specs-grid" style="display:${['iphone','android','mac','ipad'].includes(p.cat)?'grid':'none'};grid-template-columns:1fr 1fr;gap:10px;margin-bottom:12px">
@@ -748,16 +1059,22 @@ const Stock = {
                   </div>
                 </div>
 
-                <div id="f-bateria-wrap" style="display:${['iphone','android','ipad'].includes(p.cat)?'grid':'none'};grid-template-columns:1fr 1fr;gap:10px;margin-bottom:12px">
-                  <div><label style="font-size:11px;color:var(--text-secondary);font-weight:600;display:block;margin-bottom:4px">Batería %</label>
-                    <input type="number" id="f-bateria" value="${p.bateriaPct??''}" placeholder="85" min="0" max="100" style="width:100%;font-size:12px;padding:7px 10px;border:1px solid var(--border-strong);border-radius:8px">
-                  </div>
-                  <div><label style="font-size:11px;color:var(--text-secondary);font-weight:600;display:block;margin-bottom:4px">Estado del Producto</label>
-                    <select id="f-estado" style="width:100%;font-size:12px;padding:7px 10px;border:1px solid var(--border-strong);border-radius:8px">
-                      <option value="">Seleccionar</option>
-                      ${this.ESTADO_OPCIONES.map(e=>`<option ${p.estadoProducto===e?'selected':''}>${e}</option>`).join('')}
-                    </select>
-                  </div>
+                <!-- El estado va para TODOS los rubros. Antes vivía adentro del bloque
+                     de batería (solo iPhone/Android/iPad) y del de Mac, así que en
+                     accesorios, perfumería, repuestos, audio y watch no había forma de
+                     cargarlo: quedaban con el campo vacío, y tanto la pestaña
+                     Nuevo/Usado de acá como la web pública los daban por usados. -->
+                <div id="f-estado-wrap" style="margin-bottom:12px">
+                  <label style="font-size:11px;color:var(--text-secondary);font-weight:600;display:block;margin-bottom:4px">Estado del Producto *</label>
+                  <select id="f-estado" style="width:100%;font-size:12px;padding:7px 10px;border:1px solid var(--border-strong);border-radius:8px">
+                    <option value="">Seleccionar</option>
+                    ${this.ESTADO_OPCIONES.map(e=>`<option ${estadoProductoInicial===e?'selected':''}>${State.esc(e)}</option>`).join('')}
+                  </select>
+                </div>
+
+                <div id="f-bateria-wrap" style="display:${['iphone','android','ipad'].includes(p.cat)?'block':'none'};margin-bottom:12px">
+                  <label style="font-size:11px;color:var(--text-secondary);font-weight:600;display:block;margin-bottom:4px">Batería %</label>
+                  <input type="number" id="f-bateria" value="${p.bateriaPct??''}" placeholder="85" min="0" max="100" style="width:100%;font-size:12px;padding:7px 10px;border:1px solid var(--border-strong);border-radius:8px">
                 </div>
 
                 <div id="f-mac-extra-wrap" style="display:${p.cat==='mac'?'block':'none'};margin-bottom:12px">
@@ -772,11 +1089,6 @@ const Stock = {
                       </select>
                     </div>
                   </div>
-                  <label style="font-size:11px;color:var(--text-secondary);font-weight:600;display:block;margin:10px 0 4px">Estado del Producto</label>
-                  <select id="f-estado-mac" style="width:100%;font-size:12px;padding:7px 10px;border:1px solid var(--border-strong);border-radius:8px">
-                    <option value="">Seleccionar</option>
-                    ${this.ESTADO_OPCIONES.map(e=>`<option ${p.estadoProducto===e?'selected':''}>${e}</option>`).join('')}
-                  </select>
                 </div>
 
                 <div id="f-caracteristicas-wrap" style="display:${esIMEI?'block':'none'};background:var(--bg-secondary);border-radius:8px;padding:12px">
@@ -847,6 +1159,15 @@ const Stock = {
               <textarea id="f-notas" style="width:100%;font-size:12px;padding:7px 10px;border:1px solid var(--border-strong);border-radius:8px;height:50px;resize:none">${p.notas||''}</textarea>
             </div>
 
+            <div style="margin-bottom:12px">
+              <label style="font-size:11px;color:var(--text-secondary);font-weight:600;display:block;margin-bottom:4px">🖼️ Imagen pública (URL)</label>
+              <input type="url" id="f-imagen-url" value="${p.imagenUrl||''}" placeholder="https://…jpg" style="width:100%;font-size:12px;padding:7px 10px;border:1px solid var(--border-strong);border-radius:8px" oninput="Stock._previewImagen(this.value)">
+              <div class="hint" style="font-size:10px;color:var(--text-secondary);margin-top:3px">Se muestra en la página pública de precios.</div>
+              <div id="f-imagen-preview" style="margin-top:8px;display:${p.imagenUrl?'block':'none'}">
+                <img src="${p.imagenUrl||''}" style="width:80px;height:80px;object-fit:contain;border-radius:8px;border:1px solid var(--border-strong)">
+              </div>
+            </div>
+
             ${mode === 'edit' ? `
               <div style="margin-top:6px">
                 <div class="card-title" style="margin-bottom:8px"><i class="ti ti-history"></i> Historial de este producto</div>
@@ -889,11 +1210,11 @@ const Stock = {
     const colorSel = document.getElementById('f-color');
     if (storageSel) {
       storageSel.innerHTML = '<option value="">Seleccionar</option>' +
-        specs.s.map(s => `<option ${s === storageActual ? 'selected' : ''}>${s}</option>`).join('');
+        specs.s.map(s => `<option value="${State.esc(s)}" ${s === storageActual ? 'selected' : ''}>${State.esc(s)}</option>`).join('');
     }
     if (colorSel) {
       colorSel.innerHTML = '<option value="">Seleccionar color</option>' +
-        specs.c.map(c => `<option ${c === colorActual ? 'selected' : ''}>${c}</option>`).join('') +
+        specs.c.map(c => `<option value="${State.esc(c)}" ${c === colorActual ? 'selected' : ''}>${State.esc(c)}</option>`).join('') +
         '<option value="Otro">Otro</option>';
     }
   },
@@ -937,6 +1258,23 @@ const Stock = {
     btn.style.color = this._destacado ? '#854F0B' : 'var(--text-secondary)';
   },
 
+  _previewImagen(url) {
+    const wrap = document.getElementById('f-imagen-preview');
+    if (!wrap) return;
+    if (url) {
+      wrap.style.display = 'block';
+      // Convierte Google Drive al formato thumbnail directo
+      let src = url;
+      const m = url.match(/drive\.google\.com\/file\/d\/([^/?#]+)/) ||
+                url.match(/drive\.google\.com\/open\?id=([^&]+)/) ||
+                url.match(/drive\.google\.com\/uc\?.*id=([^&]+)/);
+      if (m) src = `https://drive.google.com/thumbnail?id=${m[1]}&sz=w200`;
+      wrap.querySelector('img').src = src;
+    } else {
+      wrap.style.display = 'none';
+    }
+  },
+
   toggleAdvancedPrices() {
     const wrap = document.getElementById('adv-prices-wrap');
     const arrow = document.getElementById('adv-prices-arrow');
@@ -955,10 +1293,17 @@ const Stock = {
         <button type="button" onclick="Stock.removeImei(${i})" style="background:none;border:none;cursor:pointer;color:var(--red);font-size:13px;line-height:1;padding:0">×</button>
       </span>
     `).join('') || `<span style="font-size:11px;color:var(--text-secondary)">Sin IMEIs cargados todavía</span>`;
-    if (countEl) countEl.textContent = `(${this.pendingImeis.length} cargado${this.pendingImeis.length !== 1 ? 's' : ''} — ${this.pendingImeis.length} dispositivo${this.pendingImeis.length !== 1 ? 's' : ''} al guardar)`;
-    // Sincronizar cantidad con IMEIs
+    if (countEl) countEl.textContent = `(${this.pendingImeis.length} cargado${this.pendingImeis.length !== 1 ? 's' : ''})`;
+    // La cantidad SOLO sube si hay más IMEIs que unidades declaradas (no puede
+    // haber 3 IMEIs y 2 equipos). Nunca la baja: antes cargar el primer IMEI de
+    // un lote de 5 dejaba la cantidad en 1 y se perdían 4 unidades en silencio,
+    // justo el flujo que el texto de ayuda recomienda ("vas completando IMEIs a
+    // medida que los identificás").
     const cantEl = document.getElementById('f-cantidad');
-    if (cantEl && this.pendingImeis.length > 0) cantEl.value = this.pendingImeis.length;
+    if (cantEl) {
+      const declarada = parseInt(cantEl.value, 10) || 0;
+      if (this.pendingImeis.length > declarada) cantEl.value = this.pendingImeis.length;
+    }
   },
 
   addImei() {
@@ -1118,7 +1463,7 @@ const Stock = {
     if (!cat) return;
     const esIMEI = this.CATS_IMEI.includes(cat);
     const tieneModeloFijo = ['iphone','android','mac','ipad','watch','audio'].includes(cat);
-    const esLibre = ['perfumeria','decant','accesorio','repuesto','herramienta','otro'].includes(cat);
+    const esLibre = this.esNombreLibre(cat);
     const tieneStorageColor = ['iphone','android','mac','ipad'].includes(cat);
     const tieneBateria = ['iphone','android','ipad'].includes(cat);
     const esMac = cat === 'mac';
@@ -1131,10 +1476,11 @@ const Stock = {
     set('f-serie-wrap', esMac ? 'block' : 'none');
     set('f-modelo-wrap', tieneModeloFijo ? 'block' : 'none');
     set('f-nombre-libre-wrap', esLibre ? 'block' : 'none');
-    set('f-perfume-wrap', ['perfumeria','decant'].includes(cat) ? 'block' : 'none');
+    set('f-combo-wrap', cat === 'combo' ? 'block' : 'none');
+    set('f-perfume-wrap', this.esPerfume(cat) ? 'block' : 'none');
     set('f-modelo-repuesto-wrap', cat === 'repuesto' ? 'block' : 'none');
     set('f-specs-grid', tieneStorageColor ? 'grid' : 'none');
-    set('f-bateria-wrap', tieneBateria ? 'grid' : 'none');
+    set('f-bateria-wrap', tieneBateria ? 'block' : 'none');
     set('f-mac-extra-wrap', esMac ? 'block' : 'none');
     set('f-caracteristicas-wrap', esIMEI ? 'block' : 'none');
 
@@ -1143,7 +1489,7 @@ const Stock = {
     if (modeloSelect && tieneModeloFijo) {
       const actual = modeloSelect.value;
       modeloSelect.innerHTML = `<option value="">Seleccionar modelo</option>` +
-        (this.MODELOS_POR_CAT[cat]||[]).map(m=>`<option ${actual===m?'selected':''}>${m}</option>`).join('') +
+        this.modelosParaCat(cat).map(m=>`<option value="${State.esc(m)}" ${actual===m?'selected':''}>${State.esc(m)}</option>`).join('') +
         `<option value="__otro__">Otro (escribir)</option>`;
       if (tieneStorageColor) this._actualizarSpecsDropdowns(actual !== '__otro__' ? actual : '');
     }
@@ -1163,13 +1509,13 @@ const Stock = {
     const cat = document.getElementById('f-cat').value;
     const esIMEI = this.CATS_IMEI.includes(cat);
     const tieneModeloFijo = ['iphone','android','mac','ipad','watch','audio'].includes(cat);
-    const esLibre = ['perfumeria','decant','accesorio','repuesto','herramienta','otro'].includes(cat);
+    const esLibre = this.esNombreLibre(cat);
 
     // Resolver el modelo (de la lista o "otro" escrito a mano)
     let modelo = '';
     let storage = '';
     let color = '';
-    if (['perfumeria','decant'].includes(cat)) {
+    if (this.esPerfume(cat)) {
       modelo = document.getElementById('f-pf-marca')?.value || '';
       storage = document.getElementById('f-pf-conc')?.value || '';
       color = document.getElementById('f-pf-cat')?.value || '';
@@ -1206,7 +1552,7 @@ const Stock = {
     const bateriaPct = document.getElementById('f-bateria')?.value ? parseInt(document.getElementById('f-bateria').value, 10) : null;
     const ciclosBateria = document.getElementById('f-ciclos')?.value ? parseInt(document.getElementById('f-ciclos').value, 10) : null;
     const ram = document.getElementById('f-ram')?.value || '';
-    const estadoProducto = document.getElementById('f-estado')?.value || document.getElementById('f-estado-mac')?.value || '';
+    const estadoProducto = document.getElementById('f-estado')?.value || '';
     const grado = document.getElementById('f-grado')?.value || 'Sin grado';
     const estadoInventario = document.getElementById('f-estado-inventario')?.value || 'disponible';
     const esim = document.getElementById('f-esim')?.checked || false;
@@ -1225,11 +1571,16 @@ const Stock = {
       precioReventa, precioMayorista, costoReparacion,
       cantidad: cantidadNueva, cantidadDeclarada: cantidadNueva,
       modelo, storage, color, bateriaPct, ciclosBateria, ram, estadoProducto, grado,
-      esim, tieneCaja, numeroSerie, destacado: !!this._destacado, estadoInventario
+      esim, tieneCaja, numeroSerie, destacado: !!this._destacado, estadoInventario,
+      imagenUrl: document.getElementById('f-imagen-url')?.value.trim() || '',
+      // Solo tiene sentido en combos; en el resto se guarda vacío.
+      comboItems: cat === 'combo' ? (document.getElementById('f-combo-items')?.value.trim() || '') : ''
     };
-    if (esIMEI) {
-      obj.imeis = [...this.pendingImeis];
-    }
+    // Siempre explícito: si un producto pasa de un rubro con IMEI a uno sin IMEI,
+    // hay que borrar el array. Antes la clave no se tocaba, el array viejo
+    // sobrevivía en memoria y getStock() seguía contando unidades fantasma hasta
+    // recargar la página. (undefined es la convención para "rubro sin IMEI").
+    obj.imeis = esIMEI ? [...this.pendingImeis] : undefined;
 
     toast('Guardando producto...');
 
@@ -1239,28 +1590,66 @@ const Stock = {
     if (imeisParaCrear) {
       // Alta múltiple: un registro por IMEI
       const creados = [];
+      const fallados = [];
+      let ultimoMotivo = '';
       for (const imeiVal of imeisParaCrear) {
         const objImei = { ...obj, imeis: [imeiVal], cantidad: 1, cantidadDeclarada: 1 };
-        const { id: newId, error } = await DB.guardarProductoStock(objImei, null);
-        if (error) { toast(`Error guardando IMEI ${imeiVal}.`); console.error(error); continue; }
+        const { id: newId, error, camposOmitidos } = await DB.guardarProductoStock(objImei, null);
+        if (error) {
+          console.error(error);
+          ultimoMotivo = error.message || error.hint || '';
+          fallados.push(imeiVal);
+          continue;
+        }
         objImei.id = newId;
         State.stock.push(objImei);
         await DB.registrarMovimientoStock(newId, 'alta', `Producto agregado: ${nombre} (IMEI: ${imeiVal})`, 0, 1);
+        if (camposOmitidos?.length) this._avisarCamposOmitidos(camposOmitidos);
         Sheets.stock(objImei);
         creados.push(imeiVal);
+      }
+      // Si no entró ninguno, el drawer se queda abierto con todo cargado: antes
+      // se cerraba igual avisando "0 dispositivos agregados" y se perdía la carga.
+      if (!creados.length) {
+        toast(ultimoMotivo
+          ? `No se pudo agregar ningún dispositivo: ${ultimoMotivo}`
+          : 'No se pudo agregar ningún dispositivo. Revisá la conexión e intentá de nuevo.');
+        restoreBtn();
+        return;
+      }
+      if (fallados.length) {
+        // Los que sí entraron ya están guardados: sacamos de la lista los que
+        // fallaron para que el usuario pueda reintentar solo con esos.
+        this.pendingImeis = [...fallados];
+        this.renderImeiChips();
+        toast(`${creados.length} agregado(s). Quedaron sin guardar: ${fallados.join(', ')}.`);
+        restoreBtn();
+        this.renderKpis();
+        this.renderTable();
+        return;
       }
       toast(`${creados.length} dispositivo${creados.length !== 1 ? 's' : ''} agregado${creados.length !== 1 ? 's' : ''} al stock.`);
     } else {
       // Alta simple o edición
-      const { id: newId, error } = await DB.guardarProductoStock(obj, id);
-      if (error) { toast('Hubo un problema guardando el producto.'); console.error(error); restoreBtn(); return; }
+      const { id: newId, error, camposOmitidos } = await DB.guardarProductoStock(obj, id);
+      if (camposOmitidos?.length) this._avisarCamposOmitidos(camposOmitidos);
+      if (error) {
+        // Mostrar el motivo real (ej: el candado de IMEI duplicado de la base)
+        // en vez de un mensaje genérico que no dice qué corregir.
+        const motivo = error.message || error.hint || '';
+        toast(motivo ? `No se pudo guardar: ${motivo}` : 'Hubo un problema guardando el producto.');
+        console.error(error);
+        restoreBtn();
+        return;
+      }
 
       const finalId = id || newId;
       const cantidadDespues = this.stockReal(obj);
 
       if (id) {
         const idx = State.stock.findIndex(x => x.id === id);
-        State.stock[idx] = { ...State.stock[idx], ...obj };
+        if (idx >= 0) State.stock[idx] = { ...State.stock[idx], ...obj };
+        else State.stock.push({ ...obj, id: finalId });
         await DB.registrarMovimientoStock(finalId, 'edicion', `Producto editado: ${nombre}`, cantidadAntes, cantidadDespues);
         toast('Producto actualizado.');
       } else {
@@ -1282,10 +1671,34 @@ const Stock = {
     }
   },
 
+  // Nombres lindos para avisar qué no se pudo guardar cuando la base todavía no
+  // tiene alguna columna nueva.
+  CAMPO_LABEL: {
+    precio_reventa:'precio de reventa', precio_mayorista:'precio mayorista',
+    costo_reparacion:'costo de reparación', bateria_pct:'batería %',
+    ciclos_bateria:'ciclos de batería', ram:'RAM', esim:'eSIM', tiene_caja:'tiene caja',
+    numero_serie:'número de serie', destacado:'destacado', imagen_url:'imagen',
+    combo_items:'contenido del combo',
+  },
+  _avisarCamposOmitidos(campos) {
+    const nombres = campos.map(c => this.CAMPO_LABEL[c] || c);
+    toast(`⚠️ Se guardó, pero la base no aceptó: ${nombres.join(', ')}. Falta correr la migración.`);
+  },
+
   async deleteProduct(id) {
     const p = State.stock.find(x => x.id === id);
     if (!p) return;
     if (!confirm(`¿Eliminar "${p.nombre}" del stock? Esta acción no se puede deshacer.`)) return;
+    // El movimiento se registra ANTES del borrado: después, el producto ya no
+    // existe y la fila del historial queda huérfana o la rechaza la base.
+    // Antes eliminar no dejaba ningún rastro de quién ni cuándo.
+    const unidades = this.stockReal(p);
+    const detalle = [
+      `Producto eliminado: ${p.nombre}`,
+      unidades ? `${unidades} unidad(es) dadas de baja` : null,
+      (p.imeis || []).length ? `IMEIs: ${p.imeis.join(', ')}` : null,
+    ].filter(Boolean).join(' · ');
+    await DB.registrarMovimientoStock(id, 'baja', detalle, unidades, 0);
     await DB.eliminarProductoStock(id);
     State.stock = State.stock.filter(x => x.id !== id);
     this.closeDrawer();
@@ -1296,10 +1709,103 @@ const Stock = {
 
   closeDrawer() { document.getElementById('stock-drawer-host').innerHTML = ''; },
 
+  async separarUnidades(id) {
+    const p = State.stock.find(x => x.id === id);
+    if (!p) return;
+    const cant = this.stockReal(p);
+    if (cant < 2) return toast('Este producto ya tiene una sola unidad.');
+
+    const confirmar = confirm(
+      `¿Separar "${p.nombre}" en ${cant} unidades individuales?\n\n` +
+      `Se crearán ${cant} filas independientes (1 unidad cada una) y se eliminará el lote actual.\n` +
+      `Luego podés editar cada una para agregar IMEI, batería o color distinto.`
+    );
+    if (!confirmar) return;
+
+    toast('Separando unidades...');
+    // Los IMEIs ya identificados se reparten de a uno entre las unidades nuevas.
+    // Antes todas se creaban con imeis:[] y, como después se borra el lote
+    // original, los IMEIs cargados desaparecían para siempre.
+    const imeisOriginales = [...(p.imeis || [])];
+    const creadas = [];
+    try {
+      for (let i = 1; i <= cant; i++) {
+        const imeiUnidad = imeisOriginales[i - 1] ? [imeisOriginales[i - 1]] : [];
+        const nueva = {
+          ...p,
+          id: undefined,
+          cantidad: 1,
+          cantidadDeclarada: 1,
+          imeis: this.CATS_IMEI.includes(p.cat) ? imeiUnidad : undefined,
+          notas: p.notas ? `${p.notas} (unidad ${i}/${cant})` : `Unidad ${i}/${cant}`,
+        };
+        const { id: newId, error } = await DB.guardarProductoStock(nueva, null);
+        if (error) { toast(`Error creando unidad ${i}.`); console.error(error); continue; }
+        nueva.id = newId;
+        State.stock.push(nueva);
+        creadas.push(newId);
+        await DB.registrarMovimientoStock(newId, 'alta',
+          `Separado de lote: ${p.nombre} (unidad ${i}/${cant})${imeiUnidad.length ? ` — IMEI ${imeiUnidad[0]}` : ''}`, 0, 1);
+      }
+
+      // Si no se pudo crear ninguna, NO se borra el lote: mejor dejar todo como
+      // estaba que quedarse sin el lote y sin las unidades.
+      if (!creadas.length) {
+        toast('No se pudo crear ninguna unidad. El lote quedó como estaba.');
+        return;
+      }
+
+      // Si solo entraron algunas, el lote NO se borra: se le descuenta lo que ya
+      // salió como unidad suelta y se queda con los IMEIs que no se repartieron.
+      // Borrarlo entero acá haría desaparecer las unidades que fallaron.
+      if (creadas.length < cant) {
+        const restantes = cant - creadas.length;
+        const imeisRestantes = imeisOriginales.slice(creadas.length);
+        await DB.registrarMovimientoStock(id, 'ajuste_cantidad',
+          `Separación parcial: salieron ${creadas.length} unidad(es), quedan ${restantes} en el lote`, cant, restantes);
+        if (p.imeis) { p.imeis = imeisRestantes; await DB.actualizarImeisStock(id, imeisRestantes); }
+        p.cantidad = restantes;
+        p.cantidadDeclarada = restantes;
+        await DB.actualizarCantidadStock(id, restantes);
+        toast(`⚠️ Se separaron ${creadas.length} de ${cant}. El resto quedó en el lote original.`);
+        return;
+      }
+
+      // El movimiento del lote original va ANTES del borrado: después el
+      // producto ya no existe y la base rechaza (o deja huérfana) esa fila.
+      await DB.registrarMovimientoStock(id, 'ajuste_cantidad',
+        `Lote separado en ${creadas.length} unidades individuales${imeisOriginales.length ? ` (IMEIs repartidos: ${imeisOriginales.join(', ')})` : ''}`,
+        cant, 0);
+      await DB.eliminarProductoStock(id);
+      State.stock = State.stock.filter(x => x.id !== id);
+
+      toast(`✅ ${creadas.length} unidades creadas. Editá cada una para agregar sus detalles.`);
+    } catch (err) {
+      console.error('Error al separar unidades:', err);
+      toast('Hubo un error al separar. Intentá de nuevo.');
+    } finally {
+      // En finally para que también repinte cuando se corta antes por una
+      // separación parcial: ahí ya hay unidades nuevas que mostrar.
+      this.renderKpis();
+      this.renderTable();
+    }
+  },
+
+  // Intenta hacer coincidir un nombre libre con los modelos oficiales (case-insensitive)
+  _normalizarModelo(nombre) {
+    if (!nombre) return nombre;
+    const todos = Object.values(this.MODELOS_POR_CAT).flat();
+    const match = todos.find(m => m.toLowerCase() === nombre.toLowerCase().trim());
+    return match || nombre;
+  },
+
   exportarExcel() {
     if (typeof XLSX === 'undefined') { toast('No se pudo cargar el módulo de exportación. Revisá tu conexión a internet.'); return; }
 
-    const filas = State.stock.map(p => {
+    // Se exporta lo que estás viendo (grupo + filtros aplicados). Antes salía
+    // siempre el inventario entero, sin importar cómo hubieras filtrado.
+    const filtrados = this._ultimosFiltrados?.length ? this._ultimosFiltrados : State.stock;
+    const filas = filtrados.map(p => {
       const stock = this.stockReal(p);
       const costoARS = p.costoUSD * p.cotiz;
       const margin = costoARS ? Math.round(((p.precioARS - costoARS) / costoARS) * 100) : 0;
@@ -1337,7 +1843,7 @@ const Stock = {
 
     const fecha = new Date().toISOString().split('T')[0];
     XLSX.writeFile(wb, `iPhoneMood-Inventario-${fecha}.xlsx`);
-    toast('Inventario exportado a Excel.');
+    toast(`Inventario exportado a Excel (${filas.length} producto/s).`);
   }
 };
 

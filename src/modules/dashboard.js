@@ -1,20 +1,23 @@
 const Dashboard = {
-  periodo: 'mes', // hoy | semana | mes | rango
+  periodo: 'mes', // hoy | semana | mes | mes-especifico | rango
+  periodoMes: null,
   fechaDesde: null,
   fechaHasta: null,
+  _mostrarRango: false,
   charts: {}, // referencias a instancias de Chart.js para poder destruirlas al re-renderizar
 
   // Devuelve un Set de fechas ISO (YYYY-MM-DD) que entran en el rango actual
   _enPeriodo(fechaISO) {
     if (!fechaISO) return true;
-    const f = new Date(fechaISO); f.setHours(0,0,0,0);
+    const f = State.parseFecha(fechaISO) || new Date(0); f.setHours(0,0,0,0);
     const hoy = new Date(); hoy.setHours(0,0,0,0);
     if (this.periodo === 'hoy') return f.getTime() === hoy.getTime();
     if (this.periodo === 'semana') { const d = new Date(hoy); d.setDate(d.getDate()-6); return f >= d; }
     if (this.periodo === 'mes') return f.getFullYear() === hoy.getFullYear() && f.getMonth() === hoy.getMonth();
+    if (this.periodo === 'mes-especifico') return fechaISO.slice(0, 7) === this.periodoMes;
     if (this.periodo === 'rango') {
-      const desde = this.fechaDesde ? new Date(this.fechaDesde) : null;
-      const hasta = this.fechaHasta ? new Date(this.fechaHasta) : null;
+      const desde = this.fechaDesde ? State.parseFecha(this.fechaDesde) : null;
+      const hasta = this.fechaHasta ? State.parseFecha(this.fechaHasta) : null;
       if (desde) desde.setHours(0,0,0,0);
       if (hasta) hasta.setHours(23,59,59,999);
       if (desde && f < desde) return false;
@@ -52,22 +55,31 @@ const Dashboard = {
     const ventas = this.ventasDelPeriodo();
     const PERIODO_LABEL = { hoy: 'hoy', semana: 'esta semana', mes: 'este mes', rango: 'en el rango' };
 
-    // Resultados comerciales solo del período
-    const resultComercial = ventas.reduce((a, v) => {
-      const totalVenta = v.items.reduce((s, i) => s + i.precio, 0);
-      const totalCosto = v.items.reduce((s, i) => s + (i.costo||0), 0);
-      return a + (totalVenta - totalCosto) * State.refBlue;
+    // Resultados comerciales solo del período — mismo criterio que Ventas
+    // (ver Ventas.resultadoVenta()). "Comercial" es el margen de la venta en
+    // sí: precio − costo, descontando lo que quedó sin cobrar en ventas
+    // cerradas. El recargo de tarjeta NO va acá: es un efecto de la forma de
+    // pago, no del producto, y se muestra en "Resultado financiero" junto al
+    // spread de cueva — antes se sumaba en los dos lados a la vez (adentro
+    // de margenReal, y de nuevo como diferencialTarjeta), duplicando esa
+    // plata en el "Resultado total" y descuadrando contra el panel de Ventas.
+    let diferencialTarjetaUSD = 0;
+    const resultComercialUSD = ventas.reduce((a, v) => {
+      const r = Ventas.resultadoVenta(v);
+      diferencialTarjetaUSD += r.diferencial;
+      return a + (r.margenBruto - r.quebranto);
     }, 0);
+    const resultComercial = resultComercialUSD * State.refBlue;
 
-    // Spread de cueva filtrado al mismo período
-    const hoyStr = new Date().toISOString();
-    const cambiosPeriodo = State.cambios.filter(c => this._enPeriodo(c.fechaISO || hoyStr));
-    const spreadCuevaARS = cambiosPeriodo.reduce((a, o) => a + State.calcSpreadARS(o), 0);
-    const diferencialTarjetaUSD = ventas.reduce((s, v) => {
-      const totalVenta = v.items.reduce((a, i) => a + i.precio, 0);
-      const totalPagado = (v.pagos||[]).reduce((a, p) => a + p.monto, 0) + (v.tradeIn?.valor||0);
-      return s + Math.max(0, totalPagado - totalVenta);
-    }, 0);
+    // Spread de cueva filtrado al mismo período — misma función que usa
+    // Ventas (State.cambiosEnPeriodo), para que las dos pantallas den
+    // siempre el mismo número ante el mismo período elegido.
+    const periodoCueva = {
+      tipo: this.periodo, mes: this.periodoMes,
+      desde: this.fechaDesde, hasta: this.fechaHasta,
+    };
+    const cambiosPeriodo = State.cambiosEnPeriodo(periodoCueva);
+    const spreadCuevaARS = State.spreadCuevaDelPeriodo(periodoCueva);
     const diferencialTarjetaARS = diferencialTarjetaUSD * State.refBlue;
     const resultFinanciero = spreadCuevaARS + diferencialTarjetaARS;
     const totalResultado = resultComercial + resultFinanciero;
@@ -76,10 +88,17 @@ const Dashboard = {
     const adelantosPend = (State.adelantos || []).filter(a => a.estado === 'pendiente');
     const pasivoAdelantos = adelantosPend.reduce((s, a) => s + (a.moneda === 'USD' ? a.monto : a.monto / State.refBlue), 0);
 
+    // Pendiente de cobro — TOTAL, no acotado al período: es plata que se debe
+    // hoy, sin importar cuándo se vendió. Usa la misma fuente de verdad que
+    // la pantalla Cuenta Corriente (ventas abiertas + deudas manuales), en vez
+    // de recalcularlo acá.
+    const clientesConDeudaCC = CuentaCorriente.getClientesConDeuda().length;
+    const totalPorCobrarCC = CuentaCorriente.totalCuentasPorCobrar();
+
     const totalVentasUSD = ventas.reduce((a, v) => a + v.items.reduce((s, i) => s + i.precio, 0), 0);
     const repActivas = State.reparaciones.filter(r => !['entregado', 'rechazado', 'no_reparable'].includes(r.estado)).length;
     const repListas = State.reparaciones.filter(r => r.estado === 'listo').length;
-    const stockCritico = State.stock.filter(s => State.getStockStatus(s) !== 'ok').length;
+    const stockCritico = State.modelosConUltimaUnidad().length;
 
     // KPIs reparaciones del período
     const ahora = new Date();
@@ -132,10 +151,15 @@ const Dashboard = {
         </div>
       </div>
 
-      <div class="kpi-row" style="grid-template-columns:repeat(4,1fr);padding:0 0 14px 0;border:none">
+      <div class="kpi-row" style="grid-template-columns:repeat(5,1fr);padding:0 0 14px 0;border:none">
         <div class="kpi"><label>Equivalente total en caja</label><div class="val">${State.fmtUSD(equivalenteTotalARS / State.refBlue)}</div><div class="sub">ARS + USD + USDT a cotización actual</div></div>
+        <div class="kpi" style="cursor:pointer" onclick="App.goTo('cuentacorriente')">
+          <label>Pendiente de cobro</label>
+          <div class="val" style="color:${totalPorCobrarCC>0?'var(--amber)':'var(--text)'}">${State.fmtUSD(totalPorCobrarCC)}</div>
+          <div class="sub">${clientesConDeudaCC>0 ? `${clientesConDeudaCC} cliente${clientesConDeudaCC>1?'s':''} · clic para ver` : 'Sin cuentas abiertas'}</div>
+        </div>
         <div class="kpi"><label>Ventas con saldo pendiente</label><div class="val" style="color:${ventasAbiertas?'var(--amber)':'var(--green)'}">${ventasAbiertas}</div><div class="sub">requieren seguimiento de cobro</div></div>
-        <div class="kpi"><label>Stock con alerta</label><div class="val" style="color:${stockCritico?'var(--red)':'var(--green)'}">${stockCritico}</div><div class="sub">productos bajos o agotados</div></div>
+        <div class="kpi"><label>Stock con alerta</label><div class="val" style="color:${stockCritico?'var(--red)':'var(--green)'}">${stockCritico}</div><div class="sub">modelos con la última unidad</div></div>
         <div class="kpi"><label>Reparaciones del período</label><div class="val">${repPeriodo.length}</div><div class="sub">${repActivas} activa(s) · ${repListas} lista(s)</div></div>
       </div>
 
@@ -183,7 +207,7 @@ const Dashboard = {
           <div class="card-title"><i class="ti ti-alert-triangle"></i> Alertas</div>
           <table>
             <tr><th>Tipo</th><th>Detalle</th></tr>
-            ${stockCritico > 0 ? `<tr><td><span class="badge b-red">Stock</span></td><td>${stockCritico} producto(s) con stock bajo o agotado</td></tr>` : ''}
+            ${stockCritico > 0 ? `<tr><td><span class="badge b-red">Stock</span></td><td>${stockCritico} modelo(s) con la última unidad disponible</td></tr>` : ''}
             ${repListas > 0 ? `<tr><td><span class="badge b-green">Reparación</span></td><td>${repListas} equipo(s) listo(s) para entregar</td></tr>` : ''}
             ${repActivas > 0 ? `<tr><td><span class="badge b-amber">Reparación</span></td><td>${repActivas} orden(es) en curso</td></tr>` : ''}
             ${ventasAbiertas > 0 ? `<tr><td><span class="badge b-amber">Venta</span></td><td>${ventasAbiertas} venta(s) con saldo pendiente</td></tr>` : ''}
@@ -225,26 +249,61 @@ const Dashboard = {
 
   renderPeriodoSelector() {
     const opciones = [['hoy', 'Hoy'], ['semana', 'Esta semana'], ['mes', 'Este mes'], ['rango', 'Rango libre']];
+    const mostrarRango = this._mostrarRango || this.periodo === 'rango';
+    // Mismo selector de mes que usa Ventas, con la misma lista de meses:
+    // eligiendo el mismo mes en las dos pantallas, el filtro es idéntico
+    // y los números tienen que coincidir siempre.
+    const mesesOpts = Ventas._mesesDisponibles().map(m => {
+      const [y, mo] = m.split('-');
+      const label = new Date(Number(y), Number(mo) - 1, 1).toLocaleDateString('es-AR', { month: 'short', year: '2-digit' });
+      return `<option value="${m}" ${this.periodoMes === m ? 'selected' : ''}>${label}</option>`;
+    }).join('');
     document.getElementById('periodo-selector').innerHTML = opciones.map(([k, l]) =>
-      `<button class="btn btn-sm ${this.periodo===k?'btn-primary':''}" onclick="Dashboard.setPeriodo('${k}')">${l}</button>`
-    ).join('');
-    document.getElementById('rango-custom').style.display = this.periodo === 'rango' ? 'flex' : 'none';
+      `<button class="btn btn-sm ${(k === 'rango' ? mostrarRango : this.periodo === k) ? 'btn-primary' : ''}" onclick="Dashboard.setPeriodo('${k}')">${l}</button>`
+    ).join('')
+    + `<select id="dash-mes-selector" onchange="Dashboard.setPeriodoMes(this.value)" style="font-size:12px;padding:6px 9px;border:1px solid var(--border-strong);border-radius:8px;background:var(--bg-secondary);color:var(--text);${this.periodo === 'mes-especifico' ? 'border-color:var(--blue);outline:none' : ''}">
+        <option value="">Mes específico…</option>
+        ${mesesOpts}
+      </select>`;
+    document.getElementById('rango-custom').style.display = mostrarRango ? 'flex' : 'none';
   },
 
   setPeriodo(p) {
+    if (p === 'rango') {
+      // Solo mostramos los campos de fecha: el filtro no cambia hasta que
+      // se apliquen las dos fechas (ver aplicarRango). Antes, con solo
+      // tocar el botón, el período ya quedaba en 'rango' con las fechas
+      // vacías — y como filtro vacío equivale a "sin filtro", mostraba
+      // TODO el historial (no solo el mes que se quería ver) sin avisar.
+      this._mostrarRango = true;
+      this.renderPeriodoSelector();
+      return;
+    }
+    this._mostrarRango = false;
     this.periodo = p;
-    if (p !== 'rango') App.goTo('dashboard');
-    else this.renderPeriodoSelector();
+    this.periodoMes = null;
+    App.goTo('dashboard');
+  },
+
+  setPeriodoMes(mes) {
+    if (!mes) return;
+    this.periodo = 'mes-especifico';
+    this.periodoMes = mes;
+    this._mostrarRango = false;
+    App.goTo('dashboard');
   },
 
   aplicarRango() {
     this.fechaDesde = document.getElementById('dash-desde').value;
     this.fechaHasta = document.getElementById('dash-hasta').value;
-    if (this.fechaDesde && this.fechaHasta) {
-      const ms = new Date(this.fechaHasta) - new Date(this.fechaDesde);
-      this.periodo = 'rango';
-      this._rangoDias = Math.max(1, Math.round(ms / 86400000) + 1);
+    if (!this.fechaDesde || !this.fechaHasta) {
+      if (typeof toast === 'function') toast('Elegí las dos fechas antes de aplicar.');
+      return;
     }
+    const ms = new Date(this.fechaHasta) - new Date(this.fechaDesde);
+    this.periodo = 'rango';
+    this._rangoDias = Math.max(1, Math.round(ms / 86400000) + 1);
+    this._mostrarRango = false;
     App.goTo('dashboard');
   },
 

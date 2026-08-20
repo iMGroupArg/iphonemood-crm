@@ -1,51 +1,51 @@
 /* ═══════════════════════════════════════════════════════
-   iPhoneMood CRM — Apple Dark Design System
-   Inspired by apple.com dark interfaces
+   iPhoneMood CRM — Apple Light Design System
+   Inspired by apple.com light interfaces
    Mobile-first: base styles are for ~390px (iPhone 14)
    Desktop enhancements at 768px+
 ═══════════════════════════════════════════════════════ */
 
 :root {
-  /* Apple Dark palette */
-  --bg:          #000000;
-  --bg-elevated: #1C1C1E;
-  --bg-secondary:#2C2C2E;
-  --bg-tertiary: #3A3A3C;
-  --bg-card:     #1C1C1E;
+  /* Apple Light palette */
+  --bg:          #FFFFFF;
+  --bg-elevated: #F5F5F7;
+  --bg-secondary:#E8E8ED;
+  --bg-tertiary: #D8D8DC;
+  --bg-card:     #FFFFFF;
 
-  --text:        #FFFFFF;
-  --text-secondary: #AEAEB2;
-  --text-tertiary:  #636366;
+  --text:        #1D1D1F;
+  --text-secondary: #6E6E73;
+  --text-tertiary:  #86868B;
 
-  --border:       #38383A;
-  --border-strong:#48484A;
-  --separator:    rgba(255,255,255,.08);
+  --border:       #D2D2D7;
+  --border-strong:#AEAEB2;
+  --separator:    rgba(0,0,0,.06);
 
-  /* Accent — Apple Blue */
-  --blue:       #0A84FF;
-  --blue-light: rgba(10,132,255,.15);
-  --blue-dark:  #0066CC;
+  /* Accent — Apple Blue (light mode) */
+  --blue:       #0071E3;
+  --blue-light: rgba(0,113,227,.1);
+  --blue-dark:  #0058B9;
 
   /* Semantic */
-  --green:       #30D158;
-  --green-light: rgba(48,209,88,.15);
-  --green-dark:  #248A3D;
+  --green:       #1D8348;
+  --green-light: rgba(29,131,72,.1);
+  --green-dark:  #155C34;
 
-  --amber:       #FF9F0A;
-  --amber-light: rgba(255,159,10,.15);
-  --amber-dark:  #B36800;
+  --amber:       #B7770D;
+  --amber-light: rgba(183,119,13,.1);
+  --amber-dark:  #8A5900;
 
-  --red:         #FF453A;
-  --red-light:   rgba(255,69,58,.15);
+  --red:         #C0392B;
+  --red-light:   rgba(192,57,43,.1);
 
-  --purple:      #BF5AF2;
-  --purple-light:rgba(191,90,242,.15);
+  --purple:      #7B2FA0;
+  --purple-light:rgba(123,47,160,.1);
 
-  --teal:        #5AC8FA;
-  --teal-light:  rgba(90,200,250,.15);
+  --teal:        #0080A0;
+  --teal-light:  rgba(0,128,160,.1);
 
-  --gray:        #8E8E93;
-  --gray-light:  rgba(142,142,147,.15);
+  --gray:        #6E6E73;
+  --gray-light:  rgba(110,110,115,.1);
 
   /* Typography — SF Pro */
   --font: -apple-system, "SF Pro Display", "SF Pro Text", BlinkMacSystemFont, "Helvetica Neue", sans-serif;
@@ -57,9 +57,9 @@
   --radius-xl:  18px;
 
   /* Shadows */
-  --shadow-sm:  0 1px 3px rgba(0,0,0,.6);
-  --shadow-md:  0 4px 16px rgba(0,0,0,.5);
-  --shadow-lg:  0 8px 32px rgba(0,0,0,.6);
+  --shadow-sm:  0 1px 3px rgba(0,0,0,.10);
+  --shadow-md:  0 4px 16px rgba(0,0,0,.10);
+  --shadow-lg:  0 8px 32px rgba(0,0,0,.14);
 }
 
 /* ── Reset ────────────────────────────────────────────── */
@@ -95,7 +95,7 @@ body {
 .sidebar.open { transform: translateX(0); box-shadow: var(--shadow-lg); }
 .sidebar-overlay {
   display: none; position: fixed; inset: 0;
-  background: rgba(0,0,0,.6); z-index: 350;
+  background: rgba(0,0,0,.4); z-index: 350;
   backdrop-filter: blur(4px); -webkit-backdrop-filter: blur(4px);
 }
 .sidebar-overlay.show { display: block; }
@@ -163,7 +163,7 @@ body {
 .topbar {
   padding: 12px 16px;
   padding-top: calc(12px + env(safe-area-inset-top));
-  background: rgba(28,28,30,.85);
+  background: rgba(255,255,255,.88);
   backdrop-filter: blur(20px) saturate(180%);
   -webkit-backdrop-filter: blur(20px) saturate(180%);
   border-bottom: 1px solid var(--border);

@@ -476,7 +476,9 @@ const Turnos = {
   },
 
   copiarLink() {
-    const url = window.location.origin + window.location.pathname.replace('index.html', '') + 'turnos.html';
+    // Ruta absoluta: el CRM ahora se sirve en /login, así que derivar el
+    // link del pathname daba /loginturnos.html.
+    const url = window.location.origin + '/turnos.html';
     navigator.clipboard.writeText(url).then(() => toast('🔗 Link copiado al portapapeles')).catch(() => {
       prompt('Copiá este link:', url);
     });

@@ -12,7 +12,13 @@
 const { limitar } = require('./_ratelimit.js');
 
 const SUPABASE_URL = process.env.SUPABASE_URL || 'https://oqvmiozafgogfcclwseu.supabase.co';
-const SUPABASE_ANON = process.env.SUPABASE_ANON_KEY;
+// La clave anónima va como respaldo igual que la URL de arriba. No es un
+// secreto: es exactamente la misma que el sitio le entrega a cualquier
+// visitante en /config.js, y lo único que habilita es leer lo que ya es
+// público (la vista `stock_publico` y un presupuesto por su token). Lo que
+// protege los datos es RLS en la base, no esconder esta cadena.
+// La variable de entorno, si está definida, tiene prioridad.
+const SUPABASE_ANON = process.env.SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9xdm1pb3phZmdvZ2ZjY2x3c2V1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODE4MTg4MDQsImV4cCI6MjA5NzM5NDgwNH0.egzH4uyVJ0W1mj0dTJuJGIWTXXnur9B4z_f12Z8V1lQ';
 
 // ── Copia de la lógica de slug de precios.html ──
 // Tiene que dar EXACTAMENTE lo mismo que `slugify`/`slugProd` de la landing:

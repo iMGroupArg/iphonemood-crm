@@ -34,9 +34,10 @@ REPLACE`, así que volver a correrlas es inofensivo.
 | `20260815_stock_vista_publica.sql` | Vista `stock_publico`: la landing ya no lee la tabla `stock` ni sus columnas de costo |
 | `20260815_cambios_viene_de_venta.sql` | Marca operaciones de cueva cuya plata ya viene de una venta (evita el doble conteo del diferencial de cambio) |
 
-> **Verificar antes de asumir:** la última (`20260815_cambios_viene_de_venta`) se
-> escribió el 15-08-2026 y no está confirmado que se haya corrido en Supabase.
-> Chequear que la columna `cotiz_ref` / la marca existan antes de depender de ella.
+> `20260815_cambios_viene_de_venta` **está aplicada** — confirmado el 18-08-2026
+> contra la API: las columnas `viene_de_venta` y `cotiz_ref` existen en
+> `public.cambios` (contrastado contra una columna inventada, que sí da error
+> 42703, así que la prueba distingue de verdad).
 
 ---
 

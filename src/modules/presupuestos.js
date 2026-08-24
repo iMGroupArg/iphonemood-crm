@@ -11,6 +11,73 @@ const Presupuestos = {
   lista: [],
   draft: null,
 
+  // Qué cuenta como "equipo" en el desplegable de venta. Cargadores, fundas,
+  // baterías y repuestos NO van: el stock guarda una fila por unidad física,
+  // así que el mismo cargador aparecía diez veces y tapaba a los iPhone.
+  CATS_EQUIPO: ['iphone', 'android', 'mac', 'ipad'],
+
+  // Orden natural de un equipo: primero la generación, después la variante.
+  // Hace falta porque el orden alfabético es inservible acá — pone el
+  // "iPhone 13" después del "iPhone 17 Pro" y mezcla las líneas.
+  ordenModelo(modelo) {
+    const s = String(modelo || '').toLowerCase();
+    const gen = parseInt((s.match(/iphone\s*(\d+)/) || [])[1], 10);
+    if (!gen) return 1e6; // lo que no es iPhone (Mac, iPad, Android) va al final
+    let v = 0;
+    if (/\bpro max\b/.test(s)) v = 4;
+    else if (/\bpro\b/.test(s)) v = 3;
+    else if (/\bplus\b/.test(s)) v = 2;
+    else if (/\bmini\b/.test(s) || /\d+e\b/.test(s)) v = 1;
+    return gen * 10 + v;
+  },
+
+  // Catálogo de canje: iPhone 13 en adelante, que es lo que Franco toma.
+  // Sale de Stock.SPECS_POR_MODELO para no mantener dos listas de modelos.
+  modelosCanje() {
+    return Object.keys((window.Stock || {}).SPECS_POR_MODELO || {})
+      .filter(m => /^iPhone/i.test(m) && this.ordenModelo(m) >= 130)
+      .sort((a, b) => this.ordenModelo(a) - this.ordenModelo(b));
+  },
+
+  // Capacidades y colores REALES con los que salió ese modelo.
+  // A propósito NO se usa Stock.specsParaModelo(): esa mezcla lo que haya
+  // cargado en el stock, y acá el punto es justamente no ofrecer un color que
+  // ese modelo nunca tuvo. Sin modelo elegido, se cae a las listas generales.
+  specsCanje(modelo) {
+    const S = window.Stock || {};
+    const base = (S.SPECS_POR_MODELO || {})[modelo];
+    return base || { s: S.STORAGE_OPCIONES || [], c: S.COLOR_OPCIONES || [] };
+  },
+
+  // Equipos vendibles, sin repetidos y ordenados por modelo.
+  equiposDisponibles() {
+    const vivos = (State.stock || []).filter(p =>
+      this.CATS_EQUIPO.includes(p.cat) &&
+      (p.estadoInventario || 'disponible') === 'disponible' &&
+      Number(p.precioARS) > 0 && Number(p.cotiz) > 0);
+
+    // Se colapsan las filas idénticas en una sola opción, contando unidades.
+    // La fila que queda es una real del stock, así que el id sigue sirviendo.
+    const vistos = new Map();
+    vivos.forEach(p => {
+      const usd = Math.round(p.precioARS / p.cotiz);
+      const k = [p.nombre, p.modelo, p.storage, p.color, usd].join('|').toLowerCase();
+      const prev = vistos.get(k);
+      if (prev) { prev.unidades++; return; }
+      // La etiqueta suma capacidad y color si el nombre no los trae ya: sin eso
+      // dos iPhone 15 del mismo precio y distinto color se ven idénticos en el
+      // desplegable, que es exactamente lo confuso que había que sacar.
+      const yaEsta = t => !t || p.nombre.toLowerCase().includes(String(t).toLowerCase());
+      const extra = [p.storage, p.color].filter(t => t && !yaEsta(t)).join(' · ');
+      const etiqueta = p.nombre + (extra ? ` ${extra}` : '');
+      vistos.set(k, { id: p.id, nombre: p.nombre, etiqueta, modelo: p.modelo, usd, unidades: 1 });
+    });
+
+    return [...vistos.values()].sort((a, b) =>
+      this.ordenModelo(a.modelo || a.nombre) - this.ordenModelo(b.modelo || b.nombre) ||
+      String(a.nombre).localeCompare(String(b.nombre), 'es'));
+  },
+
   render() {
     const c = document.createElement('div');
     c.style.cssText = 'flex:1;overflow-y:auto;padding:18px 22px';
@@ -78,8 +145,7 @@ const Presupuestos = {
   nuevo() {
     // Solo equipos disponibles y con precio: no tiene sentido presupuestar
     // algo que no se puede vender.
-    const disponibles = (State.stock || []).filter(p =>
-      (p.estadoInventario || 'disponible') === 'disponible' && Number(p.precioARS) > 0 && Number(p.cotiz) > 0);
+    const disponibles = this.equiposDisponibles();
     if (!disponibles.length) { toast('No hay equipos disponibles con precio cargado.'); return; }
 
     this.draft = { productoId: disponibles[0].id, cliente: '', diasValidez: 7,
@@ -90,7 +156,7 @@ const Presupuestos = {
   abrirModal(disponibles) {
     const d = this.draft;
     const ESTADOS = ['Nuevo / Sellado', 'Excelente', 'Muy bueno', 'Bueno', 'Con detalles'];
-    const STORAGE = ['64GB', '128GB', '256GB', '512GB', '1TB'];
+    const MODELOS = this.modelosCanje();
     const inp = 'width:100%;font-size:12px;padding:7px 10px;border:1px solid var(--border-strong);border-radius:8px';
     const lbl = 'font-size:11px;color:var(--text-secondary);font-weight:600;display:block;margin-bottom:4px';
 
@@ -98,7 +164,7 @@ const Presupuestos = {
       <div style="margin-bottom:12px">
         <label style="${lbl}">Equipo que se lleva *</label>
         <select id="pr-producto" style="${inp}" onchange="Presupuestos.recalcular()">
-          ${disponibles.map(p => `<option value="${p.id}">${State.esc(p.nombre)} — U$D ${Math.round(p.precioARS / p.cotiz)}</option>`).join('')}
+          ${disponibles.map(p => `<option value="${p.id}">${State.esc(p.etiqueta)} — U$D ${p.usd}${p.unidades > 1 ? ` (${p.unidades} u.)` : ''}</option>`).join('')}
         </select>
       </div>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:12px">
@@ -113,13 +179,20 @@ const Presupuestos = {
       </div>
       <div id="pr-ti-wrap">
         <div style="display:grid;grid-template-columns:2fr 1fr;gap:10px;margin-bottom:10px">
-          <div><label style="${lbl}">Modelo que entrega *</label><input id="pr-ti-modelo" placeholder="ej: iPhone 16" style="${inp}"></div>
+          <div><label style="${lbl}">Modelo que entrega *</label>
+            <select id="pr-ti-modelo" style="${inp}" onchange="Presupuestos.cambioModeloTI()">
+              <option value="">Elegí el modelo…</option>
+              ${MODELOS.map(m => `<option>${State.esc(m)}</option>`).join('')}
+              <option value="__otro">Otro modelo…</option>
+            </select>
+            <input id="pr-ti-modelo-otro" placeholder="ej: Samsung S23 / iPhone 12" style="${inp};display:none;margin-top:6px">
+          </div>
           <div><label style="${lbl}">Capacidad</label>
-            <select id="pr-ti-storage" style="${inp}"><option value=""></option>${STORAGE.map(s => `<option>${s}</option>`).join('')}</select>
+            <select id="pr-ti-storage" style="${inp}"></select>
           </div>
         </div>
         <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-bottom:10px">
-          <div><label style="${lbl}">Color</label><input id="pr-ti-color" placeholder="ej: Negro" style="${inp}"></div>
+          <div><label style="${lbl}">Color</label><select id="pr-ti-color" style="${inp}"></select></div>
           <div><label style="${lbl}">Estado</label>
             <select id="pr-ti-estado" style="${inp}">${ESTADOS.map(e => `<option${e === 'Excelente' ? ' selected' : ''}>${e}</option>`).join('')}</select>
           </div>
@@ -141,7 +214,7 @@ const Presupuestos = {
     } else {
       this._modalSimple('Nuevo presupuesto', html);
     }
-    setTimeout(() => this.recalcular(), 30);
+    setTimeout(() => { this.cambioModeloTI(); this.recalcular(); }, 30);
   },
 
   _modalSimple(titulo, html) {
@@ -158,6 +231,30 @@ const Presupuestos = {
     </div>`;
     ov.onclick = e => { if (e.target === ov) ov.remove(); };
     document.body.appendChild(ov);
+  },
+
+  // Al elegir el modelo, Capacidad y Color se rearman con lo que ese modelo
+  // realmente tuvo. "Otro modelo…" abre el campo libre y vuelve a las listas
+  // generales, para no perder la posibilidad de tomar un equipo viejo o Android.
+  cambioModeloTI() {
+    const selM = document.getElementById('pr-ti-modelo');
+    if (!selM) return;
+    const otro = selM.value === '__otro';
+    const libre = document.getElementById('pr-ti-modelo-otro');
+    if (libre) libre.style.display = otro ? 'block' : 'none';
+
+    const specs = this.specsCanje(otro ? '' : selM.value);
+    const llenar = (id, vals) => {
+      const el = document.getElementById(id);
+      if (!el) return;
+      const antes = el.value;
+      el.innerHTML = `<option value=""></option>` + vals.map(v => `<option>${State.esc(v)}</option>`).join('');
+      // Si el color/capacidad que ya estaba también existe en el modelo nuevo
+      // se respeta; si ese modelo no lo tuvo, queda vacío y hay que elegir.
+      if (antes && vals.some(v => v === antes)) el.value = antes;
+    };
+    llenar('pr-ti-storage', specs.s || []);
+    llenar('pr-ti-color', specs.c || []);
   },
 
   toggleTI(on) {
@@ -192,7 +289,10 @@ const Presupuestos = {
     const p = this._productoElegido();
     if (!p) { toast('Elegí el equipo.'); return; }
     const conTI = document.getElementById('pr-ti-on')?.checked;
-    const modelo = document.getElementById('pr-ti-modelo')?.value.trim();
+    const selM = document.getElementById('pr-ti-modelo')?.value || '';
+    const modelo = (selM === '__otro'
+      ? document.getElementById('pr-ti-modelo-otro')?.value.trim()
+      : selM.trim()) || '';
     const valor = parseFloat(document.getElementById('pr-ti-valor')?.value);
     if (conTI && (!modelo || !(valor > 0))) { toast('Cargá el modelo que entrega y su cotización.'); return; }
 
@@ -213,7 +313,7 @@ const Presupuestos = {
       },
       trade_in: conTI ? {
         modelo, storage: document.getElementById('pr-ti-storage')?.value || '',
-        color: document.getElementById('pr-ti-color')?.value.trim() || '',
+        color: document.getElementById('pr-ti-color')?.value || '',
         estado: document.getElementById('pr-ti-estado')?.value || '',
         bateria_pct: parseInt(document.getElementById('pr-ti-bat')?.value) || null,
         valor_usd: valor,

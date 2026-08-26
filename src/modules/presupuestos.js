@@ -11,6 +11,25 @@ const Presupuestos = {
   lista: [],
   draft: null,
 
+  // Trabajos que el equipo ya lleva hechos y que se le aclaran al cliente en el
+  // presupuesto. No es una lista cerrada: abajo hay un campo libre.
+  //
+  // Es información que conviene decir de frente. Un usado al que se le cambió
+  // la batería vale MÁS que uno al que no, pero si el cliente se entera después
+  // suena a algo que se le ocultó. Dicho en el presupuesto, juega a favor.
+  SERVICIOS: [
+    'Batería nueva',
+    'Pantalla nueva',
+    'Vidrio trasero nuevo',
+    'Cámara reparada',
+    'Puerto de carga reparado',
+    'Limpieza y mantenimiento',
+  ],
+
+  // Cómo se llama la plata que el cliente pone de entrada. No cambia ninguna
+  // cuenta — es solo cómo se lee en el presupuesto que recibe.
+  CONCEPTOS_EFECTIVO: ['Efectivo en USD', 'Efectivo en pesos', 'Transferencia', 'Seña ya entregada'],
+
   // Qué cuenta como "equipo" en el desplegable de venta. Cargadores, fundas,
   // baterías y repuestos NO van: el stock guarda una fila por unidad física,
   // así que el mismo cargador aparecía diez veces y tapaba a los iPhone.
@@ -87,7 +106,7 @@ const Presupuestos = {
         <button class="btn btn-primary" onclick="Presupuestos.nuevo()">+ Nuevo presupuesto</button>
       </div>
       <div style="background:var(--blue-light);border-radius:8px;padding:10px 12px;margin-bottom:14px;font-size:11.5px;color:var(--blue)">
-        <i class="ti ti-info-circle"></i> El link que se genera muestra el equipo, el canje descontado, el saldo y todas las cuotas. Los valores quedan fijos: si cambia el dólar o el precio, el presupuesto ya enviado no se altera.
+        <i class="ti ti-info-circle"></i> El link que se genera muestra el equipo, lo que el cliente entrega (equipo usado, dinero o las dos cosas), el saldo y todas las cuotas. Los valores quedan fijos: si cambia el dólar o el precio, el presupuesto ya enviado no se altera.
       </div>
       <div id="pres-lista"></div>`;
     setTimeout(() => this.cargar(), 0);
@@ -109,13 +128,15 @@ const Presupuestos = {
     cont.innerHTML = this.lista.map(p => {
       const prod = p.producto || {};
       const ti = p.trade_in;
-      const saldo = Math.max(0, (Number(prod.precio_usd) || 0) - (ti ? Number(ti.valor_usd) || 0 : 0));
+      const saldo = Math.max(0, (Number(prod.precio_usd) || 0)
+        - (ti ? Number(ti.valor_usd) || 0 : 0)
+        - (Number(ti?.efectivo?.monto_usd) || 0));
       const vencido = p.vence_en && new Date(p.vence_en) < new Date();
       return `<div class="card" style="margin-bottom:10px;display:flex;align-items:center;gap:14px;flex-wrap:wrap">
         <div style="flex:1;min-width:200px">
           <div style="font-size:13px;font-weight:700">${State.esc(prod.nombre || 'Equipo')}</div>
           <div style="font-size:11.5px;color:var(--text-secondary);margin-top:2px">
-            ${p.cliente ? State.esc(p.cliente) + ' · ' : ''}${ti ? `canje ${State.esc(ti.modelo || '')} U$D ${ti.valor_usd} · ` : ''}saldo <strong>U$D ${saldo}</strong>
+            ${p.cliente ? State.esc(p.cliente) + ' · ' : ''}${ti && ti.modelo ? `canje ${State.esc(ti.modelo)} U$D ${ti.valor_usd} · ` : ''}${ti?.efectivo ? `${State.esc(ti.efectivo.concepto)} U$D ${ti.efectivo.monto_usd} · ` : ''}saldo <strong>U$D ${saldo}</strong>
           </div>
           <div style="font-size:10.5px;color:var(--text-secondary);margin-top:3px">
             ${DB.fmtFecha(p.creado_en)}${vencido ? ' · <span style="color:var(--red)">VENCIDO</span>' : ''}
@@ -149,7 +170,8 @@ const Presupuestos = {
     if (!disponibles.length) { toast('No hay equipos disponibles con precio cargado.'); return; }
 
     this.draft = { productoId: disponibles[0].id, cliente: '', diasValidez: 7,
-                   ti: { activo: true, modelo: '', storage: '', color: '', estado: 'Excelente', bateria: '', valor: '' } };
+                   ti: { activo: true, modelo: '', storage: '', color: '', estado: 'Excelente', bateria: '', valor: '' },
+                   ef: { activo: false, monto: '', concepto: '' } };
     this.abrirModal(disponibles);
   },
 
@@ -166,6 +188,16 @@ const Presupuestos = {
         <select id="pr-producto" style="${inp}" onchange="Presupuestos.recalcular()">
           ${disponibles.map(p => `<option value="${p.id}">${State.esc(p.etiqueta)} — U$D ${p.usd}${p.unidades > 1 ? ` (${p.unidades} u.)` : ''}</option>`).join('')}
         </select>
+      </div>
+      <div style="margin-bottom:12px">
+        <label style="${lbl}">Servicio incluido</label>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:4px 12px;margin-bottom:6px">
+          ${this.SERVICIOS.map((sv, i) => `
+            <label style="display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer">
+              <input type="checkbox" class="pr-serv" value="${State.esc(sv)}" id="pr-serv-${i}"> ${State.esc(sv)}
+            </label>`).join('')}
+        </div>
+        <input id="pr-serv-otro" placeholder="Otro trabajo hecho (opcional)" style="${inp}">
       </div>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:12px">
         <div><label style="${lbl}">Cliente</label><input id="pr-cliente" placeholder="ej: Facundo" style="${inp}"></div>
@@ -201,6 +233,24 @@ const Presupuestos = {
         <div style="margin-bottom:12px">
           <label style="${lbl}">Cotización que le das (U$D) *</label>
           <input id="pr-ti-valor" type="number" min="0" placeholder="550" style="${inp};font-size:15px;font-weight:700" oninput="Presupuestos.recalcular()">
+        </div>
+      </div>
+
+      <div style="border-top:1px solid var(--border);padding-top:12px;margin-bottom:10px">
+        <label style="display:flex;align-items:center;gap:7px;font-size:12.5px;font-weight:600;cursor:pointer">
+          <input type="checkbox" id="pr-ef-on" onchange="Presupuestos.toggleEf(this.checked)"> Entrega dinero a cuenta
+        </label>
+      </div>
+      <div id="pr-ef-wrap" style="display:none">
+        <div style="display:grid;grid-template-columns:1fr 1.4fr;gap:10px;margin-bottom:12px">
+          <div><label style="${lbl}">Monto (U$D) *</label>
+            <input id="pr-ef-monto" type="number" min="0" placeholder="300" style="${inp};font-size:15px;font-weight:700" oninput="Presupuestos.recalcular()">
+          </div>
+          <div><label style="${lbl}">Concepto</label>
+            <select id="pr-ef-concepto" style="${inp}">
+              ${this.CONCEPTOS_EFECTIVO.map(c => `<option>${State.esc(c)}</option>`).join('')}
+            </select>
+          </div>
         </div>
       </div>
       <div id="pr-preview" style="background:var(--bg-secondary);border-radius:8px;padding:12px;font-size:12.5px"></div>`;
@@ -263,6 +313,28 @@ const Presupuestos = {
     this.recalcular();
   },
 
+  toggleEf(on) {
+    const w = document.getElementById('pr-ef-wrap');
+    if (w) w.style.display = on ? 'block' : 'none';
+    this.recalcular();
+  },
+
+  // Lo que el cliente pone en plata. Los dos caminos son independientes: puede
+  // entregar solo el equipo, solo plata, o las dos cosas.
+  _efectivo() {
+    if (!document.getElementById('pr-ef-on')?.checked) return null;
+    const monto = parseFloat(document.getElementById('pr-ef-monto')?.value) || 0;
+    if (!(monto > 0)) return null;
+    return { monto_usd: monto, concepto: document.getElementById('pr-ef-concepto')?.value || 'Efectivo' };
+  },
+
+  _serviciosElegidos() {
+    const marcados = [...document.querySelectorAll('.pr-serv:checked')].map(c => c.value);
+    const otro = document.getElementById('pr-serv-otro')?.value.trim();
+    if (otro) marcados.push(otro);
+    return marcados;
+  },
+
   _productoElegido() {
     const id = document.getElementById('pr-producto')?.value;
     return (State.stock || []).find(p => String(p.id) === String(id));
@@ -276,10 +348,12 @@ const Presupuestos = {
     const precio = Math.round(p.precioARS / p.cotiz);
     const conTI = document.getElementById('pr-ti-on')?.checked;
     const valorTI = conTI ? (parseFloat(document.getElementById('pr-ti-valor')?.value) || 0) : 0;
-    const saldo = Math.max(0, precio - valorTI);
+    const ef = this._efectivo();
+    const saldo = Math.max(0, precio - valorTI - (ef?.monto_usd || 0));
     box.innerHTML = `
       <div style="display:flex;justify-content:space-between"><span>Equipo</span><strong>U$D ${precio}</strong></div>
       ${conTI ? `<div style="display:flex;justify-content:space-between;color:var(--green)"><span>Canje</span><strong>− U$D ${valorTI}</strong></div>` : ''}
+      ${ef ? `<div style="display:flex;justify-content:space-between;color:var(--green)"><span>${State.esc(ef.concepto)}</span><strong>− U$D ${ef.monto_usd}</strong></div>` : ''}
       <div style="display:flex;justify-content:space-between;border-top:1px solid var(--border);margin-top:6px;padding-top:6px;font-size:14px">
         <strong>Saldo a abonar</strong><strong>U$D ${saldo}</strong></div>
       <div style="font-size:11px;color:var(--text-secondary);margin-top:4px">≈ ${State.fmtARS(saldo * State.refBlue)} al blue de hoy ($${State.refBlue.toLocaleString('es-AR')})</div>`;
@@ -296,6 +370,13 @@ const Presupuestos = {
     const valor = parseFloat(document.getElementById('pr-ti-valor')?.value);
     if (conTI && (!modelo || !(valor > 0))) { toast('Cargá el modelo que entrega y su cotización.'); return; }
 
+    const efec = this._efectivo();
+    // El monto se pide solo si la casilla está tildada: tildarla y dejarla
+    // vacía es un olvido, no "sin efectivo".
+    if (document.getElementById('pr-ef-on')?.checked && !efec) {
+      toast('Cargá cuánto dinero entrega, o destildá la opción.'); return;
+    }
+
     const dias = parseInt(document.getElementById('pr-dias')?.value) || 7;
     // Token largo y aleatorio: es lo único que protege el presupuesto, así
     // que tiene que ser imposible de adivinar probando.
@@ -310,13 +391,24 @@ const Presupuestos = {
         nombre: p.nombre, modelo: p.modelo, storage: p.storage, color: p.color,
         categoria: p.cat, estado_producto: p.estadoProducto,
         precio_usd: Math.round(p.precioARS / p.cotiz),
+        // Va dentro de `producto` y no en una columna nueva porque es una
+        // característica del equipo cotizado, y queda congelado con el resto.
+        servicios: this._serviciosElegidos(),
       },
-      trade_in: conTI ? {
-        modelo, storage: document.getElementById('pr-ti-storage')?.value || '',
-        color: document.getElementById('pr-ti-color')?.value || '',
-        estado: document.getElementById('pr-ti-estado')?.value || '',
-        bateria_pct: parseInt(document.getElementById('pr-ti-bat')?.value) || null,
-        valor_usd: valor,
+      // `trade_in` es TODO lo que el cliente entrega en parte de pago: el equipo
+      // usado, plata, o las dos cosas. El efectivo va acá adentro y no en una
+      // columna nueva a propósito: una columna obligaría a correr un SQL antes
+      // de publicar, y si ese paso se saltea, guardar un presupuesto falla del
+      // todo. Así la función anda apenas se deploya.
+      trade_in: (conTI || efec) ? {
+        ...(conTI ? {
+          modelo, storage: document.getElementById('pr-ti-storage')?.value || '',
+          color: document.getElementById('pr-ti-color')?.value || '',
+          estado: document.getElementById('pr-ti-estado')?.value || '',
+          bateria_pct: parseInt(document.getElementById('pr-ti-bat')?.value) || null,
+          valor_usd: valor,
+        } : { valor_usd: 0 }),
+        ...(efec ? { efectivo: efec } : {}),
       } : null,
       cotizacion: State.refBlue,
       pagos_cfg: (await DB.leerPagosConfig()) || {},

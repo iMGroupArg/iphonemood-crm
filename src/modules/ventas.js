@@ -31,7 +31,7 @@ const Ventas = {
           ${Reportes.NICHOS.map(n=>`<option value="${n.id}" ${this._nicho===n.id?'selected':''}>${n.emoji} ${n.label}</option>`).join('')}
         </select>
         <button class="btn" style="flex-shrink:0" onclick="Ventas.exportarDetalleExcel()" title="Exportar el detalle de las ventas del período"><i class="ti ti-file-spreadsheet"></i>${mobile?'':' Exportar'}</button>
-        <button class="btn btn-primary" style="flex-shrink:0" onclick="Ventas.openNew()"><i class="ti ti-plus"></i>${mobile?' Nueva':' Nueva venta'}</button>
+        <button class="btn btn-primary" style="flex-shrink:0" onclick="Ventas.openNew()" title="Nueva venta (${Ventas.atajoNuevaVenta()})"><i class="ti ti-plus"></i>${mobile?' Nueva':' Nueva venta'}</button>
       </div>
       <div id="ventas-rango-libre" style="display:none;padding:8px ${mobile?'12':'22'}px;border-bottom:1px solid var(--border);gap:8px;align-items:center;flex-wrap:wrap">
         <input type="date" id="ventas-desde" style="font-size:12px;padding:5px 8px;border:1px solid var(--border-strong);border-radius:8px;flex:1">
@@ -486,6 +486,13 @@ const Ventas = {
       if (Date.now() - (data.guardadoEn || 0) > 24 * 60 * 60 * 1000) { this.borrarBorrador(); return null; }
       return data;
     } catch (e) { return null; }
+  },
+
+  // El atajo se escribe con las teclas del sistema de quien mira: en Mac los
+  // símbolos, en Windows/Linux los nombres.
+  atajoNuevaVenta() {
+    const esMac = /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent || '');
+    return esMac ? '⌘⇧V' : 'Ctrl+Shift+V';
   },
 
   openNew() {

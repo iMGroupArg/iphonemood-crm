@@ -24,6 +24,7 @@ const Panel = {
       ['personas', 'ti ti-users', 'Cajas y personas'],
       ['usuarios', 'ti ti-lock', 'Usuarios y accesos'],
       ['landing', 'ti ti-world', 'Landing pública'],
+      ['banner', 'ti ti-photo', 'Banner de ofertas'],
       ['financiacion', 'ti ti-percentage', 'Financiación'],
       ['negocio', 'ti ti-building-store', 'Datos del negocio'],
       ['marca', 'ti ti-palette', 'Logo y tipografía'],
@@ -46,8 +47,155 @@ const Panel = {
     else if (this.activeTab === 'marca') { body.innerHTML = this.marcaView(); this._initMarcaPreview(); }
     else if (this.activeTab === 'landing') { body.innerHTML = this.landingView(); this.cargarLanding(); }
     else if (this.activeTab === 'financiacion') { body.innerHTML = this.financiacionView(); this.cargarFinanciacion(); }
+    else if (this.activeTab === 'banner') { body.innerHTML = this.bannerView(); this.cargarBanner(); }
     else if (this.activeTab === 'exportar') body.innerHTML = this.exportarView();
     else body.innerHTML = this.negocioView();
+  },
+
+/* ─── BANNER DE OFERTAS ─────────────────────────────────────────
+     Carrusel de imágenes arriba de la landing. Cada una puede llevar a algún
+     lado: a un filtro del catálogo (?linea=17), a una ficha (?p=…) o a un
+     link externo. Se guarda en configuracion.banner.
+  ─────────────────────────────────────────────────────────────── */
+  bannerView() {
+    return `
+      <h3 style="font-size:13px;font-weight:600;color:var(--text-secondary);text-transform:uppercase;letter-spacing:.4px;margin-bottom:12px;border-bottom:1px solid var(--border);padding-bottom:8px">Banner de ofertas — landing pública</h3>
+      <div style="background:var(--blue-light);border-radius:8px;padding:10px 12px;margin-bottom:14px;font-size:11.5px;color:var(--blue);line-height:1.5">
+        <i class="ti ti-info-circle"></i> Las imágenes rotan solas arriba de la web. Para escritorio, <b>1600×600</b>.
+        Para celular conviene subir una <b>versión aparte más cuadrada</b> (por ejemplo 1000×800): una imagen apaisada en un teléfono
+        se ve diminuta, y ninguna medida arregla eso. Subila como JPG o PNG, <b>no SVG</b>.
+        Sin ninguna imagen cargada, el banner no aparece y la web queda como está hoy.
+      </div>
+      <div id="banner-body"></div>`;
+  },
+
+  async cargarBanner() {
+    this._banner = await DB.leerBanner();
+    this.renderBanner();
+  },
+
+  _bannerImgUrl(archivo) {
+    const { SUPABASE_URL } = window.__APP_CONFIG__;
+    return `${SUPABASE_URL}/storage/v1/render/image/public/products/${encodeURIComponent(archivo)}?width=480&resize=contain&quality=70`;
+  },
+
+  renderBanner() {
+    const cont = document.getElementById('banner-body');
+    if (!cont) return;
+    const lista = this._banner || [];
+    const inp = 'width:100%;font-size:12px;padding:6px 9px;border:1px solid var(--border-strong);border-radius:7px';
+    const lbl = 'font-size:10.5px;color:var(--text-secondary);font-weight:600;display:block;margin-bottom:3px';
+
+    const filas = lista.map((sl, i) => `
+      <div class="card" style="margin-bottom:10px;display:flex;gap:12px;align-items:flex-start;${sl.activo === false ? 'opacity:.5' : ''}">
+        <div style="flex-shrink:0;width:150px">
+          <img src="${this._bannerImgUrl(sl.archivo)}" alt=""
+               style="width:100%;object-fit:contain;border-radius:8px;background:var(--bg-secondary);display:block">
+          <div style="font-size:10px;color:var(--text-secondary);text-align:center;margin-top:3px">Escritorio</div>
+          ${sl.archivo_movil ? `
+            <img src="${this._bannerImgUrl(sl.archivo_movil)}" alt=""
+                 style="width:100%;object-fit:contain;border-radius:8px;background:var(--bg-secondary);display:block;margin-top:6px">
+            <div style="font-size:10px;color:var(--text-secondary);text-align:center;margin-top:3px">
+              Celular · <a href="#" onclick="Panel.quitarBannerMovil(${i});return false" style="color:var(--red)">quitar</a>
+            </div>` : `
+            <label class="btn" style="width:100%;justify-content:center;cursor:pointer;font-size:10.5px;padding:5px;margin-top:6px">
+              <input type="file" accept="image/*" style="display:none" onchange="Panel.subirBannerMovil(this,${i})">
+              + Versión celular
+            </label>`}
+        </div>
+        <div style="flex:1;min-width:0">
+          ${/\.svg$/i.test(sl.archivo) ? `
+            <div style="background:#FFF6E5;border:1px solid #F0D9A8;border-radius:8px;padding:8px 10px;margin-bottom:8px;font-size:11px;color:#7A5A12;line-height:1.45">
+              <b>⚠ Es un SVG y se baja completo.</b> El achicado automático no funciona con SVG, así que el cliente descarga el archivo entero.
+              Exportalo como <b>JPG o PNG</b> y volvé a subirlo: suele quedar 30 veces más liviano.
+            </div>` : ''}
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px">
+            <div><label style="${lbl}">A dónde lleva (opcional)</label>
+              <input type="text" value="${State.esc(sl.link || '')}" placeholder="?linea=17  ·  https://…"
+                onchange="Panel._banner[${i}].link=this.value.trim();Panel.renderBanner()" style="${inp}"></div>
+            <div><label style="${lbl}">Descripción (para lectores de pantalla)</label>
+              <input type="text" value="${State.esc(sl.alt || '')}" placeholder="ej: 40% off en línea 17"
+                onchange="Panel._banner[${i}].alt=this.value.trim()" style="${inp}"></div>
+          </div>
+          <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+            <label style="display:flex;align-items:center;gap:5px;font-size:11.5px;cursor:pointer">
+              <input type="checkbox" ${sl.activo !== false ? 'checked' : ''}
+                onchange="Panel._banner[${i}].activo=this.checked;Panel.renderBanner()"> Visible
+            </label>
+            <button class="btn" style="font-size:11px;padding:4px 9px" onclick="Panel.moverBanner(${i},-1)" ${i === 0 ? 'disabled' : ''}>↑</button>
+            <button class="btn" style="font-size:11px;padding:4px 9px" onclick="Panel.moverBanner(${i},1)" ${i === lista.length - 1 ? 'disabled' : ''}>↓</button>
+            <button class="btn" style="font-size:11px;padding:4px 9px;color:var(--red);margin-left:auto" onclick="Panel.quitarBanner(${i})">Quitar</button>
+          </div>
+          <div style="font-size:10px;color:var(--text-secondary);margin-top:6px">${State.esc(sl.archivo)}</div>
+        </div>
+      </div>`).join('');
+
+    cont.innerHTML = `
+      ${filas || `<div style="text-align:center;padding:30px;color:var(--text-secondary);font-size:13px">Todavía no cargaste ninguna imagen.</div>`}
+      <label class="btn" style="width:100%;justify-content:center;cursor:pointer;margin-bottom:10px">
+        <input type="file" accept="image/*" style="display:none" onchange="Panel.subirBanner(this)">
+        + Agregar imagen
+      </label>
+      <button class="btn btn-primary" style="width:100%;justify-content:center" onclick="Panel.guardarBanner()">✓ Guardar banner</button>
+      <div style="font-size:11px;color:var(--text-secondary);margin-top:10px;line-height:1.5">
+        <b>A dónde lleva:</b> dejalo vacío y la imagen no será clickeable.
+        Para llevar a una parte del catálogo usá el link que te queda arriba en el navegador cuando filtrás
+        (por ejemplo <code>?linea=17</code>). También sirve un link externo completo.
+      </div>`;
+  },
+
+  async subirBanner(input) {
+    const file = input.files && input.files[0];
+    if (!file) return;
+    // 4 MB es de sobra para un banner bien exportado y evita que una foto
+    // sacada del celular sin comprimir haga lenta la portada.
+    if (file.size > 4 * 1024 * 1024) { toast('La imagen pesa más de 4 MB. Exportala más liviana.'); input.value = ''; return; }
+    toast('Subiendo imagen…');
+    const { nombre, error } = await DB.subirImagenBanner(file);
+    input.value = '';
+    if (error) { toast('No se pudo subir la imagen.'); console.error(error); return; }
+    this._banner = [...(this._banner || []), { archivo: nombre, link: '', alt: '', activo: true }];
+    this.renderBanner();
+    toast('Imagen agregada. Acordate de guardar.');
+  },
+
+  async subirBannerMovil(input, i) {
+    const file = input.files && input.files[0];
+    if (!file) return;
+    if (file.size > 4 * 1024 * 1024) { toast('La imagen pesa más de 4 MB. Exportala más liviana.'); input.value = ''; return; }
+    toast('Subiendo imagen…');
+    const { nombre, error } = await DB.subirImagenBanner(file);
+    input.value = '';
+    if (error) { toast('No se pudo subir la imagen.'); console.error(error); return; }
+    this._banner[i].archivo_movil = nombre;
+    this.renderBanner();
+    toast('Versión celular agregada. Acordate de guardar.');
+  },
+
+  quitarBannerMovil(i) {
+    delete this._banner[i].archivo_movil;
+    this.renderBanner();
+  },
+
+  moverBanner(i, d) {
+    const l = this._banner;
+    const j = i + d;
+    if (j < 0 || j >= l.length) return;
+    [l[i], l[j]] = [l[j], l[i]];
+    this.renderBanner();
+  },
+
+  quitarBanner(i) {
+    // Solo se saca de la lista. El archivo queda en el bucket a propósito:
+    // borrarlo sería irreversible y con un clic de más se perdería la imagen.
+    this._banner.splice(i, 1);
+    this.renderBanner();
+  },
+
+  async guardarBanner() {
+    const { error } = await DB.guardarBanner(this._banner || []);
+    if (error) { toast('No se pudo guardar.'); console.error(error); return; }
+    toast('Banner guardado. La landing lo toma al recargar.');
   },
 
   garantiasView() {
@@ -490,7 +638,15 @@ const Panel = {
     const mezclar = (guardadas, ns) => ns.map(n => (guardadas || []).find(c => c.n === n) || { n, mostrar: false, coef: null });
     const promoSrc = cfg.promo?.cuotas || conv((cfg.promos || [])[0]?.cuotas) || [];
     const otrosSrc = cfg.otros?.cuotas || conv(cfg.cuotas_fijas) || [];
+    const r = cfg.reserva || {};
     this._pagos = {
+      reserva: {
+        monto_usd: r.monto_usd ?? 50,
+        link_pago: r.link_pago || '',
+        nota: r.nota || 'La reserva se devuelve completa si no confirmás la compra. Sirve para que el equipo quede apartado a tu nombre.',
+        ars: { banco: r.ars?.banco || '', titular: r.ars?.titular || '', alias: r.ars?.alias || '', cbu: r.ars?.cbu || '' },
+        usd: { banco: r.usd?.banco || '', titular: r.usd?.titular || '', alias: r.usd?.alias || '', cbu: r.usd?.cbu || '' },
+      },
       lista_factor: cfg.lista_factor ?? 1.45,
       promo: { titulo: cfg.promo?.titulo || (cfg.promos || [])[0]?.titulo || '🏦 Promo Banco Macro', vigencia: cfg.promo?.vigencia || 'Agosto · jueves a sábado', cuotas: mezclar(promoSrc, [3,6,9,12]) },
       otros: { titulo: cfg.otros?.titulo || 'Otras tarjetas de crédito', cuotas: mezclar(otrosSrc, [3,6,9,12]) },
@@ -538,15 +694,83 @@ const Panel = {
       </div>
       ${bloque('promo', d.promo)}
       ${bloque('otros', d.otros)}
+      ${this._bloqueReserva(d.reserva)}
       <button class="btn btn-primary" style="width:100%;justify-content:center" onclick="Panel.guardarFinanciacion()">✓ Guardar financiación</button>
     `;
+  },
+
+// Datos de la reserva que la landing muestra al cliente. Los campos vacíos
+  // NO se publican: mientras no cargues un CBU, ese medio de pago no aparece.
+  // Es a propósito — nada de esto debería salir a la web sin que lo decidas.
+  // Completa el https:// si falta. Sin él el navegador lo toma como una ruta
+  // del propio sitio y el cliente cae en un 404 de iphonemood.com.
+  _normUrl(v) {
+    const t = String(v || '').trim();
+    if (!t) return '';
+    return /^https?:\/\//i.test(t) ? t : 'https://' + t.replace(/^\/+/, '');
+  },
+
+  _bloqueReserva(r) {
+    const inp = 'width:100%;font-size:12.5px;padding:7px 10px;border:1px solid var(--border-strong);border-radius:8px';
+    const lbl = 'font-size:10.5px;color:var(--text-secondary);font-weight:600;display:block;margin-bottom:3px';
+    const campo = (moneda, clave, etiqueta, ph) => `
+      <div><label style="${lbl}">${etiqueta}</label>
+        <input type="text" value="${State.esc(r[moneda][clave])}" placeholder="${ph}"
+          onchange="Panel._pagos.reserva.${moneda}.${clave}=this.value.trim();Panel.renderFinanciacion()" style="${inp}"></div>`;
+    const cuenta = (moneda, titulo) => `
+      <div style="border:1px solid var(--border);border-radius:10px;padding:10px 12px">
+        <div style="font-size:12px;font-weight:700;margin-bottom:8px">${titulo}</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+          ${campo(moneda, 'banco', 'Banco / billetera', 'ej: Banco Macro')}
+          ${campo(moneda, 'titular', 'Titular', 'ej: Franco Velas')}
+          ${campo(moneda, 'alias', 'Alias', 'ej: iphone.mood.mp')}
+          ${campo(moneda, 'cbu', 'CBU / CVU', '22 dígitos')}
+        </div>
+        <div style="font-size:10.5px;color:var(--text-secondary);margin-top:6px">
+          ${r[moneda].alias || r[moneda].cbu ? '● Se publica en la web' : '○ Vacío: no se publica'}
+        </div>
+      </div>`;
+    const montoARS = Math.round((r.monto_usd || 0) * State.refBlue);
+    return `
+      <div class="card" style="margin-bottom:14px">
+        <div style="font-size:13px;font-weight:700;margin-bottom:4px">Reserva del equipo</div>
+        <div style="font-size:11px;color:var(--text-secondary);margin-bottom:12px">
+          Aparece como una opción más en la ficha de producto. Los datos que dejes vacíos no se muestran.
+        </div>
+        <div style="display:grid;grid-template-columns:auto 1fr;gap:12px;align-items:end;margin-bottom:12px">
+          <div><label style="${lbl}">Monto (U$D)</label>
+            <input type="number" min="0" value="${r.monto_usd}"
+              onchange="Panel._pagos.reserva.monto_usd=parseFloat(this.value)||0;Panel.renderFinanciacion()"
+              style="${inp};width:110px;font-size:15px;font-weight:700"></div>
+          <div style="font-size:11.5px;color:var(--text-secondary);padding-bottom:8px">
+            ≈ ${State.fmtARS(montoARS)} al blue de hoy. En la web el monto en pesos se recalcula solo con la cotización del día.
+          </div>
+        </div>
+        <div style="margin-bottom:12px">
+          <label style="${lbl}">Link de pago en pesos (Mercado Pago u otro) — opcional</label>
+          <input type="text" value="${State.esc(r.link_pago)}" placeholder="link.mercadopago.com.ar/tualias"
+            onchange="Panel._pagos.reserva.link_pago=Panel._normUrl(this.value);Panel.renderFinanciacion()" style="${inp}">
+          <div style="font-size:10.5px;color:var(--text-secondary);margin-top:4px">
+            ${r.link_pago ? 'Se abrirá así: ' + State.esc(r.link_pago) : 'Podés pegarlo sin https://, se completa solo.'}
+          </div>
+        </div>
+        <div style="display:grid;gap:10px;margin-bottom:12px">
+          ${cuenta('ars', '🇦🇷 Transferencia en pesos')}
+          ${cuenta('usd', '💵 Transferencia en dólares')}
+        </div>
+        <div>
+          <label style="${lbl}">Qué se le aclara al cliente</label>
+          <textarea rows="2" onchange="Panel._pagos.reserva.nota=this.value.trim()"
+            style="${inp};resize:vertical">${State.esc(r.nota)}</textarea>
+        </div>
+      </div>`;
   },
 
   async guardarFinanciacion() {
     const d = this._pagos;
     const visibles = [...d.promo.cuotas, ...d.otros.cuotas].filter(c => c.mostrar);
     if (visibles.some(c => !(c.coef > 0))) { toast('Hay cuotas marcadas para mostrar sin coeficiente cargado.'); return; }
-    await DB.guardarPagosConfig({ lista_factor: d.lista_factor, promo: d.promo, otros: d.otros });
+    await DB.guardarPagosConfig({ lista_factor: d.lista_factor, promo: d.promo, otros: d.otros, reserva: d.reserva });
     toast('Financiación guardada. La landing la toma al recargar.');
   },
 

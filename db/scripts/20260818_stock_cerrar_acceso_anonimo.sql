@@ -3,9 +3,10 @@
 -- sirviendo (188) y la landing responde 200. Se conserva como registro.
 
 -- ============================================================================
---  PENDIENTE — este es el paso que REALMENTE tapa la fuga.
+--  HISTÓRICO — así estaba el problema cuando se escribió este archivo.
+--  Ya no hay nada que correr acá: los tres pasos están hechos y verificados.
 --
---  ESTADO al 15-08-2026:
+--  ESTADO al 15-08-2026 (superado):
 --    ✅ Vista `stock_publico` creada  (db/migrations/20260815_stock_vista_publica.sql)
 --    ✅ precios.html ya consulta la vista, verificado en local: 186 equipos,
 --       581 unidades, ninguna columna sensible llega al navegador

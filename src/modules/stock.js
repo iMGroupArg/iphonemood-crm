@@ -247,18 +247,26 @@ const Stock = {
     const mobile = this.isMobile();
     const px = mobile ? '10px 12px' : '10px 22px';
     const pxS = mobile ? '8px 12px' : '12px 22px';
+    // Filtros de perfumería: los mismos criterios que la landing pública —
+    // familia, marca y tamaño — y ofreciendo SOLO los valores que hoy tienen
+    // stock, no el catálogo entero. Filtrar por algo que no tenés no sirve.
+    const opt = (v, label) => `<option value="${State.esc(v)}">${State.esc(label ?? v)}</option>`;
     const extraSelects = this.currentGroup === 'perfumeria' ? `
       <select id="pf-cat" onchange="Stock.onPerfumeFilterChange()" style="font-size:12px;padding:5px 8px;border:1px solid var(--border-strong);border-radius:8px;max-width:130px">
-        <option value="">Categoría</option>
-        ${this.PERFUME_CATEGORIAS.map(c=>`<option>${c}</option>`).join('')}
-      </select>
-      <select id="pf-conc" onchange="Stock.renderTable()" style="font-size:12px;padding:5px 8px;border:1px solid var(--border-strong);border-radius:8px;max-width:100px">
-        <option value="">Conc.</option>
-        ${this.PERFUME_CONCENTRACIONES.map(c=>`<option>${c}</option>`).join('')}
+        <option value="">Familia</option>
+        ${this.valoresPerfumeEnStock('color').map(c => opt(c)).join('')}
       </select>
       <select id="pf-marca" onchange="Stock.renderTable()" style="font-size:12px;padding:5px 8px;border:1px solid var(--border-strong);border-radius:8px;max-width:140px">
         <option value="">Marca</option>
-        ${Object.entries(this.marcasPerfumeria()).map(([cat,marcas])=>`<optgroup label="${State.esc(cat)}">${marcas.map(m=>`<option value="${State.esc(m)}">${State.esc(m)}</option>`).join('')}</optgroup>`).join('')}
+        ${this.valoresPerfumeEnStock('modelo').map(m => opt(m)).join('')}
+      </select>
+      <select id="pf-ml" onchange="Stock.renderTable()" style="font-size:12px;padding:5px 8px;border:1px solid var(--border-strong);border-radius:8px;max-width:100px">
+        <option value="">Tamaño</option>
+        ${this.mlEnStock().map(ml => opt(ml, this.fmtMl(ml) + ' ml')).join('')}
+      </select>
+      <select id="pf-conc" onchange="Stock.renderTable()" style="font-size:12px;padding:5px 8px;border:1px solid var(--border-strong);border-radius:8px;max-width:100px">
+        <option value="">Conc.</option>
+        ${this.valoresPerfumeEnStock('storage').map(c => opt(c)).join('')}
       </select>
     ` : `
       <select id="stock-filter-modelo" onchange="Stock.onModeloFilterChange()" style="font-size:12px;padding:5px 8px;border:1px solid var(--border-strong);border-radius:8px;max-width:160px">
@@ -446,20 +454,18 @@ const Stock = {
     });
   },
 
+  // Al elegir una familia, la lista de marcas se acota a las de esa familia
+  // que además tengan stock. Si la marca elegida ya no aplica, se limpia sola.
   onPerfumeFilterChange() {
     const cat = document.getElementById('pf-cat')?.value || '';
     const marcaSelect = document.getElementById('pf-marca');
     if (!marcaSelect) return;
     const prev = marcaSelect.value;
-    marcaSelect.innerHTML = '<option value="">Todas las marcas</option>';
-    const todas = this.marcasPerfumeria();
-    const fuentes = cat ? { [cat]: todas[cat] || [] } : todas;
-    Object.entries(fuentes).forEach(([grupo, marcas]) => {
-      const og = document.createElement('optgroup');
-      og.label = grupo;
-      marcas.forEach(m => { const opt = document.createElement('option'); opt.value = m; opt.textContent = m; if (m === prev) opt.selected = true; og.appendChild(opt); });
-      marcaSelect.appendChild(og);
-    });
+    const marcas = [...new Set(State.stock
+      .filter(p => this.esPerfume(p.cat) && this.hayUnidades(p) && (!cat || (p.color || '') === cat))
+      .map(p => String(p.modelo || '').trim()).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'es'));
+    marcaSelect.innerHTML = '<option value="">Marca</option>' +
+      marcas.map(m => `<option value="${State.esc(m)}" ${m === prev ? 'selected' : ''}>${State.esc(m)}</option>`).join('');
     this.renderTable();
   },
 
@@ -628,6 +634,7 @@ const Stock = {
     const pfCat = document.getElementById('pf-cat')?.value || '';
     const pfConc = document.getElementById('pf-conc')?.value || '';
     const pfMarca = document.getElementById('pf-marca')?.value || '';
+    const pfMl = parseFloat(document.getElementById('pf-ml')?.value) || 0;
     const catsDelGrupo = this.GRUPOS[this.currentGroup]?.cats || [];
     let rows = State.stock.filter(s => {
       if (!catsDelGrupo.includes(s.cat)) return false;
@@ -641,6 +648,7 @@ const Stock = {
       if (pfCat && (s.color || '') !== pfCat) return false;
       if (pfConc && (s.storage || '') !== pfConc) return false;
       if (pfMarca && (s.modelo || '') !== pfMarca) return false;
+      if (pfMl && this.mlDe(s) !== pfMl) return false;
       return true;
     });
     const tbody = document.getElementById('stock-tbody');
@@ -879,6 +887,76 @@ const Stock = {
 
   PERFUME_CATEGORIAS: ['Árabe', 'Nicho', 'Diseñador'],
   PERFUME_CONCENTRACIONES: ['EDP', 'EDT', 'EDC', 'Parfum', 'Elixir', 'Otro'],
+  // Tamaños habituales. El selector suma además los que ya existan en el stock,
+  // así ninguno queda afuera aunque no esté en esta lista.
+  ML_OPCIONES: [2, 3, 5, 10, 15, 20, 30, 50, 60, 75, 80, 90, 100, 105, 110, 115, 120, 125, 150, 200],
+
+  // ── MILILITROS ──────────────────────────────────────────────────
+  // El tamaño vive DENTRO DEL NOMBRE ("Teriaq 100ml"), no en una columna
+  // aparte. No es por comodidad: es de donde los lee la landing (`mlDe()` en
+  // precios.js) para juntar los tamaños de un mismo aroma en una sola ficha.
+  // Guardarlo en otro lado sería un tercer lugar para sincronizar, que es el
+  // error que ya nos costó caro con modelo/color/storage.
+  // Las expresiones son las MISMAS que usa precios.js, a propósito.
+  RE_ML_LEER: /(\d+[.,]?\d*)\s*ml/i,
+  RE_ML_QUITAR: /\b\d+[.,]?\d*\s*ml\b/gi,
+
+  mlDe(p) {
+    const m = String(p?.nombre || '').match(this.RE_ML_LEER);
+    return m ? parseFloat(m[1].replace(',', '.')) : 0;
+  },
+  // El nombre sin el tamaño, para poder editarlo aparte del selector.
+  nombreSinMl(nombre) {
+    return String(nombre || '').replace(this.RE_ML_QUITAR, ' ').replace(/\s{2,}/g, ' ').trim();
+  },
+  fmtMl(ml) { return String(ml).replace('.', ','); },
+
+  // ── FORMATO ESTÁNDAR DE PERFUMERÍA ──────────────────────────────
+  // "Marca Producto Concentración Tamaño" (ej: Armaf Club de Nuit EDP 105ml).
+  //
+  // Importa que el nombre NO contradiga a los campos. Ya pasó: dos filas
+  // decían "Club de nuit intense man EDP 100ml" pero una tenía storage=EDT.
+  // Eran dos fragancias distintas con precios distintos, y como compartían
+  // nombre exacto compartían también la URL en la web: una quedaba inalcanzable.
+  _escRegex(t) { return String(t).replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); },
+
+  // La concentración que aparece escrita dentro del nombre, si hay alguna.
+  concEnNombre(nombre) {
+    const m = String(nombre || '').match(/\b(EDP|EDT|EDC|Parfum|Elixir)\b/i);
+    if (!m) return '';
+    const hit = m[1].toLowerCase();
+    return this.PERFUME_CONCENTRACIONES.find(c => c.toLowerCase() === hit) || m[1];
+  },
+
+  // El producto "pelado": sin la marca, sin la concentración y sin el tamaño.
+  productoPerfume(nombre, marca) {
+    let n = this.nombreSinMl(nombre);
+    if (marca) n = n.replace(new RegExp('^\\s*' + this._escRegex(marca) + '\\b\\s*', 'i'), '');
+    n = n.replace(/\b(EDP|EDT|EDC|Parfum|Elixir)\b/gi, ' ');
+    return n.replace(/\s{2,}/g, ' ').trim();
+  },
+
+  nombreEstandarPerfume(producto, marca, conc, ml) {
+    return [marca, producto, conc, ml ? `${this.fmtMl(ml)}ml` : ''].filter(Boolean).join(' ');
+  },
+
+  // Tamaños que hoy hay en el stock de perfumería, de menor a mayor.
+  mlEnStock() {
+    const vals = State.stock
+      .filter(p => this.esPerfume(p.cat) && this.hayUnidades(p))
+      .map(p => this.mlDe(p))
+      .filter(Boolean);
+    return [...new Set(vals)].sort((a, b) => a - b);
+  },
+
+  // Valores de un campo de perfumería que existen hoy en el stock. Igual que
+  // la landing: el filtro ofrece solo lo que realmente hay, no el catálogo.
+  valoresPerfumeEnStock(campo) {
+    return [...new Set(State.stock
+      .filter(p => this.esPerfume(p.cat) && this.hayUnidades(p))
+      .map(p => String(p[campo] || '').trim())
+      .filter(Boolean))].sort((a, b) => a.localeCompare(b, 'es'));
+  },
   PERFUME_MARCAS: {
     'Árabe': ['Armaf', 'Lattafa', 'Ard Al Zaafaran', 'Arabian Oud', 'Ajmal', 'Rasasi', 'Orientica', 'Al Haramain', 'Swiss Arabian', 'Afnan', 'Paris Corner', 'Maison Asrar', 'My Perfumes', 'Fragrance World', 'FA Paris', 'Otoori', 'Abdul Samad Al Qurashi', 'Nabeel', 'Al-Rehab', 'Khadlaj', 'Maison Alhambra', 'Emper', 'Asdaaf', 'Al Wataniah', 'Surrati', 'Zahoor Al Madina'],
     'Nicho': ['Amouage', 'Creed', 'Maison Francis Kurkdjian', 'Byredo', 'Le Labo', 'Nishane', 'Initio', 'Xerjoff', 'Orto Parisi', 'Memo Paris', 'Mancera', 'Montale', 'By Kilian', 'Diptyque', 'Serge Lutens', 'Penhaligon\'s', 'Nasomatto', 'Acqua di Parma', 'Histoires de Parfums', 'Juliette Has a Gun'],
@@ -900,6 +978,10 @@ const Stock = {
     const esPhone = ['iphone','android'].includes(p.cat);
     const cantidadDeclarada = p.cantidadDeclarada ?? p.cantidad ?? (esIMEI ? 0 : 1);
     const estadoProductoInicial = p.estadoProducto || (mode === 'new' ? 'Nuevo / Sellado' : '');
+    // El tamaño se lee del nombre, y la lista suma los que ya existan en el
+    // stock para que no falte ninguno aunque no esté en ML_OPCIONES.
+    const mlActual = this.esPerfume(p.cat) ? this.mlDe(p) : 0;
+    const mlOpciones = [...new Set([...this.ML_OPCIONES, ...this.mlEnStock()])].sort((a, b) => a - b);
     const modelosCat = this.modelosParaCat(p.cat);
     const todosModelos = this.todosLosModelos();
     const modeloEsLibre = !!p.modelo && !modelosCat.includes(p.modelo);
@@ -987,7 +1069,8 @@ const Stock = {
 
                 <div id="f-nombre-libre-wrap" style="display:${this.esNombreLibre(p.cat)?'block':'none'};margin-bottom:12px">
                   <label style="font-size:11px;color:var(--text-secondary);font-weight:600;display:block;margin-bottom:4px">Nombre ${p.cat==='herramienta'?'de la herramienta':p.cat==='repuesto'?'del repuesto':'del producto'} *</label>
-                  <input type="text" id="f-nombre-libre" value="${this.esNombreLibre(p.cat) ? State.esc(p.nombre||'') : ''}" placeholder="${this.placeholderNombre(p.cat)}" style="width:100%;font-size:12px;padding:7px 10px;border:1px solid var(--border-strong);border-radius:8px">
+                  <input type="text" id="f-nombre-libre" oninput="Stock.previewNombrePerfume()" value="${this.esNombreLibre(p.cat) ? State.esc(this.esPerfume(p.cat) ? this.nombreSinMl(p.nombre) : (p.nombre||'')) : ''}" placeholder="${this.placeholderNombre(p.cat)}" style="width:100%;font-size:12px;padding:7px 10px;border:1px solid var(--border-strong);border-radius:8px">
+                  <div id="f-nombre-preview" style="font-size:10px;margin-top:4px;display:none"></div>
                 </div>
 
                 <!-- CONTENIDO DEL COMBO — un ítem por renglón -->
@@ -1002,27 +1085,39 @@ const Stock = {
                   <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px">
                     <div>
                       <label style="font-size:11px;color:var(--text-secondary);font-weight:600;display:block;margin-bottom:4px">Categoría</label>
-                      <select id="f-pf-cat" onchange="Stock.actualizarMarcasPerfume()" style="width:100%;font-size:12px;padding:7px 10px;border:1px solid var(--border-strong);border-radius:8px">
+                      <select id="f-pf-cat" onchange="Stock.actualizarMarcasPerfume();Stock.previewNombrePerfume()" style="width:100%;font-size:12px;padding:7px 10px;border:1px solid var(--border-strong);border-radius:8px">
                         <option value="">— Elegir —</option>
                         ${this.PERFUME_CATEGORIAS.map(c=>`<option ${p.color===c?'selected':''}>${c}</option>`).join('')}
                       </select>
                     </div>
                     <div>
                       <label style="font-size:11px;color:var(--text-secondary);font-weight:600;display:block;margin-bottom:4px">Concentración</label>
-                      <select id="f-pf-conc" style="width:100%;font-size:12px;padding:7px 10px;border:1px solid var(--border-strong);border-radius:8px">
+                      <select id="f-pf-conc" onchange="Stock.previewNombrePerfume()" style="width:100%;font-size:12px;padding:7px 10px;border:1px solid var(--border-strong);border-radius:8px">
                         <option value="">— Elegir —</option>
                         ${this.PERFUME_CONCENTRACIONES.map(c=>`<option ${p.storage===c?'selected':''}>${c}</option>`).join('')}
                       </select>
                     </div>
                   </div>
-                  <div>
-                    <label style="font-size:11px;color:var(--text-secondary);font-weight:600;display:block;margin-bottom:4px">Marca</label>
-                    <select id="f-pf-marca" style="width:100%;font-size:12px;padding:7px 10px;border:1px solid var(--border-strong);border-radius:8px">
-                      <option value="">— Elegir —</option>
-                      ${Object.entries(this.PERFUME_MARCAS).map(([grupo, marcas])=>
-                        `<optgroup label="${grupo}">${marcas.map(m=>`<option value="${m}" ${p.modelo===m?'selected':''}>${m}</option>`).join('')}</optgroup>`
-                      ).join('')}
-                    </select>
+                  <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+                    <div>
+                      <label style="font-size:11px;color:var(--text-secondary);font-weight:600;display:block;margin-bottom:4px">Marca</label>
+                      <select id="f-pf-marca" onchange="Stock.previewNombrePerfume()" style="width:100%;font-size:12px;padding:7px 10px;border:1px solid var(--border-strong);border-radius:8px">
+                        <option value="">— Elegir —</option>
+                        ${Object.entries(this.marcasPerfumeria()).map(([grupo, marcas])=>
+                          `<optgroup label="${State.esc(grupo)}">${marcas.map(m=>`<option value="${State.esc(m)}" ${p.modelo===m?'selected':''}>${State.esc(m)}</option>`).join('')}</optgroup>`
+                        ).join('')}
+                      </select>
+                    </div>
+                    <div>
+                      <label style="font-size:11px;color:var(--text-secondary);font-weight:600;display:block;margin-bottom:4px">Tamaño (ml)</label>
+                      <select id="f-pf-ml" onchange="Stock.onMlChange();Stock.previewNombrePerfume()" style="width:100%;font-size:12px;padding:7px 10px;border:1px solid var(--border-strong);border-radius:8px">
+                        <option value="">— Elegir —</option>
+                        ${mlOpciones.map(ml => `<option value="${ml}" ${ml === mlActual ? 'selected' : ''}>${State.esc(this.fmtMl(ml))} ml</option>`).join('')}
+                        <option value="__otro__" ${mlActual && !mlOpciones.includes(mlActual) ? 'selected' : ''}>Otro (escribir)</option>
+                      </select>
+                      <input type="text" id="f-pf-ml-otro" inputmode="decimal" oninput="Stock.previewNombrePerfume()" placeholder="ej: 7,5" value="${mlActual && !mlOpciones.includes(mlActual) ? mlActual : ''}" style="width:100%;font-size:12px;padding:7px 10px;border:1px solid var(--border-strong);border-radius:8px;margin-top:6px;display:${mlActual && !mlOpciones.includes(mlActual) ? 'block' : 'none'}">
+                      <div class="hint" style="font-size:10px;color:var(--text-secondary);margin-top:3px">Se agrega solo al final del nombre.</div>
+                    </div>
                   </div>
                 </div>
 
@@ -1189,6 +1284,7 @@ const Stock = {
     this.renderImeiChips();
     setTimeout(() => {
       this.updatePricePreview();
+      this.previewNombrePerfume();
       if (['iphone','android','mac','ipad'].includes(p.cat) && p.modelo && !['','__otro__'].includes(p.modelo)) {
         this._actualizarSpecsDropdowns(p.modelo, p.storage || '', p.color || '');
       }
@@ -1217,6 +1313,74 @@ const Stock = {
         specs.c.map(c => `<option value="${State.esc(c)}" ${c === colorActual ? 'selected' : ''}>${State.esc(c)}</option>`).join('') +
         '<option value="Otro">Otro</option>';
     }
+  },
+
+  // Muestra cómo va a quedar guardado el perfume y avisa si el nombre escrito
+  // contradice a los campos elegidos. No bloquea: solo lo hace visible, con un
+  // botón para dejarlo en el formato estándar de una.
+  previewNombrePerfume() {
+    const host = document.getElementById('f-nombre-preview');
+    if (!host) return;
+    const cat = document.getElementById('f-cat')?.value || '';
+    if (!this.esPerfume(cat)) { host.style.display = 'none'; return; }
+
+    const escrito = document.getElementById('f-nombre-libre')?.value || '';
+    const marca   = document.getElementById('f-pf-marca')?.value || '';
+    const conc    = document.getElementById('f-pf-conc')?.value || '';
+    const ml      = this._mlDelFormulario();
+    if (!escrito.trim()) { host.style.display = 'none'; return; }
+
+    const finalNombre = [this.nombreSinMl(escrito), ml ? `${this.fmtMl(ml)}ml` : ''].filter(Boolean).join(' ');
+    const estandar = this.nombreEstandarPerfume(this.productoPerfume(escrito, marca), marca, conc, ml);
+
+    // El aviso que de verdad importa: el nombre dice una concentración y el
+    // campo dice otra. Así nacieron dos perfumes distintos con el mismo nombre.
+    const concNombre = this.concEnNombre(escrito);
+    const avisos = [];
+    if (concNombre && conc && concNombre.toLowerCase() !== conc.toLowerCase()) {
+      avisos.push(`El nombre dice <b>${State.esc(concNombre)}</b> pero elegiste <b>${State.esc(conc)}</b>.`);
+    }
+    if (marca && !new RegExp('^\\s*' + this._escRegex(marca) + '\\b', 'i').test(escrito)) {
+      avisos.push(`El nombre no empieza con la marca <b>${State.esc(marca)}</b>.`);
+    }
+
+    const yaEstandar = finalNombre.trim().toLowerCase() === estandar.trim().toLowerCase();
+    host.style.display = 'block';
+    host.innerHTML = `
+      <div style="color:var(--text-secondary)">Se guarda como: <b style="color:var(--text)">${State.esc(finalNombre)}</b></div>
+      ${avisos.length ? `<div style="color:var(--red);margin-top:3px">⚠️ ${avisos.join(' ')}</div>` : ''}
+      ${!yaEstandar && estandar ? `<button type="button" onclick="Stock.aplicarFormatoPerfume()" style="margin-top:4px;background:none;border:none;padding:0;color:var(--blue);font-size:10px;cursor:pointer;text-decoration:underline">Usar formato estándar: ${State.esc(estandar)}</button>` : ''}`;
+  },
+
+  // Reescribe el campo de nombre con el formato estándar armado desde los
+  // campos. El tamaño no se escribe acá: se pega solo al guardar.
+  aplicarFormatoPerfume() {
+    const inp = document.getElementById('f-nombre-libre');
+    if (!inp) return;
+    const marca = document.getElementById('f-pf-marca')?.value || '';
+    const conc  = document.getElementById('f-pf-conc')?.value || '';
+    inp.value = this.nombreEstandarPerfume(this.productoPerfume(inp.value, marca), marca, conc, 0);
+    this.previewNombrePerfume();
+  },
+
+  // El tamaño tiene su campo libre para los frascos raros (7,5ml y demás):
+  // sin esto, elegir "Otro" sería un callejón sin salida.
+  onMlChange() {
+    const sel = document.getElementById('f-pf-ml');
+    const otro = document.getElementById('f-pf-ml-otro');
+    if (!sel || !otro) return;
+    otro.style.display = sel.value === '__otro__' ? 'block' : 'none';
+    if (sel.value === '__otro__') otro.focus(); else otro.value = '';
+  },
+
+  // Tamaño elegido en el formulario, salga del desplegable o del campo libre.
+  _mlDelFormulario() {
+    const sel = document.getElementById('f-pf-ml')?.value || '';
+    const val = sel === '__otro__'
+      ? (document.getElementById('f-pf-ml-otro')?.value || '')
+      : sel;
+    const n = parseFloat(String(val).replace(',', '.'));
+    return n > 0 ? n : 0;
   },
 
   toggleModeloRepuestoOtro() {
@@ -1478,6 +1642,7 @@ const Stock = {
     set('f-nombre-libre-wrap', esLibre ? 'block' : 'none');
     set('f-combo-wrap', cat === 'combo' ? 'block' : 'none');
     set('f-perfume-wrap', this.esPerfume(cat) ? 'block' : 'none');
+    this.previewNombrePerfume();
     set('f-modelo-repuesto-wrap', cat === 'repuesto' ? 'block' : 'none');
     set('f-specs-grid', tieneStorageColor ? 'grid' : 'none');
     set('f-bateria-wrap', tieneBateria ? 'block' : 'none');
@@ -1538,7 +1703,14 @@ const Stock = {
     if (cat === 'mac' && !document.getElementById('f-numero-serie')?.value.trim()) { toast('Completá el número de serie.'); restoreBtn(); return; }
 
     // Armamos el nombre final que se muestra en toda la app
-    const nombre = esLibre ? nombreLibre : [modelo, storage, color].filter(Boolean).join(' ');
+    // En perfumería el tamaño se guarda pegado al nombre ("Teriaq 100ml"):
+    // es de ahí de donde la landing lo lee para agrupar los tamaños de un
+    // mismo aroma. El usuario escribe el nombre sin el tamaño y lo elige aparte.
+    let nombre = esLibre ? nombreLibre : [modelo, storage, color].filter(Boolean).join(' ');
+    if (this.esPerfume(cat)) {
+      const ml = this._mlDelFormulario();
+      nombre = [this.nombreSinMl(nombre), ml ? `${this.fmtMl(ml)}ml` : ''].filter(Boolean).join(' ');
+    }
 
     const costoUSD = parseFloat(document.getElementById('f-costo').value) || 0;
     const cotiz = parseFloat(document.getElementById('f-cotiz').value) || State.refBlue;

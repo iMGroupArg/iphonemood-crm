@@ -63,6 +63,16 @@ let modalProd = null, inqSel = 'turno', dateSel = '', timeSel = 'mañana (10 a 1
 //   `mostrar: false` deja la cuota fuera de la landing sin borrar el número,
 //   para poder volver a prenderla sin recargarlo.
 const PAGOS_DEFAULT = {
+  // Reserva del equipo. Los datos bancarios arrancan VACÍOS a propósito: se
+  // cargan desde el CRM (Panel -> Financiación) y lo que esté vacío no se
+  // publica. Nadie debería tener que borrar de la web un CBU que no puso.
+  reserva: {
+    monto_usd: 50,
+    link_pago: '',
+    nota: 'La reserva se devuelve completa si no confirmás la compra. Sirve para que el equipo quede apartado a tu nombre.',
+    ars: { banco: '', titular: '', alias: '', cbu: '' },
+    usd: { banco: '', titular: '', alias: '', cbu: '' },
+  },
   regalo: "🎁 Todos los equipos incluyen cargador, funda y templado de regalo. Comprando un equipo nuevo, llevate un cargador original Apple por 45 USD.",
   contado_factor: 1,
   lista_factor: 1.45,
@@ -123,7 +133,7 @@ function normalizarPagos(cfg) {
 /* ─── INIT ─── */
 async function init() {
   // Cargar cotización y config de pagos en paralelo
-  const [cfgRes, pagosRes, catsRes, stockRes] = await Promise.all([
+  const [cfgRes, pagosRes, catsRes, stockRes, , bannerRes] = await Promise.all([
     supa.from('configuracion').select('valor').eq('clave', 'ref_blue').single(),
     supa.from('configuracion').select('valor').eq('clave', 'pagos_config').single(),
     supa.from('configuracion').select('valor').eq('clave', 'landing_categorias').single(),
@@ -135,8 +145,13 @@ async function init() {
       .order('categoria').order('nombre'),
     // Va en el mismo lote y no se desestructura: sólo tiene que estar
     // resuelto antes del primer render() para no pedir fotos inexistentes.
-    cargarIndiceImagenes()
+    cargarIndiceImagenes(),
+    supa.from('configuracion').select('valor').eq('clave', 'banner').maybeSingle()
   ]);
+
+  try {
+    construirBanner(bannerRes?.data ? JSON.parse(bannerRes.data.valor) : []);
+  } catch (e) { /* un banner mal guardado no puede tumbar la página */ }
 
   if (cfgRes.data) cotiz = Number(cfgRes.data.valor) || 1;
   document.getElementById('cotiz-nav').textContent = 'Blue: $' + cotiz.toLocaleString('es-AR');
@@ -170,11 +185,17 @@ async function init() {
     }
   });
   todos = Object.values(grouped);
+  iniciarTopbar();
   buildHeroCard();
+  armarCarruselChips();
   buildTradeIn();
   buildShowcase();
+  construirMenuProductos();
   buildReviews();
   actualizarPuntajeGoogle();
+  // Antes de dibujar: si el link trae filtros, se aplican y la página abre ya
+  // filtrada, sin parpadeo de mostrar todo y recién después filtrar.
+  aplicarFiltrosDeURL();
   buildCats();
   buildFilters();
   render();
@@ -183,7 +204,11 @@ async function init() {
   iniciarMenuActivo();
   pintarCarrito();   // recupera el pedido guardado de una visita anterior
 
-  document.getElementById('q').addEventListener('input', e => { query = e.target.value.trim().toLowerCase(); render(); });
+  document.getElementById('q').addEventListener('input', e => {
+    query = e.target.value.trim().toLowerCase();
+    buildSeleccionados();   // el texto buscado también es un filtro activo
+    render();
+  });
   buildDateOpts();
 }
 
@@ -248,6 +273,30 @@ function bestOffer() {
 // El bucket se llama `products` (lo creó Franco a mano el 2026-08-18; el
 // `productos` original del SQL no le abría en el panel y se descartó).
 const IMG_BASE = `${SUPABASE_URL}/storage/v1/object/public/products/`;
+
+// Las fotos del bucket son PNG de 1200x1200 y pesan entre 250 KB y 1,2 MB.
+// Servidas tal cual, las 16 del listado sumaban ~10 MB para mostrarlas en
+// tarjetas de 137 px. Supabase puede redimensionar y convertir a WebP al
+// vuelo: las mismas 16 pasan a ~190 KB.
+//
+// OJO — `resize=contain` NO es opcional: pidiendo solo `width` la imagen sale
+// aplastada (verificado: width=400 sobre una foto de 1200x1200 devuelve
+// 400x1200). Con `contain` respeta la proporción.
+const IMG_BASE_OPT = `${SUPABASE_URL}/storage/v1/render/image/public/products/`;
+
+// Ancho a pedir según dónde se muestra. Van al doble del tamaño en pantalla
+// para que se vean nítidas en celulares de pantalla densa.
+const ANCHO_IMG = { tarjeta: 360, ficha: 900, mini: 200, tradein: 400, banner: 1600, bannerMovil: 800 };
+// Medidas que se le ofrecen al navegador para el banner. Elige una sola según
+// el ancho de la pantalla y su densidad; el resto ni las pide.
+const ANCHOS_BANNER = [640, 1024, 1600, 2400];
+
+function imgUrl(archivo, ancho) {
+  // Sin ancho, el archivo original: lo usa el `og:image` que comparte
+  // WhatsApp, donde conviene la foto grande.
+  if (!ancho) return IMG_BASE + archivo;
+  return `${IMG_BASE_OPT}${archivo}?width=${ancho}&resize=contain&quality=70`;
+}
 
 // Rubros donde `modelo` NO identifica al producto. El CRM reutiliza los campos
 // según el rubro: en perfumería/decant `modelo` es la MARCA, `color` la familia
@@ -317,16 +366,42 @@ const ENVIO_GRATIS_DESDE = 100000;
 // a coincidir con nadie y queda solo — se muestra como producto suelto, que
 // es exactamente el comportamiento de antes. Cuando el nombre se corrija en
 // el CRM, empieza a agrupar sin tocar código.
-function claveFragancia(p) {
+function claveFragancia(p, { conMarca = true } = {}) {
   if (!RUBROS_EN_PESOS.has(p?.categoria)) return null;   // solo perfumería
-  let s = (p.nombre || p.modelo || '').toLowerCase();
-  s = s.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
-  s = s.replace(/\|/g, ' ');
-  s = s.replace(/\b\d+[.,]?\d*\s*ml\b/g, ' ');          // 5ml, 10 ML, 100ml
-  s = s.replace(/\b(edp|edt|edc|parfum|elixir|extrait)\b/g, ' ');
-  s = s.replace(/\b(decant|decants)\b/g, ' ');
-  s = s.replace(/[^a-z0-9]+/g, ' ').trim();
+  const limpiar = t => t.toLowerCase()
+    .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+    .replace(/['’´`ʼ]/g, '')          // el apostrofe une, no separa: "Bade'e" -> "badee"
+    .replace(/\|/g, ' ')
+    .replace(/\b\d+[.,]?\d*\s*ml\b/g, ' ')             // 5ml, 10 ML, 100ml
+    .replace(/\b(edp|edt|edc|parfum|elixir|extrait)\b/g, ' ')
+    .replace(/\b(decant|decants)\b/g, ' ')
+    .replace(/[^a-z0-9]+/g, ' ')
+    .replace(/\b(and|y)\b/g, ' ')      // "Honor & Glory" == "honor and glory"
+    .replace(/\s+/g, ' ').trim();
+
+  let s = limpiar(p.nombre || p.modelo || '');
+
+  // La MARCA se antepone siempre, venga de donde venga. Sin esto el mismo
+  // aroma quedaba partido en dos productos: el decant "Khamrah 5ML" lleva la
+  // marca en el campo `modelo`, y el frasco "Lattafa | Khamrah | EDP | 100ml"
+  // la lleva metida en el nombre. Daban claves distintas, así que la web los
+  // trataba como perfumes diferentes en vez de dos tamaños del mismo — y el
+  // decant se quedaba sin la foto del frasco.
+  const marca = limpiar(p.modelo || '');
+  if (marca && s && !s.startsWith(marca + ' ') && s !== marca) s = marca + ' ' + s;
+
+  // Sin marca: se saca del principio, esté donde esté cargada.
+  if (!conMarca && marca && s.startsWith(marca + ' ')) {
+    const resto = s.slice(marca.length + 1).trim();
+    if (resto) return resto;
+  }
   return s || null;
+}
+
+// Etiqueta corta para el botón de tamaño: "5 ml", "100 ml".
+function etiquetaMl(p) {
+  const ml = mlDe(p);
+  return ml ? `${String(ml).replace('.', ',')} ml` : (p.storage || 'Ver');
 }
 
 // Mililitros del producto, para ordenar los tamaños de menor a mayor.
@@ -404,6 +479,7 @@ function slugify(s) {
   return (s || '')
     .toString().toLowerCase()
     .normalize('NFD').replace(/[\u0300-\u036f]/g, '')  // saca acentos: "cósmico" → "cosmico"
+    .replace(/['’´`ʼ]/g, '')          // el apostrofe une, no separa: "Bade'e" -> "badee"
     .replace(/[^a-z0-9]+/g, '-')
     .replace(/^-+|-+$/g, '');
 }
@@ -420,7 +496,23 @@ function slugify(s) {
 // coincidía con ningún candidato (que se generan en minúscula y con guiones)
 // y la foto simplemente no aparecía, sin ningún error visible. Normalizando
 // al indexar, el nombre con el que se sube deja de importar.
-let _archivosBucket = null;   // Map<nombreNormalizado, nombreReal>
+let _archivosBucket = null;    // Map<nombreNormalizado, nombreReal>
+let _fraganciasBucket = null;  // Map<claveDeAroma, nombreReal>
+
+// Clave de aroma a partir del NOMBRE DEL ARCHIVO, con el mismo criterio que
+// `claveFragancia` usa con los productos: sin tamaño y sin concentración.
+// Es lo que permite que `lattafa-asad-bourbon-edp-100ml.png` sirva para el
+// decant de 5ml del mismo aroma, aunque el archivo diga 100ml.
+function claveDeArchivo(nombre) {
+  return nombre.replace(/\.[^.]+$/, '')
+    .toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+    .replace(/['’´`ʼ]/g, '')          // el apostrofe une, no separa: "Bade'e" -> "badee"
+    .replace(/[^a-z0-9]+/g, ' ')
+    .replace(/\b\d+[.,]?\d*\s*ml\b/g, ' ')
+    .replace(/\b(edp|edt|edc|parfum|elixir|extrait)\b/g, ' ')
+    .replace(/\b(and|y)\b/g, ' ')      // "Honor & Glory" == "honor and glory"
+    .replace(/\s+/g, ' ').trim();
+}
 
 function normalizarNombreArchivo(nombre) {
   const punto = nombre.lastIndexOf('.');
@@ -441,11 +533,18 @@ async function cargarIndiceImagenes() {
       // pedirle al servidor.
       _archivosBucket.set(normalizarNombreArchivo(real), real);
     });
+    // Segundo índice, por aroma. Si hay varias fotos del mismo aroma se
+    // conserva la primera; cualquiera sirve, es el mismo perfume.
+    _fraganciasBucket = new Map();
+    data.forEach(f => {
+      const k = claveDeArchivo(f.name || '');
+      if (k && !_fraganciasBucket.has(k)) _fraganciasBucket.set(k, f.name);
+    });
   } catch { /* se deja null a propósito */ }
 }
 
 // Lista de URLs a probar, de más específica a más genérica.
-function imgCandidatos(p) {
+function imgCandidatos(p, ancho, { conHermanas = true } = {}) {
   const out = [];
 
   const modelo = slugify(identidadProd(p));
@@ -467,6 +566,20 @@ function imgCandidatos(p) {
     const marca = slugify(p.modelo);
     if (marca && !modelo.startsWith(marca + '-')) {
       base.unshift(...base.map(n => `${marca}-${n}`));
+    }
+  }
+
+  // La CONCENTRACIÓN también entra. Los archivos se nombran completos
+  // ("lattafa-teriaq-edp-100ml.png") pero el producto puede tener el nombre
+  // corto y el EDP en su propio campo ("Teriaq 100ml" + storage EDP). Se
+  // inserta antes del tamaño, que es donde va al escribirlo natural.
+  if (RUBROS_EN_PESOS.has(p.categoria) && p.storage) {
+    const conc = slugify(p.storage);
+    if (conc && !modelo.split('-').includes(conc)) {
+      base.unshift(...base.map(n => {
+        const m = n.match(/^(.*?)-(\d+(?:[.,-]\d+)?-?ml)$/);
+        return m ? `${m[1]}-${conc}-${m[2]}` : `${n}-${conc}`;
+      }));
     }
   }
 
@@ -495,11 +608,34 @@ function imgCandidatos(p) {
     // busca por nombre normalizado y se pide por el nombre REAL, que puede
     // tener mayúsculas o espacios.
     const clave = archivos.find(a => _archivosBucket.has(a));
-    if (clave) out.push(IMG_BASE + encodeURIComponent(_archivosBucket.get(clave)));
+    if (clave) out.push(imgUrl(encodeURIComponent(_archivosBucket.get(clave)), ancho));
   } else {
     // Sin índice hay que descubrirla a los tumbos, así que se prueban solo
     // los nombres sin prefijo para no disparar el doble de requests fallidos.
-    base.flatMap(n => [`${n}.png`, `${n}.jpg`]).forEach(a => out.push(IMG_BASE + a));
+    base.flatMap(n => [`${n}.png`, `${n}.jpg`]).forEach(a => out.push(imgUrl(a, ancho)));
+  }
+
+  // Recurso general: cualquier foto del mismo aroma, sin importar qué tamaño
+  // ni qué concentración diga el nombre del archivo. Es el mismo perfume.
+  if (!out.length && RUBROS_EN_PESOS.has(p.categoria) && _fraganciasBucket) {
+    const real = _fraganciasBucket.get(claveFragancia(p) || '')
+              || _fraganciasBucket.get(claveFragancia(p, { conMarca: false }) || '');
+    if (real) out.push(imgUrl(encodeURIComponent(real), ancho));
+  }
+
+  // Sin foto propia, se usa la del MISMO aroma en otro tamaño. Un decant de
+  // 5ml casi nunca tiene foto suya: la que existe es la del frasco completo,
+  // y es la correcta — es el mismo perfume, solo cambia cuánto va adentro.
+  // Se empieza por el más grande, que es el que suele tener la foto de
+  // catálogo. `conHermanas:false` corta la recursión.
+  if (!out.length && conHermanas && RUBROS_EN_PESOS.has(p.categoria)) {
+    const hermanas = variantesDe(p)
+      .filter(x => x !== p)
+      .sort((a, b) => mlDe(b) - mlDe(a));
+    for (const h of hermanas) {
+      const urls = imgCandidatos(h, ancho, { conHermanas: false });
+      if (urls.length) { out.push(...urls); break; }
+    }
   }
   return out;
 }
@@ -518,8 +654,8 @@ function imgFallback(el) {
 }
 
 // Devuelve el HTML de una imagen con toda la cadena de fallback ya cargada.
-function imgHtml(p, alt, emoji, { lazy = true, cls = '' } = {}) {
-  const cands = imgCandidatos(p);
+function imgHtml(p, alt, emoji, { lazy = true, cls = '', ancho = ANCHO_IMG.tarjeta } = {}) {
+  const cands = imgCandidatos(p, ancho);
   const ph = `<span class="img-emoji ${cls}" style="display:${cands.length ? 'none' : 'flex'}">${emoji}</span>`;
   if (!cands.length) return ph;
   return `<img src="${esc(cands[0])}" alt="${esc(alt)}"${lazy ? ' loading="lazy"' : ''}
@@ -879,7 +1015,7 @@ function pintarCarrito() {
     const emoji = (CAT[p.categoria] || { emoji: '🧴' }).emoji;
     const det = [p.modelo, etiquetaTamano(p)].filter(Boolean).join(' · ');
     return `<div class="cart-item">
-      <div class="cart-item-foto">${imgHtml(p, p.nombre || '', emoji)}</div>
+      <div class="cart-item-foto">${imgHtml(p, p.nombre || '', emoji, { ancho: ANCHO_IMG.mini })}</div>
       <div class="cart-item-datos">
         <div class="cart-item-nom">${esc(limpiarTitulo(p.nombre || p.modelo || ''))}</div>
         <div class="cart-item-det">${esc(det)}</div>
@@ -953,14 +1089,30 @@ const ACCIONES = {
   categoria:      el => selCat(el.dataset.arg),
   abrirProducto:  el => openModal(Number(el.dataset.arg)),
   variante:       el => irAVariante(el.dataset.arg),
-  filtroModelo:   el => { modelSel = el.dataset.arg; buildFilters(); render(); },
-  filtroTipo:     el => { subSel   = el.dataset.arg; buildFilters(); render(); },
-  filtroPill:     el => { const f = window._pillFns?.[el.dataset.arg]; if (f) f(); },
+  verMedida:      el => { const v = prodPorSlug(el.dataset.arg); if (v) abrirFicha(v); },
+  filtroDrop:     el => { CAMPOS_FILTRO[el.dataset.campo]?.set(el.value); buildFilters(); render(); },
+  quitarFiltro:   el => {
+    const campo = el.dataset.arg;
+    if (campo === 'q') { query = ''; const c = document.getElementById('q'); if (c) c.value = ''; }
+    else CAMPOS_FILTRO[campo]?.set('todos');
+    buildFilters(); render();
+  },
+  limpiarFiltros: () => {
+    Object.values(CAMPOS_FILTRO).forEach(c => c.set('todos'));
+    query = ''; const c = document.getElementById('q'); if (c) c.value = '';
+    buildFilters(); render();
+  },
   // ficha
   faq:            el => toggleFaq(el),
   consulta:       el => selInq(el),
   fecha:          el => selDate(el, el.dataset.arg),
   enviarWa:       () => enviarWA(),
+  copiar:         el => copiarAlPortapapeles(el.dataset.arg),
+  // banner
+  bannerAnterior:  () => bannerA(bannerIdx - 1),
+  bannerSiguiente: () => bannerA(bannerIdx + 1),
+  bannerIndice:    el => bannerA(Number(el.dataset.arg)),
+  bannerIr:        el => bannerIr(el.dataset.arg),
 };
 
 document.addEventListener('click', ev => {
@@ -980,6 +1132,15 @@ document.addEventListener('click', ev => {
 
 // Las fotos que fallan no burbujean su error, así que se escucha en fase de
 // captura. Reemplaza al `onerror="imgFallback(this)"` de cada <img>.
+// Los desplegables no avisan con un clic sino con 'change'. Va aparte del
+// despachador de clics para no confundir los dos tipos de evento.
+document.addEventListener('change', ev => {
+  const el = ev.target.closest('[data-change]');
+  if (!el) return;
+  const fn = ACCIONES[el.dataset.change];
+  if (fn) fn(el, ev);
+});
+
 document.addEventListener('error', ev => {
   const el = ev.target;
   if (el && el.tagName === 'IMG' && el.dataset.fb !== undefined) imgFallback(el);
@@ -1052,9 +1213,9 @@ function buildShowcase() {
   const sec = el && el.closest('.cat-showcase');
   if (!el || !sec) return;
 
-  if (items.length < SHOWCASE_MIN_VISIBLE) { sec.style.display = 'none'; return; }
-  sec.style.display = '';
   const animar = items.length >= SHOWCASE_MIN_CARRUSEL;
+  if (!animar) { sec.style.display = 'none'; return; }
+  sec.style.display = '';
   sec.classList.toggle('fija', !animar);
 
   function makeItem(c, aria) {
@@ -1124,7 +1285,7 @@ function buildTradeIn() {
 
   const foto = (prod, cls) =>
     `<div class="tradein-phone ${cls}">
-       <img src="${esc(imgCandidatos(prod)[0])}" alt="" loading="lazy" crossorigin="anonymous">
+       <img src="${esc(imgCandidatos(prod, ANCHO_IMG.tradein)[0])}" alt="" loading="lazy" crossorigin="anonymous">
      </div>`;
 
   cont.innerHTML = foto(viejo, 'old') + '<div class="tradein-arrow">→</div>' + foto(nuevo, 'new');
@@ -1178,13 +1339,13 @@ function normalizarAlto(img) {
 function fotoDeCategoria(catId) {
   if (_archivosBucket) {
     const propio = [`cat-${catId}.png`, `cat-${catId}.jpg`].find(f => _archivosBucket.has(f));
-    if (propio) return IMG_BASE + encodeURIComponent(_archivosBucket.get(propio));
+    if (propio) return imgUrl(encodeURIComponent(_archivosBucket.get(propio)), ANCHO_IMG.mini);
   }
   const delRubro = todos
     .filter(p => chipDe(p.categoria) === catId)
     .sort((a, b) => (Number(b.precio_usd) || 0) - (Number(a.precio_usd) || 0));
   for (const p of delRubro) {
-    const cands = imgCandidatos(p);
+    const cands = imgCandidatos(p, ANCHO_IMG.mini);
     if (cands.length) return cands[0];
   }
   return null;
@@ -1195,21 +1356,27 @@ function buildCats() {
   const present = todos.map(p => p.categoria).filter(Boolean);
   const chips = new Set(present.map(chipDe));
   const rubros = CATS.filter(c => c.id !== 'todos' && chips.has(c.id)).map(c => c.id);
-  const row = document.getElementById('cats-row');
-  const bar = row && row.closest('.cats-bar');
-  // Con un solo rubro, la barra sería "Todos | iPhone": dos botones que
-  // llevan exactamente al mismo listado. Se oculta entera.
-  if (bar) bar.style.display = rubros.length < 2 ? 'none' : '';
+  const tabs = document.getElementById('ftabs');
+  if (!tabs) return;
 
-  const visible = ['todos', ...rubros];
-  row.innerHTML = visible.map(id => {
-    const c = CAT[id] || { label: id, emoji: '📦' };
-    return `<div class="cat-item${id===catSel?' on':''}" data-do="categoria" data-arg="${id}">
-      <div class="cat-emoji">${c.emoji}</div>
-      <div class="cat-name">${c.label}</div>
-    </div>`;
+  // Con un solo rubro las pestañas serían "Todos | iPhone": dos que llevan al
+  // mismo listado. Se ocultan enteras.
+  if (rubros.length < 2) { tabs.style.display = 'none'; catSel = rubros[0] || 'todos'; return; }
+  tabs.style.display = '';
+
+  // "Todos" va primero solo si hay más de dos rubros: con iPhone y Perfumería
+  // nada más, la pestaña "Todos" mezcla celulares con perfumes, que no es una
+  // vista que alguien busque.
+  const visible = rubros.length > 2 ? ['todos', ...rubros] : rubros;
+  if (!visible.includes(catSel)) catSel = visible[0];
+
+  tabs.innerHTML = visible.map(id => {
+    const c = CAT[id] || { label: id };
+    return `<button class="ftab${id === catSel ? ' on' : ''}" role="tab"
+      aria-selected="${id === catSel}" data-do="categoria" data-arg="${id}">${esc(c.label)}</button>`;
   }).join('');
 }
+
 
 function selCat(id) {
   catSel = id; stoSel = 'todos'; condSel = 'todos'; modelSel = 'todos'; subSel = 'todos'; famSel = 'todos'; marcaSel = 'todos';
@@ -1218,11 +1385,6 @@ function selCat(id) {
 }
 
 /* ─── SECONDARY FILTERS ─── */
-const pfn = {};
-function mkPill(key, label, on, fn) {
-  pfn[key] = fn;
-  return `<button class="pill${on?' on':''}" data-do="filtroPill" data-arg="${key}">${label}</button>`;
-}
 // Ordena capacidades de menor a mayor. Convierte TB a GB porque
 // parseInt("1TB") da 1 y dejaba el terabyte ANTES de 128GB.
 function sortSto(a,b){
@@ -1251,104 +1413,201 @@ function lineaDe(modelo) {
   return m ? m[1] : '';
 }
 
+// Cómo se llama cada filtro y dónde se guarda. Tenerlo en un solo lugar es lo
+// que permite dibujar los desplegables, los chips de "seleccionados" y el
+// botón de limpiar sin repetir la lista en tres lados.
+const CAMPOS_FILTRO = {
+  modelo:    { lbl: 'Modelo',    get: () => modelSel, set: v => modelSel = v },
+  tipo:      { lbl: 'Tipo',      get: () => subSel,   set: v => subSel   = v },
+  capacidad: { lbl: 'Capacidad', get: () => stoSel,   set: v => stoSel   = v },
+  estado:    { lbl: 'Estado',    get: () => condSel,  set: v => condSel  = v },
+  marca:     { lbl: 'Marca',     get: () => marcaSel, set: v => marcaSel = v },
+  familia:   { lbl: 'Familia',   get: () => famSel,   set: v => famSel   = v },
+};
+
+// Etiqueta que ve el cliente para un valor guardado ("sellado" -> "Sellado").
+function textoDeValor(campo, v) {
+  if (v === 'todos') return null;
+  if (campo === 'modelo') return `Línea ${v}`;
+  if (campo === 'tipo') return SUBCATS[v] || v;
+  if (campo === 'estado') return { nuevo: 'Nuevo', sellado: 'Sellado', usado: 'Usado' }[v] || v;
+  return v;
+}
+
+// Un desplegable. Es una pastilla dibujada por nosotros con un <select> nativo
+// transparente encima: se ve como el resto del sitio y abre el selector propio
+// del teléfono, que es el que la gente ya sabe usar.
+function mkDrop(campo, opciones, todosTxt = 'Todos') {
+  const c = CAMPOS_FILTRO[campo];
+  const actual = c.get();
+  const elegido = textoDeValor(campo, actual) || todosTxt;
+  const ops = [{ v: 'todos', t: todosTxt }, ...opciones];
+  return `<label class="fdrop${actual !== 'todos' ? ' on' : ''}">
+    <select data-change="filtroDrop" data-campo="${campo}" aria-label="${c.lbl}">
+      ${ops.map(o => `<option value="${esc(o.v)}"${String(o.v) === String(actual) ? ' selected' : ''}>${esc(o.t)}</option>`).join('')}
+    </select>
+    <span class="fdrop-txt">${c.lbl}: <b>${esc(elegido)}</b></span>
+  </label>`;
+}
+
 function buildFilters() {
   const sub = catSel === 'todos' ? todos : todos.filter(p => catsDe(catSel).includes(p.categoria));
+  const drops = [];
 
-  /* ── Barra de sub-filtro: "Modelo" en iPhone, "Tipo" en perfumería ── */
-  const mb = document.getElementById('model-bar');
-  const mp = document.getElementById('model-pills');
-  const mlbl = document.getElementById('model-bar-label');
-
+  /* ── Primer desplegable: "Modelo" en iPhone, "Tipo" en perfumería ── */
   if (catSel === 'perfumeria') {
     modelSel = 'todos';
-    // Solo se ofrecen los tipos que realmente tienen stock: si no cargó
-    // ningún combo todavía, el botón "Combos" no aparece vacío.
+    // Solo los tipos con stock: si no hay ningún combo cargado, no se ofrece.
     const tipos = SUBCATS_ORDEN.filter(c => sub.some(p => p.categoria === c));
     if (tipos.length > 1) {
       if (subSel !== 'todos' && !tipos.includes(subSel)) subSel = 'todos';
-      mlbl.textContent = 'Tipo';
-      mp.innerHTML = `<button class="mpill${subSel==='todos'?' on':''}" data-do="filtroTipo" data-arg="todos">Todos</button>`
-        + tipos.map(c => `<button class="mpill${subSel===c?' on':''}" data-do="filtroTipo" data-arg="${c}">${SUBCATS[c]||c}</button>`).join('');
-      mb.classList.add('show');
-    } else {
-      subSel = 'todos';
-      mb.classList.remove('show');
-    }
+      drops.push(mkDrop('tipo', tipos.map(c => ({ v: c, t: SUBCATS[c] || c }))));
+    } else subSel = 'todos';
   } else if (catSel === 'iphone') {
     subSel = 'todos';
-    mlbl.textContent = 'Modelo';
     const lineas = [...new Set(sub.map(p => lineaDe(p.modelo)).filter(Boolean))]
       .sort((a, b) => Number(a) - Number(b));
     if (lineas.length > 1) {
       if (modelSel !== 'todos' && !lineas.includes(modelSel)) modelSel = 'todos';
-      mp.innerHTML = `<button class="mpill${modelSel==='todos'?' on':''}" data-do="filtroModelo" data-arg="todos">Todos</button>`
-        + lineas.map(l => `<button class="mpill${modelSel===l?' on':''}" data-do="filtroModelo" data-arg="${l}">Línea ${l}</button>`).join('');
-      mb.classList.add('show');
-    } else {
-      mb.classList.remove('show');
-    }
-  } else {
-    mb.classList.remove('show');
-    modelSel = 'todos';
-    subSel = 'todos';
-  }
+      drops.push(mkDrop('modelo', lineas.map(l => ({ v: l, t: `Línea ${l}` }))));
+    } else modelSel = 'todos';
+  } else { modelSel = 'todos'; subSel = 'todos'; }
 
-  /* ── Filter by selected model for storage/condition sub-filters ── */
-  const sub2 = modelSel === 'todos' ? sub : sub.filter(p => p.modelo === modelSel);
-  const storages = [...new Set(sub2.map(p => p.storage).filter(Boolean))].sort(sortSto);
-  const conds    = [...new Set(sub2.map(cond))];
+  /* ── Los otros dos se calculan sobre lo que quedó del primero ── */
+  const sub2 = modelSel === 'todos' ? sub : sub.filter(p => lineaDe(p.modelo) === modelSel);
 
-  const sp = document.getElementById('sto-pills');
   if (catSel === 'perfumeria') {
-    // Se filtra por MARCA y no por concentración: nadie elige un perfume por
-    // "quiero un EDT", pero sí por "quiero un Lattafa". La concentración
-    // queda visible en la tarjeta y en la ficha, solo deja de ser filtro.
-    stoSel = 'todos';
+    // En perfumería se filtra por MARCA y no por concentración: nadie elige un
+    // perfume por "quiero un EDT", pero sí por "quiero un Lattafa".
+    stoSel = 'todos'; condSel = 'todos';
     const marcas = [...new Set(sub2.map(p => p.modelo).filter(Boolean))].sort();
     if (marcas.length > 1) {
       if (marcaSel !== 'todos' && !marcas.includes(marcaSel)) marcaSel = 'todos';
-      sp.innerHTML = mkPill('m-all', 'Todas las marcas', marcaSel === 'todos', () => { marcaSel = 'todos'; buildFilters(); render(); })
-        + marcas.map(m => mkPill('m-' + m, m, marcaSel === m, () => { marcaSel = m; buildFilters(); render(); })).join('');
-    } else {
-      marcaSel = 'todos';
-      sp.innerHTML = '';
-    }
-  } else {
-  marcaSel = 'todos';
-  sp.innerHTML = storages.length > 1
-    ? mkPill('st-all','Todo',stoSel==='todos',()=>{stoSel='todos';buildFilters();render();})
-      + storages.map(s=>mkPill('st-'+s,s,stoSel===s,()=>{stoSel=s;buildFilters();render();})).join('')
-    : '';
-  }
+      drops.push(mkDrop('marca', marcas.map(m => ({ v: m, t: m })), 'Todas'));
+    } else marcaSel = 'todos';
 
-  const cp = document.getElementById('cond-pills');
-  if (catSel === 'perfumeria') {
-    // En perfumería el estado no dice nada (prácticamente todo es nuevo y
-    // cerrado), pero la familia olfativa sí: es el primer criterio con el
-    // que alguien elige un perfume. Se ocupa el mismo lugar de la barra en
-    // vez de sumar una tercera fila de filtros.
-    condSel = 'todos';
+    // La familia olfativa es el primer criterio con el que alguien elige.
     const familias = [...new Set(sub2.map(p => p.color).filter(Boolean))].sort();
     if (familias.length > 1) {
       if (famSel !== 'todos' && !familias.includes(famSel)) famSel = 'todos';
-      cp.innerHTML = mkPill('f-all','Todas',famSel==='todos',()=>{famSel='todos';buildFilters();render();})
-        + familias.map(f => mkPill('f-'+f, f, famSel===f, () => { famSel=f; buildFilters(); render(); })).join('');
-    } else {
-      // Con una sola familia cargada el filtro no separa nada. Se esconde
-      // hasta que haya al menos dos con stock.
-      famSel = 'todos';
-      cp.innerHTML = '';
-    }
-    return;
+      drops.push(mkDrop('familia', familias.map(x => ({ v: x, t: x })), 'Todas'));
+    } else famSel = 'todos';
+  } else {
+    marcaSel = 'todos'; famSel = 'todos';
+    const storages = [...new Set(sub2.map(p => p.storage).filter(Boolean))].sort(sortSto);
+    if (storages.length > 1) {
+      if (stoSel !== 'todos' && !storages.includes(stoSel)) stoSel = 'todos';
+      drops.push(mkDrop('capacidad', storages.map(x => ({ v: x, t: x })), 'Todas'));
+    } else stoSel = 'todos';
+
+    const conds = [...new Set(sub2.map(cond))];
+    if (conds.length > 1) {
+      if (condSel !== 'todos' && !conds.includes(condSel)) condSel = 'todos';
+      drops.push(mkDrop('estado', conds.map(x => ({ v: x, t: textoDeValor('estado', x) }))));
+    } else condSel = 'todos';
   }
 
-  famSel = 'todos';
-  cp.innerHTML = conds.length > 1
-    ? mkPill('c-all','Todos',condSel==='todos',()=>{condSel='todos';buildFilters();render();})
-      + (conds.includes('nuevo')   ? mkPill('c-n','✨ Nuevo',condSel==='nuevo',()=>{condSel='nuevo';buildFilters();render();}) : '')
-      + (conds.includes('sellado') ? mkPill('c-s','🔒 Sellado',condSel==='sellado',()=>{condSel='sellado';buildFilters();render();}) : '')
-      + (conds.includes('usado')   ? mkPill('c-u','♻️ Usado',condSel==='usado',()=>{condSel='usado';buildFilters();render();}) : '')
-    : '';
+  document.getElementById('fdrops').innerHTML = drops.join('');
+  buildSeleccionados();
+}
+
+// Fila de "Seleccionados": lo que está filtrado, con una × para sacarlo. Sin
+// esto hay que abrir cada desplegable para saber qué está aplicado.
+function buildSeleccionados() {
+  const cont = document.getElementById('fsel');
+  if (!cont) return;
+  const activos = Object.entries(CAMPOS_FILTRO)
+    .map(([campo, c]) => [campo, textoDeValor(campo, c.get())])
+    .filter(([, txt]) => txt);
+
+  if (!activos.length && !query) { cont.classList.remove('show'); cont.innerHTML = ''; return; }
+  cont.classList.add('show');
+  cont.innerHTML = `<span>Seleccionados:</span>`
+    + activos.map(([campo, txt]) =>
+        `<button class="fsel-chip" data-do="quitarFiltro" data-arg="${campo}">${esc(txt)}<span class="x">×</span></button>`).join('')
+    + (query ? `<button class="fsel-chip" data-do="quitarFiltro" data-arg="q">“${esc(query)}”<span class="x">×</span></button>` : '')
+    + `<button class="fsel-limpiar" data-do="limpiarFiltros">Limpiar todo</button>`;
+}
+
+// Desplegable de "Productos" en el menú de arriba. Se arma con el stock del
+// día: si no hay ninguna Línea 13, no aparece. Cada opción reusa el mismo
+// mecanismo que los links del banner, así filtra sin recargar la página.
+function construirMenuProductos() {
+  const cont = document.getElementById('nav-drop-productos');
+  if (!cont) return;
+
+  const present = new Set(todos.map(p => chipDe(p.categoria)).filter(Boolean));
+  const rubros = CATS.filter(c => c.id !== 'todos' && present.has(c.id));
+
+  const lineas = [...new Set(todos.filter(p => p.categoria === 'iphone')
+    .map(p => lineaDe(p.modelo)).filter(Boolean))]
+    .sort((a, b) => Number(b) - Number(a));   // la más nueva primero
+
+  // Se marca como "Nuevo" solo la línea más alta que haya en stock. Marcar
+  // varias le saca el sentido: si todo es nuevo, nada lo es.
+  const masNueva = lineas[0];
+
+  const item = (txt, destino, eyebrow) =>
+    (eyebrow ? `<span class="nav-drop-eyebrow">${eyebrow}</span>` : '')
+    + `<a class="nav-drop-it" href="${esc(destino)}" data-do="bannerIr" data-arg="${esc(destino)}" data-prevent="1">${esc(txt)}</a>`;
+
+  const hayIphone = rubros.some(r => r.id === 'iphone');
+  const otros = rubros.filter(r => r.id !== 'iphone');
+
+  cont.innerHTML = `
+    <div class="nav-drop-hdr">
+      <span class="nav-drop-tit">Productos</span>
+      <a class="nav-drop-todo" href="?" data-do="bannerIr" data-arg="?" data-prevent="1">Ver todo →</a>
+    </div>
+    ${hayIphone ? lineas.map(l =>
+        item(`Línea ${l}`, `?rubro=iphone&linea=${l}`, l === masNueva ? 'Nuevo' : '')).join('') : ''}
+    ${otros.length ? `<div class="nav-drop-sep"></div>` : ''}
+    ${otros.map(r => item(`${r.label} →`, `?rubro=${r.id}`)).join('')}`;
+}
+
+// Arma la pista del carrusel de chips: envuelve el juego original y le pega
+// una copia al lado. Se hace acá y no en el HTML para no tener que mantener
+// dos veces el mismo bloque cada vez que se cambia un chip.
+function armarCarruselChips() {
+  const cont = document.getElementById('hero-chips');
+  const set = document.getElementById('chips-set');
+  if (!cont || !set || cont.querySelector('.chips-track')) return;
+
+  const pista = document.createElement('div');
+  pista.className = 'chips-track';
+  cont.appendChild(pista);
+  pista.appendChild(set);
+
+  const copia = set.cloneNode(true);
+  copia.removeAttribute('id');
+  // La copia es decorativa: el lector de pantalla ya leyó el juego original.
+  copia.setAttribute('aria-hidden', 'true');
+  copia.querySelectorAll('a').forEach(a => a.setAttribute('tabindex', '-1'));
+  copia.querySelectorAll('[id]').forEach(el => el.removeAttribute('id'));
+  pista.appendChild(copia);
+}
+
+// Turna los avisos de la barra negra: uno por vez, con un fundido lento.
+// Lento a propósito — el anterior desfilaba en continuo y en el celular
+// competía con el carrusel de chips, que va para el otro lado.
+const TOPBAR_MS = 5200;
+let _topbarT = null;
+
+function iniciarTopbar() {
+  const cont = document.getElementById('topbar-msgs');
+  if (!cont) return;
+  const msgs = [...cont.querySelectorAll('.topbar-msg')];
+  if (msgs.length < 2) return;   // con uno solo no hay nada que turnar
+
+  let i = 0;
+  clearInterval(_topbarT);
+  _topbarT = setInterval(() => {
+    // Con la pestaña en segundo plano no tiene sentido seguir turnando.
+    if (document.visibilityState !== 'visible') return;
+    msgs[i].classList.remove('on');
+    i = (i + 1) % msgs.length;
+    msgs[i].classList.add('on');
+  }, TOPBAR_MS);
 }
 
 /* ─── RENDER ─── */
@@ -1436,9 +1695,14 @@ function render() {
     vistas.add(clave);
     return true;
   }).map(p => {
-    // De cada aroma se muestra el tamaño más chico disponible.
+    // De cada aroma se muestra el tamaño más chico QUE PERTENEZCA A LA SECCIÓN
+    // que se está viendo. Sin esa condición, en "Perfumes completos" el frasco
+    // de 100ml se reemplazaba por el decant de 5ml y la tarjeta mostraba
+    // "desde $9.480" — un precio de decant en la góndola de perfumes.
     const vs = variantesDe(p);
-    return vs.length > 1 ? vs[0] : p;
+    if (vs.length < 2) return p;
+    const propias = subSel === 'todos' ? vs : vs.filter(v => v.categoria === subSel);
+    return (propias.length ? propias : vs)[0];
   });
 
   document.getElementById('sec-count').textContent = filAgrupado.length
@@ -1458,14 +1722,17 @@ function render() {
     modelTitle = limpiarTitulo(modelTitle) || (p.nombre || 'Producto');
     const c = cond(p);
     const badgeCls = c==='sellado'?'badge-seal':c==='nuevo'?'badge-new':'badge-used';
-    // Mismo criterio que la ficha: en perfumería "sellado" se dice "original".
-    const badgeIcon = c==='sellado' ? (enPesos(p) ? '✨ Original' : '🔒 Sellado')
-                    : c==='nuevo' ? '✨ Nuevo' : '♻️ Usado';
-    // Sin `estado_producto` cargado no se muestra badge. `cond()` cae en
+    const badgeIcon = c==='sellado' ? '🔒 Sellado' : c==='nuevo' ? '✨ Nuevo' : '♻️ Usado';
+    // El badge solo va en los rubros donde DISTINGUE algo. En un iPhone,
+    // sellado o usado cambia el precio y la decisión de compra. En perfumería
+    // todos los frascos son originales y cerrados: la etiqueta se repetía
+    // idéntica en cada tarjeta, tapando la foto sin informar nada.
+    //
+    // Sin `estado_producto` cargado tampoco se muestra. `cond()` cae en
     // "usado" cuando el campo está vacío, que sirve para agrupar y filtrar
-    // pero NO para mostrarlo: afirmaría en público que un perfume cerrado o
-    // una funda nueva son usados. Dato faltante ≠ dato en "usado".
-    const badgeHtml = (p.estado_producto || '').trim()
+    // pero NO para mostrarlo: afirmaría en público que una funda nueva es
+    // usada. Dato faltante ≠ dato en "usado".
+    const badgeHtml = (!enPesos(p) && (p.estado_producto || '').trim())
       ? `<span class="card-cond-badge ${badgeCls}">${badgeIcon}</span>` : '';
     const emoji = (CAT[p.categoria]||{emoji:'📦'}).emoji;
     const imgContent = imgHtml(p, modelTitle, emoji, { cls: 'card-img-emoji' });
@@ -1478,6 +1745,18 @@ function render() {
     // antes de `detailParts`, porque esa la usa.
     const marca = (enPesos(p) && p.modelo) ? p.modelo : '';
     const marcaRow = marca ? `<div class="card-marca">${esc(marca)}</div>` : '';
+    // La marca va arriba en su propia línea. Si además está al principio del
+    // nombre, se saca de ahí: si no, la tarjeta dice "Lattafa / Lattafa Teriaq
+    // 100ml". Se compara normalizado para que no dependa de mayúsculas ni
+    // acentos, y solo se recorta si queda algo — "Lattafa" a secas como nombre
+    // se deja tal cual antes que mostrar una tarjeta sin título.
+    if (marca) {
+      const m = slugify(marca), t = slugify(modelTitle);
+      if (t === m || t.startsWith(m + '-')) {
+        const resto = modelTitle.slice(marca.length).replace(/^[\s·|-]+/, '').trim();
+        if (resto) modelTitle = resto;
+      }
+    }
     const detailParts = usaNombre(p)
       ? [marca ? null : p.modelo, p.color, p.storage].filter(Boolean)
       : [p.color, p.storage].filter(Boolean);
@@ -1496,16 +1775,31 @@ function render() {
     // entienda y no parezca el precio del frasco completo.
     // En perfumería `modelo` es la MARCA. Se muestra arriba, chiquita, y se
     // saca de la fila de detalle para no repetirla.
-    // Botón de carrito solo en los rubros que se venden en pesos. Si el aroma
-    // tiene varias medidas NO se agrega directo: hay que elegir cuál, así que
-    // el botón lleva a la ficha en vez de meter el tamaño más chico a ciegas.
-    const addRow = enPesos(p)
-      ? (variantesDe(p).length > 1
-          ? `<button class="card-add" data-do="abrirProducto" data-arg="${i}" data-stop="1">Elegir tamaño</button>`
-          : `<button class="card-add" data-do="carritoAgregar" data-arg="${esc(slugProd(p))}" data-stop="1">Agregar</button>`)
-      : '';
-    const nVar = variantesDe(p).length;
-    const varRow = nVar > 1 ? `<div class="card-variantes">${nVar} tamaños disponibles</div>` : '';
+    // Botón de carrito solo en los rubros que se venden en pesos.
+    //
+    // Con varias medidas, en vez de un "Elegir tamaño" que obliga a abrir la
+    // ficha para recién ahí ver las opciones, va un botón por tamaño. El
+    // cliente ve de una que hay 5 y 10 ml, y toca el que quiere.
+    //
+    // Si el listado está filtrado por tipo (Decants, por ejemplo) se ofrecen
+    // solo los tamaños de ese tipo: dentro de Decants no tiene sentido
+    // ofrecer el frasco de 100 ml, que vive en Perfumes completos.
+    const todasLasMedidas = variantesDe(p);
+    const medidas = subSel === 'todos'
+      ? todasLasMedidas
+      : todasLasMedidas.filter(v => v.categoria === subSel);
+    const nVar = todasLasMedidas.length;
+
+    const addRow = !enPesos(p) ? ''
+      : medidas.length > 1
+        ? `<div class="card-medidas">${medidas.map(v =>
+             `<button class="card-add card-medida" data-do="verMedida" data-arg="${esc(slugProd(v))}" data-stop="1">${esc(etiquetaMl(v))}</button>`
+           ).join('')}</div>`
+        : `<button class="card-add" data-do="carritoAgregar" data-arg="${esc(slugProd(medidas[0] || p))}" data-stop="1">Agregar</button>`;
+
+    // El "N tamaños disponibles" se sacó: los botones de abajo ya muestran
+    // cuáles son, así que era decir dos veces lo mismo y con menos detalle.
+    const varRow = '';
     return `<div class="card" data-do="abrirProducto" data-arg="${i}">
       <div class="card-img">${imgContent}${badgeHtml}</div>
       <div class="card-body">
@@ -1527,6 +1821,11 @@ function render() {
 
   // guardar índice para el modal
   window._filProd = filAgrupado;
+
+  // Un solo lugar donde la URL se pone al día: render() corre después de
+  // cualquier cambio de filtro, así que no hay que acordarse de llamarlo en
+  // cada pastilla.
+  sincronizarURL();
 }
 
 /* ═══════════════════════════════════
@@ -1587,9 +1886,10 @@ function closeModal() {
 function cerrarFicha() {
   document.getElementById('modal-overlay').classList.remove('open');
   document.body.style.overflow = '';
-  // Limpia el ?p= si quedó (caso: se entró directo por link compartido).
+  // Limpia el ?p= si quedó (caso: se entró directo por link compartido) y
+  // devuelve la URL a los filtros que estaban puestos, en vez de dejarla pelada.
   if (new URLSearchParams(location.search).get('p')) {
-    history.replaceState({}, '', location.pathname);
+    history.replaceState({}, '', urlDeFiltros());
   }
 }
 
@@ -1618,7 +1918,246 @@ function abrirDesdeURL() {
   if (p) abrirFicha(p, { push: false });
   // Si el equipo ya se vendió, el slug no matchea: se limpia la URL y queda
   // el listado normal en vez de una pantalla vacía.
-  else history.replaceState({}, '', location.pathname);
+  else history.replaceState({}, '', urlDeFiltros());
+}
+
+/* ═══════════════════════════════════
+   BANNER DE OFERTAS
+   Imágenes que rotan arriba de la página, administradas desde el CRM
+   (Panel -> Banner de ofertas). Cada una puede llevar a algún lado.
+
+   Los links internos (?linea=17, ?p=…) NO recargan la página: se aplican
+   como filtro y se baja al catálogo. Recargar para mostrar el mismo sitio
+   filtrado sería tirar a la basura todo lo que ya está cargado.
+═══════════════════════════════════ */
+let bannerSlides = [], bannerIdx = 0, bannerTimer = null;
+const BANNER_MS = 6000;
+
+function construirBanner(slides) {
+  bannerSlides = (slides || []).filter(s => s && s.archivo && s.activo !== false);
+  const cont = document.getElementById('bnr');
+  if (!cont) return;
+  if (!bannerSlides.length) { cont.hidden = true; return; }   // sin imágenes no ocupa lugar
+
+  const pista = document.getElementById('bnr-pista');
+  pista.innerHTML = bannerSlides.map((sl, i) => {
+    // La primera se pide sin `lazy`: es lo primero que se ve al entrar.
+    //
+    // Si hay imagen propia para celular, el navegador elige sola cuál baja
+    // según el ancho de pantalla: en el teléfono NO se descarga la de
+    // escritorio. Una imagen apaisada de escritorio, en un celular, o sale
+    // recortada o sale diminuta — no hay ancho que arregle eso, hace falta
+    // otra imagen pensada vertical.
+    // El banner ocupa TODO el ancho, así que en una pantalla de 1440 con
+    // densidad doble necesita ~2880 px reales. Pedir uno solo de 1600 lo
+    // dejaba blando ahí, y pedir 2880 siempre sería malgastar datos en el
+    // celular. Con `srcset` cada pantalla se baja el que le corresponde.
+    const juego = arch => ANCHOS_BANNER
+      .map(w => `${esc(imgUrl(encodeURIComponent(arch), w))} ${w}w`).join(', ');
+    const grande = esc(imgUrl(encodeURIComponent(sl.archivo), ANCHO_IMG.banner));
+    const img = `<img src="${grande}" srcset="${juego(sl.archivo)}" sizes="100vw"
+      alt="${esc(sl.alt || '')}"${i ? ' loading="lazy"' : ''} data-fb="">`;
+    const media = sl.archivo_movil
+      ? `<picture><source media="(max-width: 700px)" srcset="${juego(sl.archivo_movil)}" sizes="100vw">${img}</picture>`
+      : img;
+    const destino = (sl.link || '').trim();
+    if (!destino) return `<div class="bnr-slide">${media}</div>`;
+    // Un link al PROPIO sitio se trata como interno aunque esté escrito
+    // completo ("https://iphonemood.com/?p=..."). Antes abría una pestaña
+    // nueva y recargaba la página entera para mostrar un producto que ya
+    // estaba cargado: de ahí que tardara tanto. Ahora abre la ficha al toque.
+    const abs = urlSegura(destino);
+    const propio = (() => {
+      if (/^[?#]/.test(destino)) return destino;
+      if (!abs) return null;
+      try {
+        const u = new URL(abs);
+        if (u.origin === location.origin) return u.search || u.hash || '/';
+        // Aunque el dominio no coincida (pasa al probar en local, o si el link
+        // se escribió con www y el sitio no lo usa), si trae parámetros que
+        // son NUESTROS es un destino interno. Vale más acertar que ser
+        // estricto: lo peor acá es recargar la página entera al pedo.
+        const propios = ['p','presupuesto','rubro','linea','tipo','marca','familia','capacidad','estado','q'];
+        const q = new URLSearchParams(u.search);
+        if (propios.some(k => q.has(k))) return u.search;
+        return null;
+      } catch (e) { return null; }
+    })();
+    if (propio) {
+      return `<a class="bnr-slide" href="${esc(propio)}" data-do="bannerIr" data-arg="${esc(propio)}" data-prevent="1">${media}</a>`;
+    }
+    // Un sitio ajeno (Instagram, por ejemplo) sí se abre aparte: si no, el
+    // cliente se va de la tienda y pierde lo que estaba mirando.
+    return `<a class="bnr-slide" href="${esc(abs)}" target="_blank" rel="noopener noreferrer">${media}</a>`;
+  }).join('');
+
+  document.getElementById('bnr-puntos').innerHTML = bannerSlides.map((_, i) =>
+    `<button class="bnr-punto${i ? '' : ' on'}" data-do="bannerIndice" data-arg="${i}" aria-label="Imagen ${i + 1}"></button>`).join('');
+
+  cont.classList.toggle('solo-una', bannerSlides.length === 1);
+  cont.hidden = false;
+  bannerIdx = 0;
+  pintarBanner();
+  medirBanner();
+  activarDeslizarBanner(cont);
+  arrancarBanner();
+}
+
+// La caja toma la proporción de la imagen que el navegador terminó eligiendo,
+// así no se recorta nada en ninguna pantalla y el alto queda reservado antes
+// de que la imagen baje (si no, el resto de la página salta cuando aparece).
+function medirBanner() {
+  const cont = document.getElementById('bnr');
+  const img = cont && cont.querySelector('img');
+  if (!img) return;
+  const aplicar = () => {
+    if (!img.naturalWidth || !img.naturalHeight) return;
+    cont.style.setProperty('--bnr-ratio', `${img.naturalWidth} / ${img.naturalHeight}`);
+  };
+  if (img.complete) aplicar();
+  img.addEventListener('load', aplicar);   // también al cambiar de fuente al girar el teléfono
+}
+
+function pintarBanner() {
+  const pista = document.getElementById('bnr-pista');
+  if (!pista) return;
+  pista.style.transform = `translateX(-${bannerIdx * 100}%)`;
+  document.querySelectorAll('.bnr-punto').forEach((p, i) => p.classList.toggle('on', i === bannerIdx));
+}
+
+function bannerA(i) {
+  if (!bannerSlides.length) return;
+  bannerIdx = (i + bannerSlides.length) % bannerSlides.length;   // da la vuelta en los dos sentidos
+  pintarBanner();
+  arrancarBanner();   // tocar algo reinicia la cuenta: molesta que salte justo después
+}
+
+function arrancarBanner() {
+  clearInterval(bannerTimer);
+  if (bannerSlides.length < 2) return;
+  if (matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+  bannerTimer = setInterval(() => {
+    // Con la pestaña en segundo plano no tiene sentido seguir rotando.
+    if (document.visibilityState === 'visible') bannerA(bannerIdx + 1);
+  }, BANNER_MS);
+}
+
+// Al girar el teléfono o cambiar el tamaño de la ventana, el navegador puede
+// pasar de la imagen de celular a la de escritorio: hay que volver a medir.
+let _bnrResizeT = null;
+addEventListener('resize', () => {
+  clearTimeout(_bnrResizeT);
+  _bnrResizeT = setTimeout(medirBanner, 200);
+});
+
+// Deslizar con el dedo. Sin esto, en el celular el carrusel solo avanza solo,
+// que es justo donde la gente espera poder pasarlo a mano.
+function activarDeslizarBanner(cont) {
+  // Se engancha UNA sola vez. Sin esta guarda, cada vez que se rearma el
+  // banner se sumaba otro detector encima del anterior y un solo deslizamiento
+  // pasaba dos o tres imágenes de golpe.
+  if (cont.dataset.deslizar === '1') return;
+  cont.dataset.deslizar = '1';
+
+  let x0 = null, y0 = null;
+  cont.addEventListener('touchstart', e => { x0 = e.touches[0].clientX; y0 = e.touches[0].clientY; }, { passive: true });
+  cont.addEventListener('touchend', e => {
+    if (x0 === null) return;
+    const dx = e.changedTouches[0].clientX - x0;
+    const dy = e.changedTouches[0].clientY - y0;
+    // Solo si el gesto fue claramente horizontal: si no, se comería el scroll.
+    if (Math.abs(dx) > 45 && Math.abs(dx) > Math.abs(dy) * 1.5) bannerA(bannerIdx + (dx < 0 ? 1 : -1));
+    x0 = y0 = null;
+  }, { passive: true });
+}
+
+// Destino interno: se aplica como filtro sin recargar.
+function bannerIr(destino) {
+  const q = destino.startsWith('?') ? destino.slice(1) : destino.replace(/^#/, '');
+  const u = new URLSearchParams(q);
+  const slug = u.get('p');
+  if (slug) {
+    const p = prodPorSlug(slug);
+    if (p) { abrirFicha(p); return; }
+  }
+  history.replaceState({}, '', location.pathname + (q ? '?' + q : ''));
+  aplicarFiltrosDeURL();
+  buildCats(); buildFilters(); render();
+  smoothTo('productos');
+}
+
+/* ═══════════════════════════════════
+   FILTROS EN LA URL  —  ?rubro=&linea=&capacidad=…
+   Sirve para mandarle a un cliente el listado YA filtrado ("todo lo de Línea
+   15") en vez de explicarle dónde tiene que tocar.
+
+   Se usa replaceState y NO pushState a propósito: elegir un filtro no es un
+   paso de navegación. Con pushState, tocar cinco pastillas dejaba cinco
+   entradas en el historial y para salir de la página había que apretar atrás
+   cinco veces — además de pelearse con el botón atrás que ya usa la ficha de
+   producto para cerrarse.
+═══════════════════════════════════ */
+const FILTROS_URL = [
+  { par: 'rubro',     def: 'iphone', get: () => catSel,   set: v => catSel   = v },
+  { par: 'linea',     def: 'todos',  get: () => modelSel, set: v => modelSel = v },
+  { par: 'tipo',      def: 'todos',  get: () => subSel,   set: v => subSel   = v },
+  { par: 'marca',     def: 'todos',  get: () => marcaSel, set: v => marcaSel = v },
+  { par: 'familia',   def: 'todos',  get: () => famSel,   set: v => famSel   = v },
+  { par: 'capacidad', def: 'todos',  get: () => stoSel,   set: v => stoSel   = v },
+  { par: 'estado',    def: 'todos',  get: () => condSel,  set: v => condSel  = v },
+  { par: 'q',         def: '',       get: () => query,    set: v => query    = v },
+];
+
+// Solo se escribe lo que está fuera de lo normal: un link sin filtros queda
+// limpio, `iphonemood.com`, y no `?rubro=iphone&linea=todos&capacidad=todos…`.
+//
+// Se parte de los parámetros que YA tiene la URL y se tocan únicamente los de
+// esta lista. Si se armara de cero, un link de campaña con `?utm_source=…`
+// perdería esa marca apenas cargara la página y la visita no se podría
+// atribuir a ningún lado.
+function urlDeFiltros() {
+  const u = new URLSearchParams(location.search);
+  FILTROS_URL.forEach(f => {
+    const v = f.get();
+    if (v && v !== f.def) u.set(f.par, v); else u.delete(f.par);
+  });
+  const qs = u.toString();
+  return location.pathname + (qs ? '?' + qs : '');
+}
+
+function sincronizarURL() {
+  // Con una ficha o un presupuesto abierto la URL es de ESO, y compartirla
+  // tiene que seguir mandando al producto. No se pisa.
+  const actual = new URLSearchParams(location.search);
+  if (actual.has('p') || actual.has('presupuesto')) return;
+  const destino = urlDeFiltros();
+  if (destino !== location.pathname + location.search) {
+    history.replaceState(history.state, '', destino);
+  }
+}
+
+function aplicarFiltrosDeURL() {
+  const u = new URLSearchParams(location.search);
+  FILTROS_URL.forEach(f => {
+    if (!u.has(f.par)) return;
+    const v = u.get(f.par);
+    // El rubro se valida contra lo que HAY PUBLICADO hoy, no contra la lista
+    // de rubros que existen en el código. Un link viejo a un rubro que se
+    // despublicó o se quedó sin stock abriría una página vacía sin explicar
+    // nada; así cae al listado normal, que es lo menos malo.
+    if (f.par === 'rubro' && v !== 'todos') {
+      const hay = catsDe(v).some(c => todos.some(p => p.categoria === c));
+      if (!hay) return;
+    }
+    f.set(v);
+  });
+  // El buscador además tiene que mostrar el texto, no solo filtrar por él.
+  query = (query || '').trim().toLowerCase();
+  const cajaQ = document.getElementById('q');
+  if (cajaQ && query) cajaQ.value = query;
+  // El resto de los valores no se validan acá a mano: buildFilters() ya
+  // descarta solo el filtro que no exista en el stock de hoy (una Línea 15 que
+  // se vendió entera vuelve a "Todos" en vez de mostrar una lista vacía).
 }
 
 /* ═══════════════════════════════════
@@ -1659,10 +2198,16 @@ function renderPresupuesto(d) {
   const cfg = normalizarPagos(d.pagos_cfg || PAGOS_DEFAULT);
 
   const precioUSD = Number(prod.precio_usd) || 0;
-  const canjeUSD  = ti ? (Number(ti.valor_usd) || 0) : 0;
-  // El saldo nunca baja de cero: si el canje vale más que el equipo, la
+  // `trade_in` guarda todo lo que el cliente entrega. Puede traer el equipo
+  // usado, plata, o las dos cosas — por eso se separan y cada una se muestra
+  // solo si existe. Un canje con `modelo` vacío es un pago en efectivo puro.
+  const equipoTI  = (ti && ti.modelo) ? ti : null;
+  const efectivo  = ti && ti.efectivo && Number(ti.efectivo.monto_usd) > 0 ? ti.efectivo : null;
+  const canjeUSD  = equipoTI ? (Number(equipoTI.valor_usd) || 0) : 0;
+  const efecUSD   = efectivo ? Number(efectivo.monto_usd) : 0;
+  // El saldo nunca baja de cero: si lo que entrega vale más que el equipo, la
   // diferencia se conversa aparte, no se muestra un precio negativo.
-  const saldoUSD  = Math.max(0, precioUSD - canjeUSD);
+  const saldoUSD  = Math.max(0, precioUSD - canjeUSD - efecUSD);
 
   // Los factores se aplican sobre el SALDO, no sobre el precio de lista del
   // equipo: es lo que el cliente realmente va a pagar.
@@ -1672,7 +2217,7 @@ function renderPresupuesto(d) {
   // ── cabecera: mismo layout que la ficha ──
   const nombre = prod.nombre || [prod.modelo, prod.storage, prod.color].filter(Boolean).join(' ') || 'Equipo';
   const emoji = (CAT[prod.categoria] || { emoji: '📱' }).emoji;
-  document.getElementById('m-img').innerHTML = imgHtml(prod, nombre, emoji, { lazy: false });
+  document.getElementById('m-img').innerHTML = imgHtml(prod, nombre, emoji, { lazy: false, ancho: ANCHO_IMG.ficha });
   document.getElementById('m-crumb').innerHTML = `Presupuesto${d.cliente ? ' · <b>' + esc(d.cliente) + '</b>' : ''}`;
   document.getElementById('m-cat').textContent = 'Presupuesto personalizado';
   document.getElementById('m-name').textContent = nombre;
@@ -1680,18 +2225,18 @@ function renderPresupuesto(d) {
   document.getElementById('m-usd').textContent = fUSD(saldoUSD);
 
   // ── canje + cuenta ──
-  const detTI = ti ? [ti.storage, ti.color, ti.estado, ti.bateria_pct ? `🔋 ${ti.bateria_pct}%` : ''].filter(Boolean).join(' · ') : '';
+  const detTI = equipoTI ? [equipoTI.storage, equipoTI.color, equipoTI.estado, equipoTI.bateria_pct ? `🔋 ${equipoTI.bateria_pct}%` : ''].filter(Boolean).join(' · ') : '';
   // El canje se guarda sin rubro (siempre son equipos), así que se arma un
   // producto mínimo para que `imgHtml` pueda buscar la foto por convención,
   // igual que en el listado.
-  const tiProd = ti ? { categoria: 'iphone', modelo: ti.modelo, nombre: ti.modelo, storage: ti.storage, color: ti.color } : null;
-  const canjeHtml = ti ? `
+  const tiProd = equipoTI ? { categoria: 'iphone', modelo: equipoTI.modelo, nombre: equipoTI.modelo, storage: equipoTI.storage, color: equipoTI.color } : null;
+  const canjeHtml = equipoTI ? `
     <div class="pres-canje">
       <div class="pres-canje-top"><span class="pres-canje-badge">🔄 TU EQUIPO EN PARTE DE PAGO</span></div>
       <div class="pres-canje-body">
-        <div class="pres-canje-foto">${imgHtml(tiProd, ti.modelo || '', '📱', { lazy: false })}</div>
+        <div class="pres-canje-foto">${imgHtml(tiProd, equipoTI.modelo || '', '📱', { lazy: false, ancho: ANCHO_IMG.mini })}</div>
         <div class="pres-canje-datos">
-          <div class="pres-canje-equipo">${esc(ti.modelo || 'Tu equipo')}</div>
+          <div class="pres-canje-equipo">${esc(equipoTI.modelo || 'Tu equipo')}</div>
           ${detTI ? `<div class="pres-canje-detalle">${esc(detTI)}</div>` : ''}
           <div class="pres-canje-lbl">Queda cotizado en</div>
           <div class="pres-canje-valor">${fUSD(canjeUSD)}</div>
@@ -1699,11 +2244,25 @@ function renderPresupuesto(d) {
       </div>
     </div>` : '';
 
-  const cuentaHtml = ti ? `
+  const cuentaHtml = (equipoTI || efectivo) ? `
     <div class="pres-cuenta">
       <div class="pres-cuenta-fila"><span class="lbl">${esc(nombre)}</span><span class="val">${fUSD(precioUSD)}</span></div>
-      <div class="pres-cuenta-fila resta"><span class="lbl">Tu ${esc(ti.modelo || 'equipo')} en parte de pago</span><span class="val">− ${fUSD(canjeUSD)}</span></div>
+      ${equipoTI ? `<div class="pres-cuenta-fila resta"><span class="lbl">Tu ${esc(equipoTI.modelo)} en parte de pago</span><span class="val">− ${fUSD(canjeUSD)}</span></div>` : ''}
+      ${efectivo ? `<div class="pres-cuenta-fila resta"><span class="lbl">${esc(efectivo.concepto || 'Entrega en efectivo')}</span><span class="val">− ${fUSD(efecUSD)}</span></div>` : ''}
       <div class="pres-cuenta-fila total"><span class="lbl">Saldo a abonar</span><span class="val">${fUSD(saldoUSD)}</span></div>
+    </div>` : '';
+
+  // ── trabajos ya hechos al equipo ──
+  // Se muestra ANTES de las formas de pago, no al final en letra chica: es
+  // parte de qué se está comprando, no una aclaración legal.
+  const servicios = Array.isArray(prod.servicios) ? prod.servicios.filter(Boolean) : [];
+  const serviciosHtml = servicios.length ? `
+    <div class="pres-serv">
+      <div class="pres-serv-top">🛠️ SERVICIO INCLUIDO</div>
+      <ul class="pres-serv-lista">
+        ${servicios.map(sv => `<li>${esc(sv)}</li>`).join('')}
+      </ul>
+      <div class="pres-serv-pie">Ya realizado por nuestro taller. Sin costo extra.</div>
     </div>` : '';
 
   // ── formas de pago sobre el saldo (mismo motor que la ficha) ──
@@ -1763,7 +2322,7 @@ function renderPresupuesto(d) {
     </div>` : '';
 
   document.getElementById('m-pagos').innerHTML =
-    canjeHtml + cuentaHtml + regaloHtml + cashHtml + promoHtml + otrosHtml;
+    canjeHtml + cuentaHtml + serviciosHtml + regaloHtml + cashHtml + promoHtml + otrosHtml;
 
   // ── aviso legal + validez ──
   const avisoCanje = ti ? `<div class="pres-aviso">
@@ -1793,6 +2352,10 @@ function renderPresupuesto(d) {
 
   // El botón de WhatsApp arranca la conversación con el contexto puesto.
   modalProd = { nombre: `${nombre} (presupuesto con canje)`, categoria: prod.categoria };
+  // Un presupuesto es siempre por un equipo: el bloque de contacto va, aunque
+  // la ficha anterior haya sido un perfume y lo haya escondido.
+  const consultaPres = document.getElementById('bloque-consulta');
+  if (consultaPres) consultaPres.style.display = '';
   inqSel = 'disponibilidad';
   document.querySelectorAll('.inq-opt').forEach(el => {
     const sel = el.dataset.inq === 'disponibilidad';
@@ -1800,6 +2363,7 @@ function renderPresupuesto(d) {
     el.querySelector('.inq-radio').classList.toggle('sel', sel);
   });
   document.getElementById('turno-panel').classList.remove('show');
+  document.getElementById('rsv-panel')?.classList.remove('show');
 }
 
 // Cambia de tamaño dentro de la misma ficha. Se reemplaza la entrada del
@@ -1818,6 +2382,12 @@ function renderFicha(p) {
   inqSel = 'turno';
   dateSel = '';
 
+  // En perfumería la venta va por carrito: se esconde todo el bloque de
+  // contacto (turno, reserva, consulta por WhatsApp). El botón "Agregar al
+  // pedido" queda como única acción, y desde el carrito se termina el pedido.
+  const consulta = document.getElementById('bloque-consulta');
+  if (consulta) consulta.style.display = enPesos(p) ? 'none' : '';
+
   const nombre = limpiarTitulo(p.nombre || [p.modelo,p.storage,p.color].filter(Boolean).join(' ')) || 'Producto';
   const detParts = [p.storage,p.color];
   // Mismo criterio que en la tarjeta: la batería solo aporta en usados.
@@ -1829,7 +2399,7 @@ function renderFicha(p) {
 
   // imagen — misma cadena de fallback que la tarjeta, sin lazy porque acá
   // la foto es lo primero que se ve.
-  document.getElementById('m-img').innerHTML = imgHtml(p, nombre, emoji, { lazy: false });
+  document.getElementById('m-img').innerHTML = imgHtml(p, nombre, emoji, { lazy: false, ancho: ANCHO_IMG.ficha });
 
   // breadcrumb de la barra superior
   document.getElementById('m-crumb').innerHTML =
@@ -1982,10 +2552,129 @@ function renderFicha(p) {
     el.querySelector('.inq-radio').classList.toggle('sel', el.dataset.inq === 'turno');
   });
   document.getElementById('turno-panel').classList.add('show');
+  document.getElementById('rsv-panel')?.classList.remove('show');
   document.querySelectorAll('.date-btn').forEach(b => b.classList.remove('sel'));
   document.querySelectorAll('.time-btn').forEach((b,i) => b.classList.toggle('sel', i===0));
   timeSel = 'mañana (10 a 13hs)';
   document.getElementById('m-nombre').value = '';
+}
+
+// Un link cargado sin "https://" el navegador lo interpreta como una ruta del
+// propio sitio: "link.mercadopago.com.ar/xxx" terminaba abriendo
+// iphonemood.com/link.mercadopago.com.ar/xxx y daba 404. Se completa el
+// prefijo si falta.
+//
+// Y se aceptan SOLO http y https: esta dirección se carga desde el CRM y
+// termina en un href, así que un "javascript:" ahí sería un agujero de
+// seguridad. Cualquier otro esquema se descarta y el botón no se muestra.
+function urlSegura(u) {
+  const t = String(u || '').trim();
+  if (!t) return '';
+  const conEsquema = /^[a-z][a-z0-9+.-]*:/i.test(t) ? t : 'https://' + t;
+  try {
+    const url = new URL(conEsquema);
+    if (url.protocol !== 'http:' && url.protocol !== 'https:') return '';
+    // Un dominio sin punto no es una dirección real. Sin esto, un texto
+    // cualquiera tecleado por error generaba un botón que no llevaba a
+    // ningún lado, que es peor que no mostrar el botón.
+    if (!url.hostname.includes('.')) return '';
+    return url.href;
+  } catch (e) { return ''; }
+}
+
+/* ─── RESERVA ─── */
+// El panel se arma cada vez que se abre una ficha porque el monto en pesos
+// depende de la cotización del día, que puede haber cambiado.
+function renderReserva() {
+  const cont = document.getElementById('rsv-panel');
+  if (!cont) return;
+  const r = (pagosConfig && pagosConfig.reserva) || PAGOS_DEFAULT.reserva;
+  const usd = Number(r.monto_usd) || 0;
+  const ars = Math.round(usd * cotiz);
+
+  const fila = (etiqueta, valor) => valor ? `
+    <div class="rsv-fila">
+      <span class="rsv-fila-lbl">${etiqueta}</span>
+      <span class="rsv-fila-val">${esc(valor)}</span>
+      <button class="rsv-copiar" data-do="copiar" data-arg="${esc(valor)}">Copiar</button>
+    </div>` : '';
+
+  // Una cuenta sin alias ni CBU no se dibuja: no tiene con qué transferir.
+  const cuenta = (c, titulo) => (c && (c.alias || c.cbu)) ? `
+    <div class="rsv-cuenta">
+      <div class="rsv-cuenta-top">${titulo}</div>
+      ${fila('Banco', c.banco)}
+      ${fila('Titular', c.titular)}
+      ${fila('Alias', c.alias)}
+      ${fila('CBU', c.cbu)}
+    </div>` : '';
+
+  const link = urlSegura(r.link_pago);
+  const medios = (link ? `
+    <a class="rsv-link" href="${esc(link)}" target="_blank" rel="noopener noreferrer">
+      💳 Pagar la reserva en pesos
+    </a>` : '')
+    + cuenta(r.ars, '🇦🇷 Transferencia en pesos')
+    + cuenta(r.usd, '💵 Transferencia en dólares');
+
+  cont.innerHTML = `
+    <div class="mdiv" style="margin:14px 0 0"></div>
+    <div class="rsv-monto">
+      <span class="rsv-monto-lbl">Reservalo con</span>
+      <span class="rsv-monto-val">${fUSD(usd)}</span>
+      <span class="rsv-monto-ars">o ${fARS(ars)} al blue de hoy</span>
+    </div>
+    ${r.nota ? `<div class="rsv-nota"><span class="rsv-nota-ico">↩️</span><span>${esc(r.nota)}</span></div>` : ''}
+    ${medios
+      ? `<div class="rsv-medios-lbl">Cómo pagarla</div>${medios}
+         <div class="rsv-vacio" style="margin-top:8px">Mandanos el comprobante por WhatsApp con el botón de abajo y te confirmamos la reserva.</div>`
+      : `<div class="rsv-vacio">Escribinos con el botón de abajo y te pasamos los datos para hacer la reserva.</div>`}`;
+}
+
+async function copiarAlPortapapeles(texto) {
+  // Camino moderno. Falla más seguido de lo que parece: no existe fuera de
+  // HTTPS, y el navegador lo bloquea si la pestaña no tiene el foco.
+  try {
+    await navigator.clipboard.writeText(texto);
+    toastLanding('Copiado');
+    return;
+  } catch (e) { /* sigue por el camino viejo */ }
+
+  // Camino viejo: un campo fuera de pantalla que se selecciona y se copia.
+  // Anda en navegadores donde el otro no, que es justo lo que hace falta acá
+  // — un CBU que no se puede copiar obliga a transcribir 22 dígitos a mano.
+  try {
+    const ta = document.createElement('textarea');
+    ta.value = texto;
+    ta.setAttribute('readonly', '');
+    ta.style.cssText = 'position:fixed;top:-1000px;opacity:0';
+    document.body.appendChild(ta);
+    ta.select();
+    ta.setSelectionRange(0, texto.length);   // iOS necesita el rango explícito
+    const ok = document.execCommand('copy');
+    ta.remove();
+    toastLanding(ok ? 'Copiado' : 'No se pudo copiar. Tocá y mantené para seleccionarlo.');
+  } catch (e2) {
+    toastLanding('No se pudo copiar. Tocá y mantené para seleccionarlo.');
+  }
+}
+
+// Aviso breve. La landing no tenía ninguno: se arma acá y se va solo.
+let _toastT = null;
+function toastLanding(txt) {
+  let el = document.getElementById('landing-toast');
+  if (!el) {
+    el = document.createElement('div');
+    el.id = 'landing-toast';
+    el.style.cssText = 'position:fixed;left:50%;bottom:26px;transform:translateX(-50%);' +
+      'background:#1D1D1F;color:#fff;padding:10px 18px;border-radius:999px;font-size:13px;' +
+      'font-weight:600;z-index:9999;box-shadow:0 6px 24px rgba(0,0,0,.25);pointer-events:none';
+    document.body.appendChild(el);
+  }
+  el.textContent = txt;
+  el.style.opacity = '1';
+  clearTimeout(_toastT);
+  _toastT = setTimeout(() => { el.style.opacity = '0'; el.style.transition = 'opacity .3s'; }, 1800);
 }
 
 /* ─── INQUIRY ─── */
@@ -1996,6 +2685,11 @@ function selInq(el) {
     o.querySelector('.inq-radio').classList.toggle('sel', o===el);
   });
   document.getElementById('turno-panel').classList.toggle('show', inqSel === 'turno');
+  const rsv = document.getElementById('rsv-panel');
+  if (rsv) {
+    if (inqSel === 'reserva') renderReserva();
+    rsv.classList.toggle('show', inqSel === 'reserva');
+  }
 }
 
 function selTime(el) {
@@ -2061,6 +2755,12 @@ function enviarWA() {
   } else if (inqSel === 'disponibilidad') {
     msg += `📦 *Consulta: ¿Está disponible este equipo?*\n`;
     msg += `¿Puedo reservarlo?\n`;
+  } else if (inqSel === 'reserva') {
+    const r = (pagosConfig && pagosConfig.reserva) || PAGOS_DEFAULT.reserva;
+    const rUSD = Number(r.monto_usd) || 0;
+    msg += `🔒 *Quiero reservar este equipo.*\n`;
+    msg += `Reserva: ${fUSD(rUSD)} (o ${fARS(Math.round(rUSD * cotiz))})\n`;
+    msg += `Necesito los datos para pagarla / les paso el comprobante.\n`;
   } else {
     msg += `❓ *Tengo una consulta sobre este producto.*\n`;
   }

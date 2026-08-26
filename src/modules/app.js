@@ -437,9 +437,18 @@ document.addEventListener('keydown', (e) => {
     e.preventDefault();
     Search.open();
   }
-  if ((e.metaKey || e.ctrlKey) && e.key === 'n') {
-    const tag = document.activeElement?.tagName;
-    if (tag === 'INPUT' || tag === 'TEXTAREA') return;
+
+  // Nueva venta: Cmd/Ctrl + Shift + V.
+  //
+  // Antes era Cmd+N y NO funcionaba: "nueva ventana" es un atajo nativo del
+  // navegador, se lo queda antes de que el JS lo vea y preventDefault() no
+  // alcanza. Cmd+Shift+N tampoco sirve (ventana de incógnito). Cmd+Shift+V es
+  // "pegar sin formato", que solo hace algo dentro de un campo de texto — y de
+  // esos ya nos salimos abajo.
+  if ((e.metaKey || e.ctrlKey) && e.shiftKey && (e.key === 'v' || e.key === 'V')) {
+    const el = document.activeElement;
+    const tag = el?.tagName;
+    if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || el?.isContentEditable) return;
     e.preventDefault();
     App.goTo('ventas');
     setTimeout(() => Ventas.openNew(), 120);

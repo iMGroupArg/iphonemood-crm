@@ -49,6 +49,30 @@ nombre de modelo. Se prueba antes que el nombre pelado.
 se cae a `khamrah.png`. Pensado para decants, donde la misma fragancia se vende
 en varios volúmenes con la misma foto.
 
+## Foto propia para los decants
+
+Un decant y el frasco completo son el mismo perfume, así que por defecto el
+decant muestra la foto del frasco. Para darle **una foto distinta**, se sube el
+archivo con el prefijo del rubro adelante:
+
+| Archivo | Lo usa |
+|---|---|
+| `decant-khamrah.png` | los decants de 5 ml **y** de 10 ml |
+| `decant-khamrah-5ml.png` | solo el de 5 ml |
+| `lattafa-khamrah-edp-100ml.png` | solo el frasco completo |
+
+El prefijo `decant-` gana siempre sobre la foto compartida del aroma, así que
+alcanza con subir el archivo: no hay que tocar nada más. Si no existe ninguno
+con ese prefijo, el decant sigue usando la foto del frasco, como hasta ahora.
+
+La marca es opcional: `decant-lattafa-khamrah.png` funciona igual que
+`decant-khamrah.png`.
+
+Verificado el 2026-08-29 simulando la subida: con `decant-khamrah.png` los dos
+decants pasan a esa foto y el frasco conserva la suya; agregando además
+`decant-khamrah-5ml.png`, el de 5 ml toma la específica y el de 10 ml se queda
+con la genérica.
+
 **El campo `imagen_url` del stock se ignora** (decisión de Franco, 2026-08-18):
 la única fuente de fotos es el bucket. Sin foto en el bucket → emoji.
 

@@ -303,6 +303,43 @@ const DB = {
       .upsert({ clave: 'landing_categorias', valor: JSON.stringify(lista) });
   },
 
+  // ─── Banner de la landing ───
+  // Las diapositivas viven en configuracion.banner y las imágenes en el bucket
+  // público `products`, con el prefijo `banner-` para distinguirlas de las
+  // fotos de producto (la landing las resuelve por nombre y no debe confundir
+  // una portada de oferta con un iPhone).
+  async leerBanner() {
+    const { data, error } = await supa.from('configuracion')
+      .select('valor').eq('clave', 'banner').maybeSingle();
+    if (error || !data) return [];
+    try { const l = JSON.parse(data.valor); return Array.isArray(l) ? l : []; } catch { return []; }
+  },
+
+  async guardarBanner(slides) {
+    return await supa.from('configuracion')
+      .upsert({ clave: 'banner', valor: JSON.stringify(slides) });
+  },
+
+  // Sube la imagen del banner y devuelve el nombre con el que quedó guardada.
+  // Se le pone la fecha y hora adelante para no pisar una que ya esté en uso:
+  // si se reemplaza un archivo con el mismo nombre, los navegadores que lo
+  // tengan en caché siguen mostrando el viejo.
+  async subirImagenBanner(file) {
+    const limpio = (file.name || 'banner').toLowerCase()
+      .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+      .replace(/[^a-z0-9.]+/g, '-').replace(/^-+|-+$/g, '');
+    const nombre = `banner-${Date.now()}-${limpio}`;
+    const { error } = await supa.storage.from('products')
+      .upload(nombre, file, { upsert: false, contentType: file.type || undefined });
+    if (error) return { error };
+    return { nombre };
+  },
+
+  async borrarImagenBanner(nombre) {
+    if (!nombre || !nombre.startsWith('banner-')) return;   // no tocar fotos de producto
+    await supa.storage.from('products').remove([nombre]);
+  },
+
   // ─── Presupuestos con canje ───
   async listarPresupuestos() {
     const { data } = await supa.from('presupuestos').select('*').order('creado_en', { ascending: false }).limit(100);

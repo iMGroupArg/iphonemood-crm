@@ -658,6 +658,18 @@ const Proveedores = {
         style="${est};margin-top:4px;display:${libre ? 'block' : 'none'}">`;
   },
 
+  // Reescribe el nombre del item con el tamaño elegido: "Teriaq" + 100 →
+  // "Teriaq 100ml". Sin columna nueva y sin escribirlo a mano.
+  _setMl(idx, val) {
+    const it = this._loteWizard.items[idx];
+    const S = window.Stock;
+    if (!it || !S) return;
+    const ml = parseFloat(String(val).replace(',', '.'));
+    const base = S.nombreSinMl(it.nombre || '');
+    it.nombre = [base, ml > 0 ? `${S.fmtMl(ml)}ml` : ''].filter(Boolean).join(' ');
+    this._renderWizard();
+  },
+
   _editItemSelect(idx, campo, val) {
     const it = this._loteWizard.items[idx];
     if (!it) return;
@@ -695,6 +707,9 @@ const Proveedores = {
     const est = 'width:100%;font-size:12px;padding:5px 8px;background:var(--bg-elevated);border:1px solid var(--border-strong);border-radius:6px;color:var(--text)';
     const lbl = 'font-size:10px;color:var(--text-secondary);display:block;margin-bottom:2px';
     const titulo = this.tituloItem(item);
+    // El tamaño no tiene columna propia: vive dentro del nombre, que es de
+    // donde lo leen Stock y la landing. Acá el selector solo edita el nombre.
+    const mlItem = S?.mlDe(item) || 0;
     return `
       <div style="background:var(--bg-secondary);border-radius:8px;padding:10px;margin-bottom:8px">
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
@@ -736,6 +751,17 @@ const Proveedores = {
           <div>
             <label style="${lbl}">Concentración</label>
             ${this._selectConOtro(idx, 'storage', S?.PERFUME_CONCENTRACIONES || [], 'ej: EDP')}
+          </div>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:6px">
+          <div>
+            <label style="${lbl}">Tamaño (ml)</label>
+            <select onchange="Proveedores._setMl(${idx}, this.value)" style="${est}">
+              <option value="">— Elegir —</option>
+              ${(S?.ML_OPCIONES || []).map(ml => `<option value="${ml}" ${ml === mlItem ? 'selected' : ''}>${esc(S.fmtMl(ml))} ml</option>`).join('')}
+              ${mlItem && !(S?.ML_OPCIONES || []).includes(mlItem) ? `<option value="${mlItem}" selected>${esc(S.fmtMl(mlItem))} ml</option>` : ''}
+            </select>
+            <div style="font-size:10px;color:var(--text-secondary);margin-top:3px">Se agrega solo al final del nombre.</div>
           </div>
         </div>` : cat === 'repuesto' ? `
         <div style="margin-top:6px">

@@ -68,10 +68,23 @@ async function supa(path, opts = {}) {
 }
 
 // Devuelve la URL pública de la foto, o null si no hay ninguna subida.
+//
+// Se pide redimensionada a 600px y no el original. Los archivos del bucket son
+// PNG de 1200x1200 de hasta 1,2 MB, y WhatsApp descarta la vista previa cuando
+// la imagen pesa de más: el link terminaba sin foto, que es justo lo que esta
+// función existe para arreglar. A 600px quedan entre 185 y 280 KB.
+//
+// `resize=contain` es obligatorio: pidiendo solo `width` la foto sale
+// aplastada. Y no se fuerza WebP a propósito — el endpoint devuelve PNG a
+// quien no lo pida, y los robots de las redes no siempre lo soportan.
+const OG_ANCHO = 600;
+
 async function fotoDe(p, archivos) {
   const cands = nombreCandidatos(p);
   const hit = cands.find(c => archivos.has(c.toLowerCase()));
-  return hit ? `${SUPABASE_URL}/storage/v1/object/public/products/${hit}` : null;
+  if (!hit) return null;
+  return `${SUPABASE_URL}/storage/v1/render/image/public/products/${encodeURIComponent(hit)}`
+       + `?width=${OG_ANCHO}&resize=contain`;
 }
 
 function esc(s) {

@@ -10,6 +10,11 @@
 // cuando el link trae ?p= o ?presupuesto=; la home y el resto siguen siendo
 // estáticos y no pagan esta latencia.
 const { limitar } = require('./_ratelimit.js');
+// Slug y consultas vienen del módulo compartido: tenerlo copiado acá ya hizo
+// que se desincronizara una vez (le faltaba el arreglo del apóstrofe que sí
+// tenía la landing, así que "Bade'e" no encontraba su foto).
+const { slugify, usaNombre, identidadProd, cond, slugProd,
+        productosPublicados } = require('./_catalogo.js');
 
 const SUPABASE_URL = process.env.SUPABASE_URL || 'https://oqvmiozafgogfcclwseu.supabase.co';
 // La clave anónima va como respaldo igual que la URL de arriba. No es un
@@ -20,29 +25,6 @@ const SUPABASE_URL = process.env.SUPABASE_URL || 'https://oqvmiozafgogfcclwseu.s
 // La variable de entorno, si está definida, tiene prioridad.
 const SUPABASE_ANON = process.env.SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9xdm1pb3phZmdvZ2ZjY2x3c2V1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODE4MTg4MDQsImV4cCI6MjA5NzM5NDgwNH0.egzH4uyVJ0W1mj0dTJuJGIWTXXnur9B4z_f12Z8V1lQ';
 
-// ── Copia de la lógica de slug de precios.html ──
-// Tiene que dar EXACTAMENTE lo mismo que `slugify`/`slugProd` de la landing:
-// si se cambia una, hay que cambiar la otra o la vista previa deja de
-// encontrar el producto (y cae al logo, que es el comportamiento de antes).
-const CATS_IDENT_NOMBRE = new Set(['perfumeria','decant','combo','accesorio','repuesto','herramienta','gaming','otro']);
-
-function slugify(s) {
-  return (s || '').toString().toLowerCase()
-    .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
-    .replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
-}
-function usaNombre(p) { return CATS_IDENT_NOMBRE.has(p.categoria) || !p.modelo; }
-function identidadProd(p) { return (usaNombre(p) ? (p.nombre || p.modelo) : (p.modelo || p.nombre)) || ''; }
-function cond(p) {
-  const e = (p.estado_producto || '').toLowerCase();
-  return (e.includes('sellado') || e.includes('sealed')) ? 'sellado' : (e.includes('nuevo') ? 'nuevo' : 'usado');
-}
-function slugProd(p) {
-  const partes = usaNombre(p)
-    ? [p.categoria, identidadProd(p), cond(p)]
-    : [identidadProd(p), p.storage, p.color, cond(p)];
-  return slugify(partes.filter(Boolean).join(' '));
-}
 function nombreCandidatos(p) {
   const modelo = slugify(identidadProd(p));
   if (!modelo) return [];
@@ -92,6 +74,36 @@ function esc(s) {
 }
 
 // Reemplaza el valor de una meta ya existente, sin agregar duplicados.
+// Inserta o reemplaza una etiqueta <meta name="..."> (distinta de las og:,
+// que van por `property`).
+function setMetaName(html, nombre, valor) {
+  const re = new RegExp(`(<meta name="${nombre}" content=")[^"]*(">)`);
+  if (re.test(html)) return html.replace(re, `$1${esc(valor)}$2`);
+  return html.replace('</head>', `<meta name="${nombre}" content="${esc(valor)}">\n</head>`);
+}
+
+function setCanonical(html, url) {
+  const re = /<link rel="canonical"[^>]*>/;
+  const tag = `<link rel="canonical" href="${esc(url)}">`;
+  return re.test(html) ? html.replace(re, tag) : html.replace('</head>', tag + '\n</head>');
+}
+
+// Bloque de contenido para los buscadores. Va en <noscript>: quien tiene
+// JavaScript ve la ficha real, y quien no lo ejecuta —incluidos los robots
+// que no renderizan— lee exactamente lo mismo en texto. No es texto oculto:
+// es la misma información que muestra la página.
+function bloqueSeo(p, foto) {
+  const detalle = [p.storage, p.color, p.estado_producto].filter(Boolean).join(' · ');
+  return `<noscript><article>
+  <h1>${esc(p.nombre || p.modelo)}</h1>
+  ${foto ? `<img src="${esc(foto)}" alt="${esc(p.nombre || p.modelo)}" width="600" height="600">` : ''}
+  <p><strong>USD ${esc(p.precio_usd)}</strong></p>
+  ${detalle ? `<p>${esc(detalle)}</p>` : ''}
+  <p>Disponible en iPhone Mood, Granadero Baigorria. Aceptamos tu usado en parte de pago y financiamos en cuotas.</p>
+  <p><a href="/">Ver todo el catálogo</a></p>
+</article></noscript>`;
+}
+
 function setMeta(html, prop, valor) {
   const re = new RegExp(`(<meta property="${prop}" content=")[^"]*(">)`);
   return re.test(html) ? html.replace(re, `$1${esc(valor)}$2`) : html;
@@ -119,7 +131,7 @@ module.exports = async function handler(req, res) {
     const slug = url.searchParams.get('p');
     const token = url.searchParams.get('presupuesto');
 
-    let titulo = null, desc = null, foto = null;
+    let titulo = null, desc = null, foto = null, prodSeo = null;
 
     if (slug || token) {
       const lista = await supa('/storage/v1/object/list/products', {
@@ -128,9 +140,13 @@ module.exports = async function handler(req, res) {
       const archivos = new Set((lista || []).map(f => (f.name || '').toLowerCase()));
 
       if (slug) {
-        const filas = await supa('/rest/v1/stock_publico?select=*') || [];
+        // Solo entre los rubros publicados: si la web no muestra accesorios,
+        // la ficha de un accesorio tampoco existe para el visitante, y
+        // anunciarla en Google lo llevaría a una página que no la tiene.
+        const filas = await productosPublicados();
         const p = filas.find(x => slugProd(x) === slug);
         if (p) {
+          prodSeo = p;
           titulo = `${p.nombre || p.modelo} — iPhone Mood`;
           desc = `USD ${p.precio_usd}. ${[p.storage, p.color, p.estado_producto].filter(Boolean).join(' · ')}. Stock real con precios actualizados.`;
           foto = await fotoDe(p, archivos);
@@ -142,10 +158,14 @@ module.exports = async function handler(req, res) {
         if (pres && pres.producto) {
           const prod = pres.producto, ti = pres.trade_in;
           const saldo = Math.max(0, (prod.precio_usd || 0) - (ti ? ti.valor_usd || 0 : 0));
-          titulo = `Presupuesto: ${prod.nombre} — iPhone Mood`;
-          desc = ti
-            ? `Entregando tu ${ti.modelo}, tu saldo queda en USD ${saldo}. Mirá el detalle y las cuotas.`
-            : `USD ${saldo}. Mirá el detalle y las formas de pago.`;
+          const cant = Math.max(1, Number(prod.cantidad) || 1);
+          titulo = `Presupuesto: ${prod.nombre}${cant > 1 ? ` × ${cant}` : ''} — iPhone Mood`;
+          const nEq = (ti && Array.isArray(ti.equipos)) ? ti.equipos.length : (ti && ti.modelo ? 1 : 0);
+          desc = nEq > 1
+            ? `Entregando tus ${nEq} equipos, tu saldo queda en USD ${saldo}. Mirá el detalle y las cuotas.`
+            : (ti && ti.modelo
+              ? `Entregando tu ${ti.modelo}, tu saldo queda en USD ${saldo}. Mirá el detalle y las cuotas.`
+              : `USD ${saldo}. Mirá el detalle y las formas de pago.`);
           foto = await fotoDe(prod, archivos);
         }
       }
@@ -155,11 +175,30 @@ module.exports = async function handler(req, res) {
       html = setMeta(html, 'og:title', titulo);
       html = html.replace(/(<title>)[^<]*(<\/title>)/, `$1${esc(titulo)}$2`);
     }
-    if (desc) html = setMeta(html, 'og:description', desc);
+    if (desc) {
+      html = setMeta(html, 'og:description', desc);
+      // La misma frase como meta description: es la que Google muestra
+      // debajo del título en los resultados.
+      html = setMetaName(html, 'description', desc);
+    }
     if (foto) {
       html = setMeta(html, 'og:image', foto);
       // `summary_large_image` hace que la foto salga grande en vez de miniatura.
       html = html.replace(/(<meta name="twitter:card" content=")[^"]*(">)/, '$1summary_large_image$2');
+    }
+
+    if (prodSeo) {
+      // Dirección oficial de esta ficha: evita que el mismo producto se
+      // indexe dos veces por llegar con parámetros distintos.
+      html = setCanonical(html, `${origen}/?p=${encodeURIComponent(slug)}`);
+      // El contenido, en texto, para el que no ejecuta JavaScript.
+      html = html.replace(/<body([^>]*)>/, `<body$1>\n${bloqueSeo(prodSeo, foto)}`);
+    }
+
+    // Un presupuesto lleva el precio que se le dio a UN cliente. El link es
+    // secreto, pero si alguno se filtra no queremos que Google lo publique.
+    if (token) {
+      html = setMetaName(html, 'robots', 'noindex, nofollow');
     }
   } catch (e) {
     // Cualquier problema: se sirve la página tal cual, con el logo. Nunca

@@ -116,6 +116,65 @@ function cuotasDe(bloque, listaARS) {
     });
 }
 
+// La caja azul de la promo destacada.
+//
+// Vive acá y no escrita dos veces porque se usa en la ficha del producto y en
+// el presupuesto, y ya se desincronizó una vez: el centrado del plan único se
+// aplicó en una sola de las dos copias, así que en la ficha —que es donde
+// realmente se mira— seguía viéndose como antes.
+function promoHeroHtml(cfg, listaARS) {
+  const planes = cuotasDe(cfg?.promo, listaARS);
+  if (!planes.length) return '';
+  const titulo = cfg?.promo?.titulo || 'Promo bancaria';
+  const vig = cfg?.promo?.vigencia || '';
+  // Con un solo plan la caja se convierte en la pieza: el número de cuotas
+  // ocupa el centro y no compite con nada. Con varios hay que compararlos, y
+  // ahí el número gigante repetido no aporta.
+  if (planes.length === 1) return promoUnicaHtml(planes[0], titulo, vig);
+  return `
+    <div class="promo-hero">
+      <div class="promo-hero-top">
+        <span class="promo-hero-badge">⭐ LA MÁS ELEGIDA</span>
+        ${vig ? `<span class="promo-hero-vig">${esc(vig)}</span>` : ''}
+      </div>
+      <div class="promo-hero-title">${esc(titulo)}</div>
+      <div class="promo-hero-grid">
+        ${planes.map(c => `<div class="promo-hero-card">
+          <div class="promo-hero-n">${c.n} cuotas</div>
+          <div class="promo-hero-amount">${fARS(c.mes)}</div>
+          <div class="promo-hero-mes">/mes · total ${fARS(c.total)}</div>
+          ${c.nota ? `<div class="promo-hero-nota">${esc(c.nota)}</div>` : ''}
+        </div>`).join('')}
+      </div>
+    </div>`;
+}
+
+// La pieza de un solo plan. El texto de abajo del número y la cinta salen los
+// DOS de `nota`, que a su vez la calcula `notaCoef()` a partir del
+// coeficiente. Nunca se escribe "sin interés" a mano: si Franco cambia el
+// coeficiente, el cartel cambia solo y no puede quedar prometiendo algo que
+// el número ya no dice.
+function promoUnicaHtml(c, titulo, vig) {
+  const nota = (c.nota || '').trim();
+  const sinInteres = /sin inter/i.test(nota);
+  const conDescuento = /off/i.test(nota);
+  const etiqueta = sinInteres ? 'CUOTAS SIN INTERÉS' : 'CUOTAS';
+  return `
+    <div class="promo-uno">
+      <div class="promo-uno-kicker">La promo más elegida</div>
+      <div class="promo-uno-marca">${esc(titulo)}</div>
+      <div class="promo-uno-caja">
+        ${conDescuento ? `<div class="promo-uno-cinta"><span>${esc(nota)}</span></div>` : ''}
+        <div class="promo-uno-n">${c.n}</div>
+        <div class="promo-uno-lbl">${etiqueta}</div>
+        <div class="promo-uno-monto">${fARS(c.mes)}</div>
+        <div class="promo-uno-mes">Por mes · total ${fARS(c.total)}</div>
+        ${(!conDescuento && !sinInteres && nota) ? `<div class="promo-uno-nota">${esc(nota)}</div>` : ''}
+      </div>
+      ${vig ? `<div class="promo-uno-vig">${esc(vig)}</div>` : ''}
+    </div>`;
+}
+
 // Convierte el formato viejo (coeficiente por cuota, `cuotas_fijas`+`promos`)
 // al nuevo. Existe para que la landing no se rompa en la ventana entre este
 // deploy y la primera vez que Franco guarde desde el panel.
@@ -133,7 +192,7 @@ function normalizarPagos(cfg) {
 /* ─── INIT ─── */
 async function init() {
   // Cargar cotización y config de pagos en paralelo
-  const [cfgRes, pagosRes, catsRes, stockRes, , bannerRes] = await Promise.all([
+  const [cfgRes, pagosRes, catsRes, stockRes, , bannerRes, ingresandoRes] = await Promise.all([
     supa.from('configuracion').select('valor').eq('clave', 'ref_blue').single(),
     supa.from('configuracion').select('valor').eq('clave', 'pagos_config').single(),
     supa.from('configuracion').select('valor').eq('clave', 'landing_categorias').single(),
@@ -146,7 +205,8 @@ async function init() {
     // Va en el mismo lote y no se desestructura: sólo tiene que estar
     // resuelto antes del primer render() para no pedir fotos inexistentes.
     cargarIndiceImagenes(),
-    supa.from('configuracion').select('valor').eq('clave', 'banner').maybeSingle()
+    supa.from('configuracion').select('valor').eq('clave', 'banner').maybeSingle(),
+    supa.from('configuracion').select('valor').eq('clave', 'ingresando').maybeSingle()
   ]);
 
   try {
@@ -185,6 +245,13 @@ async function init() {
     }
   });
   todos = Object.values(grouped);
+  // Los equipos en camino se suman al catálogo después de agrupar el stock:
+  // no salen de `stock_publico` y no tienen que pasar por el agrupado.
+  try {
+    const enCamino = productosIngresando(
+      ingresandoRes?.data ? JSON.parse(ingresandoRes.data.valor) : [], todos);
+    if (enCamino.length) todos = todos.concat(enCamino);
+  } catch (e) { /* una lista mal guardada no puede tumbar la página */ }
   iniciarTopbar();
   buildHeroCard();
   armarCarruselChips();
@@ -196,6 +263,12 @@ async function init() {
   // Antes de dibujar: si el link trae filtros, se aplican y la página abre ya
   // filtrada, sin parpadeo de mostrar todo y recién después filtrar.
   aplicarFiltrosDeURL();
+  // Mismo criterio que al tocar la pestaña, para cuando la página abre ya en
+  // perfumería. No pisa lo que venga en el link: si alguien comparte
+  // ?tipo=perfumeria, se respeta.
+  if (catSel === 'perfumeria' && subSel === 'todos'
+      && !new URLSearchParams(location.search).has('tipo')
+      && todos.some(p => p.categoria === 'decant')) subSel = 'decant';
   buildCats();
   buildFilters();
   render();
@@ -234,12 +307,39 @@ function buildHeroCard() {
 // IMEI identificado se publicaba acá como 1 sola unidad.
 function qty(p) { return p._qty ?? (Number(p.unidades) || 0); }
 function pUSD(p) { return Number(p.precio_usd) || 0; }
-function pARS(p) { return Math.round(pUSD(p) * cotiz); }
-function cond(p) {
-  const e = (p.estado_producto || '').toLowerCase();
+
+// Precio en pesos. En perfumería, decants y combos manda el precio en pesos
+// tal cual se cargó en el CRM: son productos que se compran y se venden en
+// pesos, y su costo no sigue al dólar. Antes se calculaba como
+// precio_usd × blue de hoy, así que el precio de un perfume se movía solo
+// cada vez que se movía el dólar — y el redondeo a dólares enteros dejaba un
+// escalón de más de mil pesos entre un precio y el siguiente.
+//
+// Si la vista todavía no publica `precio_ars` (la migración no se corrió),
+// se cae al cálculo anterior: así la web sigue andando igual y el cambio se
+// puede publicar antes de tocar la base.
+function pARS(p) {
+  if (enPesos(p)) {
+    const ars = Number(p.precio_ars);
+    if (ars > 0) return Math.round(ars);
+  }
+  return Math.round(pUSD(p) * cotiz);
+}
+// Sellado / nuevo / usado a partir del texto del estado. Está separado de
+// cond() porque los equipos en camino también necesitan deducirlo, y ahí no
+// se puede usar cond(): para ellos devuelve 'ingresando'.
+function condDeEstado(estado) {
+  const e = (estado || '').toLowerCase();
   if (e.includes('sellado') || e.includes('sealed')) return 'sellado';
   if (e.includes('nuevo')) return 'nuevo';
   return 'usado';
+}
+function cond(p) {
+  // Los equipos en camino son una condición más, no un caso aparte: así el
+  // filtro de Estado los ofrece solo, la tarjeta les pone su cinta y la URL
+  // compartible (?estado=ingresando) funciona sin agregar nada.
+  if (p._ingresando) return 'ingresando';
+  return condDeEstado(p.estado_producto);
 }
 function fARS(n) { return '$' + Math.round(n).toLocaleString('es-AR'); }
 function fUSD(n) { return 'USD ' + Math.round(n).toLocaleString('es-AR'); }
@@ -333,10 +433,10 @@ const SUBCATS = {
   combo: 'Combo experiencias',        // packs armados con decants
   decant: 'Decants',
 };
-// El orden del sub-filtro es comercial, no alfabético: primero el producto
-// principal, después el pack (que es lo que más conviene empujar) y al final
-// la prueba suelta.
-const SUBCATS_ORDEN = ['perfumeria', 'combo', 'decant'];
+// El orden del sub-filtro es comercial, no alfabético. Los decants van
+// primero porque son la puerta de entrada: cuestan una décima parte de un
+// frasco y es con lo que la gente prueba antes de comprar el completo.
+const SUBCATS_ORDEN = ['decant', 'combo', 'perfumeria'];
 
 // Estado del filtro por familia olfativa (el campo `color` en perfumería).
 let famSel = 'todos';
@@ -368,6 +468,13 @@ const ENVIO_GRATIS_DESDE = 100000;
 // el CRM, empieza a agrupar sin tocar código.
 function claveFragancia(p, { conMarca = true } = {}) {
   if (!RUBROS_EN_PESOS.has(p?.categoria)) return null;   // solo perfumería
+  // Los combos quedan afuera del agrupado por aroma. Un combo NO es otro
+  // tamaño de un perfume: es un producto propio, con su precio y su foto.
+  // Si entrara acá, un "Combo Lattafa Asad" compartiría clave con el decant
+  // "Asad Bourbon 5ml" y la web lo trataría como una medida más — el combo
+  // desaparecería de la grilla, absorbido por la tarjeta del decant, o se
+  // colaría como un botón de tamaño al lado de 5 ML y 10 ML.
+  if (p.categoria === 'combo') return null;
   const limpiar = t => t.toLowerCase()
     .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
     .replace(/['’´`ʼ]/g, '')          // el apostrofe une, no separa: "Bade'e" -> "badee"
@@ -401,7 +508,7 @@ function claveFragancia(p, { conMarca = true } = {}) {
 // Etiqueta corta para el botón de tamaño: "5 ml", "100 ml".
 function etiquetaMl(p) {
   const ml = mlDe(p);
-  return ml ? `${String(ml).replace('.', ',')} ml` : (p.storage || 'Ver');
+  return ml ? `${String(ml).replace('.', ',')} ML` : (p.storage || 'Ver');
 }
 
 // Mililitros del producto, para ordenar los tamaños de menor a mayor.
@@ -546,6 +653,11 @@ async function cargarIndiceImagenes() {
 // Lista de URLs a probar, de más específica a más genérica.
 function imgCandidatos(p, ancho, { conHermanas = true } = {}) {
   const out = [];
+
+  // Un equipo en camino puede traer una foto subida a mano desde el panel:
+  // todavía no está en el bucket con el nombre del modelo, y muchas veces es
+  // la única que hay.
+  if (p._ingImagen) out.push(imgUrl(p._ingImagen, ancho));
 
   const modelo = slugify(identidadProd(p));
   const color  = usaNombre(p) ? '' : slugify(p.color);
@@ -1091,6 +1203,7 @@ const ACCIONES = {
   variante:       el => irAVariante(el.dataset.arg),
   verMedida:      el => { const v = prodPorSlug(el.dataset.arg); if (v) abrirFicha(v); },
   filtroDrop:     el => { CAMPOS_FILTRO[el.dataset.campo]?.set(el.value); buildFilters(); render(); },
+  filtroPill:     el => { CAMPOS_FILTRO[el.dataset.campo]?.set(el.dataset.arg); buildFilters(); render(); },
   quitarFiltro:   el => {
     const campo = el.dataset.arg;
     if (campo === 'q') { query = ''; const c = document.getElementById('q'); if (c) c.value = ''; }
@@ -1380,6 +1493,12 @@ function buildCats() {
 
 function selCat(id) {
   catSel = id; stoSel = 'todos'; condSel = 'todos'; modelSel = 'todos'; subSel = 'todos'; famSel = 'todos'; marcaSel = 'todos';
+  // En perfumería se entra por Decants. Con "Todos", la tarjeta de cada aroma
+  // muestra el decant de 5 ml —el más barato, que es el gancho— pero ofrece
+  // los tres tamaños juntos, y ver 5 / 10 / 100 ml en la misma fila confunde:
+  // no queda claro si el precio de arriba es el del frasco o el de la prueba.
+  // Separado en pestañas, cada una muestra lo suyo.
+  if (id === 'perfumeria' && todos.some(p => p.categoria === 'decant')) subSel = 'decant';
   buildCats(); buildFilters(); render();
   smoothTo('productos');
 }
@@ -1428,9 +1547,9 @@ const CAMPOS_FILTRO = {
 // Etiqueta que ve el cliente para un valor guardado ("sellado" -> "Sellado").
 function textoDeValor(campo, v) {
   if (v === 'todos') return null;
-  if (campo === 'modelo') return `Línea ${v}`;
+  if (campo === 'modelo') return `iPhone ${v}`;
   if (campo === 'tipo') return SUBCATS[v] || v;
-  if (campo === 'estado') return { nuevo: 'Nuevo', sellado: 'Sellado', usado: 'Usado' }[v] || v;
+  if (campo === 'estado') return { nuevo: 'Nuevo', sellado: 'Sellado', usado: 'Usado', ingresando: 'Ingresando' }[v] || v;
   return v;
 }
 
@@ -1450,6 +1569,28 @@ function mkDrop(campo, opciones, todosTxt = 'Todos') {
   </label>`;
 }
 
+// El primer filtro (la línea de iPhone, el tipo de perfume) va como pastillas
+// a la vista y no como desplegable. Es el que más se usa y el que decide qué
+// se está mirando: obligar a abrir un menú para cambiar de línea agrega un
+// toque a la acción más frecuente de la página.
+//
+// Los filtros secundarios —capacidad, estado, marca, familia— siguen siendo
+// desplegables: son muchos valores y a la vista taparían la grilla.
+//
+// Escribe y lee de CAMPOS_FILTRO igual que mkDrop, así los chips de
+// "Seleccionados", el botón de limpiar y la URL compartible siguen andando
+// sin tocarles nada.
+function mkPills(campo, opciones, todosTxt = 'Todos') {
+  const c = CAMPOS_FILTRO[campo];
+  const actual = String(c.get());
+  const ops = [{ v: 'todos', t: todosTxt }, ...opciones];
+  return `<div class="fpills" role="group" aria-label="${esc(c.lbl)}">
+    ${ops.map(o => `<button class="fpill${String(o.v) === actual ? ' on' : ''}"
+      data-do="filtroPill" data-campo="${esc(campo)}" data-arg="${esc(o.v)}"
+      aria-pressed="${String(o.v) === actual}">${esc(o.t)}</button>`).join('')}
+  </div>`;
+}
+
 function buildFilters() {
   const sub = catSel === 'todos' ? todos : todos.filter(p => catsDe(catSel).includes(p.categoria));
   const drops = [];
@@ -1461,7 +1602,7 @@ function buildFilters() {
     const tipos = SUBCATS_ORDEN.filter(c => sub.some(p => p.categoria === c));
     if (tipos.length > 1) {
       if (subSel !== 'todos' && !tipos.includes(subSel)) subSel = 'todos';
-      drops.push(mkDrop('tipo', tipos.map(c => ({ v: c, t: SUBCATS[c] || c }))));
+      drops.push(mkPills('tipo', tipos.map(c => ({ v: c, t: SUBCATS[c] || c }))));
     } else subSel = 'todos';
   } else if (catSel === 'iphone') {
     subSel = 'todos';
@@ -1469,7 +1610,7 @@ function buildFilters() {
       .sort((a, b) => Number(a) - Number(b));
     if (lineas.length > 1) {
       if (modelSel !== 'todos' && !lineas.includes(modelSel)) modelSel = 'todos';
-      drops.push(mkDrop('modelo', lineas.map(l => ({ v: l, t: `Línea ${l}` }))));
+      drops.push(mkPills('modelo', lineas.map(l => ({ v: l, t: `iPhone ${l}` }))));
     } else modelSel = 'todos';
   } else { modelSel = 'todos'; subSel = 'todos'; }
 
@@ -1532,6 +1673,82 @@ function buildSeleccionados() {
 // Desplegable de "Productos" en el menú de arriba. Se arma con el stock del
 // día: si no hay ninguna Línea 13, no aparece. Cada opción reusa el mismo
 // mecanismo que los links del banner, así filtra sin recargar la página.
+/* ─── INGRESANDO ─────────────────────────────────────────────────────
+   Equipos que todavía no están en stock pero ya vienen en camino. Se cargan
+   desde el CRM (Panel → Ingresando) y entran al catálogo como un producto
+   más: con su precio, su ficha, sus cuotas y sus filtros.
+
+   Se arman con la MISMA forma que una fila de `stock_publico` a propósito.
+   La alternativa era una sección aparte con su propia tarjeta, y significaba
+   reescribir el precio, la financiación, la foto y la ficha en un segundo
+   lugar que se iba a desincronizar del primero. Marcándolos con
+   `_ingresando`, todo lo que ya existe los trata igual y lo único distinto es
+   la cinta y el aviso de que no están todavía.
+
+   La entrada se cae SOLA en cuanto ese modelo aparece en el stock. Es la
+   parte que importa: si hubiera que acordarse de borrarla a mano, el día que
+   llega el equipo la web anunciaría como "en camino" algo que ya se vende.
+─────────────────────────────────────────────────────────────────────── */
+function yaHayEnStock(entrada, stock) {
+  const clave = slugify(entrada.modelo || entrada.nombre || '');
+  if (!clave) return false;
+  const condEntrada = condDeEstado(entrada.estado_producto);
+  const stoEntrada = slugify(entrada.storage || '');
+
+  return stock.some(p => {
+    // 1) El MODELO exacto, no "contiene" dentro del nombre: buscando por
+    //    nombre, un iPhone 17 Pro Max en stock haría desaparecer el aviso del
+    //    iPhone 17 Pro, que es otro equipo.
+    const m = slugify(p.modelo || '');
+    const mismoModelo = (m && m === clave) || (!p.modelo && slugify(p.nombre || '') === clave);
+    if (!mismoModelo) return false;
+
+    // 2) La CONDICIÓN. Tener un iPhone 16 usado no es tener el sellado que
+    //    está por llegar: son dos productos distintos, con precios distintos,
+    //    y el aviso del que viene tiene que seguir publicado.
+    if (cond(p) !== condEntrada) return false;
+
+    // 3) La CAPACIDAD, solo si el aviso la declara. Anunciar el de 256 GB no
+    //    queda cubierto por tener el de 128 en la vitrina.
+    if (stoEntrada && slugify(p.storage || '') !== stoEntrada) return false;
+
+    return true;
+  });
+}
+
+function productosIngresando(lista, stock) {
+  return (Array.isArray(lista) ? lista : [])
+    .filter(e => e && e.activo !== false && (e.nombre || e.modelo))
+    .filter(e => !yaHayEnStock(e, stock))
+    .map((e, i) => {
+      const usd = Math.round(Number(e.precio_usd) || 0);
+      return {
+        id: `ing-${i}`,
+        nombre: e.nombre || e.modelo,
+        categoria: e.categoria || 'iphone',
+        modelo: e.modelo || '',
+        storage: e.storage || '',
+        color: e.color || '',
+        // El texto que ve el cliente en la ficha. La cinta y el filtro salen
+        // de `_ingresando`, no de acá.
+        estado_producto: e.estado_producto || 'Nuevo / Sellado',
+        bateria_pct: null,
+        imagen_url: null,
+        combo_items: null,
+        precio_usd: usd,
+        precio_ars: 0,
+        unidades: 0,
+        _qty: 1,
+        _ingresando: true,
+        _ingImagen: e.imagen || null,
+        _ingNota: (e.nota || '').trim(),
+      };
+    })
+    // Sin precio no entra: una ficha con "USD 0" y doce cuotas de cero es
+    // peor que no publicar el equipo.
+    .filter(p => p.precio_usd > 0);
+}
+
 function construirMenuProductos() {
   const cont = document.getElementById('nav-drop-productos');
   if (!cont) return;
@@ -1560,7 +1777,7 @@ function construirMenuProductos() {
       <a class="nav-drop-todo" href="?" data-do="bannerIr" data-arg="?" data-prevent="1">Ver todo →</a>
     </div>
     ${hayIphone ? lineas.map(l =>
-        item(`Línea ${l}`, `?rubro=iphone&linea=${l}`, l === masNueva ? 'Nuevo' : '')).join('') : ''}
+        item(`iPhone ${l}`, `?rubro=iphone&linea=${l}`, l === masNueva ? 'Nuevo' : '')).join('') : ''}
     ${otros.length ? `<div class="nav-drop-sep"></div>` : ''}
     ${otros.map(r => item(`${r.label} →`, `?rubro=${r.id}`)).join('')}`;
 }
@@ -1642,7 +1859,49 @@ function colorToCSS(color) {
   return '#b0b0b5';
 }
 
+// A qué bloque de la grilla va cada producto. Se separa de cond() porque son
+// dos cosas distintas: cond() distingue sellado de nuevo para el filtro y la
+// cinta, y acá los dos van juntos bajo "Nuevos" — al cliente que barre la
+// grilla lo que le importa es nuevo contra usado.
+//
+// `sin` es para lo que NO tiene condición que mostrar: perfumería y todo lo
+// que viene con el estado vacío. Ese bloque va sin título. Ponerle uno
+// significaría rotular como "Usados" cuarenta perfumes sellados solo porque
+// el campo está en blanco.
+const BLOQUES = [
+  ['ingresando', '🚚 Ingresando'],
+  ['nuevos',     '✨ Nuevos y sellados'],
+  ['usados',     '♻️ Usados'],
+  ['sin',        ''],
+];
+
+function bloqueDe(p) {
+  if (p._ingresando) return 'ingresando';
+  if (enPesos(p) || !(p.estado_producto || '').trim()) return 'sin';
+  const c = cond(p);
+  return (c === 'usado') ? 'usados' : 'nuevos';
+}
+
 function sortProducts(a, b) {
+  // 0. El bloque manda sobre todo lo demás: primero lo que está ingresando,
+  //    después lo nuevo y al final lo usado. Sin esto la grilla mezcla un
+  //    iPhone 13 usado de U$D 550 entre los sellados del año.
+  const ia = BLOQUES.findIndex(x => x[0] === bloqueDe(a));
+  const ib = BLOQUES.findIndex(x => x[0] === bloqueDe(b));
+  if (ia !== ib) return ia - ib;
+  // 0.b En perfumería manda la MARCA. El orden alfabético por nombre dejaba
+  //    los cuatro Lattafa desperdigados entre un Armaf y un Tom Ford, y quien
+  //    busca una marca tiene que barrer toda la grilla para juntarlos.
+  //    En perfumería `modelo` es la marca.
+  if (enPesos(a) && enPesos(b)) {
+    const ma = (a.modelo || '').trim(), mb = (b.modelo || '').trim();
+    if (ma !== mb) {
+      if (!ma) return 1;
+      if (!mb) return -1;
+      return ma.localeCompare(mb, 'es');
+    }
+    return String(a.nombre || '').localeCompare(String(b.nombre || ''), 'es');
+  }
   // 1. Newer iPhone model first — only applies when modelo starts with "iPhone"
   const isIphone = s => /^iphone/i.test(s||'');
   const modelNum = s => { const m = (s||'').match(/iPhone\s*(\d+)/i); return m ? parseInt(m[1]) : -1; };
@@ -1674,7 +1933,12 @@ function render() {
 
   const catObj = CAT[catSel] || {};
   document.getElementById('sec-eye').textContent = catSel==='todos' ? 'Productos disponibles' : (catObj.label||catSel);
-  document.getElementById('sec-title').textContent = catSel==='todos' ? 'Todo el stock' : 'Disponibles ahora';
+  // El título va en dos tonos: la última palabra en color. Se parte acá y no
+  // en el CSS porque no hay forma de pintar "la última palabra" con CSS solo.
+  const [tit1, tit2] = catSel === 'todos' ? ['Todo el', 'stock'] : ['Disponibles', 'ahora'];
+  document.getElementById('sec-title').innerHTML = `${esc(tit1)} <span>${esc(tit2)}</span>`;
+  const sub = document.getElementById('sec-sub');
+  if (sub) sub.textContent = 'Stock real, con precios actualizados todos los días.';
   document.getElementById('sec-count').textContent = fil.length ? `${fil.length} producto${fil.length!==1?'s':''}` : '';
 
   const grid = document.getElementById('grid');
@@ -1709,7 +1973,24 @@ function render() {
     ? `${filAgrupado.length} producto${filAgrupado.length !== 1 ? 's' : ''}` : '';
 
   const offer = bestOffer();
+  // Un título antes de cada bloque, ocupando el ancho completo de la grilla.
+  // Solo si hay más de uno: con todo el listado en la misma condición, el
+  // título sobra y encima empuja las tarjetas para abajo sin decir nada.
+  const bloquesPresentes = [...new Set(filAgrupado.map(bloqueDe))];
+  const conTitulos = bloquesPresentes.length > 1;
+  let bloqueActual = null;
+
   grid.innerHTML = filAgrupado.map((p, i) => {
+    let tituloHtml = '';
+    if (conTitulos) {
+      const b = bloqueDe(p);
+      if (b !== bloqueActual) {
+        bloqueActual = b;
+        const lbl = (BLOQUES.find(x => x[0] === b) || [])[1];
+        const n = filAgrupado.filter(x => bloqueDe(x) === b).length;
+        if (lbl) tituloHtml = `<h3 class="grid-sub">${lbl}<span>${n}</span></h3>`;
+      }
+    }
     const u = pUSD(p);
     let modelTitle = identidadProd(p) || 'Producto';
     // El recorte de storage y color solo aplica a los rubros con campos
@@ -1721,8 +2002,8 @@ function render() {
     }
     modelTitle = limpiarTitulo(modelTitle) || (p.nombre || 'Producto');
     const c = cond(p);
-    const badgeCls = c==='sellado'?'badge-seal':c==='nuevo'?'badge-new':'badge-used';
-    const badgeIcon = c==='sellado' ? '🔒 Sellado' : c==='nuevo' ? '✨ Nuevo' : '♻️ Usado';
+    const badgeCls = c==='ingresando'?'badge-ing':c==='sellado'?'badge-seal':c==='nuevo'?'badge-new':'badge-used';
+    const badgeIcon = c==='ingresando' ? '🚚 Ingresando' : c==='sellado' ? '🔒 Sellado' : c==='nuevo' ? '✨ Nuevo' : '♻️ Usado';
     // El badge solo va en los rubros donde DISTINGUE algo. En un iPhone,
     // sellado o usado cambia el precio y la decisión de compra. En perfumería
     // todos los frascos son originales y cerrados: la etiqueta se repetía
@@ -1732,7 +2013,7 @@ function render() {
     // "usado" cuando el campo está vacío, que sirve para agrupar y filtrar
     // pero NO para mostrarlo: afirmaría en público que una funda nueva es
     // usada. Dato faltante ≠ dato en "usado".
-    const badgeHtml = (!enPesos(p) && (p.estado_producto || '').trim())
+    const badgeHtml = (p._ingresando || (!enPesos(p) && (p.estado_producto || '').trim()))
       ? `<span class="card-cond-badge ${badgeCls}">${badgeIcon}</span>` : '';
     const emoji = (CAT[p.categoria]||{emoji:'📦'}).emoji;
     const imgContent = imgHtml(p, modelTitle, emoji, { cls: 'card-img-emoji' });
@@ -1800,7 +2081,7 @@ function render() {
     // El "N tamaños disponibles" se sacó: los botones de abajo ya muestran
     // cuáles son, así que era decir dos veces lo mismo y con menos detalle.
     const varRow = '';
-    return `<div class="card" data-do="abrirProducto" data-arg="${i}">
+    return tituloHtml + `<div class="card" data-do="abrirProducto" data-arg="${i}">
       <div class="card-img">${imgContent}${badgeHtml}</div>
       <div class="card-body">
         ${marcaRow}
@@ -2198,10 +2479,21 @@ function renderPresupuesto(d) {
   const cfg = normalizarPagos(d.pagos_cfg || PAGOS_DEFAULT);
 
   const precioUSD = Number(prod.precio_usd) || 0;
+  // Cuántas unidades del mismo equipo. Los presupuestos viejos no traen el
+  // campo, así que sin él es uno. `precio_usd` ya viene multiplicado: acá la
+  // cantidad se usa solo para mostrarla, nunca para volver a multiplicar.
+  const cant = Math.max(1, Number(prod.cantidad) || 1);
+  const unitUSD = Number(prod.precio_unitario_usd) || (cant > 1 ? Math.round(precioUSD / cant) : precioUSD);
   // `trade_in` guarda todo lo que el cliente entrega. Puede traer el equipo
   // usado, plata, o las dos cosas — por eso se separan y cada una se muestra
   // solo si existe. Un canje con `modelo` vacío es un pago en efectivo puro.
   const equipoTI  = (ti && ti.modelo) ? ti : null;
+  // Puede entregar más de un equipo. Los presupuestos viejos traen un solo
+  // canje suelto y ninguna lista, así que se los envuelve para que el resto
+  // del código trabaje siempre con un array.
+  const equiposTI = (ti && Array.isArray(ti.equipos) && ti.equipos.length)
+    ? ti.equipos
+    : (equipoTI ? [equipoTI] : []);
   const efectivo  = ti && ti.efectivo && Number(ti.efectivo.monto_usd) > 0 ? ti.efectivo : null;
   const canjeUSD  = equipoTI ? (Number(equipoTI.valor_usd) || 0) : 0;
   const efecUSD   = efectivo ? Number(efectivo.monto_usd) : 0;
@@ -2221,33 +2513,38 @@ function renderPresupuesto(d) {
   document.getElementById('m-crumb').innerHTML = `Presupuesto${d.cliente ? ' · <b>' + esc(d.cliente) + '</b>' : ''}`;
   document.getElementById('m-cat').textContent = 'Presupuesto personalizado';
   document.getElementById('m-name').textContent = nombre;
-  document.getElementById('m-detail').textContent = [prod.storage, prod.color, prod.estado_producto].filter(Boolean).join(' · ');
+  document.getElementById('m-detail').textContent =
+    [cant > 1 ? `${cant} unidades` : '', prod.storage, prod.color, prod.estado_producto].filter(Boolean).join(' · ');
   document.getElementById('m-usd').textContent = fUSD(saldoUSD);
 
   // ── canje + cuenta ──
-  const detTI = equipoTI ? [equipoTI.storage, equipoTI.color, equipoTI.estado, equipoTI.bateria_pct ? `🔋 ${equipoTI.bateria_pct}%` : ''].filter(Boolean).join(' · ') : '';
-  // El canje se guarda sin rubro (siempre son equipos), así que se arma un
-  // producto mínimo para que `imgHtml` pueda buscar la foto por convención,
-  // igual que en el listado.
-  const tiProd = equipoTI ? { categoria: 'iphone', modelo: equipoTI.modelo, nombre: equipoTI.modelo, storage: equipoTI.storage, color: equipoTI.color } : null;
-  const canjeHtml = equipoTI ? `
+  const varios = equiposTI.length > 1;
+  const canjeHtml = equiposTI.length ? `
     <div class="pres-canje">
-      <div class="pres-canje-top"><span class="pres-canje-badge">🔄 TU EQUIPO EN PARTE DE PAGO</span></div>
-      <div class="pres-canje-body">
-        <div class="pres-canje-foto">${imgHtml(tiProd, equipoTI.modelo || '', '📱', { lazy: false, ancho: ANCHO_IMG.mini })}</div>
-        <div class="pres-canje-datos">
-          <div class="pres-canje-equipo">${esc(equipoTI.modelo || 'Tu equipo')}</div>
-          ${detTI ? `<div class="pres-canje-detalle">${esc(detTI)}</div>` : ''}
-          <div class="pres-canje-lbl">Queda cotizado en</div>
-          <div class="pres-canje-valor">${fUSD(canjeUSD)}</div>
-        </div>
-      </div>
+      <div class="pres-canje-top"><span class="pres-canje-badge">🔄 ${varios ? 'TUS EQUIPOS EN PARTE DE PAGO' : 'TU EQUIPO EN PARTE DE PAGO'}</span></div>
+      ${equiposTI.map(eq => {
+        const det = [eq.storage, eq.color, eq.estado, eq.bateria_pct ? `🔋 ${eq.bateria_pct}%` : ''].filter(Boolean).join(' · ');
+        // El canje se guarda sin rubro (siempre son equipos), así que se arma
+        // un producto mínimo para que `imgHtml` pueda buscar la foto por
+        // convención, igual que en el listado.
+        const prodEq = { categoria: 'iphone', modelo: eq.modelo, nombre: eq.modelo, storage: eq.storage, color: eq.color };
+        return `<div class="pres-canje-body">
+          <div class="pres-canje-foto">${imgHtml(prodEq, eq.modelo || '', '📱', { lazy: false, ancho: ANCHO_IMG.mini })}</div>
+          <div class="pres-canje-datos">
+            <div class="pres-canje-equipo">${esc(eq.modelo || 'Tu equipo')}</div>
+            ${det ? `<div class="pres-canje-detalle">${esc(det)}</div>` : ''}
+            <div class="pres-canje-lbl">Queda cotizado en</div>
+            <div class="pres-canje-valor">${fUSD(Number(eq.valor_usd) || 0)}</div>
+          </div>
+        </div>`;
+      }).join('')}
+      ${varios ? `<div class="pres-canje-total">Total por tus ${equiposTI.length} equipos <strong>${fUSD(canjeUSD)}</strong></div>` : ''}
     </div>` : '';
 
-  const cuentaHtml = (equipoTI || efectivo) ? `
+  const cuentaHtml = (equiposTI.length || efectivo || cant > 1) ? `
     <div class="pres-cuenta">
-      <div class="pres-cuenta-fila"><span class="lbl">${esc(nombre)}</span><span class="val">${fUSD(precioUSD)}</span></div>
-      ${equipoTI ? `<div class="pres-cuenta-fila resta"><span class="lbl">Tu ${esc(equipoTI.modelo)} en parte de pago</span><span class="val">− ${fUSD(canjeUSD)}</span></div>` : ''}
+      <div class="pres-cuenta-fila"><span class="lbl">${esc(nombre)}${cant > 1 ? ` × ${cant}` : ''}${cant > 1 ? `<br><span style="font-size:12px;opacity:.7">${fUSD(unitUSD)} cada uno</span>` : ''}</span><span class="val">${fUSD(precioUSD)}</span></div>
+      ${equiposTI.map(eq => `<div class="pres-cuenta-fila resta"><span class="lbl">Tu ${esc(eq.modelo)} en parte de pago</span><span class="val">− ${fUSD(Number(eq.valor_usd) || 0)}</span></div>`).join('')}
       ${efectivo ? `<div class="pres-cuenta-fila resta"><span class="lbl">${esc(efectivo.concepto || 'Entrega en efectivo')}</span><span class="val">− ${fUSD(efecUSD)}</span></div>` : ''}
       <div class="pres-cuenta-fila total"><span class="lbl">Saldo a abonar</span><span class="val">${fUSD(saldoUSD)}</span></div>
     </div>` : '';
@@ -2285,23 +2582,7 @@ function renderPresupuesto(d) {
       </div>
     </div>`;
 
-  const cPromo = cuotasDe(cfg.promo, listaARS);
-  const promoHtml = cPromo.length ? `
-    <div class="promo-hero">
-      <div class="promo-hero-top">
-        <span class="promo-hero-badge">⭐ LA MÁS ELEGIDA</span>
-        ${cfg.promo?.vigencia ? `<span class="promo-hero-vig">${esc(cfg.promo.vigencia)}</span>` : ''}
-      </div>
-      <div class="promo-hero-title">${esc(cfg.promo?.titulo || 'Promo bancaria')}</div>
-      <div class="promo-hero-grid">
-        ${cPromo.map(c => `<div class="promo-hero-card">
-          <div class="promo-hero-n">${c.n} cuotas</div>
-          <div class="promo-hero-amount">${fARS(c.mes)}</div>
-          <div class="promo-hero-mes">/mes · total ${fARS(c.total)}</div>
-          ${c.nota ? `<div class="promo-hero-nota">${esc(c.nota)}</div>` : ''}
-        </div>`).join('')}
-      </div>
-    </div>` : '';
+  const promoHtml = promoHeroHtml(cfg, listaARS);
 
   const cOtros = cuotasDe(cfg.otros, listaARS);
   const claseBadge = n => /off/i.test(n) ? 'off' : /sin inter/i.test(n) ? 'cero' : 'mas';
@@ -2413,13 +2694,26 @@ function renderFicha(p) {
 
   // ── Cálculos con config de pagos ──
   const cfg = pagosConfig || PAGOS_DEFAULT;
-  const contadoARS  = Math.round(u * cotiz * (cfg.contado_factor ?? 1));
-  const listaARS    = Math.round(u * cotiz * (cfg.lista_factor   ?? 1.45));
+  // Base de cálculo: en perfumería el precio en pesos manda; en equipos, el
+  // dólar por la cotización del día. Sin esto el encabezado mostraba el precio
+  // cargado y el recuadro de contado uno distinto, sacado del dólar.
+  const baseARS     = enPesos(p) ? a : Math.round(u * cotiz);
+  const contadoARS  = Math.round(baseARS * (cfg.contado_factor ?? 1));
+  const listaARS    = Math.round(baseARS * (cfg.lista_factor   ?? 1.45));
 
   // Banner regalo
   // El regalo (cargador, funda, templado) solo aplica a equipos.
   const regaloHtml = (cfg.regalo && !enPesos(p))
     ? `<div class="regalo-banner">${esc(cfg.regalo)}</div>` : '';
+
+  // Aviso de que el equipo todavía no está. Va ARRIBA de las formas de pago,
+  // no al pie en letra chica: el precio y las cuotas de abajo son reales, y
+  // quien los lee tiene que saber antes que el equipo aún no llegó.
+  const ingresandoHtml = p._ingresando ? `
+    <div class="ing-aviso">
+      <div class="ing-aviso-tit">🚚 Este equipo está en camino</div>
+      <div class="ing-aviso-txt">Todavía no está en el local. El precio y las cuotas son los que van a regir cuando llegue${p._ingNota ? ` · <strong>${esc(p._ingNota)}</strong>` : ''}. Escribinos y te lo reservamos.</div>
+    </div>` : '';
 
   // Efectivo / contado
   // En pesos: una sola tarjeta, sin la referencia al blue (que solo tiene
@@ -2474,23 +2768,7 @@ function renderFicha(p) {
     </div>` : '';
 
   // ── Promo destacada: arriba de las demás y con fondo lleno ──
-  const cuotasPromo = cuotasDe(cfg.promo, listaARS);
-  const promosHtml = cuotasPromo.length ? `
-    <div class="promo-hero">
-      <div class="promo-hero-top">
-        <span class="promo-hero-badge">⭐ LA MÁS ELEGIDA</span>
-        ${cfg.promo?.vigencia ? `<span class="promo-hero-vig">${esc(cfg.promo.vigencia)}</span>` : ''}
-      </div>
-      <div class="promo-hero-title">${esc(cfg.promo?.titulo || 'Promo bancaria')}</div>
-      <div class="promo-hero-grid">
-        ${cuotasPromo.map(c => `<div class="promo-hero-card">
-            <div class="promo-hero-n">${c.n} cuotas</div>
-            <div class="promo-hero-amount">${fARS(c.mes)}</div>
-            <div class="promo-hero-mes">/mes · total ${fARS(c.total)}</div>
-            ${c.nota ? `<div class="promo-hero-nota">${esc(c.nota)}</div>` : ''}
-          </div>`).join('')}
-      </div>
-    </div>` : '';
+  const promosHtml = promoHeroHtml(cfg, listaARS);
 
   // Crypto: solo en equipos. Un perfume de $96.000 no se paga en USDT.
   const cryptoHtml = enPesos(p) ? '' : `
@@ -2541,7 +2819,7 @@ function renderFicha(p) {
     </div>` : '';
 
   document.getElementById('m-pagos').innerHTML =
-    tamHtml + regaloHtml + cashHtml + promosHtml + cuotasHtml + cryptoHtml + addFicha + envioHtml;
+    ingresandoHtml + tamHtml + regaloHtml + cashHtml + promosHtml + cuotasHtml + cryptoHtml + addFicha + envioHtml;
 
   // Ficha técnica + descripción (vacío si el modelo no está en el catálogo)
   document.getElementById('m-ficha').innerHTML = fichaHtml(p);

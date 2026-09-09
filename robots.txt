@@ -1,0 +1,26 @@
+# iPhone Mood — qué puede recorrer un buscador.
+#
+# Se permite todo el catálogo público y se bloquea lo que no tiene sentido
+# indexar: el CRM, las funciones internas y las pantallas privadas.
+
+User-agent: *
+Allow: /
+
+# El CRM y su login: privados, no son contenido.
+Disallow: /login
+Disallow: /crm.html
+
+# Funciones internas. No devuelven páginas para leer.
+Disallow: /api/
+
+# Presupuestos personalizados: llevan el precio que se le dio a UN cliente.
+# Aunque el link es secreto, si alguno se filtra no queremos que quede
+# publicado en Google para siempre.
+Disallow: /*?presupuesto=
+Disallow: /*&presupuesto=
+
+# Seguimiento de reparaciones y turnos: pantallas de uso, no de lectura.
+Disallow: /seguimiento.html
+Disallow: /turnos.html
+
+Sitemap: https://iphonemood.com/sitemap.xml

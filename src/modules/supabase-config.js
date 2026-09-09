@@ -340,6 +340,80 @@ const DB = {
     await supa.storage.from('products').remove([nombre]);
   },
 
+  // ─── Ingresando (equipos en camino, landing pública) ───
+  // Se guarda en configuracion.ingresando, igual que el banner: es contenido
+  // de la web, no inventario. Meterlo en `stock` obligaría a inventarle un
+  // precio y una cantidad a algo que todavía no existe, y ensuciaría todos
+  // los informes de stock y de capital.
+  async leerIngresando() {
+    const { data, error } = await supa.from('configuracion')
+      .select('valor').eq('clave', 'ingresando').maybeSingle();
+    if (error || !data) return [];
+    try { const l = JSON.parse(data.valor); return Array.isArray(l) ? l : []; } catch { return []; }
+  },
+
+  async guardarIngresando(lista) {
+    return await supa.from('configuracion')
+      .upsert({ clave: 'ingresando', valor: JSON.stringify(lista) });
+  },
+
+  async subirImagenIngreso(file) {
+    const limpio = (file.name || 'ingreso').toLowerCase()
+      .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+      .replace(/[^a-z0-9.]+/g, '-').replace(/^-+|-+$/g, '');
+    const nombre = `ingreso-${Date.now()}-${limpio}`;
+    const { error } = await supa.storage.from('products')
+      .upload(nombre, file, { upsert: false, contentType: file.type || undefined });
+    if (error) return { error };
+    return { nombre };
+  },
+
+  // ─── Blog (posicionamiento en Google) ───
+  // El CRM lee la tabla completa porque necesita ver los borradores. La web
+  // pública lee la vista `blog_publico`, que solo deja pasar lo publicado.
+  async listarBlog() {
+    const { data, error } = await supa.from('blog_posts')
+      .select('*')
+      .order('publicado_en', { ascending: false, nullsFirst: true })
+      .order('creado_en', { ascending: false })
+      .limit(300);
+    if (error) { console.error('listarBlog', error); return []; }
+    return data || [];
+  },
+
+  async guardarPost(fila) {
+    if (fila.id) {
+      const { id, ...resto } = fila;
+      return await supa.from('blog_posts').update(resto).eq('id', id).select().maybeSingle();
+    }
+    return await supa.from('blog_posts').insert(fila).select().maybeSingle();
+  },
+
+  async eliminarPost(id) {
+    return await supa.from('blog_posts').delete().eq('id', id);
+  },
+
+  // ¿Hay otro artículo con esta dirección? El slug es la URL pública y es
+  // UNIQUE en la base: conviene avisarlo antes de que falle el guardado.
+  async slugOcupado(slug, idPropio) {
+    const { data } = await supa.from('blog_posts').select('id').eq('slug', slug).limit(2);
+    return (data || []).some(r => r.id !== idPropio);
+  },
+
+  // Las imágenes del blog van al mismo bucket que las de producto, con el
+  // prefijo blog- para poder distinguirlas (y para que borrarlas nunca toque
+  // una foto de catálogo).
+  async subirImagenBlog(file) {
+    const limpio = (file.name || 'nota').toLowerCase()
+      .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+      .replace(/[^a-z0-9.]+/g, '-').replace(/^-+|-+$/g, '');
+    const nombre = `blog-${Date.now()}-${limpio}`;
+    const { error } = await supa.storage.from('products')
+      .upload(nombre, file, { upsert: false, contentType: file.type || undefined });
+    if (error) return { error };
+    return { nombre };
+  },
+
   // ─── Presupuestos con canje ───
   async listarPresupuestos() {
     const { data } = await supa.from('presupuestos').select('*').order('creado_en', { ascending: false }).limit(100);
@@ -350,6 +424,16 @@ const DB = {
   },
   async eliminarPresupuesto(token) {
     await supa.from('presupuestos').delete().eq('token', token);
+  },
+
+  // Borrado en tanda. Va en UNA sola consulta y no en un bucle de borrados
+  // sueltos: con treinta presupuestos marcados serían treinta viajes a la
+  // base, y si alguno falla la mitad queda borrada sin saber cuál.
+  async eliminarPresupuestos(tokens) {
+    if (!tokens || !tokens.length) return { error: null, borrados: 0 };
+    const { data, error } = await supa.from('presupuestos')
+      .delete().in('token', tokens).select('token');
+    return { error, borrados: (data || []).length };
   },
 
   // ─── Financiación con tarjeta (landing pública) ───

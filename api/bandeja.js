@@ -98,6 +98,9 @@ module.exports = async function handler(req, res) {
 
     const text = await upstream.text();
     res.setHeader('Content-Type', 'application/json');
+    // La respuesta cambia según el usuario que la pidió, así que se marca como
+    // no cacheable en vez de heredar el `public` que Vercel pone por defecto.
+    res.setHeader('Cache-Control', 'private, no-store');
     res.status(upstream.status).send(text);
   } catch (e) {
     res.status(502).json({ error: 'proxy error', detail: e.message });

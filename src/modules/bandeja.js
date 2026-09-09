@@ -71,6 +71,7 @@ const Bandeja = {
         #bdj-enviar { background:var(--blue,#007aff); color:#fff; border:none; border-radius:50%; width:44px; height:44px; font-size:20px; cursor:pointer; flex-shrink:0; display:flex; align-items:center; justify-content:center; transition:opacity .15s; }
         #bdj-enviar:disabled { opacity:.35; }
         .bdj-vacio { padding:60px 20px; text-align:center; color:var(--text-secondary); font-size:14px; }
+        .bdj-vacio.bdj-error { color:var(--orange, #ff9500); font-weight:600; line-height:1.5; }
         #bdj-estado { font-size:11.5px; color:var(--text-secondary); flex-shrink:0; }
         .bdj-assign-wrap { position:relative; }
         .bdj-assign-btn { font-size:11px; padding:4px 10px; border-radius:10px; border:1px solid var(--border-strong); background:none; color:var(--text-secondary); cursor:pointer; white-space:nowrap; }
@@ -142,6 +143,12 @@ const Bandeja = {
   destroy() {
     clearInterval(this._timerLista);
     clearInterval(this._timerChat);
+    // Cada adjunto abierto crea un object URL que el navegador retiene hasta
+    // que se lo libera; sin esto una jornada larga con muchos audios iba
+    // acumulando memoria en la pestaña.
+    Object.values(this._mediaCache || {}).forEach(u => URL.revokeObjectURL(u));
+    this._mediaCache = {};
+    this._firmaChat = null;
     this.actual = null;
     this._clickOutside && document.removeEventListener('click', this._clickOutside);
   },
@@ -270,14 +277,48 @@ const Bandeja = {
       headers: { 'Content-Type': 'application/json', 'x-crm-token': token },
       ...opts,
     });
+    // Un 401 (sesión vencida) o un 429 (límite de pedidos) devuelven JSON
+    // válido con forma {error:"..."}. Antes se devolvía ese cuerpo sin mirar
+    // el status, así que el llamador leía `data.conversaciones` como undefined
+    // y pintaba "Sin conversaciones": la bandeja se veía vacía y normal cuando
+    // en realidad no había podido leer nada.
+    if (!r.ok) {
+      const e = new Error('bandeja HTTP ' + r.status);
+      e.status = r.status;
+      e.motivo = r.status === 401 ? 'sesion' : r.status === 429 ? 'limite' : 'servidor';
+      throw e;
+    }
     return r.json();
+  },
+
+  _msgError(e) {
+    if (e?.motivo === 'sesion') return 'Se venció tu sesión. Cerrá y volvé a entrar para ver la bandeja.';
+    if (e?.motivo === 'limite') return 'Demasiados pedidos seguidos. Esperá unos segundos y probá de nuevo.';
+    return 'No se pudo conectar con la bandeja. Reintentando…';
+  },
+
+  // Con la sesión vencida no tiene sentido seguir preguntando cada 5 segundos
+  // con un token muerto: se frena el refresco hasta que la persona vuelva a entrar.
+  _frenarSiSesionVencida(e) {
+    if (e?.motivo !== 'sesion') return;
+    clearInterval(this._timerLista);
+    clearInterval(this._timerChat);
   },
 
   // ── lista conversaciones ─────────────────────────────────────────────────────
   async cargarLista() {
     const qs = this.filtro ? '?q=' + encodeURIComponent(this.filtro) : '';
     let data;
-    try { data = await this._api('/conversaciones' + qs); } catch { return; }
+    try {
+      data = await this._api('/conversaciones' + qs);
+    } catch (e) {
+      const cont = document.getElementById('bdj-lista');
+      const estado = document.getElementById('bdj-estado');
+      if (cont) cont.innerHTML = `<div class="bdj-vacio bdj-error">${this._esc(this._msgError(e))}</div>`;
+      if (estado) estado.textContent = '';
+      this._frenarSiSesionVencida(e);
+      return;
+    }
 
     const cont = document.getElementById('bdj-lista');
     const estado = document.getElementById('bdj-estado');
@@ -347,7 +388,12 @@ const Bandeja = {
     let data;
     try {
       data = await this._api(`/conversacion?platform=${encodeURIComponent(this.actual.platform)}&userId=${encodeURIComponent(this.actual.userId)}`);
-    } catch { return; }
+    } catch (e) {
+      msgs.innerHTML = `<div class="bdj-vacio bdj-error">${this._esc(this._msgError(e))}</div>`;
+      this._firmaChat = null;
+      this._frenarSiSesionVencida(e);
+      return;
+    }
 
     const nom = document.getElementById('bdj-chatnom');
     const btnBot = document.getElementById('bdj-bot-btn');
@@ -461,14 +507,23 @@ const Bandeja = {
       });
       if (r.ok) { ta.value = ''; ta.style.height = '44px'; this.cargarChat(); this.cargarLista(); }
       else toast('No se pudo enviar: ' + (r.error || ''));
-    } catch { toast('Error de conexión'); }
+    } catch (e) {
+      toast(e?.motivo ? this._msgError(e) : 'Error de conexión');
+      this._frenarSiSesionVencida(e);
+    }
     btn.disabled = false;
     ta?.focus();
   },
 
   async retomarBot() {
     if (!this.actual) return;
-    await this._api('/retomar-bot', { method: 'POST', body: JSON.stringify(this.actual) });
+    try {
+      await this._api('/retomar-bot', { method: 'POST', body: JSON.stringify(this.actual) });
+    } catch (e) {
+      toast(this._msgError(e));
+      this._frenarSiSesionVencida(e);
+      return;
+    }
     this.cargarChat();
     this.cargarLista();
   },

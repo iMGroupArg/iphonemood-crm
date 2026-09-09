@@ -994,16 +994,39 @@ const Ventas = {
     { key:'otro',        label:'📦 Otro' },
   ],
 
-  inventoryForm() {
+  _CONDICIONES: [
+    { k: 'todos', l: 'Todos' },
+    { k: 'nuevo', l: '✨ Nuevo' },
+    { k: 'usado', l: '🔄 Usado' },
+  ],
+
+  // Las dos filas de botones se dibujan juntas y en su propio contenedor.
+  // Antes la fila de Nuevo/Usado se dibujaba una sola vez y después se
+  // parcheaban a mano los estilos de la fila de rubros nada más: el filtro de
+  // condición sí filtraba, pero el botón nunca se pintaba de azul, así que
+  // parecía que no hacía nada. Redibujando el bloque entero no hay dos formas
+  // de pintar lo mismo, y no se puede volver a desincronizar.
+  _invChipsHTML() {
+    const pill = (activo, chico) =>
+      `padding:${chico ? '4px 10px' : '5px 12px'};border-radius:20px;` +
+      `border:1px solid ${activo ? 'var(--blue)' : 'var(--border)'};` +
+      `background:${activo ? 'var(--blue)' : 'var(--bg-secondary)'};` +
+      `color:${activo ? '#fff' : 'var(--text)'};font-size:${chico ? '11px' : '12px'};` +
+      `cursor:pointer;white-space:nowrap;flex-shrink:0`;
     return `
       <div style="display:flex;gap:6px;margin-bottom:6px;overflow-x:auto;-webkit-overflow-scrolling:touch;padding-bottom:2px;scrollbar-width:none">
         ${this._INV_CHIPS.map(c => `<button onclick="Ventas._invCatFiltro='${c.key}';Ventas._renderInvLista()"
-          style="padding:5px 12px;border-radius:20px;border:1px solid ${this._invCatFiltro===c.key?'var(--blue)':'var(--border)'};background:${this._invCatFiltro===c.key?'var(--blue)':'var(--bg-secondary)'};color:${this._invCatFiltro===c.key?'#fff':'var(--text)'};font-size:12px;cursor:pointer;white-space:nowrap;flex-shrink:0">${c.label}</button>`).join('')}
+          style="${pill(this._invCatFiltro === c.key, false)}">${c.label}</button>`).join('')}
       </div>
       <div style="display:flex;gap:6px;margin-bottom:8px">
-        ${[{k:'todos',l:'Todos'},{k:'nuevo',l:'✨ Nuevo'},{k:'usado',l:'🔄 Usado'}].map(c=>`<button onclick="Ventas._invCondicion='${c.k}';Ventas._renderInvLista()"
-          style="padding:4px 10px;border-radius:20px;border:1px solid ${this._invCondicion===c.k?'var(--blue)':'var(--border)'};background:${this._invCondicion===c.k?'var(--blue)':'var(--bg-secondary)'};color:${this._invCondicion===c.k?'#fff':'var(--text)'};font-size:11px;cursor:pointer;white-space:nowrap">${c.l}</button>`).join('')}
-      </div>
+        ${this._CONDICIONES.map(c => `<button onclick="Ventas._invCondicion='${c.k}';Ventas._renderInvLista()"
+          style="${pill(this._invCondicion === c.k, true)}">${c.l}</button>`).join('')}
+      </div>`;
+  },
+
+  inventoryForm() {
+    return `
+      <div id="inv-chips">${this._invChipsHTML()}</div>
       <input id="inv-buscar" type="search" placeholder="Buscar producto..." value="${this._invFiltro || ''}"
         oninput="Ventas._invFiltro=this.value;Ventas._renderInvLista()"
         style="width:100%;padding:9px 12px;border:1px solid var(--border-strong);border-radius:var(--radius);background:var(--bg);color:var(--text);font-size:14px;box-sizing:border-box;margin-bottom:8px;font-family:var(--font)">
@@ -1011,19 +1034,12 @@ const Ventas = {
     `;
   },
   _renderInvLista() {
+    // El buscador queda afuera del redibujado a propósito: si se rehiciera
+    // también, el cursor saltaría al final con cada letra que se escribe.
+    const chips = document.getElementById('inv-chips');
+    if (chips) chips.innerHTML = this._invChipsHTML();
     const el = document.getElementById('inv-lista');
     if (el) el.innerHTML = this._invListaHTML();
-    // Re-render chips to update active state
-    const form = document.getElementById('vf-item-form');
-    if (form) {
-      const chipBtns = form.querySelectorAll('button[onclick*="_invCatFiltro"]');
-      chipBtns.forEach((btn, i) => {
-        const active = this._INV_CHIPS[i] && this._invCatFiltro === this._INV_CHIPS[i].key;
-        btn.style.borderColor = active ? 'var(--blue)' : 'var(--border)';
-        btn.style.background = active ? 'var(--blue)' : 'var(--bg-secondary)';
-        btn.style.color = active ? '#fff' : 'var(--text)';
-      });
-    }
   },
   _invListaHTML() {
     const q = (this._invFiltro || '').toLowerCase().trim();

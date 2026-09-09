@@ -25,6 +25,7 @@ const Panel = {
       ['usuarios', 'ti ti-lock', 'Usuarios y accesos'],
       ['landing', 'ti ti-world', 'Landing pública'],
       ['banner', 'ti ti-photo', 'Banner de ofertas'],
+      ['ingresando', 'ti ti-truck-delivery', 'Ingresando'],
       ['financiacion', 'ti ti-percentage', 'Financiación'],
       ['negocio', 'ti ti-building-store', 'Datos del negocio'],
       ['marca', 'ti ti-palette', 'Logo y tipografía'],
@@ -48,11 +49,210 @@ const Panel = {
     else if (this.activeTab === 'landing') { body.innerHTML = this.landingView(); this.cargarLanding(); }
     else if (this.activeTab === 'financiacion') { body.innerHTML = this.financiacionView(); this.cargarFinanciacion(); }
     else if (this.activeTab === 'banner') { body.innerHTML = this.bannerView(); this.cargarBanner(); }
+    else if (this.activeTab === 'ingresando') { body.innerHTML = this.ingresandoView(); this.cargarIngresando(); }
     else if (this.activeTab === 'exportar') body.innerHTML = this.exportarView();
     else body.innerHTML = this.negocioView();
   },
 
-/* ─── BANNER DE OFERTAS ─────────────────────────────────────────
+/* ─── INGRESANDO ────────────────────────────────────────────────
+     Equipos que todavía no están en stock pero ya vienen. Salen en su propia
+     sección de la web, sin precio y con un botón para reservar.
+
+     Cada entrada desaparece SOLA de la web en cuanto ese modelo aparece en el
+     stock. Por eso el campo Modelo importa más que el nombre: es el que se
+     compara. Si se dejara vacío, el aviso quedaría publicado para siempre y el
+     día que llega el equipo la web estaría anunciando como "en camino" algo
+     que ya se está vendiendo.
+  ─────────────────────────────────────────────────────────────── */
+  RUBROS_INGRESO: [['iphone','iPhone'],['mac','Mac'],['ipad','iPad'],['watch','Watch'],
+                   ['android','Android'],['audio','Audio'],['accesorio','Accesorio'],['otro','Otro']],
+
+  ingresandoView() {
+    return `
+      <h3 style="font-size:13px;font-weight:600;color:var(--text-secondary);text-transform:uppercase;letter-spacing:.4px;margin-bottom:12px;border-bottom:1px solid var(--border);padding-bottom:8px">Equipos ingresando — landing pública</h3>
+      <div style="background:var(--blue-light);border-radius:8px;padding:10px 12px;margin-bottom:14px;font-size:11.5px;color:var(--blue);line-height:1.5">
+        <i class="ti ti-info-circle"></i> Aparecen en el catálogo como un producto más: con su <b>precio, su ficha y sus cuotas</b>,
+        pero con la cinta <b>“Ingresando”</b> y un aviso de que todavía no llegó. El cliente los encuentra filtrando por Estado → Ingresando.
+        <b>Cada uno se saca solo</b> cuando cargás ese modelo en el stock, así que no hay que acordarse de borrarlo.
+        Para que eso funcione, el campo <b>Modelo</b> tiene que escribirse igual que en el stock (por ejemplo <i>iPhone 17 Pro</i>).
+        Se saca solo cuando coincide <b>modelo + estado</b> (y la capacidad, si la cargaste): tener el mismo modelo usado
+        <b>no</b> tapa el aviso del sellado que viene.
+        Sin precio no se publica.
+      </div>
+      <div id="ing-body"></div>`;
+  },
+
+  async cargarIngresando() {
+    this._ingresando = await DB.leerIngresando();
+    this.renderIngresando();
+  },
+
+  _ingImgUrl(archivo) {
+    const { SUPABASE_URL } = window.__APP_CONFIG__;
+    return `${SUPABASE_URL}/storage/v1/render/image/public/products/${encodeURIComponent(archivo)}?width=240&resize=contain&quality=70`;
+  },
+
+  renderIngresando() {
+    const cont = document.getElementById('ing-body');
+    if (!cont) return;
+    const lista = this._ingresando || [];
+    const inp = 'width:100%;font-size:12px;padding:6px 9px;border:1px solid var(--border-strong);border-radius:7px';
+    const lbl = 'font-size:10.5px;color:var(--text-secondary);font-weight:600;display:block;margin-bottom:3px';
+
+    // Aviso en vivo: si ese mismo equipo ya está en el stock, en la web no se
+    // muestra. Tiene que coincidir modelo, condición Y capacidad (si el aviso
+    // la declara). Comparar solo el modelo estaba mal: tener un iPhone 16
+    // usado tapaba el aviso del sellado que está por llegar, que es otro
+    // producto y con otro precio.
+    const norm = v => String(v || '').toLowerCase().normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]+/g, '');
+    const condDe = est => {
+      const t = String(est || '').toLowerCase();
+      if (t.includes('sellado') || t.includes('sealed')) return 'sellado';
+      if (t.includes('nuevo')) return 'nuevo';
+      return 'usado';
+    };
+    const yaEnStock = (e) => {
+      const clave = norm(e.modelo || e.nombre);
+      if (!clave) return false;
+      const c = condDe(e.estado_producto || 'Nuevo / Sellado');
+      const sto = norm(e.storage);
+      return (State.stock || []).some(p => {
+        if ((p.estadoInventario || 'disponible') !== 'disponible' || State.getStock(p) <= 0) return false;
+        const mismoModelo = norm(p.modelo) === clave || (!p.modelo && norm(p.nombre) === clave);
+        if (!mismoModelo) return false;
+        if (condDe(p.estadoProducto) !== c) return false;
+        if (sto && norm(p.storage) !== sto) return false;
+        return true;
+      });
+    };
+
+    const filas = lista.map((e, i) => {
+      const oculto = yaEnStock(e);
+      return `
+      <div class="card" style="margin-bottom:10px;display:flex;gap:12px;align-items:flex-start;${e.activo === false ? 'opacity:.5' : ''}">
+        <div style="flex-shrink:0;width:110px">
+          ${e.imagen
+            ? `<img src="${this._ingImgUrl(e.imagen)}" alt="" style="width:100%;object-fit:contain;border-radius:8px;background:var(--bg-secondary);display:block">
+               <div style="font-size:10px;text-align:center;margin-top:3px"><a href="#" onclick="Panel.quitarFotoIngreso(${i});return false" style="color:var(--red)">quitar foto</a></div>`
+            : `<label class="btn" style="width:100%;justify-content:center;cursor:pointer;font-size:10.5px;padding:5px">
+                 <input type="file" accept="image/*" style="display:none" onchange="Panel.subirFotoIngreso(this,${i})">
+                 + Foto
+               </label>
+               <div style="font-size:9.5px;color:var(--text-secondary);text-align:center;margin-top:4px;line-height:1.3">Sin foto usa la del bucket por nombre</div>`}
+        </div>
+        <div style="flex:1;min-width:0">
+          ${oculto ? `<div style="background:var(--green-light);color:var(--green);border-radius:7px;padding:6px 9px;margin-bottom:8px;font-size:11px;font-weight:600">
+            ✓ Ya tenés este equipo en stock (mismo modelo, estado${e.storage ? ' y capacidad' : ''}) — en la web no se muestra.</div>` : ''}
+          <div style="display:grid;grid-template-columns:1.4fr 1fr;gap:8px;margin-bottom:8px">
+            <div><label style="${lbl}">Nombre que se ve *</label>
+              <input type="text" value="${State.esc(e.nombre || '')}" placeholder="ej: iPhone 17 Pro 256GB"
+                onchange="Panel._ingresando[${i}].nombre=this.value.trim();Panel.renderIngresando()" style="${inp}"></div>
+            <div><label style="${lbl}">Modelo (igual que en stock) *</label>
+              <input type="text" value="${State.esc(e.modelo || '')}" placeholder="iPhone 17 Pro"
+                onchange="Panel._ingresando[${i}].modelo=this.value.trim();Panel.renderIngresando()" style="${inp}"></div>
+          </div>
+          <div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:8px;margin-bottom:8px">
+            <div><label style="${lbl}">Precio U$D *</label>
+              <input type="number" min="0" value="${e.precio_usd || ''}" placeholder="1360"
+                onchange="Panel._ingresando[${i}].precio_usd=parseFloat(this.value)||0;Panel.renderIngresando()"
+                style="${inp};font-weight:700"></div>
+            <div><label style="${lbl}">Capacidad</label>
+              <input type="text" value="${State.esc(e.storage || '')}" placeholder="256GB"
+                onchange="Panel._ingresando[${i}].storage=this.value.trim();Panel.renderIngresando()" style="${inp}"></div>
+            <div><label style="${lbl}">Color</label>
+              <input type="text" value="${State.esc(e.color || '')}" placeholder="Titanio"
+                onchange="Panel._ingresando[${i}].color=this.value.trim()" style="${inp}"></div>
+            <div><label style="${lbl}">Rubro</label>
+              <select onchange="Panel._ingresando[${i}].categoria=this.value" style="${inp}">
+                ${this.RUBROS_INGRESO.map(r => `<option value="${r[0]}"${(e.categoria || 'iphone') === r[0] ? ' selected' : ''}>${r[1]}</option>`).join('')}
+              </select></div>
+          </div>
+          <div style="display:grid;grid-template-columns:1fr 1.4fr;gap:8px;margin-bottom:8px">
+            <div><label style="${lbl}">Estado</label>
+              <select onchange="Panel._ingresando[${i}].estado_producto=this.value;Panel.renderIngresando()" style="${inp}">
+                ${['Nuevo / Sellado','Excelente','Muy bueno','Bueno','Con detalles'].map(x =>
+                  `<option${(e.estado_producto || 'Nuevo / Sellado') === x ? ' selected' : ''}>${x}</option>`).join('')}
+              </select></div>
+            <div><label style="${lbl}">Aclaración (opcional)</label>
+              <input type="text" value="${State.esc(e.nota || '')}" placeholder="Llega esta semana"
+                onchange="Panel._ingresando[${i}].nota=this.value.trim()" style="${inp}"></div>
+          </div>
+          ${!(Number(e.precio_usd) > 0) ? `<div style="background:var(--amber-light);color:var(--amber);border-radius:7px;padding:6px 9px;margin-bottom:8px;font-size:11px;font-weight:600">
+            Sin precio en dólares este equipo NO se publica.</div>` : ''}
+          <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+            <label style="display:flex;align-items:center;gap:5px;font-size:11.5px;cursor:pointer">
+              <input type="checkbox" ${e.activo !== false ? 'checked' : ''}
+                onchange="Panel._ingresando[${i}].activo=this.checked;Panel.renderIngresando()"> Visible
+            </label>
+            <button class="btn" style="font-size:11px;padding:4px 9px" onclick="Panel.moverIngreso(${i},-1)" ${i === 0 ? 'disabled' : ''}>↑</button>
+            <button class="btn" style="font-size:11px;padding:4px 9px" onclick="Panel.moverIngreso(${i},1)" ${i === lista.length - 1 ? 'disabled' : ''}>↓</button>
+            <button class="btn" style="font-size:11px;padding:4px 9px;color:var(--red);margin-left:auto" onclick="Panel.quitarIngreso(${i})">Quitar</button>
+          </div>
+        </div>
+      </div>`;
+    }).join('');
+
+    cont.innerHTML = `
+      ${filas || `<div style="text-align:center;padding:30px;color:var(--text-secondary);font-size:13px">Todavía no cargaste ningún equipo en camino.</div>`}
+      <button class="btn" style="width:100%;justify-content:center;margin-bottom:10px" onclick="Panel.agregarIngreso()">+ Agregar equipo</button>
+      <button class="btn btn-primary" style="width:100%;justify-content:center" onclick="Panel.guardarIngresando()">✓ Guardar</button>`;
+  },
+
+  agregarIngreso() {
+    this._ingresando = this._ingresando || [];
+    this._ingresando.push({ nombre: '', modelo: '', storage: '', color: '', nota: '',
+                           categoria: 'iphone', estado_producto: 'Nuevo / Sellado',
+                           precio_usd: 0, imagen: null, activo: true });
+    this.renderIngresando();
+  },
+
+  quitarIngreso(i) {
+    if (!confirm('¿Quitar este equipo de la lista?')) return;
+    this._ingresando.splice(i, 1);
+    this.renderIngresando();
+  },
+
+  moverIngreso(i, d) {
+    const j = i + d;
+    if (j < 0 || j >= this._ingresando.length) return;
+    [this._ingresando[i], this._ingresando[j]] = [this._ingresando[j], this._ingresando[i]];
+    this.renderIngresando();
+  },
+
+  async subirFotoIngreso(input, i) {
+    const file = input.files?.[0];
+    if (!file) return;
+    if (file.size > 4 * 1024 * 1024) { toast('La imagen pesa más de 4 MB. Exportala más liviana.'); input.value = ''; return; }
+    toast('Subiendo imagen…');
+    const { nombre, error } = await DB.subirImagenIngreso(file);
+    if (error) { toast('No se pudo subir la imagen.'); console.error(error); return; }
+    this._ingresando[i].imagen = nombre;
+    this.renderIngresando();
+    toast('Imagen cargada. Acordate de guardar.');
+  },
+
+  quitarFotoIngreso(i) {
+    this._ingresando[i].imagen = null;
+    this.renderIngresando();
+  },
+
+  async guardarIngresando() {
+    const lista = (this._ingresando || []).filter(e => (e.nombre || '').trim());
+    const sinPrecio = lista.filter(e => !(Number(e.precio_usd) > 0));
+    if (sinPrecio.length && !confirm(
+      `${sinPrecio.length} equipo(s) no tienen precio en dólares. Esos NO se van a publicar. ¿Guardar igual?`)) return;
+    const sinModelo = lista.filter(e => !(e.modelo || '').trim());
+    if (sinModelo.length && !confirm(
+      `${sinModelo.length} equipo(s) no tienen Modelo cargado. Sin eso NO van a desaparecer solos cuando entre el stock y vas a tener que borrarlos a mano. ¿Guardar igual?`)) return;
+    const { error } = await DB.guardarIngresando(lista);
+    if (error) { toast('No se pudo guardar.'); console.error(error); return; }
+    this._ingresando = lista;
+    this.renderIngresando();
+    toast('Guardado. Ya se ve en la web.');
+  },
+
+  /* ─── BANNER DE OFERTAS ─────────────────────────────────────────
      Carrusel de imágenes arriba de la landing. Cada una puede llevar a algún
      lado: a un filtro del catálogo (?linea=17), a una ficha (?p=…) o a un
      link externo. Se guarda en configuracion.banner.

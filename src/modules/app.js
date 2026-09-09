@@ -17,6 +17,7 @@ import './cuentacorriente.js';
 import './adelantos.js';
 import './reportes.js';
 import './presupuestos.js';
+import './blog.js';
 import Bandeja from './bandeja.js';
 
 const App = {
@@ -38,6 +39,7 @@ const App = {
     bandeja: { title: 'Bandeja WhatsApp', module: Bandeja },
     presupuestos: { title: 'Presupuestos', module: Presupuestos },
     reportes: { title: 'Reportes', module: Reportes },
+    blog: { title: 'Blog', module: Blog },
     panel: { title: 'Panel de control', module: Panel },
   },
 

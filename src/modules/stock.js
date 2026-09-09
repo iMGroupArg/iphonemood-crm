@@ -21,6 +21,22 @@ const Stock = {
   // productos distintos — esos tres campos no le aplican. Solo necesita
   // nombre libre y precio, que es lo que da `CATS_NOMBRE_LIBRE`.
   CATS_PERFUME: ['perfumeria','decant'],
+  // Rubros cuyo precio se carga y se publica EN PESOS, no en dólares. Mismo
+  // nombre que `RUBROS_EN_PESOS` en precios.js a propósito: la landing muestra
+  // `precio_ars` tal cual para estos, así que multiplicarlo por el blue del día
+  // hacía que los perfumes se encarecieran solos cuando se movía el dólar.
+  RUBROS_EN_PESOS: ['perfumeria','decant','combo'],
+  esPrecioEnPesos(cat) { return this.RUBROS_EN_PESOS.includes(cat); },
+
+  // Acepta "85800", "85.800", "$ 85.800" y "85.800,50".
+  parseARS(v) {
+    let t = String(v ?? '').replace(/[^\d.,-]/g, '').trim();
+    if (!t) return 0;
+    if (t.includes(',')) t = t.replace(/\./g, '').replace(',', '.');
+    else if (/\.\d{3}(\D|$)/.test(t)) t = t.replace(/\./g, '');
+    const n = parseFloat(t);
+    return isFinite(n) && n > 0 ? n : 0;
+  },
   esNombreLibre(cat) { return this.CATS_NOMBRE_LIBRE.includes(cat); },
   esPerfume(cat) { return this.CATS_PERFUME.includes(cat); },
   // Agrupación de rubros para las pestañas grandes del panel
@@ -31,8 +47,11 @@ const Stock = {
     gaming: { label: 'Gaming', icon: 'ti-device-gamepad-2', cats: ['gaming'] },
     taller: { label: 'Taller', icon: 'ti-tool', cats: ['herramienta','repuesto'] },
   },
-  ESTADO_INV_LABEL: { disponible:'Disponible', vendido:'Vendido', reservado:'Reservado', en_reparacion:'En reparación' },
-  ESTADO_INV_CLASS: { disponible:'b-green', vendido:'b-gray', reservado:'b-amber', en_reparacion:'b-purple' },
+  // 'eliminado' lo escribe ventas.js (línea ~2685) cuando se anula una venta
+  // con trade-in: el equipo que había entrado en canje se da de baja. Faltaba
+  // acá, así que la columna Estado mostraba literalmente "undefined".
+  ESTADO_INV_LABEL: { disponible:'Disponible', vendido:'Vendido', reservado:'Reservado', en_reparacion:'En reparación', eliminado:'Dado de baja' },
+  ESTADO_INV_CLASS: { disponible:'b-green', vendido:'b-gray', reservado:'b-amber', en_reparacion:'b-purple', eliminado:'b-red' },
   TIPO_MOV_LABEL: { alta:'Alta', baja:'Eliminado', baja_venta:'Baja por venta', ajuste_cantidad:'Ajuste de cantidad', imei_agregado:'IMEI agregado', imei_quitado:'IMEI quitado', edicion:'Edición', precio:'Cambio de precio', trade_in:'Trade-In Recibido' },
   TIPO_MOV_CLASS: { alta:'b-green', baja:'b-red', baja_venta:'b-red', ajuste_cantidad:'b-amber', imei_agregado:'b-blue', imei_quitado:'b-gray', edicion:'b-purple', precio:'b-amber', trade_in:'b-green' },
   pendingImeis: [],
@@ -70,6 +89,58 @@ const Stock = {
     const out = {};
     cats.forEach(c => { const m = this.modelosParaCat(c); if (m.length) out[c] = m; });
     return out;
+  },
+
+  // ── ORDEN DE LA TABLA ────────────────────────────────────────────
+  // El stock venía en el orden que lo devuelve la base, o sea mezclado: tres
+  // iPhone 16 Pro Max, un 14, un 16, un 14 Pro Max… Se ordena solo, sin que el
+  // usuario tenga que elegir nada: primero por rubro (en el orden en que están
+  // las solapas), después por modelo del más nuevo al más viejo, y dentro del
+  // mismo modelo por capacidad y color.
+
+  // Posición del rubro dentro del grupo, para que iPhone vaya antes que iPad.
+  _rankCat(cat) {
+    const cats = this.GRUPOS[this.currentGroup]?.cats || [];
+    const i = cats.indexOf(cat);
+    return i >= 0 ? i : cats.length;
+  },
+
+  // Posición del modelo. MODELOS_POR_CAT está del más viejo al más nuevo, así
+  // que se invierte: el iPhone 17 Pro Max primero y el 11 último. Un modelo que
+  // no esté en el catálogo va al final del rubro, no mezclado en el medio.
+  _rankModelo(p) {
+    const lista = this.MODELOS_POR_CAT[p.cat] || [];
+    if (!lista.length) return 0;
+    const i = lista.findIndex(m => m.toLowerCase() === String(p.modelo || '').toLowerCase());
+    return i >= 0 ? (lista.length - 1 - i) : lista.length;
+  },
+
+  // "128GB" → 128, "1TB" → 1024. Para ordenar capacidades de menor a mayor.
+  _rankStorage(storage) {
+    const m = String(storage || '').match(/(\d+(?:[.,]\d+)?)\s*(GB|TB)/i);
+    if (!m) return 0;
+    const n = parseFloat(m[1].replace(',', '.'));
+    return m[2].toUpperCase() === 'TB' ? n * 1024 : n;
+  },
+
+  ordenarProductos(rows) {
+    const txt = (a, b) => String(a || '').localeCompare(String(b || ''), 'es', { numeric: true });
+    return [...rows].sort((a, b) => {
+      const porCat = this._rankCat(a.cat) - this._rankCat(b.cat);
+      if (porCat) return porCat;
+
+      // En perfumería, accesorios y demás no hay catálogo de modelos: ahí lo
+      // que agrupa es la marca (y el nombre, que es la identidad del producto).
+      if (this.esNombreLibre(a.cat)) {
+        return txt(a.modelo, b.modelo) || txt(a.nombre, b.nombre);
+      }
+
+      const porModelo = this._rankModelo(a) - this._rankModelo(b);
+      if (porModelo) return porModelo;
+      const porStorage = this._rankStorage(a.storage) - this._rankStorage(b.storage);
+      if (porStorage) return porStorage;
+      return txt(a.color, b.color) || txt(a.nombre, b.nombre);
+    });
   },
 
   // ¿De este producto HAY? Cuenta lo disponible, reservado y en reparación con
@@ -385,7 +456,11 @@ const Stock = {
 
   renderEstadoTabs() {
     const grupo = this.productosDelGrupo(this.currentGroup);
+    // 'eliminado' va al final y SOLO si hay alguno: sin esto esos productos no
+    // se podían aislar, y el total no cerraba (86 ≠ 38 disponibles + 44 vendidos,
+    // los 4 que faltaban eran justamente estos).
     const estados = ['todos', 'disponible', 'reservado', 'en_reparacion', 'vendido'];
+    if (grupo.some(p => p.estadoInventario === 'eliminado')) estados.push('eliminado');
     document.getElementById('stock-estado-tabs').innerHTML = estados.map(e => {
       const count = e === 'todos' ? grupo.length : grupo.filter(p => (p.estadoInventario||'disponible') === e).length;
       const label = e === 'todos' ? 'Todos' : this.ESTADO_INV_LABEL[e];
@@ -539,8 +614,20 @@ const Stock = {
   abrirPrecioLote() {
     const sel = this._seleccionados();
     if (!sel.length) return;
-    // Si todos tienen el mismo precio, lo proponemos como valor inicial
-    const precios = [...new Set(sel.map(p => p.cotiz ? +(p.precioARS / p.cotiz).toFixed(2) : 0))];
+    // La edición en lote respeta la moneda del rubro, igual que el formulario:
+    // si TODO lo seleccionado se vende en pesos (perfumería, decants, combos),
+    // el precio se pide y se guarda en pesos. Si no, en dólares como siempre.
+    // Con una selección mezclada no hay moneda correcta: se avisa y se corta.
+    const enPesos = sel.filter(p => this.esPrecioEnPesos(p.cat)).length;
+    if (enPesos > 0 && enPesos < sel.length) {
+      toast('Elegí productos de un solo tipo: los perfumes se cotizan en pesos y el resto en dólares.');
+      return;
+    }
+    this._loteEnPesos = enPesos === sel.length;
+    const moneda = this._loteEnPesos ? 'ARS' : 'USD';
+    const precios = [...new Set(sel.map(p => this._loteEnPesos
+      ? Math.round(p.precioARS || 0)
+      : (p.cotiz ? +(p.precioARS / p.cotiz).toFixed(2) : 0)))];
     const sugerido = precios.length === 1 ? precios[0] : '';
     const costoMax = Math.max(...sel.map(p => p.costoUSD || 0));
     const host = document.getElementById('stock-modal-host') || document.body;
@@ -554,8 +641,8 @@ const Stock = {
           <div style="font-size:11px;color:var(--text-secondary)">Costo más alto de la selección: USD ${costoMax}</div>
         </div>
         <div style="padding:18px">
-          <label style="font-size:11px;color:var(--text-secondary);display:block;margin-bottom:4px">Nuevo precio de venta (USD)</label>
-          <input type="number" id="pl-precio" value="${sugerido}" min="0" step="0.01" placeholder="0"
+          <label style="font-size:11px;color:var(--text-secondary);display:block;margin-bottom:4px">Nuevo precio de venta (${moneda})</label>
+          <input type="text" inputmode="decimal" id="pl-precio" value="${sugerido}" placeholder="0"
             oninput="Stock._previewPrecioLote()"
             style="width:100%;font-size:17px;font-weight:700;padding:10px 12px;background:var(--bg-secondary);border:1px solid var(--border-strong);border-radius:8px;color:var(--text)">
           <div id="pl-preview" style="font-size:11.5px;color:var(--text-secondary);margin-top:8px;min-height:32px"></div>
@@ -574,9 +661,26 @@ const Stock = {
   _previewPrecioLote() {
     const el = document.getElementById('pl-preview');
     if (!el) return;
-    const usd = parseFloat(document.getElementById('pl-precio')?.value) || 0;
     const sel = this._seleccionados();
-    if (!usd) { el.innerHTML = 'Ingresá el precio que querés dejar en los productos elegidos.'; return; }
+    const valor = this.parseARS(document.getElementById('pl-precio')?.value);
+    if (!valor) { el.innerHTML = 'Ingresá el precio que querés dejar en los productos elegidos.'; return; }
+
+    if (this._loteEnPesos) {
+      // En pesos el precio se guarda tal cual; el margen se mide contra el
+      // costo de cada producto pasado a pesos por SU propia cotización.
+      const margenes = sel.map(p => {
+        const costoARS = (p.costoUSD || 0) * (p.cotiz || State.refBlue);
+        return costoARS > 0 ? Math.round(((valor - costoARS) / costoARS) * 100) : 0;
+      });
+      const minP = Math.min(...margenes), maxP = Math.max(...margenes);
+      const bajoP = margenes.some(m => m < 0);
+      el.innerHTML = `Quedan a <b>${State.fmtARS(valor)}</b>, tal cual, sin convertir por el dólar.<br>
+        Margen resultante: <b style="color:${bajoP?'var(--red)':'var(--green)'}">${minP===maxP ? (minP>=0?'+':'')+minP+'%' : `${minP}% a ${maxP}%`}</b>
+        ${bajoP ? ' <span style="color:var(--red)">— alguno queda por debajo del costo</span>' : ''}`;
+      return;
+    }
+
+    const usd = valor;
     const margenes = sel.map(p => p.costoUSD > 0 ? Math.round(((usd - p.costoUSD) / p.costoUSD) * 100) : 0);
     const min = Math.min(...margenes), max = Math.max(...margenes);
     const bajo = margenes.some(m => m < 0);
@@ -593,8 +697,9 @@ const Stock = {
   },
 
   async guardarPrecioLote() {
-    const usd = parseFloat(document.getElementById('pl-precio')?.value);
-    if (!(usd >= 0)) { toast('Ingresá un precio válido.'); return; }
+    const valor = this.parseARS(document.getElementById('pl-precio')?.value);
+    if (!(valor > 0)) { toast('Ingresá un precio válido.'); return; }
+    const usd = valor;
     const sel = this._seleccionados();
     if (!sel.length) return;
     const btn = document.getElementById('pl-guardar');
@@ -605,8 +710,12 @@ const Stock = {
       // Se respeta la cotización guardada de cada producto: así el precio en
       // dólares queda exacto y no se altera su histórico.
       const cotiz = p.cotiz || State.refBlue;
-      const anteriorUSD = p.cotiz ? (p.precioARS / p.cotiz) : 0;
-      const nuevoARS = Math.round(usd * cotiz);
+      // Se capturan ANTES de pisar p.precioARS unas líneas más abajo, o el
+      // movimiento del historial diría "85.800 → 85.800".
+      const anteriorARS = p.precioARS || 0;
+      const anteriorUSD = anteriorARS / cotiz;
+      // En los rubros en pesos el número va tal cual, sin pasar por el dólar.
+      const nuevoARS = this._loteEnPesos ? Math.round(valor) : Math.round(usd * cotiz);
       const guardado = await DB.actualizarPrecioStock(p.id, nuevoARS);
       if (guardado) {
         p.precioARS = nuevoARS;
@@ -614,8 +723,10 @@ const Stock = {
         // Cambiar el precio de a uno dejaba rastro y en lote no: justo al revés
         // de lo que conviene auditar.
         const unidades = this.stockReal(p);
+        const antesTxt = this._loteEnPesos ? State.fmtARS(anteriorARS) : State.fmtUSD(anteriorUSD);
+        const despuesTxt = this._loteEnPesos ? State.fmtARS(nuevoARS) : State.fmtUSD(usd);
         await DB.registrarMovimientoStock(p.id, 'precio',
-          `Precio de venta en lote: ${State.fmtUSD(anteriorUSD)} → ${State.fmtUSD(usd)} (${sel.length} productos)`,
+          `Precio de venta en lote: ${antesTxt} → ${despuesTxt} (${sel.length} productos)`,
           unidades, unidades);
       } else { fallaron.push(p.nombre); }
     }
@@ -654,6 +765,7 @@ const Stock = {
     const tbody = document.getElementById('stock-tbody');
     const cardsHost = document.getElementById('stock-cards');
     if (!tbody) return;
+    rows = this.ordenarProductos(rows);
     this._ultimosFiltrados = rows;   // lo que ve el usuario, para "seleccionar todo"
 
     if (!rows.length) {
@@ -978,6 +1090,14 @@ const Stock = {
     const esPhone = ['iphone','android'].includes(p.cat);
     const cantidadDeclarada = p.cantidadDeclarada ?? p.cantidad ?? (esIMEI ? 0 : 1);
     const estadoProductoInicial = p.estadoProducto || (mode === 'new' ? 'Nuevo / Sellado' : '');
+    // Cotización con la que trabaja el formulario. El campo de precio en USD y
+    // el campo oculto de cotización TIENEN que usar la misma: al guardar se
+    // recompone `precioARS = precioUSD × cotiz`, y si el precio en USD se
+    // dibuja vacío mientras la cotización cae al blue, guardar deja el precio
+    // en CERO sin avisar. Pasaba con cualquier producto con `cotizacion` NULL
+    // o 0 en la base (`Number(null)` da 0 al cargar el stock).
+    const cotizForm = p.cotiz || State.refBlue;
+    const precioEnPesos = this.esPrecioEnPesos(p.cat);
     // El tamaño se lee del nombre, y la lista suma los que ya existan en el
     // stock para que no falte ninguno aunque no esté en ML_OPCIONES.
     const mlActual = this.esPerfume(p.cat) ? this.mlDe(p) : 0;
@@ -1215,12 +1335,19 @@ const Stock = {
                   <div><label style="font-size:11px;color:var(--text-secondary);font-weight:600;display:block;margin-bottom:4px">Precio de Compra (USD) *</label>
                     <input type="number" id="f-costo" value="${p.costoUSD||''}" placeholder="800" style="width:100%;font-size:12px;padding:7px 10px;border:1px solid var(--border-strong);border-radius:8px">
                   </div>
-                  <input type="hidden" id="f-cotiz" value="${p.cotiz||State.refBlue}">
+                  <input type="hidden" id="f-cotiz" value="${cotizForm}">
                 </div>
 
-                <div style="margin-bottom:12px"><label style="font-size:11px;color:var(--text-secondary);font-weight:600;display:block;margin-bottom:4px">Precio de Venta Sugerido (USD) *</label>
-                  <input type="number" id="f-precio-usd" value="${p.precioARS && p.cotiz ? (p.precioARS / p.cotiz).toFixed(2) : ''}" placeholder="1000" oninput="Stock.updatePricePreview()" style="width:100%;font-size:12px;padding:7px 10px;border:1px solid var(--border-strong);border-radius:8px">
+                <div id="f-precio-usd-wrap" style="margin-bottom:12px;display:${precioEnPesos ? 'none' : 'block'}"><label style="font-size:11px;color:var(--text-secondary);font-weight:600;display:block;margin-bottom:4px">Precio de Venta Sugerido (USD) *</label>
+                  <input type="number" id="f-precio-usd" value="${p.precioARS ? (p.precioARS / cotizForm).toFixed(2) : ''}" placeholder="1000" oninput="Stock.updatePricePreview()" style="width:100%;font-size:12px;padding:7px 10px;border:1px solid var(--border-strong);border-radius:8px">
                   <div class="hint" style="font-size:10px;color:var(--text-secondary);margin-top:3px" id="precio-ars-preview">${p.precioARS ? '≈ ' + State.fmtARS(p.precioARS) + ' a la cotización indicada — se precarga al crear una venta' : 'Se precargará al crear una venta'}</div>
+                </div>
+
+                <!-- Perfumería, decants y combos se venden EN PESOS: el precio se
+                     carga tal cual y se publica tal cual, sin pasar por el dólar. -->
+                <div id="f-precio-ars-wrap" style="margin-bottom:12px;display:${precioEnPesos ? 'block' : 'none'}"><label style="font-size:11px;color:var(--text-secondary);font-weight:600;display:block;margin-bottom:4px">Precio de Venta (ARS) *</label>
+                  <input type="text" inputmode="decimal" id="f-precio-ars" value="${p.precioARS ? State.esc(Math.round(p.precioARS).toLocaleString('es-AR')) : ''}" placeholder="85.800" oninput="Stock.updatePrecioARSPreview()" style="width:100%;font-size:12px;padding:7px 10px;border:1px solid var(--border-strong);border-radius:8px">
+                  <div class="hint" style="font-size:10px;color:var(--text-secondary);margin-top:3px" id="precio-usd-preview"></div>
                 </div>
 
                 <button type="button" onclick="Stock.toggleAdvancedPrices()" style="background:none;border:none;color:var(--blue);font-size:11.5px;cursor:pointer;display:flex;align-items:center;gap:4px;padding:0;margin-bottom:10px"><i class="ti ti-chevron-down" id="adv-prices-arrow"></i> Mostrar precios avanzados</button>
@@ -1284,6 +1411,7 @@ const Stock = {
     this.renderImeiChips();
     setTimeout(() => {
       this.updatePricePreview();
+      this.updatePrecioARSPreview();
       this.previewNombrePerfume();
       if (['iphone','android','mac','ipad'].includes(p.cat) && p.modelo && !['','__otro__'].includes(p.modelo)) {
         this._actualizarSpecsDropdowns(p.modelo, p.storage || '', p.color || '');
@@ -1622,6 +1750,18 @@ const Stock = {
     el.textContent = (cotiz && precioUSD) ? `≈ ${State.fmtARS(precioUSD * cotiz)} a la cotización indicada — se precarga al crear una venta` : 'Se precargará al crear una venta';
   },
 
+  // En los rubros en pesos el precio es el dato principal; el dólar se muestra
+  // solo como referencia para saber contra qué costo se está comparando.
+  updatePrecioARSPreview() {
+    const el = document.getElementById('precio-usd-preview');
+    if (!el) return;
+    const ars = this.parseARS(document.getElementById('f-precio-ars')?.value);
+    const cotiz = parseFloat(document.getElementById('f-cotiz')?.value) || State.refBlue;
+    el.textContent = ars
+      ? `≈ ${State.fmtUSD(ars / cotiz)} a la cotización del producto — es el precio que ve el cliente en la web`
+      : 'Se publica tal cual en la web, sin convertir por el dólar del día.';
+  },
+
   toggleFields() {
     const cat = document.getElementById('f-cat')?.value;
     if (!cat) return;
@@ -1648,6 +1788,10 @@ const Stock = {
     set('f-bateria-wrap', tieneBateria ? 'block' : 'none');
     set('f-mac-extra-wrap', esMac ? 'block' : 'none');
     set('f-caracteristicas-wrap', esIMEI ? 'block' : 'none');
+    const enPesos = this.esPrecioEnPesos(cat);
+    set('f-precio-usd-wrap', enPesos ? 'none' : 'block');
+    set('f-precio-ars-wrap', enPesos ? 'block' : 'none');
+    this.updatePrecioARSPreview();
 
     // Refrescar lista de modelos si cambió la categoría
     const modeloSelect = document.getElementById('f-modelo');
@@ -1714,7 +1858,11 @@ const Stock = {
 
     const costoUSD = parseFloat(document.getElementById('f-costo').value) || 0;
     const cotiz = parseFloat(document.getElementById('f-cotiz').value) || State.refBlue;
-    const precioUSD = parseFloat(document.getElementById('f-precio-usd').value) || 0;
+    // En perfumería/decant/combo el precio se carga EN PESOS y se guarda tal
+    // cual. En el resto sigue siendo USD × cotización, como siempre.
+    const enPesos = this.esPrecioEnPesos(cat);
+    const precioUSD = parseFloat(document.getElementById('f-precio-usd')?.value) || 0;
+    const precioARSDirecto = enPesos ? Math.round(this.parseARS(document.getElementById('f-precio-ars')?.value)) : 0;
     if (!nombre || !costoUSD) { toast('Completá los campos obligatorios: producto y costo.'); restoreBtn(); return; }
 
     const cantidadNueva = parseInt(document.getElementById('f-cantidad').value, 10) || 0;
@@ -1736,7 +1884,7 @@ const Stock = {
 
     const obj = {
       cat, nombre, costoUSD, cotiz,
-      precioARS: Math.round(precioUSD * cotiz),
+      precioARS: enPesos ? precioARSDirecto : Math.round(precioUSD * cotiz),
       proveedor: document.getElementById('f-prov').value,
       custodio: document.getElementById('f-custodio').value,
       notas: document.getElementById('f-notas').value,

@@ -908,7 +908,7 @@ const Stock = {
 
   CAT_ICONS: { iphone:'ti-device-mobile', android:'ti-device-mobile', mac:'ti-device-laptop', ipad:'ti-device-ipad', watch:'ti-device-watch', audio:'ti-headphones', gaming:'ti-device-gamepad-2', perfumeria:'ti-droplet', decant:'ti-flask', combo:'ti-gift', accesorio:'ti-plug', repuesto:'ti-components', herramienta:'ti-tool', otro:'ti-box' },
   MODELOS_POR_CAT: {
-    iphone: ['iPhone 11','iPhone 12','iPhone 12 Pro','iPhone 12 Pro Max','iPhone 13','iPhone 13 Mini','iPhone 13 Pro','iPhone 13 Pro Max','iPhone 14','iPhone 14 Plus','iPhone 14 Pro','iPhone 14 Pro Max','iPhone 15','iPhone 15 Plus','iPhone 15 Pro','iPhone 15 Pro Max','iPhone 16','iPhone 16 Plus','iPhone 16 Pro','iPhone 16 Pro Max','iPhone 16e','iPhone 17','iPhone 17 Plus','iPhone 17 Pro','iPhone 17 Pro Max'],
+    iphone: ['iPhone 11','iPhone 12','iPhone 12 Pro','iPhone 12 Pro Max','iPhone 13','iPhone 13 Mini','iPhone 13 Pro','iPhone 13 Pro Max','iPhone 14','iPhone 14 Plus','iPhone 14 Pro','iPhone 14 Pro Max','iPhone 15','iPhone 15 Plus','iPhone 15 Pro','iPhone 15 Pro Max','iPhone 16','iPhone 16 Plus','iPhone 16 Pro','iPhone 16 Pro Max','iPhone 16e','iPhone 17','iPhone 17 Plus','iPhone 17 Pro','iPhone 17 Pro Max','iPhone 18','iPhone 18 Plus','iPhone 18 Pro','iPhone 18 Pro Max'],
     android: ['Samsung Galaxy S23','Samsung Galaxy S24','Samsung Galaxy S24+','Samsung Galaxy S24 Ultra','Samsung Galaxy A54','Samsung Galaxy A34','Motorola G84','Motorola G54','Motorola Edge 40','Xiaomi 13'],
     mac: ['MacBook Air M1','MacBook Air M2','MacBook Air M3','MacBook Pro 14" M3','MacBook Pro 16" M3','Mac Mini M2','iMac M3'],
     ipad: ['iPad 9ª gen','iPad 10ª gen','iPad Air M2','iPad Mini 6ª gen','iPad Pro 11"','iPad Pro 13"'],
@@ -945,6 +945,15 @@ const Stock = {
     'iPhone 17 Plus':     { s:['128GB','256GB','512GB'],         c:['Negro','Blanco','Azul Neblina','Lavanda','Salvia'] },
     'iPhone 17 Pro':      { s:['256GB','512GB','1TB','2TB'],     c:['Naranja Cósmico','Azul Profundo','Plata'] },
     'iPhone 17 Pro Max':  { s:['256GB','512GB','1TB','2TB'],     c:['Naranja Cósmico','Azul Profundo','Plata'] },
+    // iPhone 18 — capacidades según el patrón de la generación anterior.
+    // Los colores NO están puestos a propósito: no los tengo confirmados, y un
+    // color inventado termina dentro del nombre del producto y le rompe a la
+    // landing la búsqueda de la foto por convención de nombre. Mientras tanto
+    // caen a la lista genérica y se suman solos los que se vayan cargando.
+    'iPhone 18':          { s:['128GB','256GB','512GB'] },
+    'iPhone 18 Plus':     { s:['128GB','256GB','512GB'] },
+    'iPhone 18 Pro':      { s:['256GB','512GB','1TB','2TB'] },
+    'iPhone 18 Pro Max':  { s:['256GB','512GB','1TB','2TB'] },
     // ── Mac ─────────────────────────────────────────────────────
     'MacBook Air M1':     { s:['256GB','512GB','1TB','2TB'],     c:['Plata','Gris Espacial','Dorado'] },
     'MacBook Air M2':     { s:['256GB','512GB','1TB','2TB'],     c:['Plata','Gris Espacial','Dorado','Medianoche'] },
@@ -980,7 +989,11 @@ const Stock = {
   },
 
   specsParaModelo(modelo) {
-    const base = this.SPECS_POR_MODELO[modelo] || { s: this.STORAGE_OPCIONES, c: this.COLOR_OPCIONES };
+    // Cada campo cae por separado: así se puede declarar un modelo con las
+    // capacidades confirmadas y dejar los colores en la lista genérica hasta
+    // saberlos, en vez de tener que inventarlos para completar la entrada.
+    const decl = this.SPECS_POR_MODELO[modelo] || {};
+    const base = { s: decl.s || this.STORAGE_OPCIONES, c: decl.c || this.COLOR_OPCIONES };
     if (!modelo) return base;
     // Sumamos storages y colores que ya existan en el stock para ese modelo: así
     // un color cargado a mano una vez queda disponible para la próxima.

@@ -1,3 +1,9 @@
 
 .vercel
 config.js
+
+# Secretos locales: la clave del endpoint del bot vive acá.
+# El repo es PUBLICO — nada de esto puede commitearse.
+.env
+.env.local
+.env.*.local

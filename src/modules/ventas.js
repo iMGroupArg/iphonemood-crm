@@ -495,6 +495,151 @@ const Ventas = {
     return esMac ? '⌘⇧V' : 'Ctrl+Shift+V';
   },
 
+  // ── VINCULAR UN ITEM MANUAL CON EL EQUIPO REAL ───────────────────
+  //
+  // Caso: se cobró una seña de un equipo que todavía estaba en el proveedor,
+  // así que la venta se cargó con "Carga manual" y el item quedó sin `stockId`.
+  // Cuando el equipo llega y entra al stock, hay que unir las dos puntas.
+  //
+  // Sin esto, la unidad recién ingresada figura libre: se publica en la web y
+  // se puede volver a vender desde el CRM, y el descuadre recién se nota
+  // cuando el cliente viene a buscar el equipo.
+  //
+  // Si la venta sigue ABIERTA la unidad queda 'reservado' y NO se descuenta:
+  // todavía no se entregó. Si ya está cerrada se descuenta y queda 'vendido',
+  // que es lo que habría pasado si el equipo hubiera estado en stock al vender.
+  async asignarStockReal(ventaId, itemIdx, stockId) {
+    const v = State.ventas.find(x => String(x.id) === String(ventaId));
+    if (!v) { toast('No se encontró la venta.'); return false; }
+    const it = v.items?.[itemIdx];
+    if (!it) { toast('No se encontró el producto dentro de la venta.'); return false; }
+    if (it.stockId) { toast('Ese producto ya está vinculado a una unidad del stock.'); return false; }
+
+    const p = State.stock.find(x => String(x.id) === String(stockId));
+    if (!p) { toast('No se encontró el equipo en el stock.'); return false; }
+    if (State.getStock(p) <= 0) { toast(`"${p.nombre}" no tiene unidades disponibles.`); return false; }
+    if ((p.estadoInventario || 'disponible') === 'vendido') { toast(`"${p.nombre}" ya figura como vendido.`); return false; }
+
+    // Un solo IMEI por unidad: si la fila tiene varios, se toma el primero
+    // libre. Lo normal es que cada equipo sea su propia fila.
+    const imei = (p.imeis || [])[0] || null;
+    const cerrada = v.estado === 'cerrada';
+
+    const ok = await DB.vincularItemVentaAStock(it.id, {
+      stockId: p.id, imei, costoUSD: p.costoUSD, nombre: p.nombre,
+    });
+    if (!ok) { toast('No se pudo vincular. Revisá la conexión e intentá de nuevo.'); return false; }
+
+    it.stockId = p.id;
+    it.imei = imei;
+    it.costo = p.costoUSD;
+    it.nombre = p.nombre;
+
+    if (cerrada) {
+      // La venta ya se cobró entera: la unidad sale del inventario.
+      State.descontarStock(p.id, imei);
+      if (p.imeis) await DB.actualizarImeisStock(p.id, p.imeis);
+      if (p.cantidad !== undefined) await DB.actualizarCantidadStock(p.id, p.cantidad);
+    } else {
+      p.estadoInventario = 'reservado';
+      await DB.actualizarEstadoInventario(p.id, 'reservado');
+    }
+
+    // Nota cruzada en las dos puntas, para que se pueda reconstruir después
+    // mirando cualquiera de los dos lados.
+    const nota = cerrada
+      ? `Vendido — Venta #${v.id}`
+      : `Reservado — Venta #${v.id}, seña ya cobrada`;
+    p.notas = [p.notas, nota].filter(Boolean).join(' | ');
+    await DB.actualizarNotasStock(p.id, p.notas);
+    await DB.registrarMovimientoStock(p.id, cerrada ? 'baja_venta' : 'edicion',
+      `${nota}${imei ? ` — IMEI ${imei}` : ''}`,
+      State.getStock(p) + (cerrada ? 1 : 0), State.getStock(p));
+
+    toast(cerrada
+      ? `Vinculado: "${p.nombre}" salió del stock como vendido.`
+      : `Vinculado: "${p.nombre}" quedó reservado para la venta #${v.id}.`);
+    return true;
+  },
+
+  // Selector de qué unidad del stock corresponde a este item manual.
+  abrirAsignarStock(ventaId, itemIdx) {
+    const v = State.ventas.find(x => String(x.id) === String(ventaId));
+    const it = v?.items?.[itemIdx];
+    if (!it) return;
+    const cands = this.candidatosStockPara(it.nombre);
+    const esc = t => State.esc(t);
+    const cerrada = v.estado === 'cerrada';
+
+    const div = document.createElement('div');
+    div.id = 'asignar-stock-overlay';
+    div.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.5);display:flex;align-items:center;justify-content:center;z-index:700;padding:20px';
+    div.innerHTML = `
+      <div style="background:var(--bg-elevated);border:1px solid var(--border-strong);border-radius:var(--radius-xl);width:min(540px,96vw);max-height:88dvh;display:flex;flex-direction:column;overflow:hidden" onclick="event.stopPropagation()">
+        <div style="padding:14px 18px;border-bottom:1px solid var(--border)">
+          <div style="font-size:14px;font-weight:700">Vincular con el equipo real</div>
+          <div style="font-size:11.5px;color:var(--text-secondary);margin-top:2px">Venta #${v.id} · cargado a mano como "${esc(it.nombre)}"</div>
+        </div>
+        <div style="padding:10px 18px;background:${cerrada ? 'var(--amber-light, rgba(255,214,10,.12))' : 'var(--blue-light)'};font-size:11.5px;color:${cerrada ? 'var(--amber)' : 'var(--blue)'}">
+          ${cerrada
+            ? 'La venta está <b>cerrada</b>: la unidad que elijas <b>sale del inventario</b> como vendida.'
+            : 'La venta está <b>abierta</b>: la unidad queda <b>Reservada</b> y no se descuenta hasta que se cobre el saldo.'}
+        </div>
+        <div style="padding:10px 18px 0">
+          <input type="text" id="asig-buscar" placeholder="Buscar en el stock…" oninput="Ventas._filtrarCandidatos()" style="width:100%;font-size:12px;padding:7px 10px;border:1px solid var(--border-strong);border-radius:8px;background:var(--bg-secondary);color:var(--text)">
+        </div>
+        <div id="asig-lista" style="padding:10px 18px;overflow-y:auto;flex:1">
+          ${cands.length ? cands.map(p => `
+            <div class="asig-fila" data-nombre="${esc(p.nombre.toLowerCase())}" style="display:flex;justify-content:space-between;align-items:center;gap:10px;padding:9px 0;border-bottom:1px solid var(--border)">
+              <div style="min-width:0">
+                <div style="font-size:12.5px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(p.nombre)}</div>
+                <div style="font-size:10.5px;color:var(--text-secondary)">
+                  ${State.getStock(p)} und · costo ${State.fmtUSD(p.costoUSD)}${(p.imeis || [])[0] ? ` · IMEI ${esc(p.imeis[0])}` : ' · sin IMEI'}
+                  ${(p.estadoInventario || 'disponible') !== 'disponible' ? ` · ${esc(window.Stock?.ESTADO_INV_LABEL[p.estadoInventario] || p.estadoInventario)}` : ''}
+                </div>
+              </div>
+              <button class="btn btn-sm btn-primary" style="flex-shrink:0" onclick="Ventas._confirmarAsignar(${v.id}, ${itemIdx}, '${esc(String(p.id))}')">Elegir</button>
+            </div>`).join('')
+            : '<div style="padding:20px 0;text-align:center;color:var(--text-secondary);font-size:12px">No hay unidades disponibles en el stock.<br>Primero recibí el lote desde Proveedores.</div>'}
+        </div>
+        <div style="padding:12px 18px;border-top:1px solid var(--border);display:flex;justify-content:flex-end">
+          <button class="btn" onclick="document.getElementById('asignar-stock-overlay').remove()">Cancelar</button>
+        </div>
+      </div>`;
+    div.addEventListener('click', e => { if (e.target === div) div.remove(); });
+    document.body.appendChild(div);
+    setTimeout(() => document.getElementById('asig-buscar')?.focus(), 60);
+  },
+
+  _filtrarCandidatos() {
+    const q = (document.getElementById('asig-buscar')?.value || '').toLowerCase().trim();
+    document.querySelectorAll('#asig-lista .asig-fila').forEach(el => {
+      el.style.display = !q || (el.dataset.nombre || '').includes(q) ? '' : 'none';
+    });
+  },
+
+  async _confirmarAsignar(ventaId, itemIdx, stockId) {
+    const ok = await this.asignarStockReal(ventaId, itemIdx, stockId);
+    if (!ok) return;
+    document.getElementById('asignar-stock-overlay')?.remove();
+    this.viewSale(ventaId);
+  },
+
+  // Unidades del stock que se pueden vincular a un item manual: con unidades,
+  // no vendidas, y priorizando las que se parecen al nombre que se escribió.
+  candidatosStockPara(nombreItem) {
+    const norm = t => String(t || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+    const palabras = norm(nombreItem).split(' ').filter(w => w.length > 2);
+    return State.stock
+      .filter(p => State.getStock(p) > 0 && (p.estadoInventario || 'disponible') !== 'vendido')
+      .map(p => {
+        const n = norm(p.nombre);
+        return { p, puntaje: palabras.filter(w => n.includes(w)).length };
+      })
+      .sort((a, b) => b.puntaje - a.puntaje || a.p.nombre.localeCompare(b.p.nombre, 'es'))
+      .map(x => x.p);
+  },
+
   openNew() {
     const pendiente = this.hayBorradorPendiente();
     if (pendiente && pendiente.draft && (pendiente.draft.items?.length || pendiente.draft.cliente)) {
@@ -2217,7 +2362,7 @@ const Ventas = {
         <th style="width:100px;text-align:right">Precio</th>
       </tr></thead>
       <tbody>
-      ${v.items.map(i => {
+      ${v.items.map((i, idx) => {
         const stockItem = State.stock.find(s => s.id === i.stockId);
         const diasGar = i.garantiaDias || (i.garantiaFin ? Math.max(0, Math.round((new Date(i.garantiaFin)-new Date())/86400000)) : null);
         const hoy = new Date();
@@ -2229,6 +2374,7 @@ const Ventas = {
             <div style="font-weight:600">${i.nombre}</div>
             ${i.imei ? `<div class="imei-label">IMEI: ${i.imei}</div>` : ''}
             ${stockItem?.estadoProducto ? `<div style="font-size:10px;color:#888">${stockItem.estadoProducto}</div>` : ''}
+            ${!i.stockId && !i.regalo ? `<button class="btn btn-sm" style="margin-top:5px;font-size:10.5px" onclick="event.stopPropagation();Ventas.abrirAsignarStock(${v.id}, ${idx})" title="Este producto se cargó a mano y no está unido a ninguna unidad del inventario">🔗 Vincular equipo del stock</button>` : ''}
           </td>
           <td>
             ${vence ? `<span class="garantia-chip ${activa?'':'vencida'}">${activa ? 'Activa' : 'Vencida'}</span>` : '<span style="color:#bbb;font-size:11px">Sin garantía</span>'}

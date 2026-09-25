@@ -1452,6 +1452,22 @@ const Proveedores = {
               </select>
             </div>
           </div>
+          <!-- Estado con el que entran las unidades. Antes era SIEMPRE
+               'disponible', y un equipo con la seña ya cobrada se publicaba en
+               la web como libre y se podía volver a vender desde el CRM. -->
+          <div>
+            <label style="font-size:11px;color:var(--text-secondary);display:block;margin-bottom:4px">Estado al ingresar</label>
+            <select id="recep-estado" onchange="Proveedores._avisoEstadoRecepcion()" style="width:100%;font-size:13px;padding:7px 10px;background:var(--bg-secondary);border:1px solid var(--border-strong);border-radius:8px;color:var(--text)">
+              ${Object.entries(window.Stock?.ESTADO_INV_LABEL || { disponible: 'Disponible' })
+                // 'vendido' y 'eliminado' no aplican al RECIBIR: nadie recibe
+                // del proveedor algo que ya vendió o dio de baja.
+                .filter(([k]) => !['eliminado', 'vendido'].includes(k))
+                .map(([k, v]) => `<option value="${k}" ${k === 'disponible' ? 'selected' : ''}>${State.esc(v)}</option>`).join('')}
+            </select>
+            <div id="recep-estado-aviso" style="font-size:10px;color:var(--text-secondary);margin-top:4px">
+              Se aplica a todas las unidades del lote. Si alguna ya tiene comprador, entrala como <b>Reservado</b> y después ajustás las demás.
+            </div>
+          </div>
           <div style="font-size:11px;font-weight:700;color:var(--text-secondary);text-transform:uppercase;letter-spacing:.04em">Costo final por producto:</div>
           ${items.map(i => {
             const logUsada = i.logisticaManual != null ? i.logisticaManual : logPorUnidad;
@@ -1475,6 +1491,22 @@ const Proveedores = {
     document.body.appendChild(overlay);
   },
 
+  // Aviso claro cuando el lote NO entra como disponible: es el caso raro y
+  // conviene que se vea, porque afecta lo que se publica en la web.
+  _avisoEstadoRecepcion() {
+    const sel = document.getElementById('recep-estado');
+    const aviso = document.getElementById('recep-estado-aviso');
+    if (!sel || !aviso) return;
+    if (sel.value === 'disponible') {
+      aviso.innerHTML = 'Se aplica a todas las unidades del lote. Si alguna ya tiene comprador, entrala como <b>Reservado</b> y después ajustás las demás.';
+      aviso.style.color = 'var(--text-secondary)';
+    } else {
+      const label = window.Stock?.ESTADO_INV_LABEL[sel.value] || sel.value;
+      aviso.innerHTML = `Todas las unidades del lote entran como <b>${State.esc(label)}</b>, así que <b>no se publican en la web</b> hasta que las pases a Disponible.`;
+      aviso.style.color = 'var(--amber)';
+    }
+  },
+
   async _confirmarRecepcion(loteId) {
     const btn = document.querySelector('#prov-recep-overlay .btn-green');
     if (btn) { btn.disabled = true; btn.textContent = '⏳ Procesando…'; }
@@ -1485,6 +1517,7 @@ const Proveedores = {
   async __confirmarRecepcionInterno(loteId) {
     const fecha = document.getElementById('recep-fecha')?.value || new Date().toISOString().slice(0, 10);
     const custodio = document.getElementById('recep-custodio')?.value || '';
+    const estadoIngreso = document.getElementById('recep-estado')?.value || 'disponible';
     const items = (State.loteItems || []).filter(i => i.loteId === loteId);
     const l = (State.lotesCompra || []).find(x => x.id === loteId);
     const prov = (State.proveedores || []).find(p => p.id === l?.proveedorId);
@@ -1526,7 +1559,7 @@ const Proveedores = {
             proveedor: prov?.nombre || '',
             custodio,
             notas: notasBase,
-            estadoInventario: 'disponible',
+            estadoInventario: estadoIngreso,
             grado: item.grado || 'Sin grado',
             modelo: this.esNombreLibre(item.cat || 'iphone') ? (item.modelo || '') : (item.modelo || item.nombre),
             storage: storageU,
@@ -1541,7 +1574,7 @@ const Proveedores = {
             State.stock.push({ id: newId, cat: obj.cat, nombre: obj.nombre, modelo: obj.modelo,
               storage: obj.storage, color: obj.color, costoUSD: obj.costoUSD, precioARS: obj.precioARS,
               cotiz: obj.cotiz, proveedor: obj.proveedor, custodio, notas: obj.notas,
-              estadoInventario: 'disponible', grado: obj.grado, estadoProducto: obj.estadoProducto,
+              estadoInventario: estadoIngreso, grado: obj.grado, estadoProducto: obj.estadoProducto,
               cantidad: 1, cantidadDeclarada: 1, imeis: esIMEI ? (ud.imei ? [ud.imei] : []) : undefined,
               bateriaPct: ud.bateriaPct ?? null, ciclosBateria: null });
             // Registrar el alta deja el ingreso del lote en el historial de stock,
@@ -1566,7 +1599,7 @@ const Proveedores = {
           proveedor: prov?.nombre || '',
           custodio,
           notas: notasBase,
-          estadoInventario: 'disponible',
+          estadoInventario: estadoIngreso,
           grado: item.grado || 'Sin grado',
           modelo: this.esNombreLibre(item.cat || 'iphone')
             ? (item.modelo || '')
@@ -1581,7 +1614,7 @@ const Proveedores = {
           State.stock.push({ id: newId, cat: obj.cat, nombre: obj.nombre, modelo: obj.modelo,
             storage: obj.storage, color: obj.color, costoUSD: obj.costoUSD, precioARS: obj.precioARS,
             cotiz: obj.cotiz, proveedor: obj.proveedor, custodio, notas: obj.notas,
-            estadoInventario: 'disponible', grado: obj.grado, estadoProducto: obj.estadoProducto,
+            estadoInventario: estadoIngreso, grado: obj.grado, estadoProducto: obj.estadoProducto,
             cantidad: obj.cantidad, cantidadDeclarada: obj.cantidad,
             imeis: esIMEI ? [] : undefined, bateriaPct: null, ciclosBateria: null });
           await DB.registrarMovimientoStock(newId, 'alta',

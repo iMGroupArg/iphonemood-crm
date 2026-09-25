@@ -153,6 +153,9 @@ const DB = {
     (ventaItemsRes.data || []).forEach(i => {
       if (!itemsPorVenta[i.venta_id]) itemsPorVenta[i.venta_id] = [];
       itemsPorVenta[i.venta_id].push({
+        // El id del renglón se necesita para poder vincularlo despues a una
+        // fila de stock real (ver Ventas.asignarStockReal).
+        id: i.id,
         nombre: i.nombre, precio: Number(i.precio_usd), costo: Number(i.costo_usd), stockId: i.stock_id, imei: i.imei, regalo: i.es_regalo || false,
         garantiaId: i.garantia_id ?? null, garantiaDias: i.garantia_dias ?? null,
         garantiaInicio: i.garantia_inicio || null, garantiaFin: i.garantia_fin || null,
@@ -724,6 +727,17 @@ const DB = {
     const { data, error } = await q;
     if (error) { console.error('No se pudo leer el libro de caja:', error); return []; }
     return data || [];
+  },
+
+  // Vincula un renglón de venta cargado a mano con la fila de stock real que
+  // llegó después. Devuelve true solo si la base confirmó el cambio.
+  async vincularItemVentaAStock(itemId, { stockId, imei, costoUSD, nombre }) {
+    const row = { stock_id: stockId, imei: imei || null };
+    if (costoUSD != null) row.costo_usd = costoUSD;
+    if (nombre) row.nombre = nombre;
+    const { error } = await supa.from('venta_items').update(row).eq('id', itemId).select('id');
+    if (error) { console.error('No se pudo vincular el item de venta al stock:', error); return false; }
+    return true;
   },
 
   async actualizarNotasStock(stockId, notas) {

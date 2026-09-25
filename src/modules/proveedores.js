@@ -620,11 +620,24 @@ const Proveedores = {
   esNombreLibre(cat) { return !!window.Stock?.esNombreLibre(cat); },
   esPerfume(cat) { return !!window.Stock?.esPerfume(cat); },
 
+  // El item nuevo entra ARRIBA (unshift, no push) y los ya cargados se pliegan
+  // solos. En una orden de 10 equipos, agregar al final obligaba a scrollear
+  // hasta abajo cada vez, y los formularios ya completos ocupaban toda la
+  // pantalla sin aportar nada.
   _agregarItem() {
-    this._loteWizard.items.push({
+    this._loteWizard.items.forEach(it => { it._colapsado = true; });
+    this._loteWizard.items.unshift({
       cat: 'iphone', nombre: '', modelo: '', cantidad: 1, precioUsd: 0,
       storage: '', color: '', grado: 'Sin grado', estadoProducto: 'Nuevo / Sellado',
+      _colapsado: false,
     });
+    this._renderWizard();
+  },
+
+  _toggleItem(idx) {
+    const it = this._loteWizard.items[idx];
+    if (!it) return;
+    it._colapsado = !it._colapsado;
     this._renderWizard();
   },
   _quitarItem(idx) { this._loteWizard.items.splice(idx, 1); this._renderWizard(); },
@@ -710,12 +723,28 @@ const Proveedores = {
     // El tamaño no tiene columna propia: vive dentro del nombre, que es de
     // donde lo leen Stock y la landing. Acá el selector solo edita el nombre.
     const mlItem = S?.mlDe(item) || 0;
+    const plegado = !!item._colapsado;
+    const subtotal = State.fmtUSD((item.precioUsd || 0) * (item.cantidad || 0));
+    // El encabezado es el mismo plegado o desplegado: click para alternar, y
+    // plegado muestra el resumen (cantidad y subtotal) para no tener que abrir
+    // el item solo para saber qué tiene.
+    const encabezado = `
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;${plegado ? '' : 'margin-bottom:8px'}">
+          <div onclick="Proveedores._toggleItem(${idx})" style="display:flex;align-items:center;gap:7px;cursor:pointer;flex:1;min-width:0">
+            <span style="font-size:10px;color:var(--text-secondary);transform:rotate(${plegado ? '-90' : '0'}deg);transition:transform .12s">▼</span>
+            <span style="font-size:12px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(titulo) || `Item ${idx + 1}`}</span>
+            ${plegado ? `<span style="font-size:11px;color:var(--text-secondary);white-space:nowrap">× ${item.cantidad || 0} · ${subtotal}</span>` : ''}
+          </div>
+          <button onclick="Proveedores._quitarItem(${idx})" style="background:none;border:none;cursor:pointer;color:var(--red);font-size:14px;flex-shrink:0">✕</button>
+        </div>`;
+
+    if (plegado) {
+      return `<div style="background:var(--bg-secondary);border-radius:8px;padding:10px;margin-bottom:8px">${encabezado}</div>`;
+    }
+
     return `
       <div style="background:var(--bg-secondary);border-radius:8px;padding:10px;margin-bottom:8px">
-        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
-          <div style="font-size:12px;font-weight:600">${esc(titulo) || `Item ${idx + 1}`}</div>
-          <button onclick="Proveedores._quitarItem(${idx})" style="background:none;border:none;cursor:pointer;color:var(--red);font-size:14px">✕</button>
-        </div>
+        ${encabezado}
         <div style="display:grid;grid-template-columns:1.3fr 1fr 1fr;gap:8px">
           <div>
             <label style="${lbl}">Rubro</label>

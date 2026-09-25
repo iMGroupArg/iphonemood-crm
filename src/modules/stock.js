@@ -75,8 +75,14 @@ const Stock = {
 
   // Modelos de una categoría: los del catálogo fijo (en su orden) + los que
   // aparezcan en el stock real y no estuvieran en la lista.
+  // Los desplegables muestran del MÁS NUEVO al más viejo: lo que más se carga
+  // es lo último que salió, y así queda arriba sin tener que scrollear.
+  // MODELOS_POR_CAT se deja en su orden cronológico porque de ahí sale el
+  // ranking; acá se invierte solo para mostrar.
   modelosParaCat(cat) {
-    const fijos = this.MODELOS_POR_CAT[cat] || [];
+    const fijos = [...(this.MODELOS_POR_CAT[cat] || [])].reverse();
+    // Los que no están en el catálogo van al final: son casos sueltos, no
+    // tienen por qué encabezar la lista.
     const extras = this._valoresEnStock('modelo', p => p.cat === cat)
       .filter(m => !fijos.some(f => f.toLowerCase() === m.toLowerCase()))
       .sort((a, b) => a.localeCompare(b, 'es'));
@@ -108,10 +114,15 @@ const Stock = {
   // Posición del modelo. MODELOS_POR_CAT está del más viejo al más nuevo, así
   // que se invierte: el iPhone 17 Pro Max primero y el 11 último. Un modelo que
   // no esté en el catálogo va al final del rubro, no mezclado en el medio.
-  _rankModelo(p) {
-    const lista = this.MODELOS_POR_CAT[p.cat] || [];
+  _rankModelo(p) { return this._rankModeloPorNombre(p.cat, p.modelo); },
+
+  // Posición de un modelo dentro de su rubro, del más nuevo al más viejo.
+  // MODELOS_POR_CAT está del más viejo al más nuevo, así que se invierte el
+  // índice. Un modelo que no esté en el catálogo va al final.
+  _rankModeloPorNombre(cat, modelo) {
+    const lista = this.MODELOS_POR_CAT[cat] || [];
     if (!lista.length) return 0;
-    const i = lista.findIndex(m => m.toLowerCase() === String(p.modelo || '').toLowerCase());
+    const i = lista.findIndex(m => m.toLowerCase() === String(modelo || '').toLowerCase());
     return i >= 0 ? (lista.length - 1 - i) : lista.length;
   },
 
@@ -159,7 +170,10 @@ const Stock = {
     const out = {};
     cats.forEach(c => {
       const modelos = this._valoresEnStock('modelo', p => p.cat === c && this.hayUnidades(p));
-      if (modelos.length) out[c] = modelos.sort((a, b) => a.localeCompare(b, 'es', { numeric: true }));
+      // Mismo orden que la tabla: del más nuevo al más viejo.
+      if (modelos.length) out[c] = modelos.sort((a, b) =>
+        this._rankModeloPorNombre(c, a) - this._rankModeloPorNombre(c, b)
+        || a.localeCompare(b, 'es', { numeric: true }));
     });
     return out;
   },

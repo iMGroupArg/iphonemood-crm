@@ -13,22 +13,9 @@
 //
 // Contrato cerrado con Angel (dev del bot) el 2026-09-09, ronda 2.
 
-const crypto = require('crypto');
+const { autorizado, hayClaveConfigurada } = require('./_auth.js');
 const { limitar } = require('./_ratelimit.js');
 const { supa, cond, catsDe, capacidadDe, productosPublicados } = require('./_catalogo.js');
-
-const CLAVE = process.env.BOT_CATALOGO_KEY;
-
-// Comparación en tiempo constante. Se hashean los dos lados antes de comparar
-// por dos razones: `timingSafeEqual` explota si los buffers miden distinto, y
-// comparar los hashes (siempre 32 bytes) evita que el tiempo de respuesta
-// delate el largo de la clave real.
-function claveValida(recibida) {
-  if (!recibida || typeof recibida !== 'string') return false;
-  const a = crypto.createHash('sha256').update(recibida).digest();
-  const b = crypto.createHash('sha256').update(CLAVE).digest();
-  return crypto.timingSafeEqual(a, b);
-}
 
 // El tipo de cambio que el CRM actualiza a diario. El bot arma TODOS los precios
 // a partir de él, así que sin este dato su catálogo queda vacío: si no se puede
@@ -99,13 +86,13 @@ module.exports = async function handler(req, res) {
   }
 
   // Sin variable de entorno el endpoint queda cerrado, nunca abierto.
-  if (!CLAVE) {
+  if (!hayClaveConfigurada()) {
     console.error('Falta la variable de entorno BOT_CATALOGO_KEY.');
     res.status(500).json({ error: 'El catálogo no está configurado en el servidor.' });
     return;
   }
 
-  if (!claveValida(req.headers['x-catalogo-key'])) {
+  if (!autorizado(req)) {
     res.status(401).json({ error: 'No autorizado' });
     return;
   }
@@ -162,7 +149,7 @@ module.exports = async function handler(req, res) {
   // una consulta autenticada quedaría cacheada en el borde y se le podría
   // servir a cualquiera que pegue a /api/catalogo SIN la clave.
   res.setHeader('Cache-Control', 'private, max-age=60');
-  res.setHeader('Vary', 'x-catalogo-key');
+  res.setHeader('Vary', 'x-catalogo-key, Authorization');
   res.setHeader('Content-Type', 'application/json');
   res.status(200).json({
     actualizado: new Date().toISOString(),

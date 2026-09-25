@@ -12,20 +12,11 @@
 // NADA de costos, márgenes ni proveedores: los datos salen de la vista
 // `stock_publico`, donde esas columnas directamente no existen.
 
-const crypto = require('crypto');
+const { autorizado, hayClaveConfigurada } = require('./_auth.js');
 const {
   SUPABASE_URL, SUPABASE_ANON, supa, slugify, usaNombre,
   cond, capacidadEnGB, productosPublicados,
 } = require('./_catalogo.js');
-
-const CLAVE = process.env.BOT_CATALOGO_KEY;
-
-function claveValida(recibida) {
-  if (!CLAVE || !recibida || typeof recibida !== 'string') return false;
-  const a = crypto.createHash('sha256').update(recibida).digest();
-  const b = crypto.createHash('sha256').update(CLAVE).digest();
-  return crypto.timingSafeEqual(a, b);
-}
 
 // ── generation / variant ────────────────────────────────────────────────
 // No existen como campos en el CRM: hay que sacarlos de `modelo`, que es un
@@ -298,12 +289,12 @@ function puertaDeEntrada(req, res, limitar) {
     res.status(405).json({ error: 'Método no permitido' });
     return false;
   }
-  if (!CLAVE) {
+  if (!hayClaveConfigurada()) {
     console.error('Falta la variable de entorno BOT_CATALOGO_KEY.');
     res.status(500).json({ error: 'El endpoint no está configurado en el servidor.' });
     return false;
   }
-  if (!claveValida(req.headers['x-catalogo-key'])) {
+  if (!autorizado(req)) {
     res.status(401).json({ error: 'No autorizado' });
     return false;
   }
@@ -312,7 +303,7 @@ function puertaDeEntrada(req, res, limitar) {
 
 function cabeceras(res) {
   res.setHeader('Cache-Control', 'private, max-age=60');
-  res.setHeader('Vary', 'x-catalogo-key');
+  res.setHeader('Vary', 'x-catalogo-key, Authorization');
   res.setHeader('Content-Type', 'application/json');
 }
 

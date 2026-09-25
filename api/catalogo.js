@@ -15,7 +15,7 @@
 
 const crypto = require('crypto');
 const { limitar } = require('./_ratelimit.js');
-const { supa, cond, catsDe, usaNombre, productosPublicados } = require('./_catalogo.js');
+const { supa, cond, catsDe, capacidadDe, productosPublicados } = require('./_catalogo.js');
 
 const CLAVE = process.env.BOT_CATALOGO_KEY;
 
@@ -30,38 +30,6 @@ function claveValida(recibida) {
   return crypto.timingSafeEqual(a, b);
 }
 
-// El bot arma el "GB" él mismo, así que la capacidad viaja como número pelado.
-//
-// OJO con el 1TB: sacar el sufijo a lo bruto lo convertiría en "1" y el cliente
-// leería "1GB" en vez de 1TB. Hay un iPhone 13 Pro Dorado de 1TB en stock, no es
-// hipotético. Por eso se convierte a GB en vez de recortar texto.
-//
-// Si el formato no se reconoce se devuelve crudo: es preferible que el bot vea
-// algo raro a que nosotros inventemos un número.
-function capacidadEnGB(storage) {
-  if (storage == null) return null;
-  const s = String(storage).trim();
-  if (!s) return null;
-
-  const m = s.match(/^(\d+(?:[.,]\d+)?)\s*(TB|GB|MB)?$/i);
-  if (!m) return s;
-
-  const n = parseFloat(m[1].replace(',', '.'));
-  if (!isFinite(n)) return s;
-
-  const unidad = (m[2] || 'GB').toUpperCase();
-  const gb = unidad === 'TB' ? n * 1024 : unidad === 'MB' ? n / 1024 : n;
-  return String(Math.round(gb));
-}
-
-// `storage` NO significa almacenamiento en todos los rubros: en perfumería y
-// decant guarda la concentración (EDP/EDT), y en repuestos el modelo compatible.
-// Convertir eso a GB sería destruir el dato. `usaNombre()` es el mismo helper
-// que ya usan la landing y el CRM para distinguir los rubros de nombre libre.
-function capacidadDe(p) {
-  return usaNombre(p) ? (p.storage ?? null) : capacidadEnGB(p.storage);
-}
-
 // El tipo de cambio que el CRM actualiza a diario. El bot arma TODOS los precios
 // a partir de él, así que sin este dato su catálogo queda vacío: si no se puede
 // leer, es mejor un 502 honesto que una respuesta que el bot va a descartar.
@@ -70,6 +38,53 @@ async function tipoCambio() {
   const n = Number(d && d[0] && d[0].valor);
   if (!isFinite(n) || n <= 0) throw new Error('ref_blue inválido o ausente');
   return n;
+}
+
+// Coeficientes de financiación, tal como están cargados en el panel del CRM
+// (Panel → Landing pública → Financiación con tarjeta). Son la MISMA fuente que
+// usa la web para mostrar las cuotas, así que el bot y la landing no pueden
+// mostrar números distintos.
+//
+// Cada nivel viaja con su `mostrar`: es el interruptor del panel. Cuando el
+// dueño apaga un nivel, el bot deja de ofrecerlo sin que nadie toque código.
+// Los niveles apagados viajan igual, con su coeficiente tal cual está — puede
+// ser null o un valor raro, y no lo corregimos: `mostrar: false` ya dice que no
+// se usa, y maquillarlo escondería un error de carga en vez de mostrarlo.
+//
+// El bloque va acá adentro y no en un endpoint aparte a pedido del bot: los
+// precios y los coeficientes salen de la misma lectura, así que nunca quedan
+// de dos momentos distintos.
+function nivelesDe(bloque) {
+  const cuotas = (bloque && Array.isArray(bloque.cuotas)) ? bloque.cuotas : [];
+  const out = {};
+  for (const n of [3, 6, 9, 12]) {
+    const c = cuotas.find(x => Number(x && x.n) === n);
+    out[String(n)] = {
+      coef: (c && c.coef != null && isFinite(Number(c.coef))) ? Number(c.coef) : null,
+      mostrar: !!(c && c.mostrar),
+    };
+  }
+  return out;
+}
+
+async function financiacion() {
+  const d = await supa('/rest/v1/configuracion?select=valor&clave=eq.pagos_config');
+  const cfg = JSON.parse((d && d[0] && d[0].valor) || 'null');
+  if (!cfg) throw new Error('pagos_config ausente');
+
+  const lista = Number(cfg.lista_factor);
+  // Sin el factor de lista no hay forma de calcular ni una cuota. El bot pidió
+  // explícitamente que el bloque llegue siempre completo y que, si falta algo,
+  // sea un error de lectura y no un número inventado: él cae a su copia en
+  // caché, que es preferible a cotizar mal.
+  if (!isFinite(lista) || lista <= 0) throw new Error('lista_factor inválido');
+
+  return {
+    coeficiente_lista: lista,
+    vigenciaMacro: (cfg.promo && cfg.promo.vigencia) || null,
+    bancarizadas: nivelesDe(cfg.otros),
+    macro: nivelesDe(cfg.promo),
+  };
 }
 
 module.exports = async function handler(req, res) {
@@ -116,12 +131,12 @@ module.exports = async function handler(req, res) {
     return;
   }
 
-  let cotiz;
+  let cotiz, finan;
   try {
-    cotiz = await tipoCambio();
+    [cotiz, finan] = await Promise.all([tipoCambio(), financiacion()]);
   } catch (e) {
-    console.error('catalogo: no se pudo leer el tipo de cambio —', e.message);
-    res.status(502).json({ error: 'No se pudo leer el tipo de cambio' });
+    console.error('catalogo: no se pudo leer cotización/financiación —', e.message);
+    res.status(502).json({ error: 'No se pudo leer el tipo de cambio o la financiación' });
     return;
   }
 
@@ -152,6 +167,7 @@ module.exports = async function handler(req, res) {
   res.status(200).json({
     actualizado: new Date().toISOString(),
     tipoCambio: cotiz,
+    financiacion: finan,
     productos,
   });
 };

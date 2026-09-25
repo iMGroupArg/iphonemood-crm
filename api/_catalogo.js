@@ -70,6 +70,29 @@ function slugProd(p) {
   return slugify(partes.filter(Boolean).join(' '));
 }
 
+// ── Capacidad ──
+// El sufijo se saca convirtiendo a GB, NO recortando texto: hay equipos de 1TB
+// y "1TB" sin el sufijo daría "1", que el consumidor imprime como "1GB".
+// Formato no reconocido se devuelve crudo: mejor que se vea raro a inventar.
+function capacidadEnGB(storage) {
+  if (storage == null) return null;
+  const s = String(storage).trim();
+  if (!s) return null;
+  const m = s.match(/^(\d+(?:[.,]\d+)?)\s*(TB|GB|MB)?$/i);
+  if (!m) return s;
+  const n = parseFloat(m[1].replace(',', '.'));
+  if (!isFinite(n)) return s;
+  const u = (m[2] || 'GB').toUpperCase();
+  return String(Math.round(u === 'TB' ? n * 1024 : u === 'MB' ? n / 1024 : n));
+}
+
+// `storage` NO es almacenamiento en todos los rubros: en perfumería/decant es la
+// concentración (EDP/EDT) y en repuestos el modelo compatible. Convertir eso a
+// GB destruiría el dato, así que sólo se normaliza donde significa capacidad.
+function capacidadDe(p) {
+  return usaNombre(p) ? (p.storage ?? null) : capacidadEnGB(p.storage);
+}
+
 // Productos que la web realmente muestra.
 async function productosPublicados() {
   const [filas, cats] = await Promise.all([
@@ -80,4 +103,5 @@ async function productosPublicados() {
 }
 
 module.exports = { SUPABASE_URL, SUPABASE_ANON, supa, catsDe, catsPublicadas,
-                   slugify, usaNombre, identidadProd, cond, slugProd, productosPublicados };
+                   slugify, usaNombre, identidadProd, cond, slugProd, productosPublicados,
+                   capacidadEnGB, capacidadDe };

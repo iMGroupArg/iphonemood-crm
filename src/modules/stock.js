@@ -1012,8 +1012,22 @@ const Stock = {
     //
     // Cada campo se resuelve por separado: un modelo puede tener las
     // capacidades confirmadas y los colores todavía no (ej: iPhone 18).
-    const decl = this.SPECS_POR_MODELO[modelo] || {};
     if (!modelo) return { s: this.STORAGE_OPCIONES, c: this.COLOR_OPCIONES };
+    const fijo = this.SPECS_POR_MODELO[modelo] || {};
+    // Lo que se fue agregando desde el CRM para ese modelo (State.catalogoSpecs,
+    // persistido en configuracion.catalogo_specs). Cuenta como catálogo: se
+    // agrega a mano y a propósito, a diferencia de los valores sueltos que
+    // aparecen en el stock, que pueden ser errores de carga.
+    const sumado = (State.catalogoSpecs || {})[modelo] || {};
+    const unir = (a, b) => {
+      const out = [...(a || [])];
+      (b || []).forEach(v => { if (!out.some(x => x.toLowerCase() === String(v).toLowerCase())) out.push(v); });
+      return out;
+    };
+    const decl = {
+      s: (fijo.s || sumado.s) ? unir(fijo.s, sumado.s) : null,
+      c: (fijo.c || sumado.c) ? unir(fijo.c, sumado.c) : null,
+    };
 
     const esDelModelo = p => String(p.modelo || '').toLowerCase() === String(modelo).toLowerCase();
     // Solo para los campos SIN declarar: ahí sí conviene aprender de lo que se
@@ -1944,6 +1958,20 @@ const Stock = {
       // Solo tiene sentido en combos; en el resto se guarda vacío.
       comboItems: cat === 'combo' ? (document.getElementById('f-combo-items')?.value.trim() || '') : ''
     };
+    // Un color o una capacidad escritos a mano para un modelo del catálogo se
+    // suman al catálogo de ESE modelo, así la próxima vez ya están en la lista.
+    // Solo se aprende de lo que se escribió a propósito: los valores sueltos que
+    // aparecen en el stock pueden ser errores de carga (el iPhone 13 "Negro").
+    if (modelo && this.MODELOS_POR_CAT[cat]?.includes(modelo)) {
+      const specs = this.specsParaModelo(modelo);
+      const nuevos = [];
+      if (color && !specs.c.some(v => v.toLowerCase() === color.toLowerCase())
+          && await DB.agregarSpecDeModelo(modelo, 'c', color)) nuevos.push(color);
+      if (storage && !specs.s.some(v => v.toLowerCase() === storage.toLowerCase())
+          && await DB.agregarSpecDeModelo(modelo, 's', storage)) nuevos.push(storage);
+      if (nuevos.length) toast(`${nuevos.join(' y ')} quedó guardado en el catálogo de ${modelo}.`);
+    }
+
     // Siempre explícito: si un producto pasa de un rubro con IMEI a uno sin IMEI,
     // hay que borrar el array. Antes la clave no se tocaba, el array viejo
     // sobrevivía en memoria y getStock() seguía contando unidades fantasma hasta

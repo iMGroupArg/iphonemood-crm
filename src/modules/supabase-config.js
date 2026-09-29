@@ -274,6 +274,40 @@ const DB = {
     if (cfg.ref_blue)  State.refBlue      = Number(cfg.ref_blue);
     if (cfg.ref_usdt) { State.refUsdt = Number(cfg.ref_usdt); State._refUsdtCustomizado = true; }
     if (cfg.ref_blue_compra) State.refBlueCompra = Number(cfg.ref_blue_compra);
+
+    // Colores y capacidades que se fueron agregando por modelo desde el CRM,
+    // sin tocar código. Extienden el catálogo fijo de stock.js: cuando sale un
+    // color nuevo, se carga una vez y queda para todas las cargas siguientes.
+    // Va en `configuracion` y no en una tabla propia porque es exactamente el
+    // mismo caso que landing_categorias o banner: un puñado de valores que
+    // tienen que poder cambiar sin deploy.
+    State.catalogoSpecs = {};
+    if (cfg.catalogo_specs) {
+      try {
+        const obj = JSON.parse(cfg.catalogo_specs);
+        if (obj && typeof obj === 'object') State.catalogoSpecs = obj;
+      } catch (e) { console.warn('catalogo_specs con formato inválido, se ignora:', e); }
+    }
+  },
+
+  // Agrega un valor al catálogo de un modelo y lo persiste. Devuelve true solo
+  // si de verdad era nuevo y quedó guardado.
+  async agregarSpecDeModelo(modelo, campo, valor) {
+    const v = String(valor || '').trim();
+    if (!modelo || !v || !['c', 's'].includes(campo)) return false;
+    const cat = State.catalogoSpecs || (State.catalogoSpecs = {});
+    const delModelo = cat[modelo] || (cat[modelo] = {});
+    const lista = delModelo[campo] || (delModelo[campo] = []);
+    if (lista.some(x => x.toLowerCase() === v.toLowerCase())) return false;
+    lista.push(v);
+    const { error } = await supa.from('configuracion')
+      .upsert({ clave: 'catalogo_specs', valor: JSON.stringify(cat) });
+    if (error) {
+      console.error('No se pudo guardar el catálogo de specs:', error);
+      lista.pop();   // se revierte en memoria para no mentir en pantalla
+      return false;
+    }
+    return true;
   },
 
   async crearAdelanto({ socio, motivo, monto, moneda, fecha, notas }) {

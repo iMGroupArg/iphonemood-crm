@@ -1003,22 +1003,32 @@ const Stock = {
   },
 
   specsParaModelo(modelo) {
-    // Cada campo cae por separado: así se puede declarar un modelo con las
-    // capacidades confirmadas y dejar los colores en la lista genérica hasta
-    // saberlos, en vez de tener que inventarlos para completar la entrada.
+    // Cuando el catálogo DECLARA los colores (o las capacidades) de un modelo,
+    // esa lista manda y no se le suma nada. Un iPhone 13 no viene en Negro: se
+    // llama Medianoche. Si aparece "Negro" en el stock es un producto mal
+    // cargado, no un color nuevo — ofrecerlo propaga el error a cada carga
+    // siguiente, y encima le rompe a la landing la búsqueda de la foto, que se
+    // arma con el nombre del color.
+    //
+    // Cada campo se resuelve por separado: un modelo puede tener las
+    // capacidades confirmadas y los colores todavía no (ej: iPhone 18).
     const decl = this.SPECS_POR_MODELO[modelo] || {};
-    const base = { s: decl.s || this.STORAGE_OPCIONES, c: decl.c || this.COLOR_OPCIONES };
-    if (!modelo) return base;
-    // Sumamos storages y colores que ya existan en el stock para ese modelo: así
-    // un color cargado a mano una vez queda disponible para la próxima.
+    if (!modelo) return { s: this.STORAGE_OPCIONES, c: this.COLOR_OPCIONES };
+
     const esDelModelo = p => String(p.modelo || '').toLowerCase() === String(modelo).toLowerCase();
-    const mezclar = (fijos, campo) => {
-      const extras = this._valoresEnStock(campo, esDelModelo)
-        .filter(v => !fijos.some(f => f.toLowerCase() === v.toLowerCase()))
-        .sort((a, b) => a.localeCompare(b, 'es'));
-      return [...fijos, ...extras];
+    // Solo para los campos SIN declarar: ahí sí conviene aprender de lo que se
+    // cargó, porque la alternativa es la lista genérica de todos los colores.
+    const aprendidos = campo => this._valoresEnStock(campo, esDelModelo)
+      .sort((a, b) => a.localeCompare(b, 'es'));
+    const resolver = (declarado, campo, generica) => {
+      if (declarado) return [...declarado];
+      const extras = aprendidos(campo).filter(v => !generica.some(g => g.toLowerCase() === v.toLowerCase()));
+      return [...generica, ...extras];
     };
-    return { s: mezclar(base.s, 'storage'), c: mezclar(base.c, 'color') };
+    return {
+      s: resolver(decl.s, 'storage', this.STORAGE_OPCIONES),
+      c: resolver(decl.c, 'color', this.COLOR_OPCIONES),
+    };
   },
   ESTADO_OPCIONES: ['Nuevo / Sellado','Excelente','Muy bueno','Bueno','Con detalles'],
   GRADO_OPCIONES: ['Sin grado','A+','A','B','C'],
@@ -1459,13 +1469,24 @@ const Stock = {
     const specs = this.specsParaModelo(modelo);
     const storageSel = document.getElementById('f-storage');
     const colorSel = document.getElementById('f-color');
+    // El valor que YA tiene el producto se agrega si no está en la lista, marcado
+    // como fuera de catálogo. Si desapareciera, guardar cambiaría el dato solo y
+    // en silencio; así queda visible que está mal y se puede corregir.
+    const conActual = (lista, actual) => {
+      if (!actual || lista.some(v => v.toLowerCase() === String(actual).toLowerCase())) return lista;
+      return [...lista, actual];
+    };
+    const opcion = (v, actual) => {
+      const fuera = v === actual && !specs.c.concat(specs.s).some(x => x.toLowerCase() === String(v).toLowerCase());
+      return `<option value="${State.esc(v)}" ${v === actual ? 'selected' : ''}>${State.esc(v)}${fuera ? ' — fuera de catálogo' : ''}</option>`;
+    };
     if (storageSel) {
       storageSel.innerHTML = '<option value="">Seleccionar</option>' +
-        specs.s.map(s => `<option value="${State.esc(s)}" ${s === storageActual ? 'selected' : ''}>${State.esc(s)}</option>`).join('');
+        conActual(specs.s, storageActual).map(v => opcion(v, storageActual)).join('');
     }
     if (colorSel) {
       colorSel.innerHTML = '<option value="">Seleccionar color</option>' +
-        specs.c.map(c => `<option value="${State.esc(c)}" ${c === colorActual ? 'selected' : ''}>${State.esc(c)}</option>`).join('') +
+        conActual(specs.c, colorActual).map(v => opcion(v, colorActual)).join('') +
         '<option value="Otro">Otro</option>';
     }
   },

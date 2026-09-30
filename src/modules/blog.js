@@ -192,6 +192,7 @@ const Blog = {
             <code>[texto del link](/precios)</code> — enlazar al catálogo suma mucho<br>
             <code>&gt; cita</code> &nbsp;·&nbsp; <code>---</code> — línea separadora<br>
             <code>\`texto\`</code> — entre comillas invertidas, para códigos como <code>*#06#</code><br>
+            <code>| Modelo | Precio |</code> — tabla; la segunda fila tiene que ser <code>|---|---|</code><br>
             <code>![qué se ve](nombre-del-archivo.jpg)</code> — una foto ya subida al bucket
           </div>
         </details>

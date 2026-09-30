@@ -82,6 +82,21 @@ function aHtml(md) {
   let lista = null;   // 'ul' | 'ol' | null
   let cita = [];
 
+  let tabla = null;   // filas de la tabla que se está leyendo, o null
+
+  // Tabla estilo markdown: filas entre barras y una fila de guiones que separa
+  // el encabezado. Se agregó porque las notas de precios son listas de dos o
+  // tres columnas, y escritas como lista quedan ilegibles.
+  const cerrarTabla = () => {
+    if (!tabla) return;
+    const [cab, ...filas] = tabla;
+    const celdas = (fila, tag) =>
+      `<tr>${fila.map(c => `<${tag}>${enLinea(c)}</${tag}>`).join('')}</tr>`;
+    out.push(`<table><thead>${celdas(cab, 'th')}</thead><tbody>${
+      filas.map(f => celdas(f, 'td')).join('')}</tbody></table>`);
+    tabla = null;
+  };
+
   const cerrarParrafo = () => {
     if (parrafo.length) { out.push(`<p>${enLinea(parrafo.join(' '))}</p>`); parrafo = []; }
   };
@@ -89,12 +104,26 @@ function aHtml(md) {
   const cerrarCita = () => {
     if (cita.length) { out.push(`<blockquote><p>${enLinea(cita.join(' '))}</p></blockquote>`); cita = []; }
   };
-  const cerrarTodo = () => { cerrarParrafo(); cerrarLista(); cerrarCita(); };
+  const cerrarTodo = () => { cerrarParrafo(); cerrarLista(); cerrarCita(); cerrarTabla(); };
+
+  // Una fila de tabla: empieza y termina con barra. La de guiones solo separa
+  // el encabezado y no se dibuja.
+  const filaTabla = l => /^\|.*\|$/.test(l) ? l.slice(1, -1).split('|').map(c => c.trim()) : null;
+  const esSeparador = c => c.length > 0 && c.every(x => /^:?-{2,}:?$/.test(x));
 
   for (const cruda of lineas) {
     const l = cruda.trim();
 
     if (!l) { cerrarTodo(); continue; }
+
+    const celdas = filaTabla(l);
+    if (celdas) {
+      if (esSeparador(celdas)) continue;   // la fila de guiones no se dibuja
+      cerrarParrafo(); cerrarLista(); cerrarCita();
+      (tabla ||= []).push(celdas);
+      continue;
+    }
+    cerrarTabla();
 
     let m;
     if ((m = l.match(/^(#{2,4})\s+(.*)$/))) {
@@ -267,6 +296,10 @@ article h1{font-size:clamp(28px,4.6vw,42px);line-height:1.12;letter-spacing:-.03
 .cuerpo blockquote{border-left:3px solid var(--border);padding:2px 0 2px 18px;margin:0 0 20px;color:var(--gray)}
 .cuerpo hr{border:0;border-top:1px solid var(--border);margin:34px 0}
 .cuerpo img{border-radius:12px;margin:6px 0 22px;width:100%}
+.cuerpo table{width:100%;border-collapse:collapse;margin:0 0 22px;font-size:16px}
+.cuerpo th,.cuerpo td{text-align:left;padding:10px 12px;border-bottom:1px solid var(--border)}
+.cuerpo th{font-weight:700;font-size:13px;text-transform:uppercase;letter-spacing:.03em;color:var(--gray);border-bottom-width:2px}
+.cuerpo td:last-child,.cuerpo th:last-child{text-align:right}
 .cuerpo code{background:var(--gray3);border-radius:6px;padding:2px 6px;font-size:.9em;
 font-family:ui-monospace,SFMono-Regular,Menlo,monospace;white-space:nowrap}
 .tags{display:flex;flex-wrap:wrap;gap:8px;margin:26px 0 0}

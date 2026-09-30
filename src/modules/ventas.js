@@ -329,7 +329,15 @@ const Ventas = {
     const ventas=this.ventasDelPeriodo();
 
     const volumen = ventas.reduce((s,v) => s + v.items.reduce((a,i) => a + i.precio, 0), 0);
-    const unidades = ventas.reduce((s,v) => s + v.items.reduce((a,i) => a + (i.cantidad||1), 0), 0);
+    // "Unidades vendidas" es lo que generó ingreso: los ítems regalo tienen
+    // precio 0 (ver addStockItems) y antes igual sumaban a la cuenta, así
+    // que una venta con 1 iPhone + 3 accesorios de regalo mostraba "4
+    // unidades vendidas" cuando en realidad se vendió 1.
+    const unidades = ventas.reduce((s,v) => s + v.items.filter(i => !i.regalo).reduce((a,i) => a + (i.cantidad||1), 0), 0);
+    // Cuánto costó lo que se regaló en el período (no lo que valía de lista:
+    // precio ya es 0 para estos ítems, lo relevante es el costo real).
+    const itemsRegalo = ventas.flatMap(v => v.items.filter(i => i.regalo));
+    const valorRegalado = itemsRegalo.reduce((s,i) => s + (i.costo || 0), 0);
     // Un solo criterio para todo: ver resultadoVenta()
     const res = ventas.map(v => this.resultadoVenta(v));
     const margenBruto  = res.reduce((s,r) => s + r.margenBruto, 0);
@@ -372,6 +380,7 @@ const Ventas = {
     const kpis = [
       { label:'Volumen vendido',          val:State.fmtUSD(volumen),       sub:`${ventas.length} venta(s) en el período`,          emoji:'💰', color:'var(--blue)' },
       { label:'Unidades vendidas',         val:String(unidades),            sub:`${ventas.length} transacciones`,                   emoji:'📦', color:'var(--blue)' },
+      { label:'Regalado en el período',    val:State.fmtUSD(valorRegalado), sub:itemsRegalo.length ? `${itemsRegalo.length} ítem(s) regalado(s)` : 'Sin regalos en el período', emoji:'🎁', color:valorRegalado>0?'var(--purple)':'var(--text-secondary)' },
       { label:'Rentabilidad',              val:`${rentabilidad.toFixed(1)}%`,sub:'Margen real ÷ volumen vendido',                   emoji:'📊', color:rentabilidad>=0?'var(--green)':'var(--red)' },
       { label:'Margen por venta',          val:State.fmtUSD(margenXEquipo), sub:'Margen real ÷ cantidad de ventas',                emoji:margenXEquipo>=0?'📈':'📉', color:margenXEquipo>=0?'var(--green)':'var(--red)' },
       { label:'MARGEN TOTAL',              val:State.fmtUSD(margenTotal),   sub:'Ventas + tarjeta + tipo de cambio',               emoji:'🏆', color:margenTotal>=0?'var(--green)':'var(--red)' },
@@ -382,13 +391,18 @@ const Ventas = {
       { label:'Dif. tipo de cambio',        val:State.fmtUSD(difCambio),    sub:`${cambiosPeriodo.length} op. ARS→USD en el período`,emoji:'💱', color:difCambio>=0?'var(--green)':'var(--red)' },
       { label:'Ticket promedio',            val:State.fmtUSD(ticketProm),   sub:'Volumen ÷ cantidad de ventas',                    emoji:'🧾', color:'var(--text)' },
     ];
-    el.style.cssText = 'padding:14px 22px;border-bottom:1px solid var(--border);display:grid;grid-template-columns:repeat(11,1fr);gap:8px';
-    el.innerHTML = kpis.map((k,i)=>`
-      <div class="card" style="padding:10px 12px;margin-bottom:0;display:flex;flex-direction:column;gap:4px;min-height:90px${i===4?';border:1px solid var(--green);box-shadow:0 0 0 1px var(--green)20':''}">
-        <label style="font-size:9.5px;color:var(--text-secondary);display:block;line-height:1.2;${i===4?'font-weight:700;color:var(--green)':''}">${k.label}</label>
-        <div style="font-size:${i===4?'15':'14'}px;font-weight:700;color:${k.color};word-break:break-word;line-height:1.2">${k.val}</div>
+    el.style.cssText = `padding:14px 22px;border-bottom:1px solid var(--border);display:grid;grid-template-columns:repeat(${kpis.length},1fr);gap:8px`;
+    el.innerHTML = kpis.map((k)=>{
+      // Destacar la tarjeta por nombre, no por posición: un KPI nuevo en el
+      // medio del array (como "Regalado") no debe desplazar el resaltado.
+      const dest = k.label === 'MARGEN TOTAL';
+      return `
+      <div class="card" style="padding:10px 12px;margin-bottom:0;display:flex;flex-direction:column;gap:4px;min-height:90px${dest?';border:1px solid var(--green);box-shadow:0 0 0 1px var(--green)20':''}">
+        <label style="font-size:9.5px;color:var(--text-secondary);display:block;line-height:1.2;${dest?'font-weight:700;color:var(--green)':''}">${k.label}</label>
+        <div style="font-size:${dest?'15':'14'}px;font-weight:700;color:${k.color};word-break:break-word;line-height:1.2">${k.val}</div>
         <div style="font-size:9px;color:var(--text-secondary);line-height:1.2;margin-top:auto">${k.sub}</div>
-      </div>`).join('');
+      </div>`;
+    }).join('');
   },
 
   renderList() {

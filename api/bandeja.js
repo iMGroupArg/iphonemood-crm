@@ -40,6 +40,18 @@ async function usuarioAutorizado(token) {
 
 const { limitar } = require('./_ratelimit.js');
 
+// Métodos que pueden llevar cuerpo. Antes solo se reenviaba el de POST, así que
+// un PUT/PATCH/DELETE llegaba al bot vacío: la petición salía igual y el bot
+// hacía cualquier cosa, sin que nadie se enterara de que faltaban los datos.
+const METODOS_CON_CUERPO = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
+
+// Corte por tiempo. Sin esto, un bot colgado dejaba la petición esperando hasta
+// que Vercel mataba la función sola, y el navegador recibía un error de
+// plataforma en HTML en vez de un JSON que la bandeja sepa leer. Se eligen 8s
+// para cortar cómodamente antes del límite de Vercel (10s en Hobby, 15s en Pro)
+// y que el mensaje que llega sea el nuestro.
+const TIMEOUT_MS = 8000;
+
 module.exports = async function handler(req, res) {
   // Antes de todo, incluso de mirar el token: el objetivo es frenar la
   // fuerza bruta de tokens y el martilleo del proxy desde un mismo origen.
@@ -76,9 +88,15 @@ module.exports = async function handler(req, res) {
   };
 
   const opts = { method: req.method, headers };
-  if (req.method === 'POST') {
+  if (METODOS_CON_CUERPO.has(req.method)) {
+    // JSON.stringify(undefined) es undefined, y fetch entiende eso como "sin
+    // cuerpo": un DELETE sin datos sigue saliendo sin cuerpo, como corresponde.
     opts.body = JSON.stringify(req.body);
   }
+
+  const reloj = new AbortController();
+  const corte = setTimeout(() => reloj.abort(), TIMEOUT_MS);
+  opts.signal = reloj.signal;
 
   try {
     const upstream = await fetch(target, opts);
@@ -103,6 +121,12 @@ module.exports = async function handler(req, res) {
     res.setHeader('Cache-Control', 'private, no-store');
     res.status(upstream.status).send(text);
   } catch (e) {
+    if (e.name === 'AbortError') {
+      res.status(504).json({ error: 'El bot tardó demasiado en responder. Probá de nuevo en un momento.' });
+      return;
+    }
     res.status(502).json({ error: 'proxy error', detail: e.message });
+  } finally {
+    clearTimeout(corte);
   }
 };

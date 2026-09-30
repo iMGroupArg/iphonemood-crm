@@ -285,7 +285,10 @@ const Bandeja = {
     if (!r.ok) {
       const e = new Error('bandeja HTTP ' + r.status);
       e.status = r.status;
-      e.motivo = r.status === 401 ? 'sesion' : r.status === 429 ? 'limite' : 'servidor';
+      e.motivo = r.status === 401 ? 'sesion'
+              : r.status === 429 ? 'limite'
+              : r.status === 504 ? 'lento'
+              : 'servidor';
       throw e;
     }
     return r.json();
@@ -294,6 +297,9 @@ const Bandeja = {
   _msgError(e) {
     if (e?.motivo === 'sesion') return 'Se venció tu sesión. Cerrá y volvé a entrar para ver la bandeja.';
     if (e?.motivo === 'limite') return 'Demasiados pedidos seguidos. Esperá unos segundos y probá de nuevo.';
+    // 504: el proxy sí llegó al bot, lo que falló es que el bot no contestó a
+    // tiempo. Decir "no se pudo conectar" acá mandaba a revisar la red al pedo.
+    if (e?.motivo === 'lento') return 'El bot está tardando en responder. Reintentando…';
     return 'No se pudo conectar con la bandeja. Reintentando…';
   },
 

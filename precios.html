@@ -248,6 +248,18 @@ body { font-family: var(--font); background: #fff; color: var(--black); -webkit-
 /* `contain` y no `cover`: si una diapositiva tiene otra proporción, `cover` le
    cortaría los bordes. Vale más que se vea todo el aviso. */
 .bnr-slide img { width: 100%; height: 100%; object-fit: contain; display: block; }
+/* Un acercamiento lentísimo y de ida y vuelta: le da vida al banner sin que
+   se note como "animación". Es seguro porque `.bnr` recorta lo que sobra.
+   Quien tenga el sistema en modo sin animaciones no lo ve: para algunas
+   personas el movimiento en pantalla marea de verdad. */
+.bnr-slide img { animation: bnrRespira 16s ease-in-out infinite alternate; will-change: transform; }
+@keyframes bnrRespira {
+  from { transform: scale(1); }
+  to   { transform: scale(1.045); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .bnr-slide img { animation: none; }
+}
 .bnr-flecha {
   position: absolute; top: 50%; transform: translateY(-50%);
   width: 38px; height: 38px; border-radius: 50%; border: none;
@@ -483,6 +495,20 @@ body { font-family: var(--font); background: #fff; color: var(--black); -webkit-
 .fpill:hover { border-color: var(--black); }
 .fpill.on { background: var(--blue); border-color: var(--blue); color: #fff; }
 .fpill.on:hover { background: var(--blue); border-color: var(--blue); }
+
+/* Filtros que cambian según la pantalla.
+   En el celular la línea de iPhone iba en pastillas y se comía dos renglones
+   enteros antes de que apareciera un solo producto; ahí va en desplegable.
+   En escritorio siguen las pastillas, que entran de sobra y se tocan de una.
+   Se dibujan las dos y acá se decide cuál se ve: así no hay que escuchar el
+   cambio de tamaño de pantalla ni volver a dibujar nada. */
+.fdrop.f-movil { display: none; }
+@media (max-width: 700px) {
+  .fpills.f-escritorio { display: none; }
+  .fdrop.f-movil { display: inline-flex; }
+}
+/* Los dos botones de estado van juntos y separados del resto */
+.festados { gap: 8px; }
 
 /* El desplegable: pastilla dibujada por nosotros con un <select> nativo
    encima, invisible. Así se ve como el resto del sitio pero abre el selector
@@ -1572,6 +1598,229 @@ footer strong { color: rgba(255,255,255,.85); }
   .card-usd { font-size: 16px; }
   .card-name { font-size: 13px; }
 }
+
+/* ═══════════════════════════════════════════════════════════
+   iPHONE 18 PRO — panel de lanzamiento
+   Estética de página de producto: fondo oscuro, tipografía grande, mucho
+   aire y tarjetas que se deslizan de costado.
+   El texto y los gráficos son PROPIOS. De Apple se toman únicamente las
+   especificaciones (megapixeles, horas de batería, nombre del chip), que son
+   datos verificables y no material con derechos de autor. Copiar su redacción
+   o sus fotos, además de ser ilegal, nos hundiría en Google por contenido
+   duplicado: es exactamente lo contrario de lo que busca el blog.
+═══════════════════════════════════════════════════════════ */
+.p18 { background:#0A0A0C; color:#F5F5F7; padding:76px 0 64px; overflow:hidden; position:relative; }
+/* Halo frío detrás del título, para que el bloque no sea un rectángulo negro plano */
+.p18::before {
+  content:''; position:absolute; top:-180px; left:50%; width:900px; height:520px;
+  transform:translateX(-50%); pointer-events:none;
+  background:radial-gradient(50% 50% at 50% 50%, rgba(0,113,227,.20), transparent 70%);
+}
+.p18-inner { max-width:1100px; margin:0 auto; padding:0 20px; position:relative; }
+
+/* El link del 18 Pro es el séptimo de la cápsula de la nav y, como la cápsula
+   está centrada, abajo de 1200px empuja hacia afuera y le pisa el logo a la
+   marca. Por eso aparece recién en pantallas anchas: en el resto la sección
+   sigue estando en el menú lateral y a un scroll del catálogo. */
+/* El acceso al 18 Pro va primero y en azul: es lo que queremos que se toque.
+   La cápsula de la nav está centrada, así que cada link de más le come lugar
+   al logo; entre 1140 y 1280 se achica el relleno de todos para que entren
+   los siete sin pisarse. Abajo de 1140 se esconde y queda en el menú lateral. */
+.nav-links a.nav-nuevo { display: none; }
+@media (min-width: 1140px) {
+  .nav-links a.nav-nuevo { display: flex; background: var(--blue); color: #fff; }
+  .nav-links a.nav-nuevo:hover { background: #0077ED; color: #fff; }
+  .nav-links a.nav-nuevo.activo { background: var(--black); color: #fff; }
+}
+@media (min-width: 900px) and (max-width: 1279px) {
+  .nav-links a { padding: 8px 10px; }
+}
+/* Puntito que late, para que el ojo vaya ahí */
+.nav-nuevo-pt {
+  width: 6px; height: 6px; border-radius: 50%; background: #fff;
+  margin-right: 7px; flex: 0 0 6px; animation: navLate 2s ease-in-out infinite;
+}
+@keyframes navLate { 0%,100% { opacity: 1; } 50% { opacity: .35; } }
+@media (prefers-reduced-motion: reduce) { .nav-nuevo-pt { animation: none; } }
+
+/* ─ Encabezado ─ */
+.p18-eye {
+  font-size:13px; font-weight:600; letter-spacing:.02em; color:#5AC8FA;
+  display:inline-flex; align-items:center; gap:8px; margin-bottom:14px;
+}
+.p18-eye::before {
+  content:''; width:7px; height:7px; border-radius:50%; background:#5AC8FA;
+  box-shadow:0 0 0 4px rgba(90,200,250,.18);
+}
+.p18-title {
+  font-size:clamp(38px, 8.6vw, 76px); line-height:1.02; font-weight:700;
+  letter-spacing:-.03em; margin:0 0 18px;
+}
+.p18-title span { color:#86868B; display:block; }
+.p18-lead {
+  font-size:clamp(16px, 2.2vw, 20px); line-height:1.5; color:#C7C7CC;
+  max-width:620px; margin:0 0 26px;
+}
+.p18-lead b { color:#F5F5F7; font-weight:600; }
+.p18-ctas { display:flex; flex-wrap:wrap; gap:10px; margin-bottom:8px; }
+.p18-btn {
+  display:inline-flex; align-items:center; gap:8px; padding:13px 22px;
+  border-radius:980px; font-size:15px; font-weight:600; text-decoration:none;
+  transition:transform .15s ease, background .15s ease;
+}
+.p18-btn:active { transform:scale(.97); }
+.p18-btn.pri { background:#0071E3; color:#fff; }
+.p18-btn.pri:hover { background:#0077ED; }
+.p18-btn.sec { background:rgba(255,255,255,.10); color:#F5F5F7; }
+.p18-btn.sec:hover { background:rgba(255,255,255,.16); }
+.p18-nota { font-size:12px; color:#86868B; margin-top:14px; }
+
+/* ─ Fila de datos duros ─ */
+.p18-stats {
+  display:grid; grid-template-columns:repeat(2,1fr); gap:1px;
+  background:rgba(255,255,255,.10); border-radius:18px; overflow:hidden;
+  margin:44px 0 0;
+}
+.p18-stat { background:#0A0A0C; padding:22px 18px; }
+.p18-stat-n {
+  font-size:clamp(26px,5vw,38px); font-weight:700; letter-spacing:-.02em;
+  line-height:1.1; margin-bottom:4px;
+}
+.p18-stat-t { font-size:13px; color:#86868B; line-height:1.35; }
+
+/* ─ Galería de características ─ */
+.p18-sec-h {
+  font-size:clamp(24px,4.4vw,34px); font-weight:700; letter-spacing:-.02em;
+  margin:64px 0 20px; line-height:1.15;
+}
+/* ─ Fotos ─
+   Vienen con fondo negro de fábrica, así que sobre esta sección entran a
+   sangre sin recorte ni máscara: no hace falta ningún truco. */
+.p18-full {
+  display:block; width:100%; height:auto; margin:28px 0;
+}
+/* Portada: arranca la sección, así que va sin margen arriba */
+.p18-portada { display:block; width:100%; height:auto; margin:0 0 30px; }
+
+/* Enlace al blog, donde antes estaba el bloque repetido de "Reservá el tuyo" */
+.p18-blog { margin:34px 0 0; }
+.p18-blog a {
+  display:inline-flex; align-items:center; gap:8px; padding:13px 22px;
+  border-radius:980px; background:rgba(255,255,255,.10); color:#F5F5F7;
+  font-size:15px; font-weight:600; text-decoration:none;
+}
+.p18-blog a:hover { background:rgba(255,255,255,.16); }
+
+/* Visor de detalle: lista de pastillas a la izquierda, foto a la derecha.
+   Se abre una sola a la vez, como un acordeón. */
+.p18-visor {
+  display:grid; gap:18px; align-items:center; margin-top:22px;
+  background:linear-gradient(180deg,#141418,#0D0D10);
+  border:1px solid rgba(255,255,255,.08); border-radius:26px;
+  padding:22px 18px;
+}
+.p18-vlista { display:flex; flex-direction:column; gap:8px; }
+.p18-vpill {
+  display:flex; align-items:center; gap:10px; width:100%; text-align:left;
+  background:rgba(255,255,255,.08); color:#F5F5F7; border:0; cursor:pointer;
+  border-radius:980px; padding:12px 18px; font-size:15px; font-weight:600;
+  font-family:var(--font); transition:background .16s;
+}
+.p18-vpill:hover { background:rgba(255,255,255,.14); }
+.p18-vitem.on > .p18-vpill { background:rgba(255,255,255,.16); }
+/* El icono: punto de color en "Colores", cruz en el resto */
+.p18-vico { width:20px; height:20px; flex:0 0 20px; position:relative; }
+.p18-vico.dot { border-radius:50%; background:var(--dot,#7A2C3E); box-shadow:inset 0 0 0 1px rgba(255,255,255,.35); }
+.p18-vico.mas { border:1px solid rgba(255,255,255,.45); border-radius:50%; }
+.p18-vico.mas::before, .p18-vico.mas::after {
+  content:''; position:absolute; background:#F5F5F7; left:50%; top:50%;
+}
+.p18-vico.mas::before { width:9px; height:1.5px; transform:translate(-50%,-50%); }
+.p18-vico.mas::after  { width:1.5px; height:9px; transform:translate(-50%,-50%); }
+.p18-vbody { display:none; padding:12px 18px 6px; }
+.p18-vitem.on .p18-vbody { display:block; }
+.p18-vbody p { font-size:14px; line-height:1.55; color:#A1A1A6; margin:0; }
+.p18-vbody b { color:#F5F5F7; font-weight:600; }
+.p18-vfoto { min-width:0; }
+/* En el celular la lista es larga y la foto quedaba abajo de todo: se tocaba
+   un ítem y no se veía nada cambiar. Ahora la foto va primero y queda pegada
+   abajo de la barra de navegación (52px) mientras se recorre la lista. */
+@media (max-width:759px) {
+  .p18-vfoto {
+    order:-1; position:sticky; top:52px; z-index:3;
+    background:#121216; margin:-4px -8px 12px; padding:8px;
+    border-radius:18px; box-shadow:0 10px 24px rgba(0,0,0,.55);
+  }
+  .p18-vfoto img { max-height:38vh; object-fit:contain; margin:0 auto; }
+}
+.p18-vfoto img { display:block; width:100%; height:auto; border-radius:16px; background:#000; }
+.p18-sws { display:flex; gap:12px; margin-top:14px; }
+.p18-sw {
+  width:28px; height:28px; border-radius:50%; cursor:pointer; padding:0;
+  background:var(--sw); border:1px solid rgba(255,255,255,.22);
+  transition:box-shadow .16s, transform .16s;
+}
+.p18-sw:hover { transform:scale(1.08); }
+.p18-sw.on { box-shadow:0 0 0 2px #121216, 0 0 0 4px #F5F5F7; }
+
+/* Foto de cada tarjeta de la galería */
+
+/* Crédito de las fotos. Va a la vista y no sólo en la letra chica: las
+   imágenes son de Apple y corresponde decirlo donde se ven. */
+.p18-credito {
+  max-width:1100px; margin:-14px auto 0; padding:0 20px;
+  font-size:11.5px; color:#6E6E73; text-align:right;
+}
+.p18-credito a { color:#86868B; text-decoration:none; border-bottom:1px solid rgba(134,134,139,.4); }
+.p18-credito a:hover { color:#C7C7CC; }
+
+/* ─ Comparador ─ */
+.p18-comp {
+  margin-top:64px; background:linear-gradient(180deg,#151519,#0F0F12);
+  border:1px solid rgba(255,255,255,.08); border-radius:26px; padding:28px 20px 26px;
+}
+.p18-comp h3 { font-size:clamp(22px,4vw,30px); font-weight:700; letter-spacing:-.02em; margin:0 0 8px; }
+.p18-comp-sub { font-size:14px; color:#A1A1A6; line-height:1.5; margin:0 0 20px; }
+.p18-sel-lbl { display:block; font-size:12px; color:#86868B; margin-bottom:7px; }
+.p18-sel {
+  width:100%; max-width:340px; background:#1C1C20; color:#F5F5F7;
+  border:1px solid rgba(255,255,255,.14); border-radius:12px;
+  padding:12px 14px; font-size:15px; font-family:var(--font); cursor:pointer;
+  appearance:none; -webkit-appearance:none;
+  background-image:linear-gradient(45deg,transparent 50%,#86868B 50%),linear-gradient(135deg,#86868B 50%,transparent 50%);
+  background-position:calc(100% - 20px) 21px, calc(100% - 15px) 21px;
+  background-size:5px 5px,5px 5px; background-repeat:no-repeat;
+}
+.p18-res { display:grid; grid-template-columns:1fr; gap:1px; background:rgba(255,255,255,.10);
+  border-radius:16px; overflow:hidden; margin-top:20px; }
+.p18-res-i { background:#0F0F12; padding:18px; }
+.p18-res-n { font-size:26px; font-weight:700; letter-spacing:-.02em; color:#30D158; line-height:1.1; }
+.p18-res-t { font-size:13px; color:#86868B; margin-top:3px; line-height:1.35; }
+.p18-res-pie { font-size:13px; color:#A1A1A6; line-height:1.55; margin-top:16px; }
+.p18-res-pie a { color:#5AC8FA; text-decoration:none; }
+.p18-res-pie a:hover { text-decoration:underline; }
+
+/* ─ Precios y disponibilidad ─ */
+.p18-precios { margin-top:56px; }
+.p18-tabla { width:100%; border-collapse:collapse; font-size:14px; margin-top:14px; }
+.p18-tabla th, .p18-tabla td { text-align:left; padding:13px 10px; border-bottom:1px solid rgba(255,255,255,.09); }
+.p18-tabla th { font-size:12px; color:#86868B; font-weight:600; text-transform:uppercase; letter-spacing:.04em; }
+.p18-tabla td:first-child { font-weight:600; }
+.p18-tabla td { color:#C7C7CC; }
+
+/* ─ Letra chica ─ */
+.p18-fine { margin-top:46px; padding-top:22px; border-top:1px solid rgba(255,255,255,.09); }
+.p18-fine li { font-size:11.5px; line-height:1.6; color:#6E6E73; margin-bottom:7px; }
+.p18-fine a { color:#86868B; }
+
+@media (min-width:760px) {
+  .p18 { padding:100px 0 80px; }
+  .p18-stats { grid-template-columns:repeat(4,1fr); }
+  .p18-res { grid-template-columns:repeat(3,1fr); }
+  .p18-comp { padding:34px 32px 32px; }
+  .p18-visor { grid-template-columns:minmax(300px,.85fr) 1.15fr; gap:30px; padding:34px 30px; }
+  .p18-full { margin:44px 0; }
+}
 </style>
 </head>
 <body>
@@ -1593,6 +1842,7 @@ footer strong { color: rgba(255,255,255,.85); }
     iPhone Mood
   </a>
   <nav class="nav-links" id="nav-links" aria-label="Secciones">
+    <a class="nav-nuevo" href="#iphone18" data-sec="iphone18" data-do="seccion" data-arg="iphone18"><span class="nav-nuevo-pt"></span>iPhone 18 Pro</a>
     <div class="nav-item">
       <a href="#productos" data-sec="productos" data-do="seccion" data-arg="productos"
          aria-haspopup="true">Productos<span class="nav-chev"></span></a>
@@ -1639,6 +1889,7 @@ footer strong { color: rgba(255,255,255,.85); }
     <span>Secciones</span>
     <button data-do="menuCerrar" aria-label="Cerrar menú">✕</button>
   </div>
+  <a href="#iphone18" data-do="seccion" data-arg="iphone18"><span>🆕</span> iPhone 18 Pro</a>
   <a href="#productos" data-do="seccion" data-arg="productos"><span>🛍️</span> Productos</a>
   <a href="#canje" data-do="seccion" data-arg="canje"><span>🔄</span> Plan canje</a>
   <a href="#opiniones" data-do="seccion" data-arg="opiniones"><span>⭐</span> Nuestras reseñas</a>
@@ -1746,6 +1997,246 @@ footer strong { color: rgba(255,255,255,.85); }
     <div class="skel" style="height:260px"></div>
   </div>
 </div>
+
+<!-- ═══ iPHONE 18 PRO — panel de producto ═══
+     Fondo negro y fotos oficiales del equipo (vienen con fondo negro, así que
+     entran a sangre sin recorte). El texto es propio.
+     El visor de abajo reemplaza a la galería de tarjetas y al selector de
+     color sueltos que había antes: decían lo mismo tres veces. -->
+<section class="p18" id="iphone18" aria-labelledby="p18-h">
+
+  <!-- Portada: la composición va primero y el texto abajo, como en la página
+       de Apple que tomamos de referencia. -->
+  <img class="p18-portada" src="assets/iphone18/portada-pro-1600.jpg"
+       srcset="assets/iphone18/portada-pro-800.jpg 800w, assets/iphone18/portada-pro-1600.jpg 1600w"
+       sizes="100vw" width="1600" height="560" decoding="async" fetchpriority="high"
+       alt="iPhone 18 Pro color borgoña apoyado sobre la palabra PRO en letras gigantes">
+
+  <div class="p18-inner">
+    <div class="p18-eye">Disponible ahora · iPhone 18 Pro</div>
+    <h1 class="p18-title" id="p18-h">iPhone 18&nbsp;Pro.<span>Ya está acá.</span></h1>
+    <p class="p18-lead">
+      Lo tenemos en las <b>cuatro terminaciones</b>, en Pro y Pro&nbsp;Max.
+      Escribinos y te pasamos precio, capacidades y colores disponibles hoy.
+      También <b>tomamos tu equipo actual como parte de pago</b>.
+    </p>
+    <div class="p18-ctas">
+      <a class="p18-btn pri" target="_blank" rel="noopener"
+         href="https://wa.me/5493416907597?text=Hola!%20Quiero%20un%20iPhone%2018%20Pro.%20%C2%BFQu%C3%A9%20capacidades%20y%20colores%20tienen%3F">
+        Consultar por WhatsApp
+      </a>
+      <a class="p18-btn sec" href="#canje" data-do="seccion" data-arg="canje">Entregar mi usado</a>
+    </div>
+    <p class="p18-nota">Te respondemos con precio y disponibilidad real, sin vueltas.</p>
+  </div>
+
+  <div class="p18-inner">
+    <div class="p18-stats">
+      <div class="p18-stat">
+        <div class="p18-stat-n">48 MP</div>
+        <div class="p18-stat-t">Las tres cámaras traseras, no sólo la principal</div>
+      </div>
+      <div class="p18-stat">
+        <div class="p18-stat-n">ƒ/1.48</div>
+        <div class="p18-stat-t">Apertura variable hasta ƒ/4: abre y cierra como una réflex</div>
+      </div>
+      <div class="p18-stat">
+        <div class="p18-stat-n">A20 Pro</div>
+        <div class="p18-stat-t">Primer chip de 2&nbsp;nanómetros en un teléfono</div>
+      </div>
+      <div class="p18-stat">
+        <div class="p18-stat-n">43 h</div>
+        <div class="p18-stat-t">De video en el Pro&nbsp;Max: 6&nbsp;horas más que el 17 Pro&nbsp;Max</div>
+      </div>
+    </div>
+
+    <!-- Visor: se toca un ítem y cambia la foto de la derecha -->
+    <h2 class="p18-sec-h">Míralo en detalle.</h2>
+    <div class="p18-visor">
+      <div class="p18-vlista">
+
+        <div class="p18-vitem on" id="p18-it-colores">
+          <button class="p18-vpill" data-do="p18Item" data-arg="colores" aria-expanded="true">
+            <span class="p18-vico dot" id="p18-vdot" aria-hidden="true"></span>Colores
+          </button>
+          <div class="p18-vbody">
+            <p><b>Colores.</b> Cuatro terminaciones para elegir. Este es el
+               iPhone&nbsp;18&nbsp;Pro en <span id="p18-color-nom">color borgoña</span>.</p>
+            <div class="p18-sws" role="group" aria-label="Elegir color">
+              <button class="p18-sw on" data-do="p18Color" data-arg="borgona" aria-pressed="true"
+                      style="--sw:#7A2C3E" aria-label="Color borgoña"></button>
+              <button class="p18-sw" data-do="p18Color" data-arg="glaciar" aria-pressed="false"
+                      style="--sw:#B4C8DC" aria-label="Color glaciar"></button>
+              <button class="p18-sw" data-do="p18Color" data-arg="plata" aria-pressed="false"
+                      style="--sw:#E4E4E2" aria-label="Color plata"></button>
+              <button class="p18-sw" data-do="p18Color" data-arg="negro" aria-pressed="false"
+                      style="--sw:#2B2B2D" aria-label="Negro"></button>
+            </div>
+          </div>
+        </div>
+
+        <div class="p18-vitem" id="p18-it-tamanos">
+          <button class="p18-vpill" data-do="p18Item" data-arg="tamanos" aria-expanded="false">
+            <span class="p18-vico mas" aria-hidden="true"></span>Dos tamaños
+          </button>
+          <div class="p18-vbody">
+            <p><b>Dos tamaños.</b> El Pro&nbsp;Max tiene 6,9&nbsp;pulgadas y el Pro,
+               6,3. Los dos con pantalla Super&nbsp;Retina&nbsp;XDR y ProMotion a 120&nbsp;Hz.</p>
+          </div>
+        </div>
+
+        <div class="p18-vitem" id="p18-it-camara">
+          <button class="p18-vpill" data-do="p18Item" data-arg="camara" aria-expanded="false">
+            <span class="p18-vico mas" aria-hidden="true"></span>Nueva cámara principal
+          </button>
+          <div class="p18-vbody">
+            <p><b>Nueva cámara principal.</b> La de 48&nbsp;MP tiene apertura variable
+               de ƒ/1.48 a ƒ/4: se ajusta sola para que entre más luz de noche o para
+               que todo el plano quede enfocado.</p>
+          </div>
+        </div>
+
+        <div class="p18-vitem" id="p18-it-zoom">
+          <button class="p18-vpill" data-do="p18Item" data-arg="zoom" aria-expanded="false">
+            <span class="p18-vico mas" aria-hidden="true"></span>Zoom 8x
+          </button>
+          <div class="p18-vbody">
+            <p><b>Zoom 8x.</b> El teleobjetivo también es de 48&nbsp;MP y llega a 8x con
+               calidad óptica, 16x de rango total. En la cancha o en un recital el sujeto
+               sale limpio, no como un recorte pixelado.</p>
+          </div>
+        </div>
+
+        <div class="p18-vitem" id="p18-it-chip">
+          <button class="p18-vpill" data-do="p18Item" data-arg="chip" aria-expanded="false">
+            <span class="p18-vico mas" aria-hidden="true"></span>Chip A20 Pro
+          </button>
+          <div class="p18-vbody">
+            <p><b>Chip A20&nbsp;Pro.</b> Primer chip de 2&nbsp;nanómetros en un teléfono,
+               enfriado por evaporación. Mantiene el ritmo en vez de bajar la velocidad a
+               los diez minutos: hasta 40% más rendimiento sostenido que el 17&nbsp;Pro.</p>
+          </div>
+        </div>
+
+        <div class="p18-vitem" id="p18-it-isla">
+          <button class="p18-vpill" data-do="p18Item" data-arg="isla" aria-expanded="false">
+            <span class="p18-vico mas" aria-hidden="true"></span>Dynamic Island rediseñada
+          </button>
+          <div class="p18-vbody">
+            <p><b>Dynamic&nbsp;Island rediseñada.</b> Muestra hasta tres actividades en vivo
+               juntas: el partido, el viaje y el tema que está sonando, sin salir de lo
+               que estés haciendo.</p>
+          </div>
+        </div>
+
+        <div class="p18-vitem" id="p18-it-durabilidad">
+          <button class="p18-vpill" data-do="p18Item" data-arg="durabilidad" aria-expanded="false">
+            <span class="p18-vico mas" aria-hidden="true"></span>Durabilidad
+          </button>
+          <div class="p18-vbody">
+            <p><b>Durabilidad.</b> Estructura unibody de aluminio y Ceramic&nbsp;Shield&nbsp;2
+               al frente, con el triple de resistencia a los rayones que el 16&nbsp;Pro.</p>
+          </div>
+        </div>
+
+        <div class="p18-vitem" id="p18-it-control">
+          <button class="p18-vpill" data-do="p18Item" data-arg="control" aria-expanded="false">
+            <span class="p18-vico mas" aria-hidden="true"></span>Control de la Cámara
+          </button>
+          <div class="p18-vbody">
+            <p><b>Control de la Cámara.</b> Un botón dedicado: sacás la foto, grabás,
+               cambiás el zoom y ajustás la exposición deslizando el dedo, sin tocar
+               la pantalla.</p>
+          </div>
+        </div>
+
+        <div class="p18-vitem" id="p18-it-boton">
+          <button class="p18-vpill" data-do="p18Item" data-arg="boton" aria-expanded="false">
+            <span class="p18-vico mas" aria-hidden="true"></span>Botón de Acción
+          </button>
+          <div class="p18-vbody">
+            <p><b>Botón de Acción.</b> Un atajo a lo que más usás: silencio, linterna,
+               grabadora, traductor o la cámara. Lo dejás configurado una vez y listo.</p>
+          </div>
+        </div>
+
+      </div>
+
+      <div class="p18-vfoto">
+        <img id="p18-visor-img" loading="lazy" decoding="async"
+             src="assets/iphone18/color-borgona-1600.jpg"
+             srcset="assets/iphone18/color-borgona-800.jpg 800w, assets/iphone18/color-borgona-1600.jpg 1600w"
+             sizes="(min-width:760px) 55vw, 100vw" width="1600" height="1078"
+             alt="iPhone 18 Pro color borgoña">
+      </div>
+    </div>
+  </div>
+
+  <!-- Cámara, a sangre -->
+  <div class="p18-inner">
+    <h2 class="p18-sec-h">La cámara ahora abre y cierra.</h2>
+    <p class="p18-lead">
+      Es el cambio más grande del año. La principal de 48&nbsp;MP tiene apertura variable
+      de ƒ/1.48 a ƒ/4: entra más luz de noche y, cerrada, todo el plano queda enfocado.
+      Antes eso se hacía con software; ahora lo hace el lente.
+    </p>
+  </div>
+  <img class="p18-full" loading="lazy" decoding="async"
+       src="assets/iphone18/camara-1600.jpg"
+       srcset="assets/iphone18/camara-800.jpg 800w, assets/iphone18/camara-1600.jpg 1400w"
+       sizes="100vw" width="1400" height="924"
+       alt="Primer plano del sistema de tres cámaras del iPhone 18 Pro">
+
+  <div class="p18-inner">
+    <!-- Comparador -->
+    <div class="p18-comp">
+      <h3>¿Te conviene cambiarlo?</h3>
+      <p class="p18-comp-sub">
+        Elegí el iPhone que tenés hoy y te mostramos, con los números de Apple,
+        cuánto ganás pasando al 18&nbsp;Pro. Si el salto es chico, te lo decimos:
+        a veces conviene más un 17 o un 16 de los que ya tenemos acá.
+      </p>
+      <label class="p18-sel-lbl" for="p18-sel">Tu iPhone actual</label>
+      <select class="p18-sel" id="p18-sel" data-change="p18Comparar" aria-describedby="p18-res">
+        <option value="">Elegí un modelo…</option>
+      </select>
+      <p class="p18-nota" style="margin-top:12px">
+        ¿Tenés un iPhone 13 o más viejo? Apple no publica esa comparación, pero el salto
+        es todavía más grande.
+        <a href="https://wa.me/5493416907597?text=Hola!%20Tengo%20un%20iPhone%20m%C3%A1s%20viejo%20y%20quiero%20saber%20si%20me%20conviene%20cambiarlo."
+           target="_blank" rel="noopener" style="color:#5AC8FA">Escribinos y lo vemos con tu equipo →</a>
+      </p>
+      <div class="p18-res" id="p18-res" aria-live="polite"></div>
+      <p class="p18-res-pie" id="p18-res-pie"></p>
+    </div>
+  </div>
+
+  <!-- Los cuatro colores, a sangre -->
+  <img class="p18-full" loading="lazy" decoding="async"
+       src="assets/iphone18/colores-fila-1600.jpg"
+       srcset="assets/iphone18/colores-fila-800.jpg 800w, assets/iphone18/colores-fila-1600.jpg 1600w"
+       sizes="100vw" width="1600" height="777"
+       alt="Los cuatro colores del iPhone 18 Pro: negro, plata, glaciar y borgoña">
+
+  <p class="p18-credito">
+    Imágenes de producto: <a href="https://www.apple.com/la/iphone-18-pro/"
+       target="_blank" rel="noopener">Apple Inc.</a>
+  </p>
+
+  <div class="p18-inner">
+    <p class="p18-blog">
+      <a href="/blog">Leé el análisis completo en el blog →</a>
+    </p>
+
+    <ul class="p18-fine">
+      <li>Especificaciones según Apple (presentación del 9 de septiembre de 2026). Los valores de batería son los publicados por Apple y varían según el uso.</li>
+      <li>Ojo con el chip: los iPhone 18 Pro que Apple vende en EE.&nbsp;UU. y en México son sólo eSIM, sin ranura para SIM física. Si el tuyo viene de allá, tu línea tiene que soportar eSIM.</li>
+      <li>Siri AI arranca en inglés; el español llega más adelante en el año. Algunas funciones de Apple Intelligence tienen límite de uso diario.</li>
+      <li>Las imágenes de producto son propiedad de Apple&nbsp;Inc. y provienen de su sitio oficial: <a href="https://www.apple.com/la/iphone-18-pro/" target="_blank" rel="noopener">apple.com/la/iphone-18-pro</a>. iPhone, Apple, Siri, Ceramic&nbsp;Shield y Dynamic&nbsp;Island son marcas registradas de Apple&nbsp;Inc.</li>
+    </ul>
+  </div>
+
+</section>
 
 <!-- WHY -->
 <div class="why">
@@ -2053,6 +2544,6 @@ footer strong { color: rgba(255,255,255,.85); }
   </div>
 </div>
 
-<script defer src="precios.js?v=20260831a"></script>
+<script defer src="precios.js?v=20260926a"></script>
 </body>
 </html>

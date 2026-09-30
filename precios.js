@@ -256,6 +256,7 @@ async function init() {
   buildHeroCard();
   armarCarruselChips();
   buildTradeIn();
+  p18Init();
   buildShowcase();
   construirMenuProductos();
   buildReviews();
@@ -334,6 +335,24 @@ function condDeEstado(estado) {
   if (e.includes('nuevo')) return 'nuevo';
   return 'usado';
 }
+// Condición REAL del equipo, ignorando si está en stock o en camino. El
+// filtro Nuevos/Usados usa ésta y no cond(): que un usado esté ingresando no
+// lo vuelve otra cosa, y esconderlo al filtrar "Usados" sorprende al cliente.
+function condReal(p) {
+  return p._ingresando ? condDeEstado(p.estado_producto) : cond(p);
+}
+
+// "nuevos" agrupa nuevo + sellado: para el que compra son lo mismo (viene sin
+// usar) y separarlos sólo agregaba un clic.
+function coincideEstado(p, sel) {
+  // "Ingresando" sigue siendo una condición en sí misma, para que los links
+  // viejos con ?estado=ingresando no se rompan.
+  if (sel === 'ingresando') return cond(p) === 'ingresando';
+  const c = condReal(p);
+  if (sel === 'nuevos') return c === 'nuevo' || c === 'sellado';
+  return c === sel;
+}
+
 function cond(p) {
   // Los equipos en camino son una condición más, no un caso aparte: así el
   // filtro de Estado los ofrece solo, la tarjeta les pone su cinta y la URL
@@ -1204,6 +1223,8 @@ const ACCIONES = {
   verMedida:      el => { const v = prodPorSlug(el.dataset.arg); if (v) abrirFicha(v); },
   filtroDrop:     el => { CAMPOS_FILTRO[el.dataset.campo]?.set(el.value); buildFilters(); render(); },
   filtroPill:     el => { CAMPOS_FILTRO[el.dataset.campo]?.set(el.dataset.arg); buildFilters(); render(); },
+  // Se toca el que ya estaba prendido y se apaga: vuelve a verse todo.
+  filtroEstado:   el => { const v = el.dataset.arg; condSel = (condSel === v) ? 'todos' : v; buildFilters(); render(); },
   quitarFiltro:   el => {
     const campo = el.dataset.arg;
     if (campo === 'q') { query = ''; const c = document.getElementById('q'); if (c) c.value = ''; }
@@ -1226,6 +1247,10 @@ const ACCIONES = {
   bannerSiguiente: () => bannerA(bannerIdx + 1),
   bannerIndice:    el => bannerA(Number(el.dataset.arg)),
   bannerIr:        el => bannerIr(el.dataset.arg),
+  // iPhone 18 Pro
+  p18Comparar:     el => p18Comparar(el),
+  p18Color:        el => p18Color(el),
+  p18Item:         el => p18Item(el),
 };
 
 document.addEventListener('click', ev => {
@@ -1549,7 +1574,7 @@ function textoDeValor(campo, v) {
   if (v === 'todos') return null;
   if (campo === 'modelo') return `iPhone ${v}`;
   if (campo === 'tipo') return SUBCATS[v] || v;
-  if (campo === 'estado') return { nuevo: 'Nuevo', sellado: 'Sellado', usado: 'Usado', ingresando: 'Ingresando' }[v] || v;
+  if (campo === 'estado') return { nuevos: 'Nuevos y sellados', nuevo: 'Nuevo', sellado: 'Sellado', usado: 'Usado', ingresando: 'Ingresando' }[v] || v;
   return v;
 }
 
@@ -1591,6 +1616,17 @@ function mkPills(campo, opciones, todosTxt = 'Todos') {
   </div>`;
 }
 
+// Los dos botones de estado. Se prenden y se apagan: con ninguno prendido se
+// ve todo, que es lo que espera el que recién entra.
+function mkEstado() {
+  const ops = [['nuevos', 'Nuevos y sellados'], ['usado', 'Usados']];
+  return `<div class="fpills festados" role="group" aria-label="Estado">
+    ${ops.map(([v, txt]) => `<button class="fpill${condSel === v ? ' on' : ''}"
+      data-do="filtroEstado" data-arg="${v}"
+      aria-pressed="${condSel === v}">${esc(txt)}</button>`).join('')}
+  </div>`;
+}
+
 function buildFilters() {
   const sub = catSel === 'todos' ? todos : todos.filter(p => catsDe(catSel).includes(p.categoria));
   const drops = [];
@@ -1610,7 +1646,12 @@ function buildFilters() {
       .sort((a, b) => Number(a) - Number(b));
     if (lineas.length > 1) {
       if (modelSel !== 'todos' && !lineas.includes(modelSel)) modelSel = 'todos';
-      drops.push(mkPills('modelo', lineas.map(l => ({ v: l, t: `iPhone ${l}` }))));
+      // En el celular las pastillas se comían dos renglones enteros, así que
+      // ahí va un desplegable. Se dibujan las dos y el CSS muestra la que
+      // corresponde: no hace falta escuchar el cambio de tamaño de pantalla.
+      const ops = lineas.map(l => ({ v: l, t: `iPhone ${l}` }));
+      drops.push(mkPills('modelo', ops).replace('class="fpills"', 'class="fpills f-escritorio"'));
+      drops.push(mkDrop('modelo', ops).replace('class="fdrop', 'class="f-movil fdrop'));
     } else modelSel = 'todos';
   } else { modelSel = 'todos'; subSel = 'todos'; }
 
@@ -1641,10 +1682,15 @@ function buildFilters() {
       drops.push(mkDrop('capacidad', storages.map(x => ({ v: x, t: x })), 'Todas'));
     } else stoSel = 'todos';
 
-    const conds = [...new Set(sub2.map(cond))];
-    if (conds.length > 1) {
-      if (condSel !== 'todos' && !conds.includes(condSel)) condSel = 'todos';
-      drops.push(mkDrop('estado', conds.map(x => ({ v: x, t: textoDeValor('estado', x) }))));
+    // Links viejos con ?estado=nuevo o ?estado=sellado siguen andando: se
+    // traducen al grupo, que es donde viven ahora.
+    if (condSel === 'nuevo' || condSel === 'sellado') condSel = 'nuevos';
+    const conds = new Set(sub2.map(condReal));
+    const hayNuevos = conds.has('nuevo') || conds.has('sellado');
+    const hayUsados = conds.has('usado');
+    if (hayNuevos && hayUsados) {
+      if (!['todos', 'nuevos', 'usado'].includes(condSel)) condSel = 'todos';
+      drops.push(mkEstado());
     } else condSel = 'todos';
   }
 
@@ -1923,7 +1969,7 @@ function render() {
     if (marcaSel !== 'todos' && p.modelo !== marcaSel) return false;
     if (modelSel !== 'todos' && lineaDe(p.modelo) !== modelSel) return false;
     if (stoSel !== 'todos' && p.storage !== stoSel) return false;
-    if (condSel !== 'todos' && cond(p) !== condSel) return false;
+    if (condSel !== 'todos' && !coincideEstado(p, condSel)) return false;
     if (query) {
       const t = [p.nombre,p.modelo,p.storage,p.color,p.categoria].filter(Boolean).join(' ').toLowerCase();
       if (!t.includes(query)) return false;
@@ -3047,3 +3093,157 @@ function enviarWA() {
 }
 
 init();
+
+/* ═══════════════════════════════════
+   iPHONE 18 PRO — sección de lanzamiento
+   Todavía no hay stock del 18 Pro, así que la sección tiene dos trabajos:
+   juntar interesados por WhatsApp y, con el comparador, empujar a lo que sí
+   tenemos hoy. Si el salto contra el equipo del cliente es chico, lo decimos:
+   prometer de más nos vuelve como devolución.
+═══════════════════════════════════ */
+
+// Lo que gana quien viene de cada equipo. Son las comparaciones que publica
+// Apple contra cada generación (horas de video en el Pro Max, CPU y GPU), no
+// estimaciones nuestras: si Apple corrige un número, se corrige acá y listo.
+const P18_DESDE = [
+  { id:'14',     gen:14, label:'iPhone 14',         video:23, cpu:'80%', gpu:'4 veces' },
+  { id:'14p',    gen:14, label:'iPhone 14 Pro',     video:20, cpu:'60%', gpu:'2,8 veces' },
+  { id:'14pm',   gen:14, label:'iPhone 14 Pro Max', video:14, cpu:'60%', gpu:'2,8 veces' },
+  { id:'15',     gen:15, label:'iPhone 15',         video:23, cpu:'60%', gpu:'2,8 veces' },
+  { id:'15p',    gen:15, label:'iPhone 15 Pro',     video:20, cpu:'50%', gpu:'2,1 veces' },
+  { id:'15pm',   gen:15, label:'iPhone 15 Pro Max', video:14, cpu:'50%', gpu:'2,1 veces' },
+  { id:'16',     gen:16, label:'iPhone 16',         video:21, cpu:'30%', gpu:'2 veces' },
+  { id:'16p',    gen:16, label:'iPhone 16 Pro',     video:16, cpu:'30%', gpu:'80%' },
+  { id:'16pm',   gen:16, label:'iPhone 16 Pro Max', video:10, cpu:'30%', gpu:'80%' },
+  { id:'17',     gen:17, label:'iPhone 17',         video:13, cpu:'20%', gpu:'60%' },
+  { id:'17p',    gen:17, label:'iPhone 17 Pro',     video:12, cpu:'20%', gpu:'40%' },
+  { id:'17pm',   gen:17, label:'iPhone 17 Pro Max', video:6,  cpu:'20%', gpu:'40%' },
+];
+
+// Generación de un equipo del catálogo: "iPhone 15 Pro Max" → 15.
+// Se mira el modelo y, si viene vacío, el nombre; algunos productos cargados a
+// mano tienen el modelo suelto ("15 Pro") sin la palabra iPhone adelante.
+function p18Gen(p) {
+  const s = slugify(p.modelo || p.nombre || '');
+  const m = s.match(/iphone-(\d{1,2})/) || s.match(/^(\d{1,2})(?:-|$)/);
+  return m ? Number(m[1]) : null;
+}
+
+// Cuántas unidades de esa generación hay hoy en el catálogo. Los equipos
+// "Ingresando" quedan afuera a propósito: no son stock, son promesas.
+function p18EnStock(gen) {
+  return todos
+    .filter(p => p.categoria === 'iphone' && !p._ingresando && p18Gen(p) === gen)
+    .reduce((n, p) => n + (Number(p._qty) || 1), 0);
+}
+
+function p18Init() {
+  const sel = document.getElementById('p18-sel');
+  if (!sel) return;
+  sel.insertAdjacentHTML('beforeend', P18_DESDE
+    .map(m => '<option value="' + m.id + '">' + esc(m.label) + '</option>').join(''));
+}
+
+function p18Comparar(el) {
+  const caja = document.getElementById('p18-res');
+  const pie  = document.getElementById('p18-res-pie');
+  if (!caja || !pie) return;
+  const m = P18_DESDE.find(x => x.id === el.value);
+  if (!m) { caja.innerHTML = ''; pie.innerHTML = ''; return; }
+
+  caja.innerHTML =
+      p18Dato('+' + m.video + ' h', 'más de video en el Pro Max que tu ' + m.label)
+    + p18Dato(m.cpu,  'más rápido el procesador')
+    + p18Dato(m.gpu,  'más potente la placa de video');
+
+  // El veredicto no es marketing: de un 17 el salto es chico y conviene
+  // decirlo, porque el cliente lo va a descubrir igual y ahí perdemos la venta
+  // Y la confianza.
+  const hay = p18EnStock(m.gen);
+  const chico = m.video <= 13;
+  const veredicto = chico
+    ? 'Viniendo de un ' + esc(m.label) + ' el salto es chico. Si tu equipo anda bien, esperá el 18 Pro tranquilo o cambialo por un Pro de la línea anterior, que sale bastante menos.'
+    : 'Viniendo de un ' + esc(m.label) + ' el salto es grande — pero ojo: contra un 17 o un 16 de los que ya tenemos acá también lo es, y a un precio muy distinto.';
+  const stock = hay
+    ? ' Hoy tenemos <b>' + hay + (hay === 1 ? ' equipo' : ' equipos') + '</b> de la línea ' + m.gen + ' en el catálogo.'
+    : '';
+
+  pie.innerHTML = veredicto + stock
+    + ' <a href="#productos" data-do="seccion" data-arg="productos">Ver el catálogo</a>'
+    + ' · <a href="#canje" data-do="seccion" data-arg="canje">Tomamos tu usado como parte de pago</a>';
+}
+
+// Terminaciones. Las cuatro fotos están sacadas con el mismo encuadre, así que
+// cambiar el src alcanza para que parezca que el equipo cambia de color solo.
+const P18_COLORES = {
+  borgona: { nom: 'color borgoña', hex: '#7A2C3E' },
+  glaciar: { nom: 'color glaciar', hex: '#B4C8DC' },
+  plata:   { nom: 'color plata',   hex: '#E4E4E2' },
+  negro:   { nom: 'negro',         hex: '#2B2B2D' },
+};
+
+function p18Color(el) {
+  const c = el.dataset.arg;
+  const info = P18_COLORES[c];
+  if (!info) return;
+  p18Foto('color-' + c, 'iPhone 18 Pro ' + info.nom);
+  const nom = document.getElementById('p18-color-nom');
+  if (nom) nom.textContent = info.nom;
+  // El punto de la pastilla "Colores" acompaña al color elegido.
+  const dot = document.getElementById('p18-vdot');
+  if (dot) dot.style.setProperty('--dot', info.hex);
+  document.querySelectorAll('.p18-sw').forEach(b => {
+    const activo = b.dataset.arg === c;
+    b.classList.toggle('on', activo);
+    b.setAttribute('aria-pressed', activo ? 'true' : 'false');
+  });
+}
+
+// Qué foto muestra cada ítem del visor. "colores" no está acá porque su foto
+// depende del color elegido y la resuelve p18Color.
+const P18_ITEMS = {
+  tamanos:     ['tamanos',      'iPhone 18 Pro y Pro Max, los dos tamaños'],
+  camara:      ['camara',       'Primer plano de la cámara principal del iPhone 18 Pro'],
+  zoom:        ['camara-negro', 'Sistema de cámaras del iPhone 18 Pro negro'],
+  chip:        ['chip',         'Chip A20 Pro'],
+  isla:        ['isla',         'Dynamic Island del iPhone 18 Pro'],
+  durabilidad: ['durabilidad',  'Frente de Ceramic Shield 2 del iPhone 18 Pro'],
+  control:     ['control',      'Control de la Cámara del iPhone 18 Pro'],
+  boton:       ['boton',        'Botón de Acción del iPhone 18 Pro'],
+};
+
+// Cambia la foto del visor. El chip es el único que no tiene versión grande:
+// es un cuadrado chico y estirarlo lo deja borroso.
+function p18Foto(base, alt) {
+  const img = document.getElementById('p18-visor-img');
+  if (!img) return;
+  const hayGrande = base !== 'chip';
+  img.srcset = 'assets/iphone18/' + base + '-800.jpg 800w'
+             + (hayGrande ? ', assets/iphone18/' + base + '-1600.jpg 1600w' : '');
+  img.src = 'assets/iphone18/' + base + (hayGrande ? '-1600' : '-800') + '.jpg';
+  img.alt = alt;
+}
+
+// Abre un ítem del visor y cierra el resto: uno a la vez, como el acordeón
+// de la página de Apple.
+function p18Item(el) {
+  const id = el.dataset.arg;
+  document.querySelectorAll('.p18-vitem').forEach(it => {
+    const activo = it.id === 'p18-it-' + id;
+    it.classList.toggle('on', activo);
+    const pill = it.querySelector('.p18-vpill');
+    if (pill) pill.setAttribute('aria-expanded', activo ? 'true' : 'false');
+  });
+  if (id === 'colores') {
+    const sw = document.querySelector('.p18-sw.on') || document.querySelector('.p18-sw');
+    if (sw) p18Color(sw);
+    return;
+  }
+  const dato = P18_ITEMS[id];
+  if (dato) p18Foto(dato[0], dato[1]);
+}
+
+function p18Dato(n, t) {
+  return '<div class="p18-res-i"><div class="p18-res-n">' + n + '</div>'
+       + '<div class="p18-res-t">' + t + '</div></div>';
+}

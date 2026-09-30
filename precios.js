@@ -257,6 +257,7 @@ async function init() {
   armarCarruselChips();
   buildTradeIn();
   p18Init();
+  p18Revelar();
   buildShowcase();
   construirMenuProductos();
   buildReviews();
@@ -2401,6 +2402,14 @@ function activarDeslizarBanner(cont) {
 // Destino interno: se aplica como filtro sin recargar.
 function bannerIr(destino) {
   const q = destino.startsWith('?') ? destino.slice(1) : destino.replace(/^#/, '');
+  // Un ancla suelta (#iphone18, #canje) NO es un filtro: no lleva "=" ni "&".
+  // Antes caía igual en el camino de los filtros, no aplicaba ninguno y
+  // terminaba scrolleando al catálogo, así que no había manera de mandar un
+  // banner a una sección que no fuera el listado de productos.
+  if (destino.startsWith('#') && q && !/[=&]/.test(q) && document.getElementById(q)) {
+    smoothTo(q);
+    return;
+  }
   const u = new URLSearchParams(q);
   const slug = u.get('p');
   if (slug) {
@@ -3142,6 +3151,88 @@ function p18Init() {
   if (!sel) return;
   sel.insertAdjacentHTML('beforeend', P18_DESDE
     .map(m => '<option value="' + m.id + '">' + esc(m.label) + '</option>').join(''));
+}
+
+// Aparición al bajar: cada bloque entra desvanecido y subiendo cuando el
+// scroll lo trae, como en la página de Apple.
+//
+// Tres decisiones que valen la pena explicar, porque las tres salieron de
+// romperse en la cara durante esta implementación:
+//
+// 1) No se usa `animation-timeline: view()`, que sería CSS puro y sin JS:
+//    recién existe en Safari 26 y Chrome nuevo, y buena parte de nuestros
+//    clientes entra desde teléfonos de hace cuatro o cinco años.
+//
+// 2) No se usa IntersectionObserver: no dispara cuando la pestaña está en
+//    segundo plano o no se está dibujando, y ahí los bloques se quedaban
+//    escondidos para siempre. Un cálculo en el scroll siempre corre.
+//
+// 3) El estado escondido va en estilos EN LÍNEA y lo pone este código, no el
+//    HTML. Si el JS no corre, no hay nada oculto. Y por las dudas hay una red
+//    de seguridad: a los 4 segundos se revela todo lo que quede, pase lo que
+//    pase. Que no se vea la animación es un detalle; que no se vea la sección
+//    es perder la venta.
+const P18_REVELA = [
+  ['.p18-eye, .p18-title, .p18-lead, .p18-ctas, .p18-nota, .p18-sec-h, .p18-comp, .p18-blog, .p18-fine', 'sube'],
+  ['.p18-stat', 'sube'],
+  ['.p18-portada, .p18-full', 'acerca'],
+];
+const P18_CURVA = 'cubic-bezier(.22,.61,.36,1)';
+
+function p18Revelar() {
+  const seccion = document.getElementById('iphone18');
+  if (!seccion) return;
+  // Para quien pidió menos movimiento en su sistema no se toca nada.
+  if (matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+
+  const mostrar = el => { el.style.opacity = '1'; el.style.transform = 'none'; };
+  let pendientes = [];
+
+  P18_REVELA.forEach(([sel, modo]) => {
+    [...seccion.querySelectorAll(sel)].forEach((el, i) => {
+      // Los cuatro datos duros entran en cascada, uno detrás del otro.
+      const retraso = sel === '.p18-stat' ? i * 90 : 0;
+      el.style.opacity = modo === 'acerca' ? '.5' : '0';
+      el.style.transform = modo === 'acerca' ? 'scale(1.05)' : 'translateY(28px)';
+      el.style.transition = 'opacity .7s ' + P18_CURVA + ' ' + retraso + 'ms, '
+                          + 'transform .7s ' + P18_CURVA + ' ' + retraso + 'ms';
+      pendientes.push(el);
+    });
+  });
+
+  const revisar = () => {
+    // Se revela cuando el bloque entró un poco en pantalla, no apenas asoma:
+    // si no, la animación termina antes de que el ojo llegue a mirarlo.
+    pendientes = pendientes.filter(el => {
+      const r = el.getBoundingClientRect();
+      if (r.top < innerHeight * 0.92 && r.bottom > 0) { mostrar(el); return false; }
+      return true;
+    });
+    if (!pendientes.length) window.removeEventListener('scroll', agendar);
+  };
+
+  let agendado = false;
+  const agendar = () => {
+    if (agendado) return;
+    agendado = true;
+    requestAnimationFrame(() => { agendado = false; revisar(); });
+  };
+
+  window.addEventListener('scroll', agendar, { passive: true });
+  window.addEventListener('resize', agendar, { passive: true });
+
+  // El primer repaso NO va acá mismo: con las fotos todavía sin cargar la
+  // sección mide mucho menos de lo que va a medir, todos los bloques caen
+  // dentro de la pantalla y se revelan de golpe. Se espera a que el navegador
+  // termine de cargar para preguntar por las posiciones de verdad.
+  if (document.readyState === 'complete') requestAnimationFrame(revisar);
+  else window.addEventListener('load', () => requestAnimationFrame(revisar), { once: true });
+
+  // La página se acomoda de a poco: cargan las fotos, se dibuja la grilla de
+  // productos y todo lo de abajo baja de lugar. Cada repaso extra revela sólo
+  // lo que en ese momento está de verdad en pantalla, así que repetirlo es
+  // inofensivo y evita que algo quede escondido por un cambio de alto.
+  [400, 1200, 2500].forEach(ms => setTimeout(revisar, ms));
 }
 
 function p18Comparar(el) {

@@ -48,7 +48,11 @@
   --radius: 16px;
 }
 html { scroll-behavior: smooth; }
-body { font-family: var(--font); background: #fff; color: var(--black); -webkit-font-smoothing: antialiased; overflow-x: hidden; }
+body { font-family: var(--font); background: #fff; color: var(--black); -webkit-font-smoothing: antialiased;
+  /* `clip` y no `hidden`: hidden convierte al body en contenedor de scroll y
+     eso rompe los `position: sticky` de adentro. La línea `hidden` queda de
+     respaldo para navegadores viejos que no entienden `clip`. */
+  overflow-x: hidden; overflow-x: clip; }
 
 /* ─── TOPBAR ─── */
 /* La barra de avisos de arriba. Muestra UN aviso por vez y los va turnando
@@ -1609,7 +1613,7 @@ footer strong { color: rgba(255,255,255,.85); }
    o sus fotos, además de ser ilegal, nos hundiría en Google por contenido
    duplicado: es exactamente lo contrario de lo que busca el blog.
 ═══════════════════════════════════════════════════════════ */
-.p18 { background:#0A0A0C; color:#F5F5F7; padding:76px 0 64px; overflow:hidden; position:relative; }
+.p18 { background:#0A0A0C; color:#F5F5F7; padding:76px 0 64px; overflow:hidden; overflow:clip; position:relative; }
 /* Halo frío detrás del título, para que el bloque no sea un rectángulo negro plano */
 .p18::before {
   content:''; position:absolute; top:-180px; left:50%; width:900px; height:520px;
@@ -1678,7 +1682,7 @@ footer strong { color: rgba(255,255,255,.85); }
 /* ─ Fila de datos duros ─ */
 .p18-stats {
   display:grid; grid-template-columns:repeat(2,1fr); gap:1px;
-  background:rgba(255,255,255,.10); border-radius:18px; overflow:hidden;
+  background:rgba(255,255,255,.10); border-radius:18px; overflow:hidden; overflow:clip;
   margin:44px 0 0;
 }
 .p18-stat { background:#0A0A0C; padding:22px 18px; }
@@ -1773,6 +1777,10 @@ footer strong { color: rgba(255,255,255,.85); }
 }
 .p18-credito a { color:#86868B; text-decoration:none; border-bottom:1px solid rgba(134,134,139,.4); }
 .p18-credito a:hover { color:#C7C7CC; }
+
+/* La aparición al bajar la maneja p18Revelar() en precios.js con estilos en
+   línea: no hay reglas acá a propósito, así nada del cascade la puede pisar.
+   Ver el comentario de esa función para el porqué. */
 
 /* ─ Comparador ─ */
 .p18-comp {
@@ -2544,6 +2552,6 @@ footer strong { color: rgba(255,255,255,.85); }
   </div>
 </div>
 
-<script defer src="precios.js?v=20260926a"></script>
+<script defer src="precios.js?v=20260930a"></script>
 </body>
 </html>

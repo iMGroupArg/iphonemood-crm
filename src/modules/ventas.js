@@ -664,6 +664,7 @@ const Ventas = {
     this.step = 0;
     this.selectedStockIds = []; this._selectedRegalo = {};
     this.invMode = 'manual';
+    this._manualEsRegalo = false;
     this.showModal();
   },
 
@@ -697,6 +698,7 @@ const Ventas = {
     this.step = pendiente.step || 0;
     this.selectedStockIds = []; this._selectedRegalo = {};
     this.invMode = 'manual';
+    this._manualEsRegalo = false;
     this.showModal();
     toast('Venta recuperada. Revisá los datos antes de continuar.');
   },
@@ -706,6 +708,7 @@ const Ventas = {
     this.step = 0;
     this.selectedStockIds = []; this._selectedRegalo = {};
     this.invMode = 'manual';
+    this._manualEsRegalo = false;
     this.showModal();
   },
 
@@ -1098,21 +1101,27 @@ const Ventas = {
       <div id="vf-item-form">${this.invMode === 'manual' ? this.manualItemForm() : this.inventoryForm()}</div>
     `;
   },
-  setInvMode(m) { this.invMode = m; this._invFiltro = ''; document.getElementById('venta-step-body').innerHTML = this.stepItems(); },
+  setInvMode(m) { this.invMode = m; this._invFiltro = ''; this._manualEsRegalo = false; document.getElementById('venta-step-body').innerHTML = this.stepItems(); },
 
+  _manualEsRegalo: false,
   manualItemForm() {
     const mobile = this.isMobile();
     const inp = `width:100%;font-size:${mobile?'16px':'12px'};padding:${mobile?'10px 12px':'7px 10px'};border:1px solid var(--border-strong);border-radius:8px;box-sizing:border-box`;
+    const esRegalo = this._manualEsRegalo;
     return `
       <div style="display:flex;flex-direction:column;gap:8px;margin-bottom:8px">
         <input type="text" id="vf-m-nombre" placeholder="Nombre del producto *" style="${inp}">
+        <label style="display:flex;align-items:center;gap:6px;font-size:11.5px;cursor:pointer;padding:5px 9px;border-radius:6px;border:1px solid ${esRegalo?'var(--green)':'var(--border)'};background:${esRegalo?'rgba(34,197,94,.1)':'var(--bg-secondary)'};width:fit-content">
+          <input type="checkbox" id="vf-m-regalo" ${esRegalo?'checked':''} onchange="Ventas._toggleRegaloManual(this.checked)" style="accent-color:var(--green);cursor:pointer">
+          <span>🎁 Es un regalo (sin cargo)</span>
+        </label>
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
           <div>
-            <div style="font-size:10px;color:var(--text-secondary);margin-bottom:3px">Precio venta (USD) *</div>
-            <input type="number" id="vf-m-precio" placeholder="0" style="${inp}" inputmode="decimal">
+            <div style="font-size:10px;color:var(--text-secondary);margin-bottom:3px">Precio venta (USD)${esRegalo?'':' *'}</div>
+            <input type="number" id="vf-m-precio" placeholder="0" value="${esRegalo?'0':''}" ${esRegalo?'disabled':''} style="${inp};opacity:${esRegalo?'0.5':'1'}" inputmode="decimal">
           </div>
           <div>
-            <div style="font-size:10px;color:var(--text-secondary);margin-bottom:3px">Costo (USD)</div>
+            <div style="font-size:10px;color:var(--text-secondary);margin-bottom:3px">Costo (USD)${esRegalo?' — impacta en margen':''}</div>
             <input type="number" id="vf-m-costo" placeholder="0" style="${inp}" inputmode="decimal">
           </div>
         </div>
@@ -1120,12 +1129,24 @@ const Ventas = {
       <button class="btn btn-primary" style="width:100%;justify-content:center" onclick="Ventas.addManualItem()"><i class="ti ti-plus"></i> Agregar ítem</button>
     `;
   },
+  // Igual que Ventas._toggleRegalo (inventario), pero para la carga manual:
+  // un ítem manual regalo no tiene costoUSD de stock del que tirar, así que
+  // acá el campo Costo lo sigue completando la persona a mano.
+  _toggleRegaloManual(checked) {
+    this._manualEsRegalo = checked;
+    document.getElementById('venta-step-body').innerHTML = this.stepItems();
+  },
   addManualItem() {
     const nombre = document.getElementById('vf-m-nombre').value.trim();
-    const precio = parseFloat(document.getElementById('vf-m-precio').value) || 0;
+    const esRegalo = this._manualEsRegalo;
+    const precio = esRegalo ? 0 : (parseFloat(document.getElementById('vf-m-precio').value) || 0);
     const costo = parseFloat(document.getElementById('vf-m-costo').value) || 0;
-    if (!nombre || !precio) { toast('Completá nombre y precio.'); return; }
-    this.draft.items.push({ nombre, precio, costo, stockId: null, imei: null });
+    // Un regalo vale $0 a propósito — antes la validación lo rechazaba igual
+    // que a un ítem sin cargar, así que no había forma de sumar manualmente
+    // algo que no viene de Stock (ej. "Bolsa") como regalo.
+    if (!nombre || (!esRegalo && !precio)) { toast('Completá nombre y precio.'); return; }
+    this.draft.items.push({ nombre, precio, costo, stockId: null, imei: null, regalo: esRegalo || undefined });
+    this._manualEsRegalo = false;
     document.getElementById('venta-step-body').innerHTML = this.stepItems();
     this.guardarBorrador();
   },

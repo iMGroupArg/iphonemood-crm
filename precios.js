@@ -8,6 +8,37 @@
 // El orden importa: config.js (que define window.__APP_CONFIG__) y el SDK de
 // Supabase se cargan ANTES que este archivo.
 
+// ─── WHATSAPP ───
+// El número vive acá para que el JS tenga una sola copia. OJO con el alcance
+// real de esto: en un sitio sin build no existe "un solo lugar". Los <a> del
+// HTML quedan escritos a mano a propósito, porque son la única versión que
+// sigue funcionando si el JS no carga, y el teléfono del pie está escrito
+// formateado para leerlo. O sea: cambiar el número es tocar WA_NUMERO Y hacer
+// un buscar-y-reemplazar en precios.html. sincronizarWA() es la red por si
+// alguien se olvida de lo segundo, no un reemplazo de hacerlo.
+const WA_NUMERO = '5493416907597';
+const waLink = txt => `https://wa.me/${WA_NUMERO}`
+  + (txt ? `?text=${encodeURIComponent(txt)}` : '');
+
+// Se valida el host en vez de buscar "wa.me/" como subcadena: así no se
+// reescribe una URL ajena que lleve eso en el path o en el query.
+function sincronizarWA() {
+  document.querySelectorAll('a[href]').forEach(a => {
+    let u;
+    try { u = new URL(a.href, location.href); } catch { return; }
+    if (u.protocol !== 'https:' || u.hostname !== 'wa.me') return;
+    if (!/^\/\d+$/.test(u.pathname)) return;   // wa.me/<numero>, no wa.me/message/XXXX
+    u.pathname = '/' + WA_NUMERO;
+    a.href = u.toString();                     // el ?text=... se conserva
+  });
+}
+
+// Va ACÁ, antes de leer la config de Supabase y no dentro de init(): si falta
+// window.__APP_CONFIG__ o la URL es inválida, las dos líneas de abajo lanzan y
+// el archivo entero deja de ejecutarse. Justo en esa situación es cuando los
+// enlaces de WhatsApp más hacen falta, así que no pueden depender de eso.
+sincronizarWA();
+
 const { SUPABASE_URL, SUPABASE_ANON_KEY } = window.__APP_CONFIG__;
 const supa = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
@@ -114,6 +145,24 @@ function cuotasDe(bloque, listaARS) {
       const total = Math.round(listaARS * c.coef);
       return { n: c.n, total, mes: Math.round(total / c.n), nota: c.nota || notaCoef(c.coef) };
     });
+}
+
+// Bases de cálculo de un producto, en un solo lugar. La ficha y el mensaje de
+// WhatsApp tienen que mostrar exactamente los mismos números, y este repo ya se
+// quemó una vez con dos copias de un cálculo que se desincronizaron (ver el
+// comentario de promoHeroHtml). Devuelve 0 para un producto sin precio, que es
+// lo que llega por el camino del presupuesto.
+function basesDePago(p) {
+  const cfg = pagosConfig || PAGOS_DEFAULT;
+  // En perfumería el precio en pesos manda; en equipos, el dólar por la
+  // cotización del día.
+  const baseARS = enPesos(p) ? pARS(p) : Math.round(pUSD(p) * cotiz);
+  return {
+    cfg,
+    baseARS,
+    contadoARS: Math.round(baseARS * (cfg.contado_factor ?? 1)),
+    listaARS:   Math.round(baseARS * (cfg.lista_factor   ?? 1.45)),
+  };
 }
 
 // La caja azul de la promo destacada.
@@ -1188,7 +1237,7 @@ function pedirPorWhatsApp() {
   const txt = `¡Hola! Quiero hacer este pedido:\n\n${lineas.join('\n')}\n\nTotal estimado: ${fARS(total)}`
     + (falta <= 0 ? '\n(Con envío sin cargo 🚚)' : '')
     + '\n\n¿Me confirman disponibilidad?';
-  window.open(`https://wa.me/5493416907597?text=${encodeURIComponent(txt)}`, '_blank');
+  window.open(waLink(txt), '_blank', 'noopener,noreferrer');
 }
 
 /* ═══════════════════════════════════
@@ -2692,12 +2741,7 @@ function renderPresupuesto(d) {
   // la ficha anterior haya sido un perfume y lo haya escondido.
   const consultaPres = document.getElementById('bloque-consulta');
   if (consultaPres) consultaPres.style.display = '';
-  inqSel = 'disponibilidad';
-  document.querySelectorAll('.inq-opt').forEach(el => {
-    const sel = el.dataset.inq === 'disponibilidad';
-    el.classList.toggle('sel', sel);
-    el.querySelector('.inq-radio').classList.toggle('sel', sel);
-  });
+  prepararInq(modalProd, 'disponibilidad');
   document.getElementById('turno-panel').classList.remove('show');
   document.getElementById('rsv-panel')?.classList.remove('show');
 }
@@ -2715,7 +2759,8 @@ function irAVariante(slug) {
 
 function renderFicha(p) {
   modalProd = p;
-  inqSel = 'turno';
+  // inqSel lo fija prepararInq() más abajo, junto con la visibilidad: separarlos
+  // es lo que dejaría elegida una opción escondida.
   dateSel = '';
 
   // En perfumería la venta va por carrito: se esconde todo el bloque de
@@ -2748,13 +2793,9 @@ function renderFicha(p) {
   document.getElementById('m-usd').textContent = enPesos(p) ? fARS(a) : fUSD(u);
 
   // ── Cálculos con config de pagos ──
-  const cfg = pagosConfig || PAGOS_DEFAULT;
-  // Base de cálculo: en perfumería el precio en pesos manda; en equipos, el
-  // dólar por la cotización del día. Sin esto el encabezado mostraba el precio
-  // cargado y el recuadro de contado uno distinto, sacado del dólar.
-  const baseARS     = enPesos(p) ? a : Math.round(u * cotiz);
-  const contadoARS  = Math.round(baseARS * (cfg.contado_factor ?? 1));
-  const listaARS    = Math.round(baseARS * (cfg.lista_factor   ?? 1.45));
+  // Sin esto el encabezado mostraba el precio cargado y el recuadro de contado
+  // uno distinto, sacado del dólar.
+  const { cfg, contadoARS, listaARS } = basesDePago(p);
 
   // Banner regalo
   // El regalo (cargador, funda, templado) solo aplica a equipos.
@@ -2880,10 +2921,7 @@ function renderFicha(p) {
   document.getElementById('m-ficha').innerHTML = fichaHtml(p);
 
   // reset opciones
-  document.querySelectorAll('.inq-opt').forEach(el => {
-    el.classList.toggle('sel', el.dataset.inq === 'turno');
-    el.querySelector('.inq-radio').classList.toggle('sel', el.dataset.inq === 'turno');
-  });
+  prepararInq(p, 'turno');
   document.getElementById('turno-panel').classList.add('show');
   document.getElementById('rsv-panel')?.classList.remove('show');
   document.querySelectorAll('.date-btn').forEach(b => b.classList.remove('sel'));
@@ -3011,6 +3049,35 @@ function toastLanding(txt) {
 }
 
 /* ─── INQUIRY ─── */
+// Dos opciones del selector no aplican a todo producto:
+//   · "avisame cuando llegue" sólo tiene sentido si el equipo está ingresando;
+//   · "consultar por cuotas" sólo si hay un precio del que sacarlas.
+// Las reglas son independientes: un equipo ingresando CON precio muestra las
+// dos, porque el aviso de la ficha ya dice que ese precio y esas cuotas son los
+// que van a regir cuando llegue.
+//
+// El presupuesto arma un modalProd sintético sin precio y sin `_ingresando`,
+// así que la misma regla esconde las dos ahí sin necesidad de una excepción
+// escrita a mano.
+//
+// Esto vive en una sola función porque `inqSel` sobrevive entre aperturas del
+// modal: si un camino se olvidara de resetear, quedaría elegida una opción que
+// no se ve. Los dos caminos que abren el modal llaman acá.
+function prepararInq(p, porDefecto) {
+  const visible = {
+    espera:       !!(p && p._ingresando),
+    financiacion: basesDePago(p || {}).baseARS > 0,
+  };
+  inqSel = porDefecto;
+  document.querySelectorAll('.inq-opt').forEach(o => {
+    const id = o.dataset.inq;
+    if (id in visible) o.style.display = visible[id] ? '' : 'none';
+    const sel = id === porDefecto;
+    o.classList.toggle('sel', sel);
+    o.querySelector('.inq-radio').classList.toggle('sel', sel);
+  });
+}
+
 function selInq(el) {
   inqSel = el.dataset.inq;
   document.querySelectorAll('.inq-opt').forEach(o => {
@@ -3094,11 +3161,36 @@ function enviarWA() {
     msg += `🔒 *Quiero reservar este equipo.*\n`;
     msg += `Reserva: ${fUSD(rUSD)} (o ${fARS(Math.round(rUSD * cotiz))})\n`;
     msg += `Necesito los datos para pagarla / les paso el comprobante.\n`;
+  } else if (inqSel === 'canje') {
+    msg += `🔄 *Quiero entregar mi usado en parte de pago.*\n`;
+    msg += `Te paso modelo, capacidad y estado de mi equipo para que me lo coticen.\n`;
+  } else if (inqSel === 'financiacion') {
+    // Los planes salen de la MISMA config que la ficha: si acá se recalculara
+    // con otra fórmula, el cliente recibiría por WhatsApp números distintos de
+    // los que acaba de leer en pantalla.
+    const { cfg, listaARS } = basesDePago(modalProd);
+    const linea = c => `• ${c.n} cuotas de ${fARS(c.mes)}${c.nota ? ` (${c.nota})` : ''}`;
+    const planesPromo = cuotasDe(cfg.promo, listaARS);
+    const planesOtros = cuotasDe(cfg.otros, listaARS);
+    msg += `💳 *Quiero consultar por las cuotas.*\n`;
+    // Mismos textos de respaldo que la ficha: sin esto, una config sin título
+    // manda la palabra "undefined" por WhatsApp.
+    if (planesPromo.length) {
+      msg += `\n${cfg.promo?.titulo || 'Promo bancaria'}\n${planesPromo.map(linea).join('\n')}\n`;
+    }
+    if (planesOtros.length) {
+      msg += `\n${cfg.otros?.titulo || 'Otras tarjetas de crédito'}\n${planesOtros.map(linea).join('\n')}\n`;
+    }
+    // La promo tiene vigencia por fecha: el mensaje no afirma que siga abierta.
+    msg += `\n¿Me confirman si siguen vigentes?\n`;
+  } else if (inqSel === 'espera') {
+    msg += `🚚 *Quiero que me avisen cuando llegue.*\n`;
+    msg += `Anotame en la lista de espera de este equipo.\n`;
   } else {
     msg += `❓ *Tengo una consulta sobre este producto.*\n`;
   }
 
-  window.open(`https://wa.me/5493416907597?text=${encodeURIComponent(msg)}`, '_blank');
+  window.open(waLink(msg), '_blank', 'noopener,noreferrer');
 }
 
 init();

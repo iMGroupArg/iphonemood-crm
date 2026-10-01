@@ -42,6 +42,15 @@ const Dashboard = {
       const y = hoy.getFullYear(), m = hoy.getMonth();
       const diasMes = hoy.getDate();
       for (let i = 1; i <= diasMes; i++) arr.push(new Date(y, m, i));
+    } else if (this.periodo === 'mes-especifico' && this.periodoMes) {
+      // Un mes pasado elegido en el desplegable: el mes COMPLETO, de 1 al
+      // último día. Sin esta rama caía al `else` de abajo y los gráficos
+      // armaban los últimos 30 días desde hoy: los KPIs mostraban agosto y
+      // los gráficos seguían con los días de septiembre, así que ninguna
+      // venta caía dentro del rango y las series salían todas en cero.
+      const [y, m] = this.periodoMes.split('-').map(Number);
+      const ultimoDia = new Date(y, m, 0).getDate();   // día 0 del mes siguiente
+      for (let i = 1; i <= ultimoDia; i++) arr.push(new Date(y, m - 1, i));
     } else {
       for (let i = 29; i >= 0; i--) { const d = new Date(hoy); d.setDate(d.getDate()-i); arr.push(d); }
     }

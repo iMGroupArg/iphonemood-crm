@@ -39,6 +39,33 @@ function sincronizarWA() {
 // enlaces de WhatsApp más hacen falta, así que no pueden depender de eso.
 sincronizarWA();
 
+// ─── RASTREO (Meta Pixel) ───
+// pixel.js define window.imTrack / window.imIntencion. Todo pasa por este
+// wrapper para que, si pixel.js no cargó o falla, WhatsApp siga funcionando:
+// el rastreo jamás puede ser lo que impida que un cliente nos escriba.
+const rastrear = (nombre, params, opts) => {
+  try { return window.imTrack ? window.imTrack(nombre, params, opts) : null; } catch { return null; }
+};
+const rastrearIntencion = (intencion, params, clave) => {
+  try { return window.imIntencion ? window.imIntencion(intencion, params, clave) : []; } catch { return []; }
+};
+
+// Clic en cualquier enlace estático de WhatsApp. Va aparte del despachador
+// `data-do`: esos <a> no tienen data-do, así que si esto colgara de ahí nunca
+// los vería. No se manda el href ni el texto del enlace. Los CTAs con intención
+// llevan data-wa-intent y disparan además el evento de esa intención.
+// (Sólo clic principal: el clic con rueda no se cuenta.)
+document.addEventListener('click', ev => {
+  const a = ev.target.closest && ev.target.closest('a[href]');
+  if (!a) return;
+  let u;
+  try { u = new URL(a.href, location.href); } catch { return; }
+  if (u.protocol !== 'https:' || u.hostname !== 'wa.me') return;
+  const intencion = a.dataset.waIntent || '';
+  rastrear('WhatsAppClick', intencion ? { intent: intencion } : {}, { custom: true, clave: 'wa:' + intencion });
+  if (intencion) rastrearIntencion(intencion, {}, 'estatico');
+});
+
 const { SUPABASE_URL, SUPABASE_ANON_KEY } = window.__APP_CONFIG__;
 const supa = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
@@ -328,10 +355,18 @@ async function init() {
   iniciarMenuActivo();
   pintarCarrito();   // recupera el pedido guardado de una visita anterior
 
+  let _timerBusqueda = null;
   document.getElementById('q').addEventListener('input', e => {
     query = e.target.value.trim().toLowerCase();
     buildSeleccionados();   // el texto buscado también es un filtro activo
     render();
+    // Search: el timer se cancela en CADA tecla (también al vaciar o bajar de
+    // 2 caracteres) y al disparar se vuelve a leer `query`. NO se manda el
+    // texto buscado como parámetro.
+    clearTimeout(_timerBusqueda);
+    _timerBusqueda = setTimeout(() => {
+      if (query.length >= 2) rastrear('Search', {}, { clave: 'q:' + query });
+    }, 800);
   });
   buildDateOpts();
 }
@@ -1237,6 +1272,11 @@ function pedirPorWhatsApp() {
   const txt = `¡Hola! Quiero hacer este pedido:\n\n${lineas.join('\n')}\n\nTotal estimado: ${fARS(total)}`
     + (falta <= 0 ? '\n(Con envío sin cargo 🚚)' : '')
     + '\n\n¿Me confirman disponibilidad?';
+  rastrear('InitiateCheckout', {
+    value: total, currency: 'ARS', num_items: items.reduce((a, i) => a + i.n, 0),
+    content_ids: items.map(i => String(i.p.id != null ? i.p.id : slugProd(i.p))),
+    content_type: 'product',
+  }, { clave: 'cart:' + items.length + ':' + total });
   window.open(waLink(txt), '_blank', 'noopener,noreferrer');
 }
 
@@ -2239,14 +2279,45 @@ function openModal(idx) {
   if (p) abrirFicha(p);
 }
 
+// Parámetros del evento. Sólo datos del producto: nunca nombre ni teléfono del
+// cliente ni texto que haya escrito.
+function paramsDeProducto(p) {
+  if (!p) return {};
+  const pesos = enPesos(p);
+  return {
+    content_name: limpiarTitulo(p.nombre || p.modelo || ''),
+    content_ids: [String(p.id != null ? p.id : slugProd(p))],
+    content_type: 'product',
+    value: pesos ? pARS(p) : pUSD(p),
+    currency: pesos ? 'ARS' : 'USD',
+  };
+}
+
+// ViewContent una vez por producto y por apertura de ficha. `_aperturaFicha`
+// sube cada vez que se abre; cambiar de variante dentro de la misma apertura
+// cuenta sólo si es OTRO producto. Se llama DESPUÉS de actualizar la URL, para
+// que el evento refiera a la página que el cliente realmente está viendo.
+let _aperturaFicha = 0;
+const _vistos = new Set();
+function rastrearVista(p) {
+  if (!p) return;
+  const id = String(p.id != null ? p.id : slugProd(p));
+  const k = _aperturaFicha + ':' + id;
+  if (_vistos.has(k)) return;
+  _vistos.add(k);
+  rastrear('ViewContent', paramsDeProducto(p), { clave: 'vc:' + k });
+}
+
 function abrirFicha(p, { push = true } = {}) {
   if (!p) return;
+  _aperturaFicha++;
   renderFicha(p);
   if (push) {
     const slug = slugProd(p);
     history.pushState({ p: slug }, '', '?p=' + slug);
     _fichaEnHistorial = true;
   }
+  rastrearVista(p);
   document.getElementById('modal-overlay').classList.add('open');
   document.getElementById('modal-sheet').scrollTop = 0;
   document.body.style.overflow = 'hidden';
@@ -2262,6 +2333,7 @@ function closeModal() {
 
 function cerrarFicha() {
   document.getElementById('modal-overlay').classList.remove('open');
+  _vistos.clear();   // la apertura terminó: el registro de ViewContent no crece en la sesión
   document.body.style.overflow = '';
   // Limpia el ?p= si quedó (caso: se entró directo por link compartido) y
   // devuelve la URL a los filtros que estaban puestos, en vez de dejarla pelada.
@@ -2755,6 +2827,7 @@ function irAVariante(slug) {
   renderFicha(v);
   history.replaceState({ p: slug }, '', '?p=' + slug);
   document.getElementById('modal-sheet').scrollTop = 0;
+  rastrearVista(v);
 }
 
 function renderFicha(p) {
@@ -3079,7 +3152,12 @@ function prepararInq(p, porDefecto) {
 }
 
 function selInq(el) {
+  const antes = inqSel;
   inqSel = el.dataset.inq;
+  // Sólo en la transición hacia canje, no cada vez que se vuelve a tocar.
+  if (inqSel === 'canje' && antes !== 'canje') {
+    rastrear('TradeInStarted', paramsDeProducto(modalProd), { custom: true, clave: 'tis:' + (modalProd && modalProd.id) });
+  }
   document.querySelectorAll('.inq-opt').forEach(o => {
     o.classList.toggle('sel', o===el);
     o.querySelector('.inq-radio').classList.toggle('sel', o===el);
@@ -3190,6 +3268,8 @@ function enviarWA() {
     msg += `❓ *Tengo una consulta sobre este producto.*\n`;
   }
 
+  // Mide "mandó la consulta a WhatsApp", no turno confirmado ni compra.
+  rastrearIntencion(inqSel, paramsDeProducto(modalProd), modalProd && modalProd.id);
   window.open(waLink(msg), '_blank', 'noopener,noreferrer');
 }
 

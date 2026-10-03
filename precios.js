@@ -1387,8 +1387,34 @@ function toggleMenu(abrir) {
 
 // Un solo camino para ir a una sección, lo llamen desde la barra o el panel:
 // así el panel siempre se cierra y nunca queda tapando el destino.
+// La sección del iPhone 18 Pro es de celulares: viéndola con la pestaña de
+// perfumería abierta no tiene sentido, y además le muestra una portada de
+// iPhone a quien vino a mirar perfumes. Se esconde ella y los dos enlaces que
+// la apuntan (barra y menú lateral). Corre desde render(), que se ejecuta
+// después de CADA cambio de rubro: pestañas, banner, link con filtros, inicio.
+function p18SegunRubro() {
+  const sec = document.getElementById('iphone18');
+  if (!sec) return;
+  const ocultar = catSel === 'perfumeria';
+  const estabaOculta = sec.style.display === 'none';
+  sec.style.display = ocultar ? 'none' : '';
+  document.querySelectorAll('a[data-do="seccion"][data-arg="iphone18"]')
+    .forEach(a => { a.style.display = ocultar ? 'none' : ''; });
+  // Mientras estuvo escondida sus bloques midieron 0 y p18Revelar() los dejó
+  // pendientes: al reaparecer hay que despertarlo, o quedarían invisibles
+  // hasta el próximo scroll.
+  if (estabaOculta && !ocultar) window.dispatchEvent(new Event('resize'));
+}
+
+// Un enlace al iPhone 18 estando en perfumería: se vuelve al rubro iPhone
+// ANTES de bajar, si no el destino está escondido y no pasa nada.
+function asegurarRubroPara(id) {
+  if (id === 'iphone18' && catSel === 'perfumeria') selCat('iphone', { scroll: false });
+}
+
 function irASeccion(id) {
   toggleMenu(false);
+  asegurarRubroPara(id);
   smoothTo(id);
 }
 
@@ -1606,7 +1632,7 @@ function buildCats() {
 }
 
 
-function selCat(id) {
+function selCat(id, { scroll = true } = {}) {
   catSel = id; stoSel = 'todos'; condSel = 'todos'; modelSel = 'todos'; subSel = 'todos'; famSel = 'todos'; marcaSel = 'todos';
   // En perfumería se entra por Decants. Con "Todos", la tarjeta de cada aroma
   // muestra el decant de 5 ml —el más barato, que es el gancho— pero ofrece
@@ -1615,7 +1641,7 @@ function selCat(id) {
   // Separado en pestañas, cada una muestra lo suyo.
   if (id === 'perfumeria' && todos.some(p => p.categoria === 'decant')) subSel = 'decant';
   buildCats(); buildFilters(); render();
-  smoothTo('productos');
+  if (scroll) smoothTo('productos');
 }
 
 /* ─── SECONDARY FILTERS ─── */
@@ -2052,6 +2078,7 @@ function sortProducts(a, b) {
 }
 
 function render() {
+  p18SegunRubro();
   const fil = todos.filter(p => {
     if (catSel !== 'todos' && !catsDe(catSel).includes(p.categoria)) return false;
     if (subSel !== 'todos' && p.categoria !== subSel) return false;
@@ -2528,6 +2555,7 @@ function bannerIr(destino) {
   // terminaba scrolleando al catálogo, así que no había manera de mandar un
   // banner a una sección que no fuera el listado de productos.
   if (destino.startsWith('#') && q && !/[=&]/.test(q) && document.getElementById(q)) {
+    asegurarRubroPara(q);
     smoothTo(q);
     return;
   }

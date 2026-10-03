@@ -76,7 +76,7 @@ const Dashboard = {
     const resultComercialUSD = ventas.reduce((a, v) => {
       const r = Ventas.resultadoVenta(v);
       diferencialTarjetaUSD += r.diferencial;
-      return a + (r.margenBruto - r.quebranto);
+      return a + r.margenComercial;
     }, 0);
     const resultComercial = resultComercialUSD * State.refBlue;
 
@@ -126,14 +126,15 @@ const Dashboard = {
         return sum + Math.max(0, (parseDate(r.fechaEntrega) - parseDate(r.fecha)) / 86400000);
       }, 0) / entregadasConFecha.length
     ) : null;
-    const ventasAbiertas = ventas.filter(v => v.estado === 'abierta').length;
+    const ventasAbiertas = ventas.filter(v => v.estado === 'abierta' && v.tipoVenta !== 'mercadolibre').length;
     const ticketPromedio = ventas.length ? totalVentasUSD / ventas.length : 0;
 
     let totalARSenCajas = 0, totalUSDenCajas = 0, totalUSDTenCajas = 0;
     Object.values(State.cajas).forEach(c => {
-      totalARSenCajas += (c['ARS cash'] || 0) + (c['ARS transferencia'] || 0);
-      totalUSDenCajas += (c['USD cash'] || 0) + (c['USD transferencia'] || 0);
-      totalUSDTenCajas += (c['USDT'] || 0);
+      totalARSenCajas += State.saldosPorMoneda(c).ARS;
+      const sm = State.saldosPorMoneda(c);
+      totalUSDenCajas += sm.USD;
+      totalUSDTenCajas += sm.USDT;
     });
     const equivalenteTotalARS = totalARSenCajas + totalUSDenCajas * State.refBlue + totalUSDTenCajas * State.refUsdt;
 
@@ -160,13 +161,19 @@ const Dashboard = {
         </div>
       </div>
 
-      <div class="kpi-row" style="grid-template-columns:repeat(5,1fr);padding:0 0 14px 0;border:none">
+      <div class="kpi-row" style="grid-template-columns:repeat(auto-fit,minmax(150px,1fr));padding:0 0 14px 0;border:none">
         <div class="kpi"><label>Equivalente total en caja</label><div class="val">${State.fmtUSD(equivalenteTotalARS / State.refBlue)}</div><div class="sub">ARS + USD + USDT a cotización actual</div></div>
         <div class="kpi" style="cursor:pointer" onclick="App.goTo('cuentacorriente')">
           <label>Pendiente de cobro</label>
           <div class="val" style="color:${totalPorCobrarCC>0?'var(--amber)':'var(--text)'}">${State.fmtUSD(totalPorCobrarCC)}</div>
           <div class="sub">${clientesConDeudaCC>0 ? `${clientesConDeudaCC} cliente${clientesConDeudaCC>1?'s':''} · clic para ver` : 'Sin cuentas abiertas'}</div>
         </div>
+        ${(() => { const ml = State.meliPendienteLiberar(); return ml.ordenes ? `
+        <div class="kpi" style="cursor:pointer" onclick="App.goTo('meli')">
+          <label>A liberar de Mercado Libre</label>
+          <div class="val" style="color:var(--amber)">${State.fmtARS(ml.ars)}</div>
+          <div class="sub">${ml.ordenes} orden${ml.ordenes>1?'es':''}${ml.sinDato ? ` · ${ml.sinDato} sin importe confirmado` : ''} · plata en camino</div>
+        </div>` : ''; })()}
         <div class="kpi"><label>Ventas con saldo pendiente</label><div class="val" style="color:${ventasAbiertas?'var(--amber)':'var(--green)'}">${ventasAbiertas}</div><div class="sub">requieren seguimiento de cobro</div></div>
         <div class="kpi"><label>Stock con alerta</label><div class="val" style="color:${stockCritico?'var(--red)':'var(--green)'}">${stockCritico}</div><div class="sub">modelos con la última unidad</div></div>
         <div class="kpi"><label>Reparaciones del período</label><div class="val">${repPeriodo.length}</div><div class="sub">${repActivas} activa(s) · ${repListas} lista(s)</div></div>
@@ -203,9 +210,8 @@ const Dashboard = {
             <tr><th>Persona</th><th>ARS</th><th>USD</th><th>USDT</th></tr>
             ${State.personas.map(p => {
               const c = State.cajas[p] || {};
-              const ars = (c['ARS cash']||0)+(c['ARS transferencia']||0);
-              const usd = (c['USD cash']||0)+(c['USD transferencia']||0);
-              const usdt = c['USDT']||0;
+              const sm = State.saldosPorMoneda(c);
+              const ars = sm.ARS, usd = sm.USD, usdt = sm.USDT;
               return `<tr><td><div style="display:flex;align-items:center;gap:6px"><div class="av">${p.substring(0,2).toUpperCase()}</div>${p}</div></td><td>${State.fmtARS(ars)}</td><td>${State.fmtUSD(usd)}</td><td>${usdt.toLocaleString('es-AR')}</td></tr>`;
             }).join('')}
             <tr style="font-weight:600"><td>Total</td><td>${State.fmtARS(totalARSenCajas)}</td><td>${State.fmtUSD(totalUSDenCajas)}</td><td>${totalUSDTenCajas.toLocaleString('es-AR')}</td></tr>
@@ -232,7 +238,7 @@ const Dashboard = {
             <tr><th>Cliente</th><th>Detalle</th><th>Total</th><th>Estado</th></tr>
             ${State.ventas.slice(0, 5).map(v => {
               const total = v.items.reduce((s, i) => s + i.precio, 0);
-              return `<tr><td>${v.cliente}</td><td>${(v.items[0]?.nombre || '—').substring(0,28)}${v.items.length>1?` +${v.items.length-1}`:''}</td><td>${State.fmtUSD(total)}</td><td><span class="badge ${v.estado==='cerrada'?'b-green':'b-amber'}">${v.estado==='cerrada'?'Cerrada':'Abierta'}</span></td></tr>`;
+              return `<tr><td>${State.esc(v.cliente)}</td><td>${(v.items[0]?.nombre || '—').substring(0,28)}${v.items.length>1?` +${v.items.length-1}`:''}</td><td>${State.fmtUSD(total)}</td><td><span class="badge ${v.estado==='cerrada'?'b-green':'b-amber'}">${v.estado==='cerrada'?'Cerrada':'Abierta'}</span></td></tr>`;
             }).join('') || '<tr><td colspan="4" style="color:var(--text-secondary)">Todavía no hay ventas cargadas</td></tr>'}
           </table>
         </div>
@@ -397,7 +403,8 @@ const Dashboard = {
     if (ctxP) {
       const equivPorPersona = State.personas.map(p => {
         const c = State.cajas[p] || {};
-        return (c['ARS cash']||0) + (c['ARS transferencia']||0) + ((c['USD cash']||0)+(c['USD transferencia']||0))*State.refBlue + (c['USDT']||0)*State.refUsdt;
+        const sm = State.saldosPorMoneda(c);
+        return sm.ARS + sm.USD*State.refBlue + sm.USDT*State.refUsdt;
       });
       const colores = ['#0A84FF', '#30D158', '#854F0B', '#3C3489', '#085041'];
       this.charts.personas = new Chart(ctxP, {

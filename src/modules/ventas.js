@@ -150,13 +150,25 @@ const Ventas = {
     const cobrado = (v.pagos || []).reduce((a, p) => a + p.monto, 0) + (v.tradeIn?.valor || 0);
     const margenBruto = total - costo;
     const diferencial = Math.max(0, cobrado - total);
-    const faltante    = Math.max(0, total - cobrado);
+    // Costo del canal (comisión + envío de Mercado Libre): lo que el canal se queda
+    // entre el total de la venta y lo que de verdad llegó. Es un concepto EXPLÍCITO,
+    // distinto del quebranto (plata que el cliente no pagó): cuenta como "cubierto" al
+    // calcular el faltante —no es deuda de nadie— y resta del margen comercial.
+    const costoCanal  = Math.max(0, Number(v.costoCanal) || 0);
+    const faltante    = Math.max(0, total - cobrado - costoCanal);
     const cerrada     = v.estado === 'cerrada';
+    // Una venta de Mercado Libre abierta no es plata que un cliente deba: ya la cobró
+    // Mercado Libre y viene en camino ("pendiente de liberar", que se ve aparte). Por eso
+    // NO cuenta como "por cobrar".
+    const esMeli      = v.tipoVenta === 'mercadolibre' || v.meliOrdenId != null;
     const quebranto   = cerrada ? faltante : 0;
-    const pendiente   = cerrada ? 0 : faltante;
+    const pendiente   = (cerrada || esMeli) ? 0 : faltante;
+    // margenComercial = lo que deja la venta en sí (sin recargos de tarjeta). TODOS los
+    // que antes calculaban `margenBruto − quebranto` por su cuenta usan este.
+    const margenComercial = margenBruto - costoCanal - quebranto;
     return {
-      total, costo, cobrado, margenBruto, diferencial, quebranto, pendiente,
-      margenReal: margenBruto + diferencial - quebranto,
+      total, costo, cobrado, margenBruto, diferencial, quebranto, pendiente, costoCanal, margenComercial, esMeli,
+      margenReal: margenComercial + diferencial,
     };
   },
 
@@ -212,9 +224,9 @@ const Ventas = {
         'Tipo': v.tipoVenta || 'minorista', 'Estado': v.estado === 'cerrada' ? 'Cerrada' : 'Abierta',
         'Subtotal dispositivos': n(subDisp), 'Subtotal accesorios': n(subAcc), 'SUBTOTAL': n(subtotal),
         'Trade-in': n(v.tradeIn?.valor || 0), 'Total pagos': n(totalPagos),
-        'Total cobrado': n(r.cobrado), 'Saldo': n(r.total - r.cobrado),
+        'Total cobrado': n(r.cobrado), 'Saldo': n(r.esMeli ? r.pendiente + r.quebranto : r.total - r.cobrado - r.costoCanal),
         'Costo': n(costoFila), 'Ganancia bruta': n(subtotal - costoFila),
-        'Diferencial tarjeta': n(r.diferencial), 'Sin cobrar': n(r.quebranto),
+        'Diferencial tarjeta': n(r.diferencial), 'Costo del canal': n(r.costoCanal), 'Sin cobrar': n(r.quebranto),
         'Pendiente': n(r.pendiente), 'Ganancia real': n(r.margenReal),
       });
 
@@ -263,7 +275,7 @@ const Ventas = {
       'SUBTOTAL': tot('SUBTOTAL'), 'Trade-in': tot('Trade-in'), 'Total pagos': tot('Total pagos'),
       'Total cobrado': tot('Total cobrado'), 'Saldo': tot('Saldo'), 'Costo': tot('Costo'),
       'Ganancia bruta': tot('Ganancia bruta'), 'Diferencial tarjeta': tot('Diferencial tarjeta'),
-      'Sin cobrar': tot('Sin cobrar'), 'Pendiente': tot('Pendiente'), 'Ganancia real': tot('Ganancia real'),
+      'Costo del canal': tot('Costo del canal'), 'Sin cobrar': tot('Sin cobrar'), 'Pendiente': tot('Pendiente'), 'Ganancia real': tot('Ganancia real'),
     });
 
     // ── Diferencial de tipo de cambio del mismo período (operaciones de cueva)
@@ -289,8 +301,9 @@ const Ventas = {
     const gananciaBruta = t('Ganancia bruta');
     const difTarjeta    = t('Diferencial tarjeta');
     const sinCobrar     = t('Sin cobrar');
+    const costoCanal    = t('Costo del canal');
     const pendiente     = t('Pendiente');
-    const gananciaFinal = n(gananciaBruta + difTarjeta + difCambio - sinCobrar);
+    const gananciaFinal = n(gananciaBruta + difTarjeta + difCambio - sinCobrar - costoCanal);
     const hojaResumen = [
       { 'Concepto': 'Período',                        'Detalle': this._nombrePeriodo() + (nicho ? ` · ${nicho}` : ''), 'USD': '' },
       { 'Concepto': 'Ventas',                         'Detalle': `${ventas.length} operación(es)`,                     'USD': '' },
@@ -299,8 +312,9 @@ const Ventas = {
       { 'Concepto': 'Ganancia bruta',                 'Detalle': 'Precio − costo',                                     'USD': gananciaBruta },
       { 'Concepto': 'Diferencial con tarjeta',        'Detalle': 'Cobrado por encima del precio (recargo posnet)',     'USD': difTarjeta },
       { 'Concepto': 'Diferencial por tipo de cambio', 'Detalle': `Spread de ${cambios.length} operación(es) de cueva`, 'USD': n(difCambio) },
+      { 'Concepto': 'Costo del canal (Mercado Libre)','Detalle': 'Comisión + envío que se queda el canal — resta',     'USD': -costoCanal },
       { 'Concepto': 'Sin cobrar (ventas cerradas)',   'Detalle': 'Descuentos y comisiones — resta',                    'USD': -sinCobrar },
-      { 'Concepto': 'GANANCIA FINAL',                 'Detalle': 'Bruta + tarjeta + tipo de cambio − sin cobrar',      'USD': gananciaFinal },
+      { 'Concepto': 'GANANCIA FINAL',                 'Detalle': 'Bruta + tarjeta + tipo de cambio − canal − sin cobrar','USD': gananciaFinal },
       { 'Concepto': 'Por cobrar (ventas abiertas)',   'Detalle': 'No descontado — plata que te deben',                 'USD': pendiente },
     ];
 
@@ -312,7 +326,7 @@ const Ventas = {
       XLSX.utils.book_append_sheet(wb, ws, nombre);
     };
     agregar(hojaResumen, 'Resumen',     [32,52,14]);
-    agregar(hojaVentas, 'Ventas',       [8,10,24,16,18,12,10,20,18,12,10,12,13,10,10,14,17,11,11,13]);
+    agregar(hojaVentas, 'Ventas',       [8,10,24,16,18,12,10,20,18,12,10,12,13,10,10,14,17,13,11,11,13]);
     agregar(hojaDisp,   'Dispositivos', [8,10,24,18,32,16,18,8,13,12,11]);
     agregar(hojaAcc,    'Accesorios',   [8,10,24,18,30,9,8,11,12,11]);
     agregar(hojaPagos,  'Pagos',        [8,10,24,18,18,12,14,12,9,15]);
@@ -345,7 +359,8 @@ const Ventas = {
     const quebranto    = res.reduce((s,r) => s + r.quebranto, 0);
     const porCobrar    = res.reduce((s,r) => s + r.pendiente, 0);
     // Margen real = lo comercial menos lo que quedó sin cobrar en ventas cerradas
-    const margenReal   = margenBruto - quebranto;
+    const costoCanal   = res.reduce((s,r) => s + r.costoCanal, 0);
+    const margenReal   = margenBruto - quebranto - costoCanal;
     const margenXEquipo = ventas.length ? margenReal / ventas.length : 0;
     const rentabilidad = volumen > 0 ? (margenReal / volumen * 100) : 0;
     const ticketProm = ventas.length ? volumen / ventas.length : 0;
@@ -409,7 +424,7 @@ const Ventas = {
     const host=document.getElementById('ventas-list-host');
     if (!host) return;
     const ventas=this.ventasDelPeriodo();
-    const TIPO={minorista:'Minorista',mayorista:'Mayorista',revendedor:'Revendedor'};
+    const TIPO={minorista:'Minorista',mayorista:'Mayorista',revendedor:'Revendedor',mercadolibre:'Mercado Libre'};
     if (!ventas.length) {
       host.innerHTML=`<div class="empty-state"><i class="ti ti-receipt-off"></i>Sin ventas en este período</div>`;
       return;
@@ -419,13 +434,14 @@ const Ventas = {
         ventas.map(v => {
           const total=v.items.reduce((s,i)=>s+i.precio,0);
           const pagado=v.pagos.reduce((s,p)=>s+p.monto,0)+(v.tradeIn?.valor||0);
-          const saldo=total-pagado;
+          const cobroV=this._cobroVisible(v,total,pagado);
+          const saldo=-cobroV.dif;
           const cerrada=v.estado==='cerrada';
           const itemsStr=v.items.map(i=>i.nombre+(i.imei?` · ${i.imei}`:'')).join(', ');
           return `<div class="card" style="margin-bottom:0;padding:12px 14px" onclick="Ventas.viewSale(${v.id})">
             <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;margin-bottom:6px">
               <div style="min-width:0">
-                <div style="font-size:13px;font-weight:700">${v.cliente}</div>
+                <div style="font-size:13px;font-weight:700">${State.esc(v.cliente)}</div>
                 <div style="font-size:11px;color:var(--text-secondary);font-family:monospace;margin-top:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${itemsStr}</div>
               </div>
               <div style="text-align:right;flex-shrink:0">
@@ -437,6 +453,7 @@ const Ventas = {
               <span class="badge b-blue" style="font-size:10px">${TIPO[v.tipoVenta]||'Minorista'}</span>
               <span class="badge ${cerrada?'b-green':'b-amber'}" style="font-size:10px">${cerrada?'✓ Cerrada':'Abierta'}</span>
               ${saldo>0.5?`<span style="font-size:10px;color:var(--red);font-weight:600">Pendiente: ${State.fmtUSD(saldo)}</span>`:''}
+              ${cobroV.aLiberar?`<span style="font-size:10px;color:var(--amber);font-weight:600">A liberar por Mercado Libre</span>`:''}
               <span style="font-size:10px;color:var(--text-secondary);margin-left:auto">#${v.id}</span>
             </div>
           </div>`;
@@ -456,12 +473,12 @@ const Ventas = {
         return `<tr>
           <td style="font-weight:600">#${v.id}</td>
           <td style="font-size:11.5px">${v.fecha}</td>
-          <td>${v.cliente}${v.clienteTel?`<div style="font-size:10px;color:var(--text-secondary)">${v.clienteTel}</div>`:''}</td>
+          <td>${State.esc(v.cliente)}${v.clienteTel?`<div style="font-size:10px;color:var(--text-secondary)">${State.esc(v.clienteTel)}</div>`:''}</td>
           <td><span class="badge b-blue" style="font-size:10px">${TIPO[v.tipoVenta]||'Minorista'}</span></td>
           <td style="font-size:11px;max-width:200px">${v.items.map(i=>`<div style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${i.nombre}${i.imei?`<span style="font-family:monospace;color:var(--text-secondary);font-size:10px"> · ${i.imei}</span>`:''}</div>`).join('')}</td>
           <td><b>${State.fmtUSD(total)}</b></td>
           <td style="min-width:160px">${pagosHtml}</td>
-          <td>${this.estadoToggle(cerrada)}</td>
+          <td>${this.estadoToggle(cerrada)}${(this._esMeli(v) && !cerrada && !v.pagos.length) ? '<div style="font-size:10px;color:var(--amber);font-weight:600;margin-top:3px">A liberar por Mercado Libre</div>' : ''}</td>
           <td><button class="btn btn-sm" onclick="Ventas.viewSale(${v.id})">👁️ Ver</button></td>
         </tr>`;
       }).join('') + `</tbody></table></div>`;
@@ -2109,9 +2126,10 @@ const Ventas = {
     App.closeSidebar();
     const total = v.items.reduce((s, i) => s + i.precio, 0);
     const pagado = v.pagos.reduce((s, p) => s + p.monto, 0) + (v.tradeIn?.valor || 0);
-    const saldo = pagado - total;
+    const cobroV = this._cobroVisible(v, total, pagado);
+    const saldo = cobroV.dif;
     const cerrada = v.estado === 'cerrada';
-    const TIPO_LABEL = { minorista: 'Minorista', mayorista: 'Mayorista', revendedor: 'Revendedor' };
+    const TIPO_LABEL = { minorista: 'Minorista', mayorista: 'Mayorista', revendedor: 'Revendedor', mercadolibre: 'Mercado Libre' };
 
     // Separar ítems en dispositivos y accesorios
     const dispositivosCats = ['iphone','android','mac','ipad','watch'];
@@ -2166,8 +2184,8 @@ const Ventas = {
             <div class="card" style="margin-bottom:14px">
               <div class="card-title"><i class="ti ti-user"></i> Información del Cliente</div>
               <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
-                <div><label style="font-size:11px;color:var(--text-secondary)">Nombre</label><div style="font-size:13px;font-weight:500">${v.cliente}</div></div>
-                <div><label style="font-size:11px;color:var(--text-secondary)">Teléfono</label><div style="font-size:13px">${v.clienteTel||'—'}</div></div>
+                <div><label style="font-size:11px;color:var(--text-secondary)">Nombre</label><div style="font-size:13px;font-weight:500">${State.esc(v.cliente)}</div></div>
+                <div><label style="font-size:11px;color:var(--text-secondary)">Teléfono</label><div style="font-size:13px">${State.esc(v.clienteTel)||'—'}</div></div>
                 <div><label style="font-size:11px;color:var(--text-secondary)">DNI</label><div style="font-size:13px">${v.clienteDni||'—'}</div></div>
                 <div><label style="font-size:11px;color:var(--text-secondary)">Email</label><div style="font-size:13px">${v.clienteEmail ? `<a href="mailto:${v.clienteEmail}" style="color:var(--blue)">${v.clienteEmail}</a>` : '—'}</div></div>
                 <div><label style="font-size:11px;color:var(--text-secondary)">Vendedor</label>
@@ -2265,7 +2283,7 @@ const Ventas = {
               <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:12px">
                 <div><label style="font-size:11px;color:var(--text-secondary)">Total Venta</label><div style="font-size:17px;font-weight:700">${State.fmtUSD(total)}</div></div>
                 <div><label style="font-size:11px;color:var(--text-secondary)">Total Pagos</label><div style="font-size:17px;font-weight:700">${State.fmtUSD(pagado)}</div></div>
-                <div><label style="font-size:11px;color:var(--text-secondary)">Saldo</label><div style="font-size:17px;font-weight:700;color:${saldo>=0?'var(--green)':'var(--red)'}">${saldo>=0?'✓ Pagado':State.fmtUSD(-saldo)+' pendiente'}</div></div>
+                <div><label style="font-size:11px;color:var(--text-secondary)">Saldo</label><div style="font-size:17px;font-weight:700;color:${cobroV.aLiberar?'var(--amber)':saldo>=0?'var(--green)':'var(--red)'}">${cobroV.aLiberar?'A liberar por Mercado Libre':saldo>=0?'✓ Pagado':State.fmtUSD(-saldo)+' pendiente'}</div></div>
               </div>
               ${v.tradeIn?.valor > 0 ? `
                 <div style="display:flex;justify-content:space-between;align-items:center;background:var(--bg-secondary);border:1px solid var(--green);border-radius:8px;padding:10px 12px;margin-bottom:6px">
@@ -2362,7 +2380,8 @@ const Ventas = {
     if (!v) return;
     const total = v.items.reduce((s, i) => s + i.precio, 0);
     const pagado = v.pagos.reduce((s, p) => s + p.monto, 0) + (v.tradeIn?.valor || 0);
-    const saldo = pagado - total;
+    const cobroV = this._cobroVisible(v, total, pagado);
+    const saldo = cobroV.dif;
     const dispositivosCats = ['iphone','android','mac','ipad','watch'];
     const itemsDisp = v.items.filter(i => { const p = State.stock.find(s => s.id === i.stockId); return p ? dispositivosCats.includes(p.cat) : false; });
     const itemsAcc = v.items.filter(i => { const p = State.stock.find(s => s.id === i.stockId); return !p || !dispositivosCats.includes(p.cat); });
@@ -2506,9 +2525,9 @@ const Ventas = {
     <!-- CLIENTE -->
     <div class="cliente-box">
       <div class="label">Recibido por</div>
-      <div class="nombre">${v.cliente}</div>
+      <div class="nombre">${State.esc(v.cliente)}</div>
       <div class="datos">
-        ${v.clienteTel ? `<span>📞 ${v.clienteTel}</span>` : ''}
+        ${v.clienteTel ? `<span>📞 ${State.esc(v.clienteTel)}</span>` : ''}
         ${v.clienteDni ? `<span>DNI: ${v.clienteDni}</span>` : ''}
         ${v.vendedor ? `<span>Vendedor: ${v.vendedor}</span>` : ''}
       </div>
@@ -2631,7 +2650,8 @@ const Ventas = {
     if (!v) return;
     const total = v.items.reduce((s, i) => s + i.precio, 0);
     const pagado = v.pagos.reduce((s, p) => s + p.monto, 0);
-    const saldo = pagado - total;
+    const cobroV = this._cobroVisible(v, total, pagado);
+    const saldo = cobroV.dif;
     const profitTotal = v.items.reduce((s,i)=>s+(i.precio-(i.costo||0)),0);
     const dispositivosCats = ['iphone','android','mac','ipad','watch'];
     const itemsDisp = v.items.filter(i => { const p = State.stock.find(s => s.id === i.stockId); return p ? dispositivosCats.includes(p.cat) : false; });
@@ -2666,8 +2686,8 @@ const Ventas = {
     <div class="section">
       <h3>INFORMACIÓN DEL CLIENTE</h3>
       <div class="info-grid">
-        <div><span>Cliente</span>${v.cliente}</div>
-        ${v.clienteTel?`<div><span>Teléfono</span>${v.clienteTel}</div>`:''}
+        <div><span>Cliente</span>${State.esc(v.cliente)}</div>
+        ${v.clienteTel?`<div><span>Teléfono</span>${State.esc(v.clienteTel)}</div>`:''}
         ${v.clienteDni?`<div><span>DNI</span>${v.clienteDni}</div>`:''}
         <div><span>Vendedor</span>${v.vendedor||'—'}</div>
       </div>
@@ -2708,7 +2728,7 @@ const Ventas = {
       <div style="color:${profitTotal>=0?'green':'red'}">Profit Total: ${profitTotal>=0?'+':''}$${profitTotal.toFixed(2)} USD</div>
       <div>Total Pagado: <b>$${pagado.toFixed(2)} USD</b></div>
       <div>Saldo: <b>$${saldo.toFixed(2)} USD</b></div>
-      <div style="font-weight:bold;margin-top:4px">Ganancia Neta: ${profitTotal>=0?'+':''}$${profitTotal.toFixed(2)} USD</div>
+      <div style="font-weight:bold;margin-top:4px">Ganancia bruta: ${profitTotal>=0?'+':''}$${profitTotal.toFixed(2)} USD</div>
     </div>
 
     <div class="footer">
@@ -2723,7 +2743,7 @@ const Ventas = {
     banner.style.cssText = 'position:fixed;bottom:80px;right:20px;background:var(--bg-elevated);border:1px solid #25D366;border-radius:var(--radius-lg);padding:12px 16px;z-index:9000;box-shadow:var(--shadow-md);max-width:300px';
     banner.innerHTML = `
       <div style="font-size:12px;font-weight:600;color:#25D366;margin-bottom:6px"><i class="ti ti-brand-whatsapp"></i> ¿Enviar recibo por WhatsApp?</div>
-      <div style="font-size:11px;color:var(--text-secondary);margin-bottom:10px">Venta #${v.id} para <b>${v.cliente}</b></div>
+      <div style="font-size:11px;color:var(--text-secondary);margin-bottom:10px">Venta #${v.id} para <b>${State.esc(v.cliente)}</b></div>
       <div style="display:flex;gap:6px">
         <button onclick="this.closest('div[style]').remove()" style="flex:1;font-size:11px;padding:5px;border:1px solid var(--border);border-radius:6px;background:transparent;color:var(--text-secondary);cursor:pointer">No</button>
         <button onclick="Ventas._whatsappVenta(${v.id});this.closest('div[style]').remove()" style="flex:2;font-size:11px;padding:5px;border:none;border-radius:6px;background:#25D366;color:#fff;cursor:pointer;font-weight:600"><i class="ti ti-brand-whatsapp"></i> Enviar</button>
@@ -2744,9 +2764,28 @@ const Ventas = {
   },
 
   // ── Registrar cobro en ventas abiertas ────────────────
+  // Las ventas de Mercado Libre las mueven SOLO las funciones de la base (procesar,
+  // acreditar, revertir): cobrar, cerrar, borrar un pago o anular desde acá rompería
+  // la cuenta de lo acreditado.
+  _esMeli(v) { return v?.tipoVenta === 'mercadolibre' || v?.meliOrdenId != null; },
+  // Para MOSTRAR el saldo de una venta: { dif: pagado − total (≥ 0 = pagada), aLiberar }.
+  // En una venta de Mercado Libre, lo que se quedó el canal (comisión + envío) cuenta
+  // como cubierto, y mientras no se acreditó no hay saldo de ningún cliente: está "a liberar".
+  _cobroVisible(v, total, pagado) {
+    if (!this._esMeli(v)) return { dif: pagado - total, aLiberar: false };
+    if (v.estado !== 'cerrada' && !(v.pagos || []).length) return { dif: 0, aLiberar: true };
+    return { dif: pagado + (Number(v.costoCanal) || 0) - total, aLiberar: false };
+  },
+  _bloquearMeli(v) {
+    if (!this._esMeli(v)) return false;
+    toast('Esta venta viene de Mercado Libre: su cobro, su cierre y su reverso se manejan desde la pantalla de Mercado Libre, no desde acá.');
+    return true;
+  },
+
   abrirCobro(id) {
     const v = State.ventas.find(x => x.id === id);
     if (!v) return;
+    if (this._bloquearMeli(v)) return;
     const total = v.items.reduce((s, i) => s + i.precio, 0);
     // El trade-in cuenta como parte de pago: sin sumarlo, el saldo pendiente
     // salía inflado y se cobraba de más.
@@ -2760,7 +2799,7 @@ const Ventas = {
       <div style="background:var(--bg-elevated);border:1px solid var(--border-strong);border-radius:var(--radius-xl);width:min(400px,96vw);overflow:hidden">
         <div style="padding:14px 18px;border-bottom:1px solid var(--border)">
           <div style="font-size:14px;font-weight:700">Registrar cobro — Venta #${v.id}</div>
-          <div style="font-size:11px;color:var(--text-secondary)">${v.cliente} · Saldo pendiente: <b style="color:var(--amber)">USD ${saldo.toFixed(2)}</b></div>
+          <div style="font-size:11px;color:var(--text-secondary)">${State.esc(v.cliente)} · Saldo pendiente: <b style="color:var(--amber)">USD ${saldo.toFixed(2)}</b></div>
         </div>
         <div style="padding:18px;display:flex;flex-direction:column;gap:12px">
           <!-- 1) Dónde entra la plata: define la moneda del monto -->
@@ -2865,6 +2904,7 @@ const Ventas = {
   },
 
   async submitCobro(id) {
+    if (this._bloquearMeli(State.ventas.find(x => x.id === id))) return;
     const { esARS, cotiz, ingresado, montoUSD } = this._cobroDatos();
     if (!ingresado) { toast('Ingresá un monto.'); return; }
     if (esARS && cotiz <= 0) { toast('Ingresá una cotización válida.'); return; }
@@ -2920,6 +2960,7 @@ const Ventas = {
   async cerrarVentaManual(id) {
     const v = State.ventas.find(x => x.id === id);
     if (!v) return;
+    if (this._bloquearMeli(v)) return;
     if (!confirm(`¿Marcar la venta #${id} como cerrada/pagada?`)) return;
     v.estado = 'cerrada';
     await DB.actualizarEstadoVenta(id, 'cerrada');
@@ -2953,6 +2994,7 @@ const Ventas = {
   },
 
   async eliminarPago(ventaId, pagoId) {
+    if (this._bloquearMeli(State.ventas.find(x => x.id === ventaId))) return;
     if (!confirm('¿Eliminar este pago? El saldo de la venta se actualizará y el monto se debitará de la caja.')) return;
     const v = State.ventas.find(x => x.id === ventaId);
     const pago = v?.pagos.find(p => p.id === pagoId);
@@ -2994,6 +3036,7 @@ const Ventas = {
   async anular(id) {
     const v = State.ventas.find(x => x.id === id);
     if (!v) return;
+    if (this._bloquearMeli(v)) return;
     if (!confirm(`¿Anular la venta #${v.id}? Esto revertirá el stock y los pagos en las cajas correspondientes.`)) return;
     // Revertir cajas usando la cotización original del pago, no la actual.
     // Va ANTES que el stock: si una caja no devuelve la plata la venta sigue

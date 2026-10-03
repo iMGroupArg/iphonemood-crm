@@ -182,6 +182,7 @@ function nuevoEntorno(opciones = {}) {
                     setItem: (k, v) => { if (cfg.sinAlmacen) throw new Error('QuotaExceeded'); almacen[k] = String(v); } },
     confirm: () => true,
     Sheets: new Proxy({}, { get: () => () => {} }),
+    supa: { rpc: async (...a) => (cfg.supaRpc ? cfg.supaRpc(...a) : { data: null, error: { message: 'sin supa' } }) },
     Auth: { usuario: { nombre: 'Test' } },
     Reportes: { NICHOS: [] },
     App: { goTo() {} },
@@ -1425,6 +1426,82 @@ const entornoVenta = (extra = {}, cfg = {}) => {
   e.servidor.base['Franco||USD cash'] = 0.01;
   await e.mod.Ventas.anular(7);
   check('Anular con el producto reservado para esa venta: la reserva se libera (disponible)', e.servidor.stock[1].estado === 'disponible' && e.State.stock[0].estadoInventario === 'disponible', JSON.stringify(e.servidor.stock));
+}
+
+// 32. MERCADO LIBRE en el CRM: costo del canal, totales por prefijo, cuenta corriente, bloqueos y pantalla
+{
+  const e = nuevoEntorno({ modulos: ['stock.js', 'ventas.js', 'cuentacorriente.js'] });
+  const ml = { id: 50, estado: 'cerrada', tipoVenta: 'mercadolibre', meliOrdenId: 9, meliCotizacion: 1000, costoCanal: 15,
+    items: [{ precio: 100, costo: 30 }], pagos: [{ monto: 85, persona: 'Franco', bolsillo: 'ARS Mercado Pago', cotizacionDiferencial: 1000 }] };
+  const r = e.mod.Ventas.resultadoVenta(ml);
+  check('Venta de Mercado Libre cerrada (100 USD, llegaron 85, costo del canal 15): NO hay quebranto y el margen comercial es 100−30−15 = 55',
+    r.quebranto === 0 && r.costoCanal === 15 && r.margenComercial === 55 && r.margenReal === 55, JSON.stringify(r));
+  const comun = e.mod.Ventas.resultadoVenta({ id: 51, estado: 'cerrada', items: [{ precio: 100, costo: 30 }], pagos: [{ monto: 85 }] });
+  check('La misma venta SIN costo de canal sigue siendo quebranto de 15 (el cambio no altera las ventas comunes)', comun.quebranto === 15 && comun.margenComercial === 55 && comun.costoCanal === 0, JSON.stringify(comun));
+  const abierta = e.mod.Ventas.resultadoVenta({ ...ml, estado: 'abierta', costoCanal: 0, pagos: [] });
+  check('Venta de Mercado Libre abierta (sin acreditar): NO es plata que un cliente deba (pendiente 0, quebranto 0); el margen cuenta entero (70)',
+    abierta.pendiente === 0 && abierta.quebranto === 0 && abierta.margenComercial === 70 && abierta.esMeli === true, JSON.stringify(abierta));
+  const cv1 = e.mod.Ventas._cobroVisible({ tipoVenta: 'mercadolibre', estado: 'abierta', pagos: [] }, 100, 0);
+  const cv2 = e.mod.Ventas._cobroVisible(ml, 100, 85);
+  const cv3 = e.mod.Ventas._cobroVisible({ tipoVenta: 'minorista', estado: 'abierta', pagos: [] }, 100, 40);
+  check('Saldo a mostrar: MELI sin acreditar = "a liberar" (no deuda); MELI acreditada con comisión 15 = pagada; venta común sigue debiendo 60',
+    cv1.aLiberar === true && cv1.dif === 0 && cv2.dif === 0 && cv2.aLiberar === false && cv3.dif === -60, JSON.stringify({ cv1, cv2, cv3 }));
+
+  e.State.ventas = [{ ...ml, estado: 'abierta', costoCanal: 0, pagos: [], cliente: 'c', clienteTel: '' }];
+  check('Una venta de Mercado Libre abierta NO aparece como deuda en Cuenta Corriente', e.mod.CuentaCorriente.getClientesConDeuda().length === 0);
+  e.State.ventas.push({ id: 52, estado: 'abierta', tipoVenta: 'minorista', cliente: 'Juan', clienteTel: '1', items: [{ precio: 100 }], pagos: [] });
+  check('… pero una venta común abierta sí', e.mod.CuentaCorriente.getClientesConDeuda().length === 1);
+
+  // Totales por prefijo: 'ARS Mercado Pago' entra en el total en pesos
+  const sm = e.State.saldosPorMoneda({ 'ARS cash': 100, 'ARS transferencia': 50, 'ARS Mercado Pago': 1000, 'USD cash': 5, 'USDT': 7 });
+  check('Los totales suman por prefijo: ARS = 100+50+1000 (incluye Mercado Pago), USD = 5, USDT = 7 (sin mezclar USDT en USD)', sm.ARS === 1150 && sm.USD === 5 && sm.USDT === 7, JSON.stringify(sm));
+  e.State.cajas = { Franco: { 'ARS cash': 0, 'ARS Mercado Pago': 10 }, Lautaro: { 'ARS cash': 0 } };
+  check('Un bolsillo nuevo aparece en la lista de bolsillos existentes (para Cueva, Cajas y Capital)', e.State.bolsillosExistentes().includes('ARS Mercado Pago') && e.State.bolsillosExistentes().length === 6);
+
+  // Bloqueos: nada de cobrar, cerrar, borrar pagos ni anular una venta de Mercado Libre desde Ventas
+  e.State.ventas = [{ ...ml, estado: 'abierta', pagos: [{ id: 1, monto: 1, persona: 'Franco', bolsillo: 'ARS Mercado Pago' }], items: [{ precio: 100, costo: 30 }] }];
+  const antes = e.toasts.length;
+  e.mod.Ventas.abrirCobro(50);
+  await e.mod.Ventas.cerrarVentaManual(50);
+  await e.mod.Ventas.eliminarPago(50, 1);
+  await e.mod.Ventas.anular(50);
+  check('Cobrar, cerrar, borrar un pago o anular una venta de Mercado Libre desde Ventas: bloqueado con aviso, y nada se movió',
+    e.toasts.length - antes === 4 && e.toasts.slice(antes).every(t => t.includes('viene de Mercado Libre')) && e.State.ventas.length === 1 && e.servidor.llamadas === 0, JSON.stringify(e.toasts.slice(antes)));
+
+  // Pendiente de liberar
+  e.State.refBlue = 1000;
+  e.State.meliOrdenes = [
+    { id: 1, procesada: true, acreditado: false, revertidaEn: null, neto: 85000, financieraCompleta: true, ventaId: 50 },
+    { id: 2, procesada: true, acreditado: false, revertidaEn: null, neto: null, financieraCompleta: false, ventaId: 50 },
+    { id: 3, procesada: true, acreditado: true, revertidaEn: null, neto: 70000, financieraCompleta: true },
+    { id: 4, procesada: true, acreditado: false, revertidaEn: '2026-10-01', neto: 70000, financieraCompleta: true },
+    { id: 5, procesada: false, acreditado: false, revertidaEn: null, neto: 60000, financieraCompleta: true },
+  ];
+  const pl = e.State.meliPendienteLiberar();
+  check('Pendiente de liberar: solo la orden procesada y sin acreditar/revertir (85.000 = 85 USD); la de neto desconocido NO suma 0, se cuenta aparte',
+    pl.ars === 85000 && pl.usd === 85 && pl.ordenes === 2 && pl.sinDato === 1, JSON.stringify(pl));
+}
+{
+  // La pantalla: llama a las funciones de la base con los argumentos correctos y traduce los errores
+  const llamadas = [];
+  const e = nuevoEntorno({ modulos: ['meli-ordenes.js'], dom: { 'meliord-monto-7': '85000', 'meliord-fin-7': false, 'meliord-cot-3': '1000' },
+    dbExtra: { async cargarTodo() {}, async cargarMeliOrdenes() {} } });
+  let respuesta = { data: { ok: true, ya_acreditada: false, monto: 85000, costo_canal_usd: 15 }, error: null };
+  e.cfg.supaRpc = async (fn, args) => { llamadas.push({ fn, args }); return respuesta; };
+  e.State.meliOrdenes = [{ id: 7, orderId: 'ORD7', neto: 85000, bruto: 100000, procesada: true, acreditado: false, financieraCompleta: true, fechaLiberacion: '2020-01-01' }];
+  await e.mod.MeliOrdenes.acreditar(7, null);
+  check('Acreditar con el monto igual al neto informado: manda monto NULL (que la base use SU neto) y liquidación final falsa',
+    llamadas.length === 1 && llamadas[0].fn === 'meli_acreditar_orden' && llamadas[0].args.p_monto_real === null && llamadas[0].args.p_liquidacion_final === false, JSON.stringify(llamadas));
+  respuesta = { data: null, error: { message: 'MONTO_MENOR_AL_NETO' } };
+  e.dom['meliord-monto-7'] = '80000';
+  await e.mod.MeliOrdenes.acreditar(7, null);
+  check('Un monto distinto se manda tal cual, y el error de la base se explica en castellano',
+    llamadas[1].args.p_monto_real === 80000 && e.toasts.some(t => t.includes('liquidación final')), JSON.stringify({ l: llamadas[1], t: e.toasts }));
+  respuesta = { data: { ok: false, motivo: 'Producto con IMEI: elegir la unidad a mano' }, error: null };
+  e.State.meliOrdenes.push({ id: 3, orderId: 'ORD3', procesada: false, revisar: false });
+  await e.mod.MeliOrdenes.procesar(3, null);
+  check('Procesar una orden que la base deja en revisión: muestra el motivo (no dice que salió bien)',
+    llamadas[2].fn === 'meli_procesar_orden' && llamadas[2].args.p_cotizacion === 1000 && e.toasts.some(t => t.includes('IMEI')), JSON.stringify({ l: llamadas[2], t: e.toasts }));
 }
 
 // 30. Altas: si el registro no se puede crear, NO se toca la caja (o se deshace)

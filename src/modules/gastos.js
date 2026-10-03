@@ -544,7 +544,7 @@ const Gastos = {
     const costoUSD       = res.reduce((s, r) => s + r.costo, 0);
     const quebrantoUSD   = res.reduce((s, r) => s + r.quebranto, 0);
     const porCobrarUSD   = res.reduce((s, r) => s + r.pendiente, 0);
-    const margenUSD      = res.reduce((s, r) => s + r.margenBruto - r.quebranto, 0);
+    const margenUSD      = res.reduce((s, r) => s + r.margenComercial, 0);
     const diferencialUSD = res.reduce((s, r) => s + r.diferencial, 0);
 
     // La misma función de período que usan Ventas, Cueva y Dashboard, en vez de

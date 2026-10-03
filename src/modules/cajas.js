@@ -7,16 +7,15 @@ const Cajas = {
     c.className = 'body-pad';
     let totalARS = 0, totalUSD = 0, totalUSDT = 0;
     Object.values(State.cajas).forEach(caja => {
-      totalARS  += (caja['ARS cash']||0) + (caja['ARS transferencia']||0);
-      totalUSD  += (caja['USD cash']||0) + (caja['USD transferencia']||0);
-      totalUSDT += caja['USDT'] || 0;
+      const sm = State.saldosPorMoneda(caja);
+      totalARS += sm.ARS; totalUSD += sm.USD; totalUSDT += sm.USDT;
     });
     const equivalenteTotal = totalARS + totalUSD * State.refBlue + totalUSDT * State.refBlue;
 
     const BOLSILLO_ICON = {
       'ARS cash': 'ti-cash', 'ARS transferencia': 'ti-building-bank',
       'USD cash': 'ti-currency-dollar', 'USD transferencia': 'ti-transfer',
-      'USDT': 'ti-currency-bitcoin'
+      'USDT': 'ti-currency-bitcoin', 'ARS Mercado Pago': 'ti-wallet'
     };
 
     c.innerHTML = `
@@ -165,6 +164,7 @@ const Cajas = {
     gasto:'Gasto', reparacion:'Reparación', reparacion_cancelada:'Reparación cancelada',
     cueva:'Cueva', cueva_anulada:'Cueva anulada', proveedor:'Proveedor',
     cuenta_corriente:'Cuenta corriente', movimiento:'Movimiento entre cajas',
+    meli:'Acreditación Mercado Libre', meli_reverso:'Reverso Mercado Libre',
     activo_fijo:'Activo fijo', ajuste:'Ajuste manual', otro:'Otro'
   },
 
@@ -209,7 +209,7 @@ const Cajas = {
     const TIPO = this.TIPOS_LIBRO;
     const fmt = n => Math.round(Number(n)).toLocaleString('es-AR');
 
-    const bolsillos = ['ARS cash','ARS transferencia','USD cash','USD transferencia','USDT'];
+    const bolsillos = State.bolsillosExistentes();
     const sel = 'font-size:12px;padding:6px 8px;border:1px solid var(--border-strong);border-radius:8px;background:var(--bg);color:var(--text)';
     const btnR = (clave, txt) => `<button class="btn btn-sm" onclick="Cajas.setRangoLibro('${clave}')">${txt}</button>`;
 
@@ -292,18 +292,15 @@ const Cajas = {
     return `<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:14px">
         ${State.personas.map(p => {
           const caja = State.cajas[p] || {};
-          const arsEquiv = (caja['ARS cash']||0) + (caja['ARS transferencia']||0)
-                         + ((caja['USD cash']||0)+(caja['USD transferencia']||0)) * State.refBlue
-                         + (caja['USDT']||0) * State.refBlue;
-          const usdEquiv = ((caja['ARS cash']||0) + (caja['ARS transferencia']||0)) / State.refBlueCompra
-                         + (caja['USD cash']||0) + (caja['USD transferencia']||0)
-                         + (caja['USDT']||0);
+          const sm = State.saldosPorMoneda(caja);
+          const arsEquiv = sm.ARS + sm.USD * State.refBlue + sm.USDT * State.refBlue;
+          const usdEquiv = sm.ARS / State.refBlueCompra + sm.USD + sm.USDT;
           return `<div class="card" style="margin-bottom:0">
             <div class="card-title" style="margin-bottom:14px">
               <div class="av" style="width:30px;height:30px;font-size:11px">${p.substring(0,2).toUpperCase()}</div>
               <span style="font-size:14px;font-weight:700">${p}</span>
             </div>
-            ${['ARS cash','ARS transferencia','USD cash','USD transferencia','USDT'].map(b => {
+            ${State.BOLSILLOS_BASE.concat(Object.keys(caja).filter(b => !State.BOLSILLOS_BASE.includes(b)).sort()).map(b => {
               const val = caja[b] || 0;
               const fmt = b === 'USDT' ? val.toLocaleString('es-AR') + ' USDT'
                         : b.startsWith('ARS') ? State.fmtARS(val)
@@ -470,7 +467,7 @@ const Cajas = {
 
   abrirModalMovimiento() {
     const personaOpts = State.personas.map(p => `<option value="${p}">${p}</option>`).join('');
-    const bolsilloOpts = ['ARS cash','ARS transferencia','USD cash','USD transferencia','USDT']
+    const bolsilloOpts = State.bolsillosExistentes()
       .map(b => `<option value="${b}">${b}</option>`).join('');
     const sep = (label) => `<div style="font-size:10px;font-weight:700;color:var(--text-tertiary);text-transform:uppercase;letter-spacing:.06em;margin:14px 0 6px">${label}</div>`;
 

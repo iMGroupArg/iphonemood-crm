@@ -19,6 +19,7 @@ import './reportes.js';
 import './presupuestos.js';
 import './blog.js';
 import './meli.js';
+import './meli-ordenes.js';
 import Bandeja from './bandeja.js';
 
 const App = {
@@ -259,7 +260,7 @@ const App = {
         badge.style.display = 'none';
       }
     }
-    const ventasAbiertas = (State.ventas || []).filter(v => v.estado === 'abierta').length;
+    const ventasAbiertas = (State.ventas || []).filter(v => v.estado === 'abierta' && v.tipoVenta !== 'mercadolibre').length;   // las de Mercado Libre abiertas no son cobros que perseguir
     const badgeVentas = document.getElementById('badge-ventas');
     if (badgeVentas) {
       if (ventasAbiertas > 0) {

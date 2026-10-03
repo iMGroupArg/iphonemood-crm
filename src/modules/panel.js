@@ -712,7 +712,8 @@ const Panel = {
 
   saldoTotalPersona(p) {
     const c = State.cajas[p] || {};
-    return (c['ARS cash']||0) + (c['ARS transferencia']||0) + ((c['USD cash']||0)+(c['USD transferencia']||0))*State.refBlue + (c['USDT']||0)*State.refUsdt;
+    const sm = State.saldosPorMoneda(c);
+    return sm.ARS + sm.USD*State.refBlue + sm.USDT*State.refUsdt;
   },
 
 

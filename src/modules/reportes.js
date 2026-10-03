@@ -120,10 +120,12 @@ const Reportes = {
         diferencial: r.diferencial * peso,
         quebranto:   r.quebranto   * peso,
         pendiente:   r.pendiente   * peso,
+        costoCanal:  r.costoCanal  * peso,
       };
     });
     const gananciaBruta = res.reduce((s, r) => s + r.margenBruto, 0);
     const sinCobrar     = res.reduce((s, r) => s + r.quebranto, 0);
+    const costoCanal    = res.reduce((s, r) => s + (r.costoCanal || 0), 0);
     const porCobrar     = res.reduce((s, r) => s + r.pendiente, 0);
     const difTarjeta    = res.reduce((s, r) => s + r.diferencial, 0);
 
@@ -141,13 +143,13 @@ const Reportes = {
 
     const rentabilidad  = volumen > 0 ? (gananciaBruta / volumen) * 100 : 0;
     const ticketProm    = unidades > 0 ? volumen / unidades : 0;
-    const gananciaNeta  = gananciaBruta + difTarjeta + difCambio - sinCobrar;
+    const gananciaNeta  = gananciaBruta + difTarjeta + difCambio - sinCobrar - costoCanal;
 
     return {
       mes, nicho, ventas, cantidadVentas: ventas.length,
       volumen, unidades, costoTotal, nichos,
       gananciaBruta, rentabilidad, ticketProm,
-      difTarjeta, difCambio, sinCobrar, porCobrar, gananciaNeta,
+      difTarjeta, difCambio, sinCobrar, costoCanal, porCobrar, gananciaNeta,
       opsCambio: cambios.length,
     };
   },

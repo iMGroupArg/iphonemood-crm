@@ -170,10 +170,17 @@ const DB = {
         cotizacionDiferencial: p.cotizacion_diferencial ? Number(p.cotizacion_diferencial) : null
       });
     });
-    State.ventas = (ventasRes.data || []).map(v => ({
+    // Las ventas ANULADAS (hoy solo las de Mercado Libre revertidas: esas no se borran,
+    // para no perder el rastro de la plata) no se cargan: no cuentan en nada.
+    State.ventas = (ventasRes.data || []).filter(v => v.estado !== 'anulada').map(v => ({
       id: v.id, fecha: this.fmtFecha(v.fecha_venta || v.creado_en), fechaISO: v.fecha_venta || v.creado_en, cliente: v.cliente,
       clienteDni: v.cliente_dni || '', clienteTel: v.cliente_tel || '', clienteEmail: v.cliente_email || '',
       tipoVenta: v.tipo_venta || 'minorista',
+      // Mercado Libre: la orden de origen, la cotización congelada al procesar y el costo
+      // del canal (comisión + envío) EXPLÍCITO en dólares. null = venta normal.
+      meliOrdenId: v.meli_orden_id ?? null,
+      meliCotizacion: v.meli_cotizacion ? Number(v.meli_cotizacion) : null,
+      costoCanal: v.costo_canal_usd != null ? Number(v.costo_canal_usd) : 0,
       comisionVendedor: Number(v.comision_vendedor) || 0,
       vendedor: this.personasIdToNombre[v.vendedor_id] || '',
       items: itemsPorVenta[v.id] || [], pagos: pagosPorVenta[v.id] || [],
@@ -287,6 +294,70 @@ const DB = {
         const obj = JSON.parse(cfg.catalogo_specs);
         if (obj && typeof obj === 'object') State.catalogoSpecs = obj;
       } catch (e) { console.warn('catalogo_specs con formato inválido, se ignora:', e); }
+    }
+
+    // Órdenes de Mercado Libre (si la integración todavía no está instalada, la tabla
+    // no existe: se ignora sin romper la carga de todo lo demás).
+    await this.cargarMeliOrdenes();
+  },
+
+  // Órdenes de Mercado Libre para la pantalla y para "pendiente de liberar".
+  // Nunca tira: ante cualquier error deja la lista vacía y marca `State.meliError`.
+  async cargarMeliOrdenes() {
+    State.meliOrdenes = []; State.meliError = false;
+    try {
+      const COLS = 'id,meli_order_id,cuenta_id,estado,estado_envio,comprador,fecha_orden,moneda,bruto,neto,comision_envio,fecha_liberacion,financiera_completa,revisar,motivo_revisar,procesada,stock_descontado,venta_id,acreditado,monto_acreditado,acreditado_en,revertida_en';
+      // Las 300 más nuevas para la pantalla, MÁS todas las que siguen abiertas sin importar
+      // cuán viejas sean: "pendiente de liberar" y el Capital se calculan con esto, y una
+      // orden vieja sin acreditar no puede desaparecer de la suma por quedar fuera del límite.
+      // Las abiertas se piden por páginas de 1.000 (el tope de filas de la API): si no, por
+      // encima de ese número se perderían de las sumas de "a liberar" y del Capital.
+      const traerAbiertas = async () => {
+        // Cursor por id (no por posición): si otra sesión acredita una orden entre dos
+        // páginas, una paginación por offset saltearía una orden que sigue abierta.
+        const todas = [];
+        for (let ultimo = 0; ; ) {
+          const r = await supa.from('meli_ordenes').select(COLS).eq('procesada', true).eq('acreditado', false)
+            .is('revertida_en', null).gt('id', ultimo).order('id', { ascending: true }).limit(1000);
+          if (r.error) return { error: r.error };
+          const fila = r.data || [];
+          todas.push(...fila);
+          if (fila.length < 1000) return { data: todas };
+          ultimo = fila[fila.length - 1].id;
+        }
+      };
+      const [recientes, abiertas] = await Promise.all([
+        supa.from('meli_ordenes').select(COLS).order('fecha_orden', { ascending: false }).limit(300),
+        traerAbiertas(),
+      ]);
+      if (recientes.error || abiertas.error) { State.meliError = true; return; }
+      const porId = new Map();
+      [...(recientes.data || []), ...(abiertas.data || [])].forEach(o => porId.set(o.id, o));
+      const filas = [...porId.values()].sort((a, b) => String(b.fecha_orden || '').localeCompare(String(a.fecha_orden || '')));
+      const ids = filas.map(o => o.id);
+      const itemsPor = {};
+      // Los productos, de a 100 órdenes por pedido (cada orden puede traer varios y la API
+      // devuelve como mucho 1.000 filas por consulta).
+      for (let k = 0; k < ids.length; k += 100) {
+        const { data: its, error: errIts } = await supa.from('meli_orden_items')
+          .select('orden_id,titulo,cantidad,stock_id').in('orden_id', ids.slice(k, k + 100)).limit(1000);
+        if (errIts) { State.meliError = true; return; }
+        (its || []).forEach(i => { (itemsPor[i.orden_id] = itemsPor[i.orden_id] || []).push(i); });
+      }
+      const num = x => (x === null || x === undefined ? null : Number(x));   // NULL se queda NULL: nunca 0
+      State.meliOrdenes = filas.map(o => ({
+        id: o.id, orderId: o.meli_order_id, cuentaId: o.cuenta_id, estado: o.estado, comprador: o.comprador,
+        fechaOrden: o.fecha_orden, moneda: o.moneda || 'ARS',
+        bruto: num(o.bruto), neto: num(o.neto), comisionEnvio: num(o.comision_envio),
+        fechaLiberacion: o.fecha_liberacion, financieraCompleta: !!o.financiera_completa,
+        revisar: !!o.revisar, motivoRevisar: o.motivo_revisar || '',
+        procesada: !!o.procesada, stockDescontado: !!o.stock_descontado, ventaId: o.venta_id,
+        acreditado: !!o.acreditado, montoAcreditado: num(o.monto_acreditado), acreditadoEn: o.acreditado_en,
+        revertidaEn: o.revertida_en, items: itemsPor[o.id] || [],
+      }));
+    } catch (e) {
+      console.warn('No se pudieron leer las órdenes de Mercado Libre:', e);
+      State.meliOrdenes = []; State.meliError = true;
     }
   },
 

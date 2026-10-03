@@ -7,7 +7,13 @@ const Cueva = {
     { id: 'usdt-ars', label: 'USDT → ARS', monedaO: 'USDT', monedaD: 'ARS' },
     { id: 'usd-ars', label: 'USD → ARS', monedaO: 'USD', monedaD: 'ARS' },
   ],
-  BOLSILLOS: { ARS: ['ARS cash', 'ARS transferencia'], USD: ['USD cash', 'USD transferencia'], USDT: ['USDT'] },
+  // Por moneda, incluyendo cualquier bolsillo extra (p. ej. 'ARS Mercado Pago'): si no
+  // estuviera acá, esa plata no se podría convertir a dólares.
+  get BOLSILLOS() {
+    const todos = State.bolsillosExistentes();
+    const por = m => todos.filter(b => State.monedaDeBolsillo(b) === m);
+    return { ARS: por('ARS'), USD: por('USD'), USDT: por('USDT') };
+  },
 
   // Mismo selector de período que Ventas/Dashboard, y mismo filtro
   // subyacente (State.cambiosEnPeriodo). Antes esta pantalla llamaba a

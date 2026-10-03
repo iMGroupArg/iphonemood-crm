@@ -585,6 +585,53 @@ const State = {
     }
   },
 
+  // Bolsillos que existen de verdad. Los 5 de siempre más cualquier otro que alguna
+  // persona tenga (p. ej. 'ARS Mercado Pago'): una suma o un selector con nombres
+  // fijos deja esa plata INVISIBLE en los totales.
+  BOLSILLOS_BASE: ['ARS cash', 'ARS transferencia', 'USD cash', 'USD transferencia', 'USDT'],
+  bolsillosExistentes() {
+    const extras = new Set();
+    Object.values(this.cajas || {}).forEach(c => Object.keys(c || {}).forEach(b => {
+      if (!this.BOLSILLOS_BASE.includes(b)) extras.add(b);
+    }));
+    return [...this.BOLSILLOS_BASE, ...[...extras].sort()];
+  },
+  // Moneda de un bolsillo por su PREFIJO: 'ARS…' → ARS, 'USDT…' → USDT, 'USD…' → USD.
+  monedaDeBolsillo(b) {
+    const n = String(b || '');
+    if (n.startsWith('ARS')) return 'ARS';
+    if (n.startsWith('USDT')) return 'USDT';
+    if (n.startsWith('USD')) return 'USD';
+    return null;
+  },
+  // Suma los saldos de UNA persona por moneda, sin importar cómo se llame cada bolsillo.
+  saldosPorMoneda(cajaPersona) {
+    const t = { ARS: 0, USD: 0, USDT: 0 };
+    Object.entries(cajaPersona || {}).forEach(([b, v]) => {
+      const m = this.monedaDeBolsillo(b);
+      if (m) t[m] += Number(v) || 0;
+    });
+    return t;
+  },
+
+  // PENDIENTE DE LIBERAR de Mercado Libre: lo que ya se vendió (orden procesada, stock
+  // descontado) y todavía no entró a la caja. Es plata en camino, NO una deuda de un
+  // cliente. Se cuenta por el NETO que informa Mercado Libre; un neto desconocido (NULL)
+  // no se suma como cero: queda contado en `sinDato` para que se vea que falta.
+  //   → { ars, usd, ordenes, sinDato }   (usd a la cotización congelada de cada venta)
+  meliPendienteLiberar() {
+    const r = { ars: 0, usd: 0, ordenes: 0, sinDato: 0 };
+    (this.meliOrdenes || []).forEach(o => {
+      if (!o.procesada || o.acreditado || o.revertidaEn) return;
+      r.ordenes++;
+      if (o.neto === null || !o.financieraCompleta) { r.sinDato++; return; }
+      r.ars += o.neto;
+      const v = (this.ventas || []).find(x => x.id === o.ventaId);
+      r.usd += o.neto / (v?.meliCotizacion || this.refBlue || 1);
+    });
+    return r;
+  },
+
   // Refresca la copia en pantalla de UNA fila de stock con lo que respondió la base
   // (stock_ajustar). Es la única fuente de verdad tras un ajuste por delta:
   // `cantidadDeclarada` es un espejo solo del cliente y getStock() le da prioridad,

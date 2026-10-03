@@ -54,8 +54,8 @@ const Meli = {
   render() {
     const c = document.createElement('div');
     c.style.cssText = 'flex:1;overflow-y:auto;padding:16px';
-    c.innerHTML = '<div id="meli-root"></div>';
-    setTimeout(() => this.cargar(), 0);
+    c.innerHTML = '<div id="meli-root"></div><div id="meli-ordenes-root" style="margin-top:24px"></div>';
+    setTimeout(() => { this.cargar(); if (window.MeliOrdenes) MeliOrdenes.cargar(); }, 0);
     return c;
   },
 

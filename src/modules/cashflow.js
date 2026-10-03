@@ -35,7 +35,7 @@ const CashFlow = {
 
     const res = ventas.map(v => Ventas.resultadoVenta(v));
     const cobradoUSD    = res.reduce((s, r) => s + r.cobrado, 0);
-    const margenUSD     = res.reduce((s, r) => s + r.margenBruto - r.quebranto, 0);
+    const margenUSD     = res.reduce((s, r) => s + r.margenComercial, 0);
     const diferencialUSD = res.reduce((s, r) => s + r.diferencial, 0);
     const gastosARS     = gastos.reduce((a, g) => a + State.gastoEnUSD(g), 0) * blue;
     const spreadARS     = cambios.reduce((s, c) => s + State.calcSpreadARS(c), 0);

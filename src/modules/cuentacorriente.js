@@ -43,6 +43,9 @@ const CuentaCorriente = {
     // Ventas con saldo pendiente
     (State.ventas || []).forEach(v => {
       if (v.estado === 'cerrada') return;
+      // Una venta de Mercado Libre abierta NO es deuda de un cliente: ya cobró en
+      // Mercado Libre y la plata viene en camino ("pendiente de liberar", se ve aparte).
+      if (v.tipoVenta === 'mercadolibre') return;
       const saldo = this.saldoVenta(v);
       if (saldo <= 0) return;
       const k = key(v.cliente, v.clienteTel);

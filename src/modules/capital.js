@@ -54,9 +54,10 @@ const Capital = {
     // Cajas equivalente en USD (incluye todos los bolsillos de todas las personas)
     let cajasUSD = 0;
     Object.values(State.cajas || {}).forEach(c => {
-      cajasUSD += ((c['USD cash']||0) + (c['USD transferencia']||0));
-      cajasUSD += ((c['ARS cash']||0) + (c['ARS transferencia']||0)) / (State.refBlue || 1);
-      cajasUSD += (c['USDT'] || 0) * (State.refUsdt || 1) / (State.refBlue || 1);
+      const sm = State.saldosPorMoneda(c);
+      cajasUSD += sm.USD;
+      cajasUSD += sm.ARS / (State.refBlue || 1);
+      cajasUSD += sm.USDT * (State.refUsdt || 1) / (State.refBlue || 1);
     });
 
     // Pedidos en tránsito: lotes pagados pero aún no recibidos
@@ -86,8 +87,12 @@ const Capital = {
       ? (State.proveedores || []).reduce((s, p) => s + Proveedores.saldoCredito(p.id), 0)
       : 0;
 
+    // Mercado Libre: vendido y todavía no liberado a la caja. Es plata en camino (activo
+    // en tránsito), separada de las cuentas por cobrar de clientes.
+    const meliPendiente = State.meliPendienteLiberar().usd;
+
     // Capital bruto
-    const capitalBruto = valorStock + cajasUSD + pedidosEnTransito + valorActivosFijos + cuentasPorCobrar + saldoCreditosProveedores;
+    const capitalBruto = valorStock + cajasUSD + pedidosEnTransito + valorActivosFijos + cuentasPorCobrar + saldoCreditosProveedores + meliPendiente;
 
     // Inversores
     const capitalInvertido = (State.inversores || []).reduce((s, i) => s + (i.capitalInicialUSD || 0), 0);
@@ -96,7 +101,7 @@ const Capital = {
     // Capital neto
     const capitalNeto = capitalBruto - capitalInvertido - totalPagadoInversores;
 
-    return { valorStock, cajasUSD, pedidosEnTransito, valorActivosFijos, cuentasPorCobrar, saldoCreditosProveedores, capitalBruto, capitalInvertido, totalPagadoInversores, capitalNeto };
+    return { valorStock, cajasUSD, pedidosEnTransito, valorActivosFijos, cuentasPorCobrar, saldoCreditosProveedores, meliPendiente, capitalBruto, capitalInvertido, totalPagadoInversores, capitalNeto };
   },
 
   // ── RESUMEN ───────────────────────────────────────────────
@@ -142,6 +147,7 @@ const Capital = {
             ['Activos fijos',         r.valorActivosFijos,   'var(--amber)'],
             ...(r.cuentasPorCobrar > 0 ? [['Cuentas por cobrar', r.cuentasPorCobrar, 'var(--blue)']] : []),
             ...(r.saldoCreditosProveedores > 0 ? [['Saldo a favor con proveedores', r.saldoCreditosProveedores, 'var(--purple)']] : []),
+            ...(r.meliPendiente > 0 ? [['A liberar de Mercado Libre', r.meliPendiente, 'var(--amber)']] : []),
           ].map(([label, val, color]) => `
             <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid var(--border)">
               <span style="font-size:12px;color:var(--text-secondary)">${label}</span>
@@ -487,7 +493,7 @@ const Capital = {
   abrirModalActivo(id) {
     const activo = id ? (State.activosFijos||[]).find(x => x.id === id) : null;
     const CATS = { mobiliario:'Mobiliario', equipamiento:'Equipamiento', tecnologia:'Tecnología', vehiculo:'Vehículo', otro:'Otro' };
-    const BOLSILLOS = ['ARS cash', 'ARS transferencia', 'USD cash', 'USD transferencia', 'USDT'];
+    const BOLSILLOS = State.bolsillosExistentes();
 
     // Opciones de caja: persona + bolsillo con saldo actual
     const cajaOpts = (State.personas || []).flatMap(p =>

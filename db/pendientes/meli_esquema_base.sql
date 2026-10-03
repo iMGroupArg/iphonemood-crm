@@ -154,6 +154,70 @@ CREATE UNIQUE INDEX IF NOT EXISTS meli_publicaciones_unica
 
 CREATE INDEX IF NOT EXISTS meli_publicaciones_stock ON public.meli_publicaciones (stock_id);
 
+-- ── "A pedido" y Mercado Libre ───────────────────────────────────────────
+-- Un producto a pedido (stock.a_pedido = true, definido por Stock) no tiene stock
+-- físico: descontar y reponer no tocan su cantidad (ver meli__descontar_core y
+-- meli_reponer_stock). Y NO se vincula a una publicación: la fase 2 empujaría a MELI
+-- la cantidad de stock, y para una fila a pedido ese número no significa nada. La
+-- columna se repite acá (idempotente) por si este archivo corre antes que
+-- stock_a_pedido.sql.
+ALTER TABLE public.stock ADD COLUMN IF NOT EXISTS a_pedido BOOLEAN NOT NULL DEFAULT FALSE;
+
+-- Del lado de la publicación: no se puede apuntar a un producto a pedido. FOR SHARE
+-- traba la fila de stock hasta que esta transacción termine, así una marcación
+-- simultánea de a_pedido espera, y al seguir ve el vínculo (y lo rechaza el otro
+-- trigger). Sin el bloqueo, las dos transacciones podrían confirmar sin verse.
+CREATE OR REPLACE FUNCTION public.meli__publicacion_sin_a_pedido()
+RETURNS TRIGGER
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp AS $$
+DECLARE v_ped BOOLEAN;
+BEGIN
+  IF NEW.stock_id IS NULL THEN RETURN NEW; END IF;
+  SELECT COALESCE(s.a_pedido, FALSE) INTO v_ped
+    FROM public.stock s WHERE s.id = NEW.stock_id
+     FOR SHARE;
+  IF v_ped IS TRUE THEN
+    RAISE EXCEPTION 'A_PEDIDO_NO_SE_VINCULA'
+      USING DETAIL = 'El producto es a pedido: no se puede vincular a una publicación de Mercado Libre.';
+  END IF;
+  RETURN NEW;
+END; $$;
+REVOKE EXECUTE ON FUNCTION public.meli__publicacion_sin_a_pedido() FROM PUBLIC, anon, authenticated;
+
+DROP TRIGGER IF EXISTS meli_publicacion_sin_a_pedido ON public.meli_publicaciones;
+CREATE TRIGGER meli_publicacion_sin_a_pedido
+  BEFORE INSERT OR UPDATE OF stock_id ON public.meli_publicaciones
+  FOR EACH ROW EXECUTE FUNCTION public.meli__publicacion_sin_a_pedido();
+
+-- Del lado del stock: no se puede marcar a pedido un producto que ya está vinculado.
+-- Sólo se dispara al PASAR a verdadero. Al desmarcarlo no hace falta nada.
+CREATE OR REPLACE FUNCTION public.meli__stock_a_pedido_sin_vinculo()
+RETURNS TRIGGER
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp AS $$
+BEGIN
+  -- La garantía exige READ COMMITTED: al seguir tras esperar un bloqueo, la consulta de
+  -- abajo vuelve a mirar los datos y ve el vínculo recién confirmado. En REPEATABLE
+  -- READ conserva el snapshot viejo (el FOR SHARE de la otra transacción no modificó
+  -- esta fila, así que ni siquiera hay error de serialización) y dejaría pasar la
+  -- marca. PostgREST usa READ COMMITTED; esto defiende frente a SQL con otro nivel.
+  IF current_setting('transaction_isolation') <> 'read committed' THEN
+    RAISE EXCEPTION 'AISLAMIENTO_NO_SOPORTADO';
+  END IF;
+  IF EXISTS (SELECT 1 FROM public.meli_publicaciones p WHERE p.stock_id = NEW.id) THEN
+    RAISE EXCEPTION 'A_PEDIDO_VINCULADO_A_MELI'
+      USING DETAIL = 'El producto está vinculado a una publicación de Mercado Libre: desvincularlo antes de marcarlo a pedido.';
+  END IF;
+  RETURN NEW;
+END; $$;
+REVOKE EXECUTE ON FUNCTION public.meli__stock_a_pedido_sin_vinculo() FROM PUBLIC, anon, authenticated;
+
+DROP TRIGGER IF EXISTS meli_stock_a_pedido_sin_vinculo ON public.stock;
+CREATE TRIGGER meli_stock_a_pedido_sin_vinculo
+  BEFORE UPDATE OF a_pedido ON public.stock
+  FOR EACH ROW
+  WHEN (NEW.a_pedido IS TRUE AND OLD.a_pedido IS DISTINCT FROM TRUE)
+  EXECUTE FUNCTION public.meli__stock_a_pedido_sin_vinculo();
+
 
 -- ════════════════════════════════════════════════════════════════════════════
 --  3. NOTIFICACIONES  (la bandeja cruda del webhook)
@@ -274,6 +338,14 @@ CREATE TABLE IF NOT EXISTS public.meli_orden_items (
 );
 
 CREATE INDEX IF NOT EXISTS meli_orden_items_orden ON public.meli_orden_items (orden_id);
+
+-- Cuántas unidades sacó DE VERDAD el descuento de este ítem (0 si era "a pedido"; NULL si
+-- todavía no se descontó). Reponer devuelve EXACTAMENTE esto y no mira la bandera actual
+-- del stock: si alguien cambia stock.a_pedido entre el descuento y la reversión, mirar la
+-- bandera de hoy no repondría lo que se descontó (de físico a pedido) o inventaría stock
+-- (de a pedido a físico). La escribe meli__descontar_core, bajo el bloqueo de la orden;
+-- los ítems de una orden ya descontada no se reescriben (ver meli_ingresar_orden).
+ALTER TABLE public.meli_orden_items ADD COLUMN IF NOT EXISTS descontado_cantidad INTEGER;
 
 
 -- ════════════════════════════════════════════════════════════════════════════
@@ -616,12 +688,18 @@ LANGUAGE plpgsql
 SECURITY DEFINER
 SET search_path = public, pg_temp
 AS $$
-DECLARE r RECORD; v_queda INTEGER; v_faltante TEXT; v_con_imei TEXT; v_order_ref TEXT;
+DECLARE r RECORD; v_queda INTEGER; v_ped BOOLEAN; v_ya BOOLEAN; v_faltante TEXT; v_con_imei TEXT; v_order_ref TEXT;
 BEGIN
   -- BLOQUEO PRIMERO, antes de leer un solo ítem. Si se leyeran los ítems antes,
   -- la ingesta podría estar reemplazándolos justo mientras los medimos. Ingesta,
   -- descuento y reversión compiten todos por este mismo bloqueo.
-  PERFORM 1 FROM meli_ordenes WHERE id = p_orden_id FOR UPDATE;
+  SELECT stock_descontado INTO v_ya FROM meli_ordenes WHERE id = p_orden_id FOR UPDATE;
+
+  -- Orden ya descontada (un reintento, o el servidor y el CRM llegaron los dos): no se
+  -- vuelve a mirar nada. Si siguiera, el chequeo de abajo vería el stock YA descontado
+  -- (por ejemplo 1 → 0), lo tomaría por "insuficiente" y marcaría `revisar` una orden
+  -- que está bien. Tampoco toca los motivos de revisión que ya tenga.
+  IF v_ya IS TRUE THEN RETURN; END IF;
 
   -- PRIMER FRENO — filas con IMEI no se tocan desde acá.
   --
@@ -654,7 +732,9 @@ BEGIN
   SELECT string_agg(i.meli_item_id, ', ') INTO v_faltante
     FROM meli_orden_items i
     JOIN stock s ON s.id = i.stock_id
-   WHERE i.orden_id = p_orden_id AND COALESCE(s.cantidad, 0) < i.cantidad;
+   WHERE i.orden_id = p_orden_id AND COALESCE(s.cantidad, 0) < i.cantidad
+     -- Una fila "a pedido" no tiene stock físico que se agote: nunca falta.
+     AND NOT COALESCE(s.a_pedido, FALSE);
 
   IF v_faltante IS NOT NULL THEN
     UPDATE meli_ordenes SET
@@ -676,17 +756,24 @@ BEGIN
   -- A tiene el producto 1 y espera el 2, B tiene el 2 y espera el 1. Con un orden común
   -- (y el mismo en la reposición) un ciclo es imposible. Lo marcó la revisión de código.
   FOR r IN
-    SELECT i.stock_id AS sid, i.cantidad AS cant, i.meli_item_id AS item
+    SELECT i.id AS iid, i.stock_id AS sid, i.cantidad AS cant, i.meli_item_id AS item
       FROM meli_orden_items i
      WHERE i.orden_id = p_orden_id AND i.stock_id IS NOT NULL
      ORDER BY i.stock_id, i.meli_item_id
   LOOP
+    -- "A pedido" (se lee ACÁ, ya bajo el bloqueo de la fila, no antes): no toca la
+    -- cantidad ni el estado, y el movimiento igual queda. Si la bandera cambió desde
+    -- el chequeo de arriba y ahora falta stock, la condición del WHERE no se cumple y
+    -- salta la excepción de abajo (se deshace todo, como cualquier carrera perdida).
     UPDATE stock s
-       SET cantidad = s.cantidad - r.cant,
-           estado_inventario = CASE WHEN s.cantidad - r.cant <= 0
-                                    THEN 'vendido' ELSE s.estado_inventario END
-     WHERE s.id = r.sid AND COALESCE(s.cantidad, 0) >= r.cant
-    RETURNING s.cantidad INTO v_queda;
+       SET cantidad = CASE WHEN COALESCE(s.a_pedido, FALSE) THEN s.cantidad
+                           ELSE s.cantidad - r.cant END,
+           estado_inventario = CASE WHEN COALESCE(s.a_pedido, FALSE) THEN s.estado_inventario
+                                    WHEN s.cantidad - r.cant <= 0 THEN 'vendido'
+                                    ELSE s.estado_inventario END
+     WHERE s.id = r.sid
+       AND (COALESCE(s.a_pedido, FALSE) OR COALESCE(s.cantidad, 0) >= r.cant)
+    RETURNING s.cantidad, COALESCE(s.a_pedido, FALSE) INTO v_queda, v_ped;
 
     -- Carrera perdida: entre el chequeo y el descuento alguien vendió en el
     -- local. Se levanta excepción a propósito: la función corre en una sola
@@ -704,11 +791,20 @@ BEGIN
     VALUES (
       r.sid, 'meli',
       'Venta de Mercado Libre (orden ' || COALESCE(v_order_ref, '?') || ')',
-      v_queda + r.cant, v_queda, 'Mercado Libre',
+      CASE WHEN v_ped THEN COALESCE(v_queda, 0) ELSE v_queda + r.cant END,
+      COALESCE(v_queda, 0), 'Mercado Libre',
       jsonb_build_object('meli_order_id', v_order_ref, 'meli_item_id', r.item,
-                         'cantidad', r.cant));
+                         'cantidad', r.cant, 'a_pedido', v_ped));
 
-    stock_id := r.sid; descontado := r.cant; queda := v_queda; agotado := (v_queda <= 0);
+    -- Lo que se sacó de verdad queda en el ítem: es lo que va a devolver meli_reponer_stock.
+    UPDATE meli_orden_items SET descontado_cantidad = CASE WHEN v_ped THEN 0 ELSE r.cant END
+     WHERE id = r.iid;
+
+    -- A pedido: `descontado` es 0 (no se sacó nada) y nunca figura agotado.
+    stock_id := r.sid;
+    descontado := CASE WHEN v_ped THEN 0 ELSE r.cant END;
+    queda := COALESCE(v_queda, 0);
+    agotado := (NOT v_ped) AND (v_queda <= 0);
     RETURN NEXT;
   END LOOP;
 END;
@@ -802,7 +898,7 @@ END; $$;
 CREATE OR REPLACE FUNCTION public.meli_reponer_stock(p_orden_id BIGINT)
 RETURNS TABLE (stock_id UUID, repuesto INTEGER, queda INTEGER)
 LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp AS $$
-DECLARE r RECORD; v_queda INTEGER; v_ref TEXT;
+DECLARE r RECORD; v_queda INTEGER; v_rep INTEGER; v_ref TEXT;
 BEGIN
   IF NOT public.is_authorized_user() THEN RAISE EXCEPTION 'no autorizado'; END IF;
 
@@ -816,15 +912,24 @@ BEGIN
 
   -- Mismo orden que meli__descontar_core (por stock_id), para que descontar y reponer
   -- nunca tomen las filas de stock en orden inverso entre sí.
-  FOR r IN SELECT i.stock_id AS sid, i.cantidad AS cant, i.meli_item_id AS item
+  FOR r IN SELECT i.id AS iid, i.stock_id AS sid, i.cantidad AS cant, i.meli_item_id AS item,
+                  i.descontado_cantidad AS desc_c
              FROM meli_orden_items i
             WHERE i.orden_id = p_orden_id AND i.stock_id IS NOT NULL
             ORDER BY i.stock_id, i.meli_item_id
   LOOP
+    -- Se devuelve lo que el descuento sacó DE VERDAD (descontado_cantidad), no lo que
+    -- diga hoy la bandera a_pedido de la fila. 0 = el descuento no tocó nada (era a pedido):
+    -- no se suma nada y el estado queda como está, pero el movimiento igual se registra.
+    -- NULL (ítem descontado antes de existir esa columna) = se devuelve toda la cantidad.
+    v_rep := COALESCE(r.desc_c, r.cant);
+
     UPDATE stock s
-       SET cantidad = COALESCE(s.cantidad,0) + r.cant,
-           estado_inventario = CASE WHEN s.estado_inventario = 'vendido'
-                                    THEN 'disponible' ELSE s.estado_inventario END
+       SET cantidad = CASE WHEN v_rep = 0 THEN s.cantidad
+                           ELSE COALESCE(s.cantidad,0) + v_rep END,
+           estado_inventario = CASE WHEN v_rep = 0 THEN s.estado_inventario
+                                    WHEN s.estado_inventario = 'vendido' THEN 'disponible'
+                                    ELSE s.estado_inventario END
      WHERE s.id = r.sid
     RETURNING s.cantidad INTO v_queda;
 
@@ -832,10 +937,16 @@ BEGIN
       (stock_id, tipo, detalle, cantidad_antes, cantidad_despues, usuario_nombre, datos)
     VALUES (r.sid, 'meli_reverso',
       'Reposición por cancelación en Mercado Libre (orden ' || COALESCE(v_ref,'?') || ')',
-      v_queda - r.cant, v_queda, 'Mercado Libre',
-      jsonb_build_object('meli_order_id', v_ref, 'meli_item_id', r.item, 'cantidad', r.cant));
+      COALESCE(v_queda, 0) - v_rep,
+      COALESCE(v_queda, 0), 'Mercado Libre',
+      jsonb_build_object('meli_order_id', v_ref, 'meli_item_id', r.item, 'cantidad', r.cant,
+                         'repuesto', v_rep));
 
-    stock_id := r.sid; repuesto := r.cant; queda := v_queda;
+    -- Ya se devolvió: el ítem vuelve a "no descontado".
+    UPDATE meli_orden_items SET descontado_cantidad = NULL WHERE id = r.iid;
+
+    stock_id := r.sid; repuesto := v_rep;
+    queda := COALESCE(v_queda, 0);
     RETURN NEXT;
   END LOOP;
 END; $$;

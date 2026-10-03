@@ -4,7 +4,10 @@
   "type": "module",
   "scripts": {
     "test": "node caja.sql.test.mjs",
-    "test:meli": "node meli.sql.test.mjs"
+    "test:meli": "node meli.sql.test.mjs",
+    "test:todo": "node caja.sql.test.mjs && node meli.sql.test.mjs && node stock.sql.test.mjs && node catalogo.sql.test.mjs",
+    "test:stock": "node stock.sql.test.mjs",
+    "test:catalogo": "node catalogo.sql.test.mjs"
   },
   "devDependencies": {
     "@electric-sql/pglite": "^0.3.0"

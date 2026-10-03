@@ -358,9 +358,11 @@ está corregido.
 
 ## Lo que NO está verificado
 
-- **El SQL nunca se ejecutó.** No hay Postgres local. La revisión de Codex fue estática; no encontró
-  errores de sintaxis ni referencias ambiguas, pero no es una ejecución. Corre en una transacción
-  (todo o nada) para que un error no deje el esquema a medias.
+- **El SQL sólo se ejecutó en pglite (Postgres en WebAssembly, UNA conexión).** Lo cargan los bancos
+  de Ventas+Cueva (`tests/sql/meli.sql.test.mjs`, 48 checks) y de Stock (`tests/sql/stock.sql.test.mjs`).
+  Nunca contra Supabase ni con dos sesiones simultáneas: los bloqueos, los leases y el orden de
+  locks siguen verificados sólo por lectura (Codex). Corre en una transacción (todo o nada) para que
+  un error no deje el esquema a medias.
 - **Los nombres de campo de las respuestas de Mercado Libre y Mercado Pago** salen de lo que se
   conoce de las APIs, no de respuestas reales (la documentación devolvió 403). Falla del lado
   seguro (NULL, nunca 0), pero hay que contrastar con la primera orden real.

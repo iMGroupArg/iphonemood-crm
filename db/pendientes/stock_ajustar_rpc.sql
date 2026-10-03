@@ -1,8 +1,10 @@
 -- ============================================================================
 --  stock_ajustar — descuento y reposición de stock POR DELTA, atómicos
 --
---  PENDIENTE DE CORRER. NUNCA SE EJECUTÓ: no hay Postgres local. Se revisó de forma
---  estática (ver al final). Pedido por Stock/Inventario; escrito por Deploy-infra.
+--  PENDIENTE DE CORRER EN PRODUCCIÓN. Probada sobre Postgres real (pglite, UNA sola
+--  conexión) con tests/sql/stock.sql.test.mjs, y revisada de forma estática (ver al
+--  final). NO probada con dos sesiones simultáneas: los bloqueos y el candado de IMEI
+--  dependen de eso. Pedido por Stock/Inventario; escrito por Deploy-infra.
 --
 --  QUÉ ARREGLA
 --  El cliente del CRM descuenta stock leyendo la cantidad de SU copia en memoria,
@@ -59,6 +61,18 @@
 --      +1 y, si esa fila estaba 'reservado' por esa venta (venta_items.stock_id es el
 --      vínculo), pasar p_estado_destino := 'disponible'. Esta función NO verifica que
 --      la reserva fuera de esa venta: eso lo decide el cliente.
+--    · FILAS "A PEDIDO" (stock.a_pedido = true; semántica cerrada con Stock). Sobre
+--      una fila así, descontar y reponer NO tocan la cantidad: ni
+--      STOCK_INSUFICIENTE ni negativos ni CANTIDAD_FUERA_DE_RANGO. SÍ dejan el
+--      movimiento (cantidad_antes = cantidad_despues, y datos.a_pedido = true).
+--      Nunca pasan a 'vendido': el estado se conserva (una fila a pedido en 0
+--      unidades y 'disponible' es lo correcto, y la regla 'vendido' ⇔ 0 unidades no
+--      se le aplica). Un p_estado_destino distinto de 'vendido' se respeta tal cual;
+--      pedir 'vendido' da ESTADO_INCONSISTENTE. Con p_imei se rechaza
+--      (A_PEDIDO_NO_ADMITE_IMEI): una fila a pedido no tiene unidades físicas. La
+--      devolución trae `unidades` calculado como en las demás filas (no es stock real).
+--      Reponer sobre una fila a pedido que estuviera 'vendido' (anómala) tampoco la
+--      pasa a 'disponible': se conserva el estado, como pidió Stock.
 --    · Deja el movimiento en stock_movimientos, en la misma transacción.
 --    · UNA LLAMADA POR TRANSACCIÓN. Orden de bloqueos: candado global de IMEIs (sólo
 --      al reponer un IMEI) y después la fila. Con una sola llamada no hay ciclo
@@ -86,6 +100,8 @@
 --      AISLAMIENTO_NO_SOPORTADO   se repuso un IMEI fuera de READ COMMITTED
 --      ESTADO_INVALIDO     p_estado_destino no es uno de los permitidos
 --      ESTADO_INCONSISTENTE  se pidió 'vendido' con unidades, o otro estado con 0
+--                           (en una fila a pedido: se pidió 'vendido', sin más)
+--      A_PEDIDO_NO_ADMITE_IMEI  se pasó p_imei sobre una fila a pedido
 --      TIPO_REQUERIDO       falta el tipo del movimiento
 --      no autorizado        el usuario no está en usuarios_autorizados
 --    Un IMEI repetido lo rechaza el trigger stock_imei_unico (ya existente).
@@ -106,6 +122,10 @@ BEGIN;
 -- No usa CASCADE a propósito: si algo dependiera de la firma vieja, aborta (y con él
 -- toda la transacción) en vez de borrarlo en silencio.
 DROP FUNCTION IF EXISTS public.stock_ajustar(UUID, INTEGER, TEXT, TEXT, TEXT);
+
+-- La bandera "a pedido". La define stock_a_pedido.sql (junto con su CHECK y la vista
+-- pública); se repite acá, idempotente, para que el orden de corrida no importe.
+ALTER TABLE public.stock ADD COLUMN IF NOT EXISTS a_pedido BOOLEAN NOT NULL DEFAULT FALSE;
 
 CREATE OR REPLACE FUNCTION public.stock_ajustar(
   p_stock_id        UUID,
@@ -135,6 +155,7 @@ DECLARE
   v_cant          stock.cantidad%TYPE;
   v_imeis         stock.imeis%TYPE;
   v_estado        stock.estado_inventario%TYPE;
+  v_a_pedido      BOOLEAN;
   v_unid_antes    INTEGER;
   v_cant_nueva    INTEGER;
   v_imeis_nuevos  stock.imeis%TYPE;
@@ -191,13 +212,19 @@ BEGIN
 
   -- Bloqueo de la fila ANTES de leer nada. Todo lo que sigue ve un estado estable:
   -- dos llamadas simultáneas se serializan acá.
-  SELECT s.cantidad, s.imeis, s.estado_inventario
-    INTO v_cant, v_imeis, v_estado
+  SELECT s.cantidad, s.imeis, s.estado_inventario, COALESCE(s.a_pedido, FALSE)
+    INTO v_cant, v_imeis, v_estado, v_a_pedido
     FROM stock s
    WHERE s.id = p_stock_id
    FOR UPDATE;
   IF NOT FOUND THEN
     RAISE EXCEPTION 'STOCK_INEXISTENTE';
+  END IF;
+
+  -- Una fila a pedido no tiene unidades físicas, así que no hay IMEI que mover. Va
+  -- después del bloqueo de la fila (la bandera se lee ya estable).
+  IF v_a_pedido AND v_imei IS NOT NULL THEN
+    RAISE EXCEPTION 'A_PEDIDO_NO_ADMITE_IMEI';
   END IF;
 
   -- El arreglo tiene que ser unidimensional, y sus elementos NULL o vacíos NO son
@@ -214,11 +241,15 @@ BEGIN
   -- La suma en BIGINT, y recién después se convierte: en INTEGER desbordaría con un
   -- error distinto del contrato ("integer out of range"). No deja cambios a medias
   -- (la transacción se revierte), pero tiene que fallar con un nombre propio.
-  IF v_unid_antes::BIGINT + p_delta::BIGINT > 2147483647 THEN
+  IF NOT v_a_pedido AND v_unid_antes::BIGINT + p_delta::BIGINT > 2147483647 THEN
     RAISE EXCEPTION 'CANTIDAD_FUERA_DE_RANGO';
   END IF;
 
-  IF p_delta < 0 THEN
+  IF v_a_pedido THEN
+    -- A PEDIDO: no se toca nada de lo físico. El movimiento igual queda registrado.
+    v_cant_nueva   := v_cant;
+    v_imeis_nuevos := v_imeis;
+  ELSIF p_delta < 0 THEN
     -- DESCONTAR
     IF v_unid_antes + p_delta < 0 THEN
       RAISE EXCEPTION 'STOCK_INSUFICIENTE' USING DETAIL = 'unidades=' || v_unid_antes;
@@ -265,7 +296,14 @@ BEGIN
   -- corregir en silencio: si un cliente pide 'disponible' y la fila queda en 0, el
   -- cliente tiene un error de lógica y tiene que enterarse, no recibir un 'vendido'
   -- que no pidió. Va ANTES del UPDATE, así que no deja nada escrito.
-  IF v_destino IS NOT NULL
+  IF v_destino IS NOT NULL AND v_a_pedido THEN
+    -- A pedido: la regla 'vendido' ⇔ 0 unidades no rige (0 unidades y 'disponible' es
+    -- lo normal), pero una fila a pedido nunca se vende del todo.
+    IF v_destino = 'vendido' THEN
+      RAISE EXCEPTION 'ESTADO_INCONSISTENTE'
+        USING DETAIL = 'estado=vendido en una fila a pedido';
+    END IF;
+  ELSIF v_destino IS NOT NULL
      AND ((v_destino = 'vendido') <> (v_unid_nueva <= 0)) THEN
     RAISE EXCEPTION 'ESTADO_INCONSISTENTE'
       USING DETAIL = 'estado=' || v_destino || ' unidades=' || v_unid_nueva;
@@ -273,6 +311,7 @@ BEGIN
 
   v_estado_nuevo := CASE
     WHEN v_destino IS NOT NULL                 THEN v_destino     -- lo pidió el cliente, ya validado
+    WHEN v_a_pedido                            THEN v_estado      -- a pedido: se conserva
     WHEN v_unid_nueva <= 0                     THEN 'vendido'
     WHEN p_delta > 0 AND v_estado = 'vendido'  THEN 'disponible'  -- sólo al REPONER
     ELSE v_estado
@@ -297,7 +336,8 @@ BEGIN
   VALUES
     (p_stock_id, btrim(p_tipo), p_detalle, v_unid_antes, v_unid_nueva, v_usuario,
      jsonb_build_object('delta', p_delta, 'imei', v_imei,
-                        'estado_antes', v_estado, 'estado_despues', v_estado_nuevo));
+                        'estado_antes', v_estado, 'estado_despues', v_estado_nuevo,
+                        'a_pedido', v_a_pedido));
 
   RETURN QUERY SELECT v_cant_nueva::INTEGER, v_imeis_nuevos::TEXT[], v_estado_nuevo, v_unid_nueva;
 END;

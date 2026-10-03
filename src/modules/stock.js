@@ -1330,7 +1330,7 @@ const Stock = {
                     </select>
                   </div>
                   <div><label style="font-size:11px;color:var(--text-secondary);font-weight:600;display:block;margin-bottom:4px">Color</label>
-                    <select id="f-color" onchange="Stock.onColorChange()" style="width:100%;font-size:12px;padding:7px 10px;border:1px solid var(--border-strong);border-radius:8px">
+                    <select id="f-color" onchange="Stock.onColorChange(true)" style="width:100%;font-size:12px;padding:7px 10px;border:1px solid var(--border-strong);border-radius:8px">
                       <option value="">Seleccionar</option>
                       ${this.COLOR_OPCIONES.filter(c=>c!=='Otro').map(c=>`<option ${p.color===c?'selected':''}>${c}</option>`).join('')}
                       <option value="Otro" ${p.color==='Otro'?'selected':''}>Otro</option>
@@ -1606,13 +1606,15 @@ const Stock = {
   // "Otro" en el color abre un campo para escribirlo. Sin esto, un modelo sin
   // colores cargados (el iPhone 18 base, un Samsung nuevo) no tenía manera de
   // recibir su color real: el formulario guardaba la palabra "Otro".
-  onColorChange() {
+  // `enfocar` sólo lo pasa el desplegable cuando la persona elige "Otro": las
+  // actualizaciones internas (al escribir el modelo) no deben robarle el foco.
+  onColorChange(enfocar = false) {
     const sel = document.getElementById('f-color');
     const otro = document.getElementById('f-color-otro');
     if (!sel || !otro) return;
     const abrir = sel.value === 'Otro';
     otro.style.display = abrir ? 'block' : 'none';
-    if (abrir && !otro.value) otro.focus(); else if (!abrir) otro.value = '';
+    if (abrir) { if (enfocar && !otro.value) otro.focus(); } else otro.value = '';
   },
 
   // Color del formulario: el escrito si eligió "Otro". Si lo dejó vacío se

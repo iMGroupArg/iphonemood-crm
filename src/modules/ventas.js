@@ -987,13 +987,15 @@ const Ventas = {
   // elegir (mismo criterio que el canje de Presupuestos).
   // "Otro" en el color abre un campo para escribirlo (si no, se guardaba la
   // palabra "Otro"). Vacío conserva "Otro", como antes.
-  tiColorToggle() {
+  // `enfocar` sólo lo pasa el desplegable al elegir "Otro"; refrescar las
+  // listas al escribir el modelo no debe robarle el foco.
+  tiColorToggle(enfocar = false) {
     const sel = document.getElementById('vf-ti-color');
     const otro = document.getElementById('vf-ti-color-otro');
     if (!sel || !otro) return;
     const abrir = sel.value === 'Otro';
     otro.style.display = abrir ? 'block' : 'none';
-    if (abrir && !otro.value) otro.focus(); else if (!abrir) otro.value = '';
+    if (abrir) { if (enfocar && !otro.value) otro.focus(); } else otro.value = '';
   },
 
   tiRefrescarSpecs() {
@@ -1065,7 +1067,7 @@ const Ventas = {
         </div>
         <div>
           <label style="${LABEL_ST}">Color *</label>
-          <select id="vf-ti-color" onchange="Ventas.tiColorToggle()" style="${INPUT_ST}">
+          <select id="vf-ti-color" onchange="Ventas.tiColorToggle(true)" style="${INPUT_ST}">
             <option value="">Seleccionar color</option>
             ${this._tiOpciones(_specsTI.c, ti.color, true)}
           </select>

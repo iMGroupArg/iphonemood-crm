@@ -116,6 +116,8 @@ const App = {
       return;
     }
 
+    State.iniciarVigilanciaCaja();   // cierra dudas de red de movimientos de caja que quedaron sin confirmar
+
     document.getElementById('topbar-blue').textContent = State.refBlue.toLocaleString('es-AR');
     document.getElementById('topbar-usdt').textContent = State.refUsdt.toLocaleString('es-AR');
     Panel.cargarMarcaAlInicio();

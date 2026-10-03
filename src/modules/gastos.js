@@ -236,13 +236,28 @@ const Gastos = {
     const cotizacionUsada = moneda === 'ARS' ? State.refBlue : null;
     const newId = await DB.crearGasto({ motivo, cat, responsable, persona, bolsillo, moneda, monto, estado: 'pagado', mesCierre, cotizacionUsada });
 
+    if (!newId) {
+      // Sin registro no se toca la caja: si no, saldría plata sin gasto que la explique.
+      toast('No se pudo guardar el gasto; no se movió nada de la caja. Probá de nuevo.');
+      return;
+    }
     let comprobanteUrl = null;
     if (file && newId) {
       try { comprobanteUrl = await DB.subirComprobanteGasto(newId, file); } catch(e) { console.warn('Comprobante no subido:', e); }
     }
 
-    State.gastos.unshift({ id: newId || Date.now(), fecha: 'Hoy', motivo, cat, responsable, caja: `${persona}-${bolsillo}`, moneda, monto, estado: 'pagado', mesCierre, esFijo: false, esSueldoSocio: false, cotizacionUsada, comprobanteUrl });
-    State.debitarCaja(persona, bolsillo, monto, { tipo: 'gasto', referencia: newId, descripcion: motivo });
+    // La plata sale de la caja ANTES de dar el gasto por registrado. Antes el
+    // débito ni se esperaba: si la caja lo rechazaba, quedaba un gasto "pagado"
+    // sin que la plata hubiera salido.
+    const debitado = await State.debitarCaja(persona, bolsillo, monto, { tipo: 'gasto', referencia: newId, descripcion: motivo });
+    if (!debitado) {
+      const borrado = await DB.eliminarGasto(newId);
+      toast(borrado
+        ? 'El gasto NO se registró: no se pudo debitar de la caja (mirá el aviso anterior).'
+        : '⚠️ ATENCIÓN: no se pudo debitar de la caja y el gasto quedó cargado como pagado. Eliminá ese gasto a mano desde Gastos.');
+      return;
+    }
+    State.gastos.unshift({ id: newId, fecha: 'Hoy', motivo, cat, responsable, caja: `${persona}-${bolsillo}`, moneda, monto, estado: 'pagado', mesCierre, esFijo: false, esSueldoSocio: false, cotizacionUsada, comprobanteUrl });
     Sheets.gasto({ fecha: 'Hoy', motivo, responsable, caja: `${persona}-${bolsillo}`, moneda, monto, estado: 'pagado' }, this.catObj(cat).nombre);
     this.close(); this.renderChips(); this.renderKpis(); this.renderTable();
     toast('Gasto registrado y debitado de la caja correspondiente.');
@@ -313,12 +328,21 @@ const Gastos = {
       const bolsillo = bolsilloPartes.join('-');
       if (persona && bolsillo && State.cajas[persona] !== undefined) {
         // Por el motor central, para que el reverso quede en el libro de caja
-        await State.acreditarCaja(persona, bolsillo, g.monto,
-          { tipo: 'gasto', referencia: id, descripcion: `Se eliminó el gasto "${g.motivo}"` });
+        // Clave estable: si el borrado del registro falla y se repite, la plata
+        // no vuelve a la caja dos veces.
+        const devuelto = await State.acreditarCaja(persona, bolsillo, State.cent(g.monto),
+          { clave: `gasto-eliminar-${id}`, tipo: 'gasto', referencia: id, descripcion: `Se eliminó el gasto "${g.motivo}"` });
+        // Si la plata no volvió a la caja, el gasto NO se borra: borrarlo
+        // dejaría esa salida de caja sin ningún gasto que la explique.
+        if (!devuelto) return;
       }
     }
 
-    await DB.eliminarGasto(id);
+    const borrado = await DB.eliminarGasto(id);
+    if (!borrado) {
+      toast('⚠️ La plata de este gasto ya volvió a la caja, pero el gasto no se pudo borrar. Volvé a tocar «Eliminar»: no se devuelve dos veces.');
+      return;
+    }
     State.gastos = State.gastos.filter(x => x.id != id);
     this.close();
     this.renderChips();

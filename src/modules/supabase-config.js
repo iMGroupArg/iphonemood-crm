@@ -191,7 +191,7 @@ const DB = {
     (repPagosRes.data || []).forEach(p => {
       if (!pagosPorRep[p.reparacion_id]) pagosPorRep[p.reparacion_id] = [];
       const persona = this.personasIdToNombre[p.persona_id] || '';
-      pagosPorRep[p.reparacion_id].push({ caja: `${persona}-${p.bolsillo}`, monto: Number(p.monto), persona, bolsillo: p.bolsillo });
+      pagosPorRep[p.reparacion_id].push({ id: p.id, caja: `${persona}-${p.bolsillo}`, monto: Number(p.monto), persona, bolsillo: p.bolsillo });
     });
     State.reparaciones = (reparacionesRes.data || []).map(r => ({
       id: r.id, cliente: r.cliente, tel: r.telefono || '', equipo: r.equipo, falla: r.falla || '',
@@ -315,7 +315,9 @@ const DB = {
   },
 
   async cobrarAdelanto(id, fechaCobro, cajaDebito) {
-    await supa.from('adelantos_socios').update({ estado: 'cobrado', fecha_cobro: fechaCobro, caja_debito: cajaDebito }).eq('id', id);
+    const { error } = await supa.from('adelantos_socios').update({ estado: 'cobrado', fecha_cobro: fechaCobro, caja_debito: cajaDebito }).eq('id', id);
+    if (error) { console.error('No se pudo marcar el adelanto como cobrado:', error); return false; }
+    return true;
   },
 
   async eliminarAdelanto(id) {
@@ -539,6 +541,123 @@ const DB = {
     return true;
   },
 
+  // Llama a una función atómica de caja (ver db/pendientes/caja_aplicar_delta.sql)
+  // y clasifica la respuesta. Nunca se manda un saldo absoluto: la base suma
+  // sobre el saldo real, así dos pestañas no pueden pisarse.
+  //
+  // Devuelve { ok:true, data } o { ok:false, motivo }:
+  //   'rpc_ausente' → la migración todavía no se corrió
+  //   'rechazada'   → la base dijo que no (caja inexistente, sin permiso, clave mal usada):
+  //                   NO se aplicó nada
+  //   'red'         → NO se pudo confirmar si se aplicó o no
+  //
+  // Un fallo de red se reintenta UNA vez con la MISMA clave: si el primer pedido
+  // sí se había aplicado, la base lo reconoce y no lo repite. Pero si el primer
+  // intento quedó incierto, NINGÚN resultado posterior puede declarar que "no se
+  // aplicó": el primero pudo haberse aplicado igual (por ejemplo, el reintento
+  // cae con un 403 porque se revocó la sesión). Queda 'red', es decir, sin confirmar.
+  async _rpcCaja(nombre, args) {
+    let hubo_ambiguo = false;
+    for (let intento = 0; intento < 2; intento++) {
+      let res;
+      try { res = await supa.rpc(nombre, args); }
+      catch (e) { res = { data: null, error: { message: String(e), code: '' }, status: 0 }; }
+      const { data, error } = res;
+      if (!error) return { ok: true, data };
+      // Sin código de Postgres, o 5xx: la petición pudo haberse aplicado igual.
+      const ambiguo = !error.code || res.status === 0 || res.status >= 500;
+      if (ambiguo) {
+        hubo_ambiguo = true;
+        console.warn(`Movimiento de caja sin confirmar (${nombre}, intento ${intento + 1}):`, error);
+        continue;
+      }
+      if (hubo_ambiguo) {
+        console.error(`Tras un intento incierto, la base respondió ${error.code} (${nombre}). Queda sin confirmar:`, error);
+        return { ok: false, motivo: 'red' };
+      }
+      // La clave fue cancelada por una duda anterior: ese movimiento comprobadamente
+      // no se aplicó, así que se puede repetir con una clave nueva sin duplicar.
+      if (String(error.message || '').includes('clave_cancelada')) return { ok: false, motivo: 'clave_cancelada' };
+      // PostgREST: función inexistente (PGRST202) o Postgres 42883.
+      if (error.code === 'PGRST202' || error.code === '42883') return { ok: false, motivo: 'rpc_ausente' };
+      console.error(`La base rechazó el movimiento de caja (${nombre}):`, args, error);
+      return { ok: false, motivo: 'rechazada' };
+    }
+    return { ok: false, motivo: 'red' };
+  },
+
+  _quienMueve() {
+    return (typeof Auth !== 'undefined'
+      ? (Auth.usuario?.nombre || Auth.usuario?.email || 'Desconocido') : 'Desconocido');
+  },
+
+  // UNA caja. Devuelve { ok:true, saldoPost } o { ok:false, motivo }.
+  async aplicarDeltaCaja(persona, bolsillo, delta, ref, clave) {
+    const pid = this.personaId(persona);
+    if (!pid) {
+      console.error(`No se encontró la persona "${persona}" — el movimiento NO se aplicó.`);
+      return { ok: false, motivo: 'rechazada' };
+    }
+    const r = await this._rpcCaja('caja_aplicar_delta', {
+      p_persona_id: pid, p_bolsillo: bolsillo, p_delta: delta,
+      p_tipo: ref?.tipo || 'otro',
+      p_referencia: ref?.referencia != null ? String(ref.referencia) : null,
+      p_descripcion: ref?.descripcion || null,
+      p_creado_por: this._quienMueve(),
+      p_clave: clave || null,
+    });
+    return r.ok ? { ok: true, saldoPost: Number(r.data) } : r;
+  },
+
+  // DOS cajas en una sola transacción: salen y entran las dos patas, o no pasa
+  // nada. Devuelve { ok:true, saldoOrigen, saldoDestino } o { ok:false, motivo }.
+  async moverCajaAtomico(origen, destino, ref, clave) {
+    const po = this.personaId(origen.persona), pd = this.personaId(destino.persona);
+    if (!po || !pd) {
+      console.error('No se encontró la persona del traspaso — NO se movió nada.', origen.persona, destino.persona);
+      return { ok: false, motivo: 'rechazada' };
+    }
+    const r = await this._rpcCaja('caja_mover_atomico', {
+      p_origen_persona: po, p_origen_bolsillo: origen.bolsillo,
+      p_destino_persona: pd, p_destino_bolsillo: destino.bolsillo,
+      p_monto_origen: origen.monto, p_monto_destino: destino.monto,
+      p_clave: clave,
+      p_tipo: ref?.tipo || 'movimiento',
+      p_referencia: ref?.referencia != null ? String(ref.referencia) : null,
+      p_desc_origen: origen.descripcion || ref?.descripcion || null,
+      p_desc_destino: destino.descripcion || ref?.descripcion || null,
+      p_creado_por: this._quienMueve(),
+    });
+    if (!r.ok) return r;
+    const fila = Array.isArray(r.data) ? r.data[0] : r.data;
+    return { ok: true, saldoOrigen: Number(fila?.saldo_origen), saldoDestino: Number(fila?.saldo_destino) };
+  },
+
+  // Cierra una duda de red: ¿el movimiento con esta clave se aplicó o no?
+  // La base responde 'aplicada' (con el saldo que quedó) o 'cancelada' — y en ese
+  // caso deja la clave inhabilitada, así que un pedido viejo que llegara tarde
+  // ya no se acepta. Para un traspaso se pasa la clave de su primera pata (":o").
+  // Devuelve { estado, saldoPost } o null si TAMPOCO se pudo consultar (sin red).
+  async resolverClaveCaja(clave) {
+    const r = await this._rpcCaja('caja_resolver_clave', { p_clave: clave });
+    if (!r.ok) return null;
+    const fila = Array.isArray(r.data) ? r.data[0] : r.data;
+    if (!fila?.estado) return null;
+    return { estado: fila.estado, saldoPost: fila.saldo_post != null ? Number(fila.saldo_post) : null };
+  },
+
+  // Saldo real de una caja según la base (null si no se pudo leer).
+  async leerSaldoCaja(persona, bolsillo) {
+    const pid = this.personaId(persona);
+    if (!pid) return null;
+    try {
+      const { data, error } = await supa.from('cajas').select('saldo')
+        .eq('persona_id', pid).eq('bolsillo', bolsillo).maybeSingle();
+      if (error || !data) return null;
+      return Number(data.saldo);
+    } catch (e) { return null; }
+  },
+
   async crearMovimientoCaja({ tipo, descripcion, origenPersona, origenBolsillo, destinoPersona, destinoBolsillo, monto, moneda, creadoPor }) {
     const row = {
       tipo, descripcion: descripcion || null, monto, moneda,
@@ -665,8 +784,12 @@ const DB = {
     return data || [];
   },
 
+  // Las escrituras de stock devuelven true/false (antes se perdía el error): los
+  // flujos que las usan después de mover plata necesitan saber si se guardó.
   async actualizarImeisStock(stockId, imeis) {
-    await supa.from('stock').update({ imeis }).eq('id', stockId);
+    const { error } = await supa.from('stock').update({ imeis }).eq('id', stockId);
+    if (error) { console.error('No se pudieron guardar los IMEIs del stock:', error); return false; }
+    return true;
   },
   // Actualiza solo el precio, sin tocar el resto de la ficha.
   // Devuelve true solo si la fila se modificó de verdad.
@@ -679,7 +802,9 @@ const DB = {
   },
 
   async actualizarCantidadStock(stockId, cantidad) {
-    await supa.from('stock').update({ cantidad }).eq('id', stockId);
+    const { error } = await supa.from('stock').update({ cantidad }).eq('id', stockId);
+    if (error) { console.error('No se pudo guardar la cantidad del stock:', error); return false; }
+    return true;
   },
 
   async eliminarProductoStock(stockId) {
@@ -687,7 +812,9 @@ const DB = {
   },
 
   async actualizarEstadoInventario(stockId, estado) {
-    await supa.from('stock').update({ estado_inventario: estado }).eq('id', stockId);
+    const { error } = await supa.from('stock').update({ estado_inventario: estado }).eq('id', stockId);
+    if (error) { console.error('No se pudo guardar el estado del stock:', error); return false; }
+    return true;
   },
 
   // Libro mayor de cajas: deja registrado cada entrada y salida.
@@ -746,7 +873,8 @@ const DB = {
   // Movimientos del libro, con filtros. `desde` y `hasta` son fechas locales
   // en formato AAAA-MM-DD; `hasta` se toma inclusive (hasta las 23:59:59).
   async movimientosCaja({ persona, bolsillo, tipo, desde, hasta, limite = 500 } = {}) {
-    let q = supa.from('caja_ledger').select('*').order('creado_en', { ascending: false }).limit(limite);
+    // Las marcas 'clave_cancelada' son internas (cierran una duda de red), no movimientos de plata.
+    let q = supa.from('caja_ledger').select('*').neq('tipo', 'clave_cancelada').order('creado_en', { ascending: false }).limit(limite);
     if (persona)  q = q.eq('persona', persona);
     if (bolsillo) q = q.eq('bolsillo', bolsillo);
     if (tipo)     q = q.eq('tipo', tipo);
@@ -783,9 +911,11 @@ const DB = {
   async darDeBajaProductoStock(stockId, motivo) {
     const { data } = await supa.from('stock').select('notas').eq('id', stockId).maybeSingle();
     const notas = [(data?.notas || '').trim(), motivo].filter(Boolean).join(' · ');
-    await supa.from('stock')
+    const { error } = await supa.from('stock')
       .update({ estado_inventario: 'eliminado', cantidad: 0, imeis: [], notas })
       .eq('id', stockId);
+    if (error) { console.error('No se pudo dar de baja el producto del stock:', error); return false; }
+    return true;
   },
 
   // Busca el equipo que entró como trade-in de una venta (para poder revertirlo
@@ -800,8 +930,9 @@ const DB = {
   },
 
   async cancelarDeudaDeVenta(ventaId) {
-    const { data } = await supa.from('deudas_manuales')
+    const { data, error } = await supa.from('deudas_manuales')
       .delete().eq('concepto', String(ventaId)).select('id');
+    if (error) { console.error('No se pudo cancelar la deuda de la venta:', error); return null; }
     return (data || []).map(r => r.id);
   },
 
@@ -845,7 +976,15 @@ const DB = {
         if (err2) {
           // Fallback final: reintentar sin es_regalo tampoco, si esa columna no existe
           const itemsFallback = sinGarantia.map(({ es_regalo, ...rest }) => rest);
-          await supa.from('venta_items').insert(itemsFallback);
+          const { error: err3 } = await supa.from('venta_items').insert(itemsFallback);
+          if (err3) {
+            // Una venta sin sus ítems no sirve: se borra la cabecera y se informa
+            // el fallo, así quien llama devuelve la plata cobrada (antes devolvía
+            // el id igual y la venta quedaba "guardada" sin nada adentro).
+            console.error('No se pudieron guardar los ítems de la venta:', err3);
+            await this._borrarVentaParcial(ventaRow.id);
+            return null;
+          }
         }
       }
     }
@@ -856,13 +995,31 @@ const DB = {
       cotizacion_diferencial: p.bolsillo?.startsWith('ARS') ? (p.cotizacionDiferencial || State.refBlue) : null
     }));
     if (pagosToInsert.length) {
-      const { data: pagosInserted } = await supa.from('venta_pagos').insert(pagosToInsert).select();
-      if (pagosInserted) {
-        draft.pagos.forEach((p, i) => { if (pagosInserted[i]) p.id = pagosInserted[i].id; });
+      const { data: pagosInserted, error: pagosErr } = await supa.from('venta_pagos').insert(pagosToInsert).select();
+      if (pagosErr || !pagosInserted || pagosInserted.length !== pagosToInsert.length) {
+        // Sin sus pagos la venta no refleja lo cobrado: al recargar quedaría "sin
+        // pagos" mientras la caja ya los recibió (y cobrar de nuevo los duplicaba).
+        // Se borra la venta completa (cascada) y se informa el fallo.
+        console.error('No se pudieron guardar los pagos de la venta:', pagosErr);
+        await this._borrarVentaParcial(ventaRow.id);
+        return null;
       }
+      draft.pagos.forEach((p, i) => { if (pagosInserted[i]) p.id = pagosInserted[i].id; });
     }
 
     return ventaRow.id;
+  },
+
+  // Borra una venta que quedó a medias. Si el borrado también falla, avisa con el
+  // número: esa venta quedó en la base sin todos sus ítems o cobros.
+  async _borrarVentaParcial(ventaId) {
+    const { error } = await supa.from('ventas').delete().eq('id', ventaId);
+    if (!error) return true;
+    console.error('No se pudo borrar la venta a medias:', error);
+    if (typeof toast === 'function') {
+      toast(`⚠️ ATENCIÓN: la venta #${ventaId} quedó a medias en la base (sin todos sus ítems o cobros) y no se pudo borrar. La plata y el stock de este intento se devuelven solos: NO la anules desde Ventas (lo devolvería dos veces). Avisá para borrarla directo de la base.`);
+    }
+    return false;
   },
 
   async agregarNotaVenta(ventaId, texto) {
@@ -879,7 +1036,9 @@ const DB = {
   },
 
   async anularVenta(ventaId) {
-    await supa.from('ventas').delete().eq('id', ventaId); // borra en cascada items y pagos
+    const { error } = await supa.from('ventas').delete().eq('id', ventaId); // borra en cascada items y pagos
+    if (error) { console.error('No se pudo borrar la venta:', error); return false; }
+    return true;
   },
 
   // Guarda la cotización usada y devuelve el id del pago.
@@ -918,7 +1077,7 @@ const DB = {
     });
   },
   async actualizarReparacion(o) {
-    await supa.from('reparaciones').update({
+    const { error } = await supa.from('reparaciones').update({
       cliente: o.cliente, telefono: o.tel, equipo: o.equipo, falla: o.falla,
       clave_desbloqueo: o.clave, tecnico: o.tecnico,
       estado: o.estado, diagnostico: o.diagnostico, presupuesto_aprobado: o.presupuestoAprobado,
@@ -926,6 +1085,8 @@ const DB = {
       precio_final: o.precioFinal, notas: o.notas, equipo_devuelto: o.equipoDevuelto,
       condicion_ingreso: o.condicionIngreso || {},
     }).eq('id', o.id);
+    if (error) { console.error('No se pudo actualizar la reparación:', error); return false; }
+    return true;
   },
   async agregarRepuestoReparacion(reparacionId, repuesto) {
     await supa.from('reparacion_repuestos').insert({
@@ -934,13 +1095,19 @@ const DB = {
     });
   },
   async agregarPagoReparacion(reparacionId, pago) {
-    await supa.from('reparacion_pagos').insert({
+    const { data, error } = await supa.from('reparacion_pagos').insert({
       reparacion_id: reparacionId, persona_id: this.personaId(pago.persona), bolsillo: pago.bolsillo, monto: pago.monto
-    });
+    }).select().single();
+    if (error || !data) { console.error('No se pudo guardar el pago de la reparación:', error); return false; }
+    // Devuelve el id del pago (truthy): identifica ese cobro para siempre y evita
+    // que una clave de reversión se reutilice con un cobro nuevo.
+    return data.id;
   },
   async limpiarMovimientosReparacion(reparacionId) {
-    await supa.from('reparacion_pagos').delete().eq('reparacion_id', reparacionId);
-    await supa.from('reparacion_repuestos').delete().eq('reparacion_id', reparacionId).eq('de_stock', true);
+    const r1 = await supa.from('reparacion_pagos').delete().eq('reparacion_id', reparacionId);
+    const r2 = await supa.from('reparacion_repuestos').delete().eq('reparacion_id', reparacionId).eq('de_stock', true);
+    if (r1.error || r2.error) { console.error('No se pudieron limpiar los movimientos de la reparación:', r1.error || r2.error); return false; }
+    return true;
   },
 
   async getSeguimientoComentarios(reparacionId) {
@@ -985,7 +1152,9 @@ const DB = {
   },
 
   async eliminarGasto(gastoId) {
-    await supa.from('gastos').delete().eq('id', gastoId);
+    const { error } = await supa.from('gastos').delete().eq('id', gastoId);
+    if (error) { console.error('No se pudo borrar de gastos:', error); return false; }
+    return true;
   },
 
   // ===== GASTOS FIJOS (plantilla) =====
@@ -1071,7 +1240,9 @@ const DB = {
       persona_dest: p.personaDest || '', bolsillo_dest: p.bolsilloDestino || '',
       fecha: p.fecha || new Date().toISOString().slice(0, 10), notas: p.notas || '',
     }).select().single();
-    if (row) State.lotePagos.push({ id: row.id, loteId, tipo: p.tipo, montoUsd: Number(p.montoUsd), montoUsdt: Number(p.montoUsdt || 0), comisionPct: Number(p.comisionPct || 0), comisionUsd: Number(p.comisionUsd || 0), moneda: p.moneda || 'USD', persona: p.persona || '', bolsillo: p.bolsillo || '', personaDest: p.personaDest || '', bolsilloDestino: p.bolsilloDestino || '', fecha: p.fecha || '', notas: p.notas || '' });
+    if (!row) return false;
+    State.lotePagos.push({ id: row.id, loteId, tipo: p.tipo, montoUsd: Number(p.montoUsd), montoUsdt: Number(p.montoUsdt || 0), comisionPct: Number(p.comisionPct || 0), comisionUsd: Number(p.comisionUsd || 0), moneda: p.moneda || 'USD', persona: p.persona || '', bolsillo: p.bolsillo || '', personaDest: p.personaDest || '', bolsilloDestino: p.bolsilloDestino || '', fecha: p.fecha || '', notas: p.notas || '' });
+    return true;
   },
 
   async eliminarLotePago(pagoId) {
@@ -1101,9 +1272,11 @@ const DB = {
   async actualizarEstadoLote(loteId, estado, fechaRecepcion) {
     const upd = { estado };
     if (fechaRecepcion) upd.fecha_recepcion = fechaRecepcion;
-    await supa.from('lotes_compra').update(upd).eq('id', loteId);
+    const { error } = await supa.from('lotes_compra').update(upd).eq('id', loteId);
+    if (error) { console.error('No se pudo cambiar el estado del lote:', error); return false; }
     const l = State.lotesCompra.find(x => x.id === loteId);
     if (l) { l.estado = estado; if (fechaRecepcion) l.fechaRecepcion = fechaRecepcion; }
+    return true;
   },
 
   async actualizarLogisticaItem(itemId, logisticaManual) {
@@ -1159,7 +1332,9 @@ const DB = {
   },
 
   async eliminarCambio(cambioId) {
-    await supa.from('cambios').delete().eq('id', cambioId);
+    const { error } = await supa.from('cambios').delete().eq('id', cambioId);
+    if (error) { console.error('No se pudo borrar de cambios:', error); return false; }
+    return true;
   },
 
   async agregarPersona(nombre) {
@@ -1274,7 +1449,9 @@ const DB = {
     }).eq('id', id);
   },
   async eliminarActivoFijo(id) {
-    await supa.from('activos_fijos').delete().eq('id', id);
+    const { error } = await supa.from('activos_fijos').delete().eq('id', id);
+    if (error) { console.error('No se pudo borrar el activo fijo:', error); return false; }
+    return true;
   },
 
   // ===== TURNOS =====

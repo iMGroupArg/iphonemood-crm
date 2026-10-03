@@ -1,0 +1,7 @@
+{
+  "name": "tests-sql-cajas",
+  "private": true,
+  "type": "module",
+  "scripts": { "test": "node caja.sql.test.mjs" },
+  "devDependencies": { "@electric-sql/pglite": "^0.3.0" }
+}

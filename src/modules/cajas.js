@@ -643,8 +643,15 @@ const Cajas = {
         monto, moneda, creadoPor: State.currentUser || null,
       });
 
-      // 2. Actualizar saldos automáticamente
-      await this._aplicarSaldos({ tipo, origenP, origenB, destinoPFinal, destinoBFinal, monto, moneda, desc });
+      // 2. Actualizar saldos automáticamente. Si la plata NO se movió, el
+      //    registro recién creado se borra: dejarlo mostraría como hecho un
+      //    movimiento que no pasó. (State ya le avisó a la persona qué pasó.)
+      const aplicado = await this._aplicarSaldos({ tipo, origenP, origenB, destinoPFinal, destinoBFinal, monto, moneda, desc });
+      if (!aplicado) {
+        if (mov?.id) await supa.from('caja_movimientos').delete().eq('id', mov.id);
+        if (btn) { btn.disabled = false; btn.innerHTML = '<i class="ti ti-check"></i> Registrar'; }
+        return;
+      }
 
       // 3. Subir comprobante si hay
       if (file && mov?.id) {
@@ -677,16 +684,29 @@ const Cajas = {
     };
 
     // Origen y destino iguales: no hay movimiento real que aplicar.
-    if (origenP === destinoPFinal && origenB === destinoBFinal) return;
+    if (origenP === destinoPFinal && origenB === destinoBFinal) return true;
 
+    // Con origen y destino: UNA operación atómica (o salen y entran las dos
+    // patas, o no se mueve nada). Antes eran dos pedidos y se ignoraba si
+    // alguno fallaba: si el débito se rechazaba pero el crédito entraba, se
+    // creaba plata, y el movimiento quedaba registrado como hecho.
+    if (origenP && origenB && destinoPFinal && destinoBFinal) {
+      return State.moverCaja(origenP, origenB, monto, destinoPFinal, destinoBFinal, monto, {
+        ...ref,
+        descripcionOrigen: ref.descripcion || `Sale hacia ${destinoPFinal} · ${destinoBFinal}`,
+        descripcionDestino: ref.descripcion || `Viene de ${origenP} · ${origenB}`,
+      });
+    }
+    // Una sola pata (no debería pasar con los tipos actuales, pero se respeta).
     if (origenP && origenB) {
-      await State.debitarCaja(origenP, origenB, monto,
+      return State.debitarCaja(origenP, origenB, monto,
         { ...ref, descripcion: ref.descripcion || `Sale hacia ${destinoPFinal || '—'} · ${destinoBFinal || '—'}` });
     }
     if (destinoPFinal && destinoBFinal) {
-      await State.acreditarCaja(destinoPFinal, destinoBFinal, monto,
+      return State.acreditarCaja(destinoPFinal, destinoBFinal, monto,
         { ...ref, descripcion: ref.descripcion || `Viene de ${origenP} · ${origenB}` });
     }
+    return true;
   },
 
   // ── Revertir movimiento ─────────────────────────────────────
@@ -713,14 +733,27 @@ const Cajas = {
       // Revertir: sumar al origen, restar del destino
       // Por el motor central, sin recortar en 0: el reverso tiene que devolver
       // exactamente lo mismo que se movió, aunque el saldo quede negativo.
-      const refRev = { tipo: 'movimiento', descripcion: 'Reverso de un movimiento entre cajas' };
-      if (m.origenP && m.origen_bolsillo) {
-        await State.acreditarCaja(m.origenP, m.origen_bolsillo, m.monto, refRev);
+      // Clave estable: si después falla el borrado del registro y se repite la acción,
+      // la plata no se devuelve dos veces.
+      const refRev = { clave: `mov-revertir-${id}`, tipo: 'movimiento', descripcion: 'Reverso de un movimiento entre cajas' };
+      let revertido = true;
+      if (m.origenP && m.origen_bolsillo && m.destinoP && m.destino_bolsillo) {
+        // Las dos patas juntas y atómicas.
+        revertido = await State.moverCaja(m.destinoP, m.destino_bolsillo, m.monto, m.origenP, m.origen_bolsillo, m.monto, refRev);
+      } else if (m.origenP && m.origen_bolsillo) {
+        revertido = await State.acreditarCaja(m.origenP, m.origen_bolsillo, m.monto, refRev);
+      } else if (m.destinoP && m.destino_bolsillo) {
+        revertido = await State.debitarCaja(m.destinoP, m.destino_bolsillo, m.monto, refRev);
       }
-      if (m.destinoP && m.destino_bolsillo) {
-        await State.debitarCaja(m.destinoP, m.destino_bolsillo, m.monto, refRev);
+      // Si la plata no se pudo devolver, el registro NO se borra: borrarlo
+      // dejaría el dinero movido sin ningún rastro.
+      if (!revertido) return;
+      const { error: errBorrar } = await supa.from('caja_movimientos').delete().eq('id', id);
+      if (errBorrar) {
+        console.error(errBorrar);
+        toast('⚠️ La plata ya se devolvió, pero el registro del movimiento no se pudo borrar. Volvé a tocar «Revertir»: no se devuelve dos veces.');
+        return;
       }
-      await supa.from('caja_movimientos').delete().eq('id', id);
       this._movimientos = await DB.listarMovimientosCaja(200);
       this._tab = 'movimientos';
       App.goTo('cajas');
@@ -731,32 +764,31 @@ const Cajas = {
       await Cueva.deleteOp(id);
 
     } else if (tipo === 'venta') {
-      const [ventaId, pagoId, persona, bolsillo, monto] = parts;
-      if (!confirm(`¿Revertir el pago de esta venta (${State.fmtUSD(Number(monto))}) de la caja ${persona}-${bolsillo}?\nEl monto volverá a la caja pero la venta seguirá registrada.`)) return;
-      // Sacar de la caja lo que había entrado por ese pago, por el motor central
-      await State.debitarCaja(persona, bolsillo, Number(monto),
-        { tipo: 'pago_eliminado', referencia: ventaId, descripcion: `Se revirtió un pago de la venta #${ventaId}` });
-      // Eliminar el pago puntual
-      await supa.from('venta_pagos').delete().eq('id', pagoId);
+      // Se revierte por el camino de Ventas, que calcula el importe real del pago
+      // (con su cotización) y comparte la clave eliminar-pago-<id>. Antes acá se
+      // debitaba el importe en dólares aunque la caja fuera en pesos.
+      const [ventaId, pagoId] = parts;
       const v = State.ventas.find(x => x.id == ventaId);
-      if (v) v.pagos = v.pagos.filter(p => p.id != pagoId);
+      const pg = v?.pagos.find(p => p.id == pagoId);
+      if (!pg) { toast('No se encontró ese pago de la venta. Recargá la página.'); return; }
+      // La pantalla de Ventas puede no estar abierta: sus repintados no deben cortar
+      // el refresco de Cajas (la plata y el registro ya quedaron resueltos antes).
+      try { await Ventas.eliminarPago(v.id, pg.id); } catch (e) { console.warn('Repintado de Ventas desde Cajas:', e); }
       this._movimientos = await DB.listarMovimientosCaja(200);
       this._tab = 'movimientos';
       App.goTo('cajas');
-      toast('Pago revertido. La venta sigue activa pero sin ese cobro.');
 
     } else if (tipo === 'lote') {
-      const [pagoId, persona, bolsillo, monto, moneda] = parts;
-      if (!confirm(`¿Revertir este pago a proveedor (${moneda === 'USDT' ? Number(monto).toLocaleString('es-AR')+' USDT' : State.fmtUSD(Number(monto))}) de la caja ${persona}-${bolsillo}?\nEl monto volverá a la caja.`)) return;
-      // Acreditar la caja por el motor central, para que quede en el libro
-      await State.acreditarCaja(persona, bolsillo, Number(monto),
-        { tipo: 'proveedor', referencia: pagoId, descripcion: 'Se revirtió un pago a proveedor' });
-      await DB.eliminarLotePago(pagoId);
-      State.lotePagos = State.lotePagos.filter(p => p.id != pagoId);
+      // Todo pago de un lote se revierte por el camino de Proveedores, que conoce
+      // cada tipo (pago, costo, devolución, conversión de dos patas…). Antes acá
+      // se acreditaba solo una caja y se borraba el pago, aun en conversiones.
+      const [pagoId] = parts;
+      const pg = (State.lotePagos || []).find(p => p.id == pagoId);
+      if (!pg) { toast('No se encontró ese pago del lote. Recargá la página.'); return; }
+      await Proveedores.revertirMovimientoLote(pg.loteId, pg.id);
       this._movimientos = await DB.listarMovimientosCaja(200);
       this._tab = 'movimientos';
       App.goTo('cajas');
-      toast('Pago a proveedor revertido. El monto fue devuelto a la caja.');
 
     } else {
       toast('Este tipo de movimiento no se puede revertir desde aquí.');
@@ -844,13 +876,19 @@ const Cajas = {
     const actual = State.cajas[persona][bolsillo] || 0;
     const delta = nuevo - actual;
     if (!delta) { toast('El saldo no cambió.'); return; }
-    await State.acreditarCaja(persona, bolsillo, delta,
+    const aplicado = await State.acreditarCaja(persona, bolsillo, delta,
       { tipo: 'ajuste', descripcion: `Ajuste manual: de ${actual} a ${nuevo}` });
     // Puede haber quedado en el valor previo si la base rechazó el cambio.
     const final = State.cajas[persona][bolsillo] || 0;
     Sheets.caja(persona, bolsillo, final);
     App.goTo('cajas');
-    if (final === nuevo) toast(`Saldo de ${persona} — ${bolsillo} actualizado.`);
+    if (aplicado && Math.abs(final - nuevo) < 0.005) {
+      toast(`Saldo de ${persona} — ${bolsillo} actualizado.`);
+    } else if (aplicado) {
+      // El ajuste se aplicó como diferencia sobre el saldo REAL de la base, y ese
+      // saldo ya no era el que se veía en pantalla (otra pestaña movió la caja).
+      toast(`⚠️ El ajuste se aplicó (${delta > 0 ? '+' : ''}${delta}), pero la caja había cambiado desde otra pestaña: ahora tiene ${final}, no ${nuevo}. Revisalo.`);
+    }
   }
 };
 

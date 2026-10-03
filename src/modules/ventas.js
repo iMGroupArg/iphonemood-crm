@@ -534,6 +534,18 @@ const Ventas = {
     if (State.getStock(p) <= 0) { toast(`"${p.nombre}" no tiene unidades disponibles.`); return false; }
     if ((p.estadoInventario || 'disponible') === 'vendido') { toast(`"${p.nombre}" ya figura como vendido.`); return false; }
 
+    // Una unidad reservada por OTRA venta no se puede volver a vincular: sería
+    // prometerle el mismo frasco a dos clientes que ya pagaron la seña. Es el
+    // caso que las otras guardas dejaban pasar — 'reservado' tiene stock > 0 y
+    // no es 'vendido', así que entraba sin chistar.
+    const reservadaPor = State.ventas.find(o =>
+      String(o.id) !== String(ventaId) &&
+      (o.items || []).some(i => String(i.stockId || '') === String(p.id)));
+    if (reservadaPor && (p.estadoInventario || 'disponible') === 'reservado') {
+      toast(`"${p.nombre}" ya está reservado para la venta #${reservadaPor.id}.`);
+      return false;
+    }
+
     // Un solo IMEI por unidad: si la fila tiene varios, se toma el primero
     // libre. Lo normal es que cada equipo sea su propia fila.
     const imei = (p.imeis || [])[0] || null;
@@ -1764,6 +1776,7 @@ const Ventas = {
 
     // Descontar stock de los ítems que vinieron de inventario (memoria + base de datos)
     const stockMovs = [];
+    const stockSinGuardar = [];   // descontados en pantalla pero que la base no aceptó
     const noDescontados = [];
     for (const it of d.items) {
       if (it.stockId) {
@@ -1774,8 +1787,10 @@ const Ventas = {
           if (item) {
             // Guardar SIEMPRE las dos columnas: con IMEI se escribía solo
             // `imeis` y `cantidad` quedaba vieja, dejando el equipo disponible.
-            if (item.imeis) await DB.actualizarImeisStock(it.stockId, item.imeis);
-            if (item.cantidad !== undefined) await DB.actualizarCantidadStock(it.stockId, item.cantidad);
+            let guardado = true;
+            if (item.imeis) guardado = (await DB.actualizarImeisStock(it.stockId, item.imeis)) !== false && guardado;
+            if (item.cantidad !== undefined) guardado = (await DB.actualizarCantidadStock(it.stockId, item.cantidad)) !== false && guardado;
+            if (!guardado) stockSinGuardar.push(it.nombre);
           }
         } else {
           // Antes esto se ignoraba: la venta se guardaba igual y el equipo
@@ -1804,6 +1819,9 @@ const Ventas = {
           }
         }
       }
+    }
+    if (stockSinGuardar.length) {
+      toast(`⚠️ La venta se guardó, pero la base no aceptó el descuento de stock de: ${stockSinGuardar.join(', ')}. Corregilo a mano en Stock.`);
     }
     if (noDescontados.length) {
       toast(`⚠️ No se pudo descontar del stock: ${noDescontados.join(', ')}. Revisalo a mano en Stock.`);
@@ -1843,44 +1861,63 @@ const Ventas = {
       }
     }
 
-    // Acreditar pagos en las cajas correspondientes (memoria + base de datos)
-    await Promise.all(d.pagos.map(p => {
+    // Acreditar pagos en las cajas correspondientes. Todo o nada: si un cobro
+    // no entra a su caja, los demás se deshacen solos. Antes el resultado se
+    // descartaba: un cobro rechazado se "revertía" después igual, y la caja
+    // perdía una plata que nunca había recibido.
+    const cobrosCaja = d.pagos.map(p => {
       let montoEnBolsillo = p.monto;
       if (p.bolsillo.startsWith('ARS')) montoEnBolsillo = p.monto * (p.cotizacionDiferencial || State.refBlue);
-      return State.acreditarCaja(p.persona, p.bolsillo, montoEnBolsillo,
-        { tipo: 'venta', descripcion: `Cobro de venta a ${d.cliente}` });
-    }));
+      // A centavos UNA vez: el cobro y su reverso (si la venta no se guarda) usan el
+      // mismo valor, así el reverso devuelve exactamente lo que entró.
+      return { persona: p.persona, bolsillo: p.bolsillo, delta: State.cent(montoEnBolsillo),
+               ref: { tipo: 'venta', descripcion: `Cobro de venta a ${d.cliente}` } };
+    });
+    const cajaOk = await State.moverVarias(cobrosCaja);
 
-    // Guardar la venta en Supabase
-    const ventaId = await DB.crearVenta(d, estado);
-    if (!ventaId) {
+    // Guardar la venta en Supabase (solo si la plata ya está en las cajas)
+    const ventaId = cajaOk ? await DB.crearVenta(d, estado) : null;
+    if (!cajaOk || !ventaId) {
       // Sacar el equipo del trade-in que ya se había dado de alta: si la venta
       // no se guardó, ese teléfono no entró. Antes quedaba colgado en el stock.
+      const avisosRollback = [];
       if (savedTradeInId) {
-        await DB.darDeBajaProductoStock(savedTradeInId, 'Baja: la venta no se llegó a guardar');
-        State.stock = State.stock.filter(s => s.id !== savedTradeInId);
+        if ((await DB.darDeBajaProductoStock(savedTradeInId, 'Baja: la venta no se llegó a guardar')) !== false) {
+          State.stock = State.stock.filter(s => s.id !== savedTradeInId);
+        } else {
+          avisosRollback.push('el equipo del trade-in sigue en el stock (no se pudo dar de baja: borralo a mano)');
+        }
       }
       // Revertir stock descontado
       for (const mov of stockMovs) {
-        State.restaurarStock(mov.stockId, mov.imei);
+        State.restaurarStock(mov.stockId, mov.imei, { sinPersistir: true });
         const item = State.stock.find(s => s.id === mov.stockId || s.id == mov.stockId);
         if (item) {
-          if (item.imeis) await DB.actualizarImeisStock(mov.stockId, item.imeis);
-          if (item.cantidad !== undefined) await DB.actualizarCantidadStock(mov.stockId, item.cantidad);
+          let guardado = true;
+          if (item.imeis) guardado = (await DB.actualizarImeisStock(mov.stockId, item.imeis)) !== false && guardado;
+          if (item.cantidad !== undefined) guardado = (await DB.actualizarCantidadStock(mov.stockId, item.cantidad)) !== false && guardado;
           if (State.getStock(item) > 0 && item.estadoInventario !== 'disponible') {
             item.estadoInventario = 'disponible';
-            await DB.actualizarEstadoInventario(mov.stockId, 'disponible');
+            guardado = (await DB.actualizarEstadoInventario(mov.stockId, 'disponible')) !== false && guardado;
           }
+          if (!guardado) avisosRollback.push(`el stock de "${item.nombre || mov.stockId}" no se pudo devolver en la base (revisalo a mano)`);
         }
       }
-      // Revertir pagos acreditados
-      await Promise.all(d.pagos.map(p => {
-        let montoEnBolsillo = p.monto;
-        if (p.bolsillo.startsWith('ARS')) montoEnBolsillo = p.monto * (p.cotizacionDiferencial || State.refBlue);
-        return State.debitarCaja(p.persona, p.bolsillo, montoEnBolsillo,
-          { tipo: 'venta_fallida', descripcion: 'Reverso: la venta no se pudo guardar' });
-      }));
-      toast('Hubo un problema guardando la venta. Probá de nuevo.');
+      // Revertir los cobros — SOLO si llegaron a entrar (si la caja los rechazó,
+      // moverVarias ya los dejó como estaban y no hay nada que sacar).
+      let cobrosDeshechos = true;
+      if (cajaOk) {
+        cobrosDeshechos = await State.moverVarias(cobrosCaja.map(c => ({
+          ...c, delta: -c.delta,
+          ref: { tipo: 'venta_fallida', descripcion: 'Reverso: la venta no se pudo guardar' } })),
+          { atomico: false });
+      }
+      toast(cajaOk
+        ? (cobrosDeshechos
+            ? 'Hubo un problema guardando la venta. Probá de nuevo.'
+            : '⚠️ ATENCIÓN: la venta NO se guardó pero parte de la plata cobrada TODAVÍA está en las cajas (no se pudo sacar). Revisá y corregí los saldos desde Cajas antes de reintentar.')
+        : 'La venta NO se guardó: no se pudo confirmar el cobro en caja (mirá el aviso anterior). Revisá los saldos antes de reintentar.');
+      if (avisosRollback.length) toast('⚠️ ' + avisosRollback.join(' · '));
       return;
     }
 
@@ -2755,13 +2792,26 @@ const Ventas = {
       esTarjeta: false, diferencialArs: 0,
       cotizacionDiferencial: esARS ? cotiz : null,
     };
-    v.pagos.push(pago);
-    // A la caja en pesos entra exactamente lo que se tipeó, sin re-redondeos
-    const montoEnBolsillo = esARS ? ingresado : monto;
-    State.acreditarCaja(persona, bolsillo, montoEnBolsillo,
+    // A la caja en pesos entra exactamente lo que se tipeó, sin re-redondeos.
+    // Primero la plata y SOLO si entró se registra el pago: antes el pago se
+    // anotaba (y la venta podía cerrarse) sin esperar a que la caja lo aceptara.
+    const montoEnBolsillo = State.cent(esARS ? ingresado : monto);
+    const entro = await State.acreditarCaja(persona, bolsillo, montoEnBolsillo,
       { tipo: 'venta', referencia: id, descripcion: `Cobro adicional de la venta #${id}` });
+    if (!entro) return;   // State ya avisó; el cobro NO se registró
     // Guardar el id que devuelve la base para poder eliminar este pago sin recargar.
     pago.id = await DB.agregarPagoVenta(id, pago);
+    if (!pago.id) {
+      // La plata entró pero el pago no quedó anotado: se saca de la caja para no
+      // dejar plata sin venta que la respalde.
+      const deshecho = await State.debitarCaja(persona, bolsillo, montoEnBolsillo,
+        { tipo: 'pago_eliminado', referencia: id, descripcion: `Se deshizo un cobro de la venta #${id} que no se pudo guardar` });
+      toast(deshecho
+        ? 'No se pudo guardar el cobro en la venta; se deshizo el movimiento de caja. Probá de nuevo.'
+        : `⚠️ ATENCIÓN: el cobro NO se guardó en la venta pero la plata TODAVÍA está en la caja de ${persona} (no se pudo sacar). Sacala a mano desde Cajas.`);
+      return;
+    }
+    v.pagos.push(pago);
     const total = v.items.reduce((s, i) => s + i.precio, 0);
     const pagado = v.pagos.reduce((s, p) => s + p.monto, 0) + (v.tradeIn?.valor || 0);
     if (pagado >= total) {
@@ -2788,20 +2838,39 @@ const Ventas = {
     this.viewSale(id);
   },
 
+  // Importe que un pago movió (o debe devolver) en SU caja. Es la única fuente para
+  // los tres caminos de reverso (eliminar pago, anular venta y Cajas): como
+  // comparten la clave eliminar-pago-<id>, tienen que pedir exactamente lo mismo.
+  _montoCajaDePago(p) {
+    const base = p.bolsillo?.startsWith('ARS') ? p.monto * (p.cotizacionDiferencial || State.refBlue) : p.monto;
+    return State.cent(base);
+  },
+
   async eliminarPago(ventaId, pagoId) {
     if (!confirm('¿Eliminar este pago? El saldo de la venta se actualizará y el monto se debitará de la caja.')) return;
     const v = State.ventas.find(x => x.id === ventaId);
     const pago = v?.pagos.find(p => p.id === pagoId);
+    // Primero se SACA la plata de la caja y recién después se borra el registro:
+    // si la caja no la devuelve, el pago se queda donde está (borrarlo antes
+    // dejaba la plata en la caja sin ningún pago que la explique).
+    let montoEnBolsillo = 0;
+    if (pago) {
+      montoEnBolsillo = this._montoCajaDePago(pago);
+      // Clave ESTABLE: si después falla el borrado del registro y se repite la
+      // acción (incluso tras recargar), la base reconoce el débito ya hecho y no
+      // saca la plata dos veces. Por eso acá NO se compensa: se reintenta.
+      const sacado = await State.debitarCaja(pago.persona, pago.bolsillo, montoEnBolsillo,
+        { clave: `eliminar-pago-${pagoId}`, tipo: 'pago_eliminado', referencia: ventaId, descripcion: `Se eliminó un pago de la venta #${ventaId}` });
+      if (!sacado) return;   // el pago NO se elimina
+    }
     const ok = await DB.eliminarPagoVenta(pagoId);
-    if (!ok) { toast('Error al eliminar el pago'); return; }
+    if (!ok) {
+      toast(pago
+        ? '⚠️ La plata de ese pago ya salió de la caja, pero el pago no se pudo borrar de la venta. Volvé a tocar «Eliminar pago»: no se descuenta dos veces.'
+        : 'Error al eliminar el pago.');
+      return;
+    }
     if (v) {
-      // Revertir el movimiento de caja
-      if (pago) {
-        let montoEnBolsillo = pago.monto;
-        if (pago.bolsillo?.startsWith('ARS')) montoEnBolsillo = pago.monto * (pago.cotizacionDiferencial || State.refBlue);
-        State.debitarCaja(pago.persona, pago.bolsillo, montoEnBolsillo,
-          { tipo: 'pago_eliminado', referencia: ventaId, descripcion: `Se eliminó un pago de la venta #${ventaId}` });
-      }
       v.pagos = v.pagos.filter(p => p.id !== pagoId);
       const total = v.items.reduce((s, i) => s + i.precio, 0);
       const pagado = v.pagos.reduce((s, p) => s + p.monto, 0) + (v.tradeIn?.valor || 0);
@@ -2820,35 +2889,61 @@ const Ventas = {
     const v = State.ventas.find(x => x.id === id);
     if (!v) return;
     if (!confirm(`¿Anular la venta #${v.id}? Esto revertirá el stock y los pagos en las cajas correspondientes.`)) return;
+    // Revertir cajas usando la cotización original del pago, no la actual.
+    // Va ANTES que el stock: si una caja no devuelve la plata la venta sigue
+    // viva (con su stock vendido) y se puede repetir. Se intentan todas las
+    // cajas aunque una falle; lo que ya se devolvió no se repite (claves).
+    // Cada reverso lleva una clave ESTABLE (venta + posición del pago): si la
+    // anulación se corta a la mitad y se repite —incluso después de recargar— la
+    // base reconoce los reversos ya hechos y no devuelve la plata dos veces.
+    // La clave es la MISMA que usa «Eliminar pago» para ese pago (eliminar-pago-<id>):
+    // si un pago ya se había sacado de la caja por ese camino, anular la venta no lo
+    // saca otra vez. Todos los pagos tienen id (crearVenta y agregarPagoVenta lo asignan).
+    if (v.pagos.some(p => !p.id)) {
+      toast('Esta venta tiene un pago sin identificar (recién cargado): recargá la página y volvé a anularla.');
+      return;
+    }
+    const okCajas = await State.moverVarias(v.pagos.map(p => {
+      return { persona: p.persona, bolsillo: p.bolsillo, delta: -this._montoCajaDePago(p),
+               ref: { clave: `eliminar-pago-${p.id}`, tipo: 'venta_anulada', referencia: id, descripcion: `Se anuló la venta #${id}` } };
+    }), { atomico: false });
+    if (!okCajas) { toast('La venta NO se anuló del todo: no se pudo devolver la plata de alguna caja. Volvé a tocar «Anular»: lo que ya se devolvió no se repite.'); return; }
+    // PUNTO SIN RETORNO: con la plata ya devuelta se borra la venta enseguida,
+    // antes de tocar el stock (que sí se repetiría si hubiera que volver a
+    // anular). Así, si algo falla después, nunca queda una venta viva con la
+    // plata ya devuelta.
+    const borrada = await DB.anularVenta(id);
+    if (!borrada) {
+      toast(`⚠️ La plata de la venta #${id} ya volvió a las cajas, pero la venta no se pudo borrar de la base. Volvé a tocar «Anular»: la plata no se devuelve dos veces.`);
+      return;
+    }
     // Revertir stock — si stockMovs no existe (ventas cargadas de DB), usar los items con stockId
     const movsARestaurar = (v.stockMovs && v.stockMovs.length)
       ? v.stockMovs
       : v.items.filter(i => i.stockId).map(i => ({ stockId: i.stockId, imei: i.imei || null }));
+    const avisos = [];
     for (const m of movsARestaurar) {
-      State.restaurarStock(m.stockId, m.imei);
-      const item = State.stock.find(s => s.id === m.stockId || s.id == m.stockId);
-      if (item) {
-        if (item.imeis) await DB.actualizarImeisStock(m.stockId, item.imeis);
-        if (item.cantidad !== undefined) await DB.actualizarCantidadStock(m.stockId, item.cantidad);
-        // Siempre restaurar el estado a disponible si tiene stock
-        if (State.getStock(item) > 0 && item.estadoInventario !== 'disponible') {
-          item.estadoInventario = 'disponible';
-          await DB.actualizarEstadoInventario(m.stockId, 'disponible');
+      try {
+        State.restaurarStock(m.stockId, m.imei, { sinPersistir: true });
+        const item = State.stock.find(s => s.id === m.stockId || s.id == m.stockId);
+        if (item) {
+          let guardado = true;
+          if (item.imeis) guardado = (await DB.actualizarImeisStock(m.stockId, item.imeis)) !== false && guardado;
+          if (item.cantidad !== undefined) guardado = (await DB.actualizarCantidadStock(m.stockId, item.cantidad)) !== false && guardado;
+          // Siempre restaurar el estado a disponible si tiene stock
+          if (State.getStock(item) > 0 && item.estadoInventario !== 'disponible') {
+            item.estadoInventario = 'disponible';
+            guardado = (await DB.actualizarEstadoInventario(m.stockId, 'disponible')) !== false && guardado;
+          }
+          if (!guardado) avisos.push(`no se pudo guardar la devolución al stock de "${item.nombre || m.stockId}", revisalo a mano`);
         }
+      } catch (e) {
+        console.error(e);
+        avisos.push(`no se pudo devolver al stock el producto ${m.stockId}, revisalo a mano`);
       }
     }
-    // Revertir cajas usando la cotización original del pago, no la actual
-    // Esperar a que la plata vuelva ANTES de borrar la venta: si algo falla,
-    // no queremos quedarnos sin la venta y sin la reversión.
-    await Promise.all(v.pagos.map(p => {
-      let montoEnBolsillo = p.monto;
-      if (p.bolsillo?.startsWith('ARS')) montoEnBolsillo = p.monto * (p.cotizacionDiferencial || State.refBlue);
-      return State.debitarCaja(p.persona, p.bolsillo, montoEnBolsillo,
-        { tipo: 'venta_anulada', referencia: id, descripcion: `Se anuló la venta #${id}` });
-    }));
     // Dar de baja el equipo que había entrado como trade-in: la venta deja de
     // existir, así que ese teléfono ya no es tuyo. Antes quedaba en el stock.
-    const avisos = [];
     let idsTradeIn = v.tradeInStockId ? [v.tradeInStockId] : [];
     if (!idsTradeIn.length && v.tradeIn?.valor > 0) {
       // Venta cargada de la base (o tras recargar): buscarlo por la nota.
@@ -2861,7 +2956,9 @@ const Ventas = {
         avisos.push(`el equipo del trade-in ya no estaba disponible (${item.nombre})`);
         continue;
       }
-      await DB.darDeBajaProductoStock(tiId, `Baja: se anuló la venta #${id}`);
+      let baja = false;
+      try { baja = (await DB.darDeBajaProductoStock(tiId, `Baja: se anuló la venta #${id}`)) !== false; } catch (e) { console.error(e); }
+      if (!baja) { avisos.push(`no se pudo dar de baja el equipo del trade-in (${item?.nombre || tiId}), revisalo a mano`); continue; }
       if (item) {
         item.estadoInventario = 'eliminado';
         item.cantidad = 0;
@@ -2877,12 +2974,14 @@ const Ventas = {
 
     // Cancelar la deuda a plazos que la venta hubiera generado.
     let deudasBorradas = [];
-    try { deudasBorradas = await DB.cancelarDeudaDeVenta(id); } catch (e) { console.error(e); }
+    let deudasRes = null;
+    try { deudasRes = await DB.cancelarDeudaDeVenta(id); } catch (e) { console.error(e); }
+    if (deudasRes === null) avisos.push('no se pudo cancelar la deuda a plazos de esta venta: sigue cobrable, cancelala a mano desde Cuenta Corriente');
+    else deudasBorradas = deudasRes;
     if (deudasBorradas.length) {
       State.deudas = (State.deudas || []).filter(x => !deudasBorradas.includes(x.id));
     }
 
-    await DB.anularVenta(id);
     State.ventas = State.ventas.filter(x => x.id !== id);
     this.closeModal();
     this.renderList();
@@ -2891,7 +2990,7 @@ const Ventas = {
       idsTradeIn.length ? 'equipo del trade-in dado de baja' : '',
       deudasBorradas.length ? 'deuda cancelada' : '',
     ].filter(Boolean).join(', ');
-    toast(`Venta #${id} anulada. Stock restaurado y pagos revertidos${extra ? ', ' + extra : ''}.`);
+    toast(`Venta #${id} anulada. Pagos revertidos${avisos.length ? '' : ' y stock restaurado'}${extra ? ', ' + extra : ''}.`);
     if (avisos.length) toast('⚠️ ' + avisos.join(' · '));
   }
 };

@@ -975,13 +975,28 @@ const Proveedores = {
 
     if (!montoUsd || montoUsd <= 0) { toast('Ingresá un monto válido', 'error'); return; }
 
-    // Impactar cajas por el motor central, para que queden en el libro
-    await State.debitarCaja(persona, bolsillo, montoUsd,
-      { tipo: 'proveedor', referencia: loteId, descripcion: `Conversión a USDT — pasa a ${personaDest} · ${bolsilloDestino}` });
-    await State.acreditarCaja(personaDest, bolsilloDestino, montoUsdt,
-      { tipo: 'proveedor', referencia: loteId, descripcion: `Conversión desde ${persona} · ${bolsillo} (comisión ${comisionPct}%)` });
+    // Impactar cajas por el motor central, en UNA operación atómica: sale de un
+    // lado y entra del otro, o no pasa nada. Antes eran dos pedidos que ni se
+    // chequeaban: si fallaba el débito pero entraba el crédito se creaba plata,
+    // y la conversión quedaba registrada igual.
+    const movido = await State.moverCaja(persona, bolsillo, montoUsd, personaDest, bolsilloDestino, montoUsdt, {
+      tipo: 'proveedor', referencia: loteId,
+      descripcionOrigen: `Conversión a USDT — pasa a ${personaDest} · ${bolsilloDestino}`,
+      descripcionDestino: `Conversión desde ${persona} · ${bolsillo} (comisión ${comisionPct}%)`,
+    });
+    if (!movido) return;   // State ya avisó; la conversión NO se registra
 
-    await DB.guardarLotePago(loteId, { tipo: 'conversion', montoUsd, montoUsdt, comisionPct, comisionUsd, moneda: 'USD', persona, bolsillo, personaDest, bolsilloDestino, fecha, notas });
+    const anotada = await DB.guardarLotePago(loteId, { tipo: 'conversion', montoUsd, montoUsdt, comisionPct, comisionUsd, moneda: 'USD', persona, bolsillo, personaDest, bolsilloDestino, fecha, notas });
+    if (!anotada) {
+      // La plata ya se movió pero la conversión no quedó anotada en el lote: se
+      // devuelve (traspaso inverso, atómico) para no dejar plata movida sin registro.
+      const deshecha = await State.moverCaja(personaDest, bolsilloDestino, montoUsdt, persona, bolsillo, montoUsd, {
+        tipo: 'proveedor', referencia: loteId, descripcion: 'Reverso: la conversión no se pudo registrar en el lote' });
+      toast(deshecha
+        ? 'No se pudo registrar la conversión en el lote; se devolvió la plata a su caja. Probá de nuevo.'
+        : '⚠️ ATENCIÓN: la conversión NO quedó registrada en el lote pero la plata YA se movió y no se pudo devolver. Corregí los saldos a mano desde Cajas.');
+      return;
+    }
 
     document.getElementById('prov-conv-overlay')?.remove();
     toast(`Conversión registrada: ${montoUsdt.toFixed(2)} USDT`, 'success');
@@ -1121,12 +1136,21 @@ const Proveedores = {
     let montoUsd = monto;
     if (moneda === 'ARS') montoUsd = monto / (State.refBlue || 1);
 
-    await State.debitarCaja(persona, bolsillo, monto,
+    const debitado = await State.debitarCaja(persona, bolsillo, monto,
       { tipo: 'proveedor', referencia: loteId, descripcion: `Pago a proveedor del lote ${loteId}` });
-    await DB.guardarLotePago(loteId, {
+    if (!debitado) return;   // la plata no salió de la caja: el pago NO se registra
+    const anotado = await DB.guardarLotePago(loteId, {
       tipo: 'pago_proveedor', montoUsd, montoUsdt: moneda === 'USDT' ? monto : montoUsd,
       moneda, persona, bolsillo, personaDest: '', bolsilloDestino: '', fecha, notas
     });
+    if (!anotado) {
+      const devuelta = await State.acreditarCaja(persona, bolsillo, monto,
+        { tipo: 'proveedor', referencia: loteId, descripcion: `Reverso: el pago del lote ${loteId} no se pudo registrar` });
+      toast(devuelta
+        ? 'No se pudo registrar el pago en el lote; se devolvió la plata a la caja. Probá de nuevo.'
+        : `⚠️ ATENCIÓN: el pago NO quedó registrado en el lote pero la plata YA salió de la caja de ${persona} y no se pudo devolver. Corregí el saldo a mano desde Cajas.`);
+      return;
+    }
     await DB.actualizarEstadoLote(loteId, 'pagado');
 
     document.getElementById('prov-pago-overlay')?.remove();
@@ -1300,14 +1324,28 @@ const Proveedores = {
       if (esARS)       montoParaCaja = moneda === 'ARS' ? monto : montoUsd * (State.refBlue || 1);
       else if (esUSDT) montoParaCaja = moneda === 'USDT' ? monto : montoUsd;
       else             montoParaCaja = montoUsd; // bolsillo USD
-      await State.debitarCaja(persona, bolsillo, montoParaCaja,
+      const debitado = await State.debitarCaja(persona, bolsillo, montoParaCaja,
         { tipo: 'proveedor', referencia: loteId, descripcion: `Costo del lote: ${desc}` });
+      if (!debitado) return;   // la plata no salió de la caja: el costo NO se registra
     }
 
-    await DB.guardarLotePago(loteId, {
+    const anotado = await DB.guardarLotePago(loteId, {
       tipo: 'costo', montoUsd, montoUsdt: 0, comisionPct: 0, comisionUsd: 0,
       moneda, persona: persona || '', bolsillo: persona ? bolsillo : '', personaDest: '', bolsilloDestino: '', fecha, notas: desc
     });
+    if (!anotado) {
+      let devuelta = true;
+      if (persona) {
+        const esARS = bolsillo.startsWith('ARS'), esUSDT = bolsillo === 'USDT';
+        const montoCaja = esARS ? (moneda === 'ARS' ? monto : montoUsd * (State.refBlue || 1)) : (esUSDT ? (moneda === 'USDT' ? monto : montoUsd) : montoUsd);
+        devuelta = await State.acreditarCaja(persona, bolsillo, montoCaja,
+          { tipo: 'proveedor', referencia: loteId, descripcion: `Reverso: el costo del lote ${loteId} no se pudo registrar` });
+      }
+      toast(devuelta
+        ? 'No se pudo registrar el costo en el lote; se devolvió la plata a la caja. Probá de nuevo.'
+        : '⚠️ ATENCIÓN: el costo NO quedó registrado pero la plata YA salió de la caja y no se pudo devolver. Corregí el saldo a mano desde Cajas.');
+      return;
+    }
 
     document.getElementById('prov-costo-overlay')?.remove();
     toast('Costo registrado');
@@ -1623,8 +1661,16 @@ const Proveedores = {
       }
     }
 
-    await DB.actualizarEstadoLote(loteId, 'recibido', fecha);
+    const marcado = await DB.actualizarEstadoLote(loteId, 'recibido', fecha);
     document.getElementById('prov-recep-overlay')?.remove();
+    if (!marcado) {
+      // El stock ya se dio de alta pero el lote sigue figurando sin recibir: repetir
+      // la recepción lo duplicaría. Se avisa en vez de mostrar éxito.
+      toast('⚠️ ATENCIÓN: los productos ya entraron al stock, pero el lote NO quedó marcado como recibido. NO lo recibas otra vez (duplicarías el stock): marcalo a mano o avisá.', 'error');
+      this.renderKpis();
+      this.renderContent();
+      return;
+    }
     if (errores > 0) {
       toast(`⚠️ ${errores} item(s) no se pudieron agregar al stock. Revisá el historial.`, 'error');
     } else {
@@ -1634,40 +1680,69 @@ const Proveedores = {
     this.renderContent();
   },
 
+  // Movimientos de caja que deshacen UN pago del lote. Es la única fuente de
+  // importes y claves para los dos caminos de reverso (pago por pago y orden
+  // completa): como comparten clave, si pidieran importes distintos la base
+  // rechazaría el segundo. Las claves salen del id permanente del pago.
+  // Nota: el importe en pesos de un pago en ARS se reconstruye con el blue de HOY
+  // (no se guardó la cotización); si el blue cambia entre un intento y su reintento
+  // la base rechaza el 2º pedido con aviso en vez de devolver dos veces.
+  _movsReversoPago(pg) {
+    const ref = { tipo: 'proveedor', referencia: pg.loteId };
+    const clave = `lote-revertir-${pg.id}`;
+    const movs = [];
+    if (pg.tipo === 'conversion') {
+      // Devolver USD al origen, quitar USDT del destino
+      if (pg.persona && pg.bolsillo) {
+        movs.push({ persona: pg.persona, bolsillo: pg.bolsillo, delta: +pg.montoUsd,
+          ref: { ...ref, clave, descripcion: 'Se revirtió una conversión a USDT' } });
+      }
+      if ((pg.personaDest || pg.persona)) {
+        movs.push({ persona: pg.personaDest || pg.persona, bolsillo: pg.bolsilloDestino || 'USDT', delta: -pg.montoUsdt,
+          ref: { ...ref, clave: `${clave}-2`, descripcion: 'Se revirtió una conversión a USDT' } });
+      }
+    } else if (pg.tipo === 'devolucion') {
+      // La devolución acreditó la caja → se debita de vuelta
+      const monto = (pg.moneda === 'USDT' && pg.montoUsdt) ? pg.montoUsdt : pg.montoUsd;
+      if (pg.persona && pg.bolsillo) {
+        movs.push({ persona: pg.persona, bolsillo: pg.bolsillo, delta: -monto,
+          ref: { ...ref, clave, descripcion: 'Reverso de una devolución del proveedor' } });
+      }
+    } else if (['pago_proveedor', 'costo', 'envio'].includes(pg.tipo) && pg.persona && pg.bolsillo) {
+      // El pago/costo debitó la caja en la moneda original → se acredita de vuelta
+      const monto = pg.moneda === 'ARS'
+        ? pg.montoUsd * (State.refBlue || 1)
+        : pg.moneda === 'USDT' ? (pg.montoUsdt || pg.montoUsd) : pg.montoUsd;
+      movs.push({ persona: pg.persona, bolsillo: pg.bolsillo, delta: +monto,
+        ref: { ...ref, clave, descripcion: 'Reverso de pago a proveedor' } });
+    }
+    // credito_aplicado no toca cajas.
+    return movs;
+  },
+
+  // Devuelve true si TODA la plata volvió a su lugar. Cada reverso lleva una
+  // clave ESTABLE (pago del lote + pata): si una caja falla, las demás se
+  // devuelven igual y al repetir la acción solo se reintenta la que faltó, sin
+  // devolver dos veces las que ya volvieron. La orden no se cancela/borra
+  // mientras falte alguna (dejaría movimientos de caja sin orden que los explique).
   async _revertirPagosCaja(loteId) {
     const pagos = (State.lotePagos || []).filter(p => p.loteId === loteId);
-    for (const pg of pagos) {
-      // Todo por el motor central, para que el reverso quede en el libro.
-      const ref = { tipo: 'proveedor', referencia: loteId };
-      if (pg.tipo === 'conversion') {
-        // Devolver USD al origen, quitar USDT al destino
-        if (pg.persona && pg.bolsillo) {
-          await State.acreditarCaja(pg.persona, pg.bolsillo, pg.montoUsd,
-            { ...ref, descripcion: 'Se revirtió una conversión a USDT' });
-        }
-        if (pg.personaDest && pg.bolsilloDestino) {
-          await State.debitarCaja(pg.personaDest, pg.bolsilloDestino, pg.montoUsdt,
-            { ...ref, descripcion: 'Se revirtió una conversión a USDT' });
-        }
-      } else if (['pago_proveedor', 'costo', 'envio'].includes(pg.tipo) && pg.persona && pg.bolsillo) {
-        // Devolver el monto en la moneda original al bolsillo
-        const montoOriginal = pg.moneda === 'ARS'
-          ? pg.montoUsd * (State.refBlue || 1)
-          : pg.moneda === 'USDT' ? pg.montoUsdt : pg.montoUsd;
-        await State.acreditarCaja(pg.persona, pg.bolsillo, montoOriginal,
-          { ...ref, descripcion: 'Se revirtió un pago del lote' });
-      }
-      // credito_aplicado no toca cajas — se restaura aparte más abajo.
-    }
+    // Mismo constructor que «Revertir» pago por pago: los dos caminos comparten la
+    // clave de cada pago, así que TIENEN que pedir exactamente el mismo importe.
+    const movs = pagos.flatMap(pg => this._movsReversoPago(pg));
+    if (!(await State.moverVarias(movs, { atomico: false }))) return false;
 
     // Restaurar el saldo a favor que se haya usado en este lote: al cancelar
     // o eliminar la orden, ese crédito con el proveedor vuelve a estar
     // disponible para otra compra (el saldo generado por sobrepago, en
     // cambio, NO se toca acá: esa plata de verdad salió de la caja).
     const creditosAplicados = (State.proveedorCreditos || []).filter(c => c.loteId === loteId && c.tipo === 'aplicado');
+    let creditosOk = true;
     for (const c of creditosAplicados) {
-      await DB.eliminarProveedorCredito(c.id);
+      if (!(await DB.eliminarProveedorCredito(c.id))) creditosOk = false;
     }
+    if (!creditosOk) toast('⚠️ La plata ya volvió a las cajas, pero no se pudo restaurar el saldo a favor usado. Volvé a intentar: la plata no se devuelve dos veces.');
+    return creditosOk;
   },
 
   modalEditarItems(loteId) {
@@ -1849,14 +1924,23 @@ const Proveedores = {
     const notas = document.getElementById('dev-notas')?.value || '';
     if (!persona || !bolsillo || !monto) { toast('Completá todos los campos.'); return; }
 
-    // Acreditar en la caja
-    State.acreditarCaja(persona, bolsillo, monto, { tipo: 'proveedor', descripcion: 'Movimiento con proveedor' });
+    // Acreditar en la caja. Si la plata no entra, la devolución NO se registra.
+    const acreditado = await State.acreditarCaja(persona, bolsillo, monto, { tipo: 'proveedor', descripcion: 'Movimiento con proveedor' });
+    if (!acreditado) return;
 
     // Registrar como movimiento en el lote (tipo 'devolucion')
-    await DB.guardarLotePago(loteId, {
+    const anotada = await DB.guardarLotePago(loteId, {
       tipo: 'devolucion', montoUsd: monto, moneda: 'USD',
       persona, bolsillo, notas: notas || 'Devolución parcial del proveedor', fecha: new Date().toISOString().slice(0,10)
     });
+    if (!anotada) {
+      const sacada = await State.debitarCaja(persona, bolsillo, monto,
+        { tipo: 'proveedor', referencia: loteId, descripcion: `Reverso: la devolución del lote ${loteId} no se pudo registrar` });
+      toast(sacada
+        ? 'No se pudo registrar la devolución en el lote; se sacó la plata de la caja. Probá de nuevo.'
+        : `⚠️ ATENCIÓN: la devolución NO quedó registrada pero la plata YA entró a la caja de ${persona} y no se pudo sacar. Corregí el saldo a mano desde Cajas.`);
+      return;
+    }
 
     document.getElementById('prov-devolucion-overlay')?.remove();
     toast(`${State.fmtUSD(monto)} acreditados en ${persona} — ${bolsillo}.`);
@@ -1878,31 +1962,30 @@ const Proveedores = {
 
     if (!confirm(mensajes[pg.tipo] || '¿Revertir este movimiento?')) return;
 
-    // montoReal = monto en la moneda original que se movió en la caja
-    const montoReal = (pg.moneda === 'USDT' && pg.montoUsdt) ? pg.montoUsdt : pg.montoUsd;
-
-    if (pg.tipo === 'devolucion') {
-      // La devolución acreditó la caja en USD → debitamos de vuelta
-      if (pg.persona) State.debitarCaja(pg.persona, pg.bolsillo, montoReal, { tipo: 'proveedor', descripcion: 'Pago a proveedor' });
-    } else if (pg.tipo === 'costo' || pg.tipo === 'envio') {
-      // El costo debitó la caja en la moneda original → acreditamos de vuelta
-      if (pg.persona) State.acreditarCaja(pg.persona, pg.bolsillo, montoReal, { tipo: 'proveedor', descripcion: 'Reverso de pago a proveedor' });
-    } else if (pg.tipo === 'pago_proveedor') {
-      // El pago debitó la caja en la moneda original → acreditamos de vuelta
-      if (pg.persona) State.acreditarCaja(pg.persona, pg.bolsillo, montoReal, { tipo: 'proveedor', descripcion: 'Reverso de pago a proveedor' });
-    } else if (pg.tipo === 'conversion') {
-      // Devolver USD al origen, quitar USDT del destino
-      if (pg.persona) await State.acreditarCaja(pg.persona, pg.bolsillo, pg.montoUsd, { tipo: 'proveedor', descripcion: 'Reverso de pago a proveedor' });
-      if (pg.personaDest || pg.persona) await State.debitarCaja(pg.personaDest || pg.persona, pg.bolsilloDestino || 'USDT', pg.montoUsdt, { tipo: 'proveedor', descripcion: 'Reverso de pago a proveedor (USDT)' });
-    } else if (pg.tipo === 'credito_aplicado') {
+    // Cada tipo se traduce a sus movimientos de caja (mismo constructor que usa
+    // cancelar/eliminar la orden) y se aplican TODOS: si la caja no devuelve la
+    // plata, el registro del lote NO se borra (borrarlo dejaría el movimiento de
+    // caja sin ningún registro que lo explique).
+    const movs = this._movsReversoPago(pg);
+    if (movs.length && !(await State.moverVarias(movs, { atomico: false }))) {
+      toast('El movimiento NO se revirtió del todo: alguna caja no devolvió la plata. Volvé a tocar «Revertir»: lo que ya volvió no se repite.');
+      return;
+    }
+    if (pg.tipo === 'credito_aplicado') {
       // No hay caja que tocar: se elimina el consumo de crédito, así el
       // saldo a favor con el proveedor vuelve a subir en el mismo monto.
       const aplicado = (State.proveedorCreditos || [])
         .find(c => c.loteId === loteId && c.tipo === 'aplicado' && Math.abs(c.montoUsd - pg.montoUsd) < 0.01);
-      if (aplicado) await DB.eliminarProveedorCredito(aplicado.id);
+      if (aplicado && !(await DB.eliminarProveedorCredito(aplicado.id))) {
+        toast('⚠️ No se pudo restaurar el saldo a favor usado. Volvé a tocar «Revertir».');
+        return;
+      }
     }
 
-    await DB.eliminarLotePago(pagoId);
+    if (!(await DB.eliminarLotePago(pagoId))) {
+      toast('⚠️ La plata ya volvió a las cajas, pero el pago no se pudo borrar del lote. Volvé a tocar «Revertir»: no se devuelve dos veces.');
+      return;
+    }
     toast('Movimiento revertido y saldo restaurado.');
     this.renderContent();
   },
@@ -2067,8 +2150,11 @@ const Proveedores = {
 
   async cancelarLote(loteId) {
     if (!confirm('¿Cancelar esta orden? Se revertirán todos los movimientos de caja registrados.')) return;
-    await this._revertirPagosCaja(loteId);
-    await DB.actualizarEstadoLote(loteId, 'cancelado');
+    if (!(await this._revertirPagosCaja(loteId))) { toast('La orden NO se canceló: no se pudo devolver la plata a las cajas (mirá el aviso anterior).'); return; }
+    if (!(await DB.actualizarEstadoLote(loteId, 'cancelado'))) {
+      toast('⚠️ La plata ya volvió a las cajas, pero no se pudo marcar la orden como cancelada. Volvé a tocar «Cancelar»: la plata no se devuelve dos veces.');
+      return;
+    }
     toast('Orden cancelada y movimientos de caja revertidos');
     this.renderKpis();
     this.renderContent();
@@ -2076,7 +2162,7 @@ const Proveedores = {
 
   async eliminarLote(loteId) {
     if (!confirm('¿Eliminar esta orden definitivamente? Se revertirán los movimientos de caja. Esta acción no se puede deshacer.')) return;
-    await this._revertirPagosCaja(loteId);
+    if (!(await this._revertirPagosCaja(loteId))) { toast('La orden NO se eliminó: no se pudo devolver la plata a las cajas (mirá el aviso anterior).'); return; }
     const ok = await DB.eliminarLote(loteId);
     if (ok) {
       toast('Orden eliminada y movimientos de caja revertidos');

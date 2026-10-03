@@ -226,11 +226,22 @@ const Adelantos = {
 
     // Debitar la caja por el motor central: queda en el libro y no se recorta
     // en 0 (recortar hacía desaparecer la diferencia cuando el saldo no alcanzaba).
-    await State.debitarCaja(persona, bolsillo, a.monto,
+    const montoCaja = State.cent(a.monto);
+    const debitado = await State.debitarCaja(persona, bolsillo, montoCaja,
       { tipo: 'adelanto', referencia: id, descripcion: `Cobro del adelanto: ${a.concepto || a.motivo || 'adelanto de socio'}` });
+    if (!debitado) return;   // la plata no salió de la caja: el adelanto NO se marca como cobrado
 
     // Marcar cobrado
-    await DB.cobrarAdelanto(id, fecha, cajaDebito);
+    const marcado = await DB.cobrarAdelanto(id, fecha, cajaDebito);
+    if (!marcado) {
+      // La plata salió pero el adelanto no quedó como cobrado: se devuelve a la caja.
+      const devuelta = await State.acreditarCaja(persona, bolsillo, montoCaja,
+        { tipo: 'adelanto', referencia: id, descripcion: 'Se deshizo el cobro de un adelanto que no se pudo guardar' });
+      toast(devuelta
+        ? 'No se pudo registrar el cobro del adelanto; la plata volvió a la caja. Probá de nuevo.'
+        : `⚠️ ATENCIÓN: el adelanto NO quedó como cobrado pero la plata ya salió de la caja de ${persona} y no se pudo devolver. Corregí el saldo a mano desde Cajas.`);
+      return;
+    }
     const idx = State.adelantos.findIndex(x => x.id == id);
     if (idx !== -1) {
       State.adelantos[idx] = { ...State.adelantos[idx], estado: 'cobrado', fechaCobro: fecha, cajaDebito };

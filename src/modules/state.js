@@ -132,11 +132,11 @@ const State = {
   _colaCaja: {},   // una fila de espera por caja, para no pisar escrituras
 
   async _moverSaldo(persona, bolsillo, delta, ref) {
-    if (!persona || !bolsillo || !delta) return;
-    // Los movimientos de una misma caja se guardan DE A UNO. Sin esto, dos
-    // pagos de la misma venta a la misma caja se disparaban en paralelo y la
-    // base podía quedarse con el saldo del que terminara último, perdiendo el
-    // otro. En pantalla se veía bien, y el descuadre aparecía al recargar.
+    if (!delta) return true;                  // nada que mover
+    if (!persona || !bolsillo) return false;
+    // Los movimientos de una misma caja se mandan DE A UNO desde esta pestaña,
+    // para que la pantalla refleje el orden real. (Entre pestañas distintas ya
+    // no hace falta: la base los suma de forma atómica.)
     const clave = `${persona}||${bolsillo}`;
     const anterior = this._colaCaja[clave] || Promise.resolve();
     const turno = anterior
@@ -146,6 +146,112 @@ const State = {
     return turno;
   },
 
+  // Redondeo a centavos, el mismo que usa la base. Quien arme un movimiento Y su
+  // reverso debe usar ESTE valor para ambos, así el reverso devuelve exactamente
+  // lo que entró (+1,125 entra como +1,13: el reverso tiene que ser −1,13).
+  cent(n) { return Math.round((Number(n) + Number.EPSILON) * 100) / 100; },
+
+  // Aviso de "falta la migración": se muestra UNA vez por sesión. Pero NO se
+  // recuerda que la función falta: cada movimiento vuelve a probarla, así en
+  // cuanto se corre la migración las pestañas abiertas pasan solas al camino
+  // atómico (si se recordara, una pestaña vieja seguiría escribiendo saldos
+  // absolutos y pisando a las demás aun con la migración ya hecha).
+  _avisoMigracionMostrado: false,
+  _avisarFaltaMigracion() {
+    if (this._avisoMigracionMostrado) return;
+    this._avisoMigracionMostrado = true;
+    if (typeof toast === 'function') {
+      toast('⚠️ Falta correr la migración caja_aplicar_delta en Supabase: los movimientos de caja siguen funcionando, pero con el método viejo (dos pestañas pueden pisarse).');
+    }
+  },
+
+  // Identifica UN movimiento. Si la respuesta de la base se pierde y se
+  // reintenta con la misma clave, la base no lo aplica dos veces.
+  // Si quien llama pasa `ref.clave`, esa clave es ESTABLE: repetir la misma
+  // operación (por ejemplo, reintentar una anulación después de recargar) manda la
+  // misma clave y la base no mueve la plata dos veces. Se usa en las reversiones,
+  // donde el reintento es lo normal cuando falló el paso posterior.
+  _claveMovimiento(ref) {
+    if (ref && ref.clave) return String(ref.clave);
+    if (typeof crypto !== 'undefined' && crypto.randomUUID) return crypto.randomUUID();
+    return 'm-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 10);
+  },
+
+  // ── Dudas de red ──────────────────────────────────────────────────────
+  // Cuando no llega la respuesta de la base NO se adivina. Se le pregunta a la
+  // base, por la clave del movimiento, si se aplicó: si se aplicó lo informa, y
+  // si NO se aplicó lo cancela para siempre (un pedido viejo que llegara tarde
+  // ya no se acepta). Solo si tampoco hay red para preguntar queda "sin
+  // resolver": se guarda en el navegador y se cierra apenas vuelva la conexión.
+  //   → { estado:'aplicada', saldoPost } | { estado:'cancelada' } | { estado:'sin_resolver' }
+  async _cerrarDudaCaja(claveResolver, descripcion) {
+    const res = await DB.resolverClaveCaja(claveResolver);
+    if (res?.estado === 'aplicada') return { estado: 'aplicada', saldoPost: res.saldoPost };
+    if (res?.estado === 'cancelada') return { estado: 'cancelada' };
+    const guardado = this._guardarPendienteCaja({ claveResolver, descripcion, desde: new Date().toISOString() });
+    if (!guardado && typeof toast === 'function') {
+      toast(`⚠️ OJO: este navegador no dejó guardar el recordatorio del movimiento "${descripcion}". Se recuerda solo mientras esta pestaña siga abierta. Anotalo y, apenas haya conexión, revisalo en Cajas.`);
+    }
+    return { estado: 'sin_resolver' };
+  },
+
+  // La lista de movimientos sin confirmar vive en el navegador (localStorage) Y en
+  // memoria: si el navegador no deja guardar (modo privado, cuota llena), la
+  // memoria igual los retiene mientras la pestaña siga abierta.
+  _pendientesMemoria: [],
+  _leerPendientesCaja() {
+    let lista = [];
+    try { lista = JSON.parse(localStorage.getItem('im_caja_pendientes') || '[]'); } catch (e) { lista = []; }
+    const vistas = new Set(lista.map(x => x.claveResolver));
+    for (const m of this._pendientesMemoria) if (!vistas.has(m.claveResolver)) lista.push(m);
+    return lista;
+  },
+  // Devuelve true si quedó guardado en el navegador (no solo en memoria).
+  _escribirPendientesCaja(lista) {
+    this._pendientesMemoria = lista.slice();
+    try { localStorage.setItem('im_caja_pendientes', JSON.stringify(lista)); return true; }
+    catch (e) { console.error('No se pudo guardar la lista de movimientos pendientes de confirmar:', e); return false; }
+  },
+  // Leer-modificar-escribir SIN ningún await en el medio: no puede intercalarse
+  // con otra modificación de esta pestaña.
+  _guardarPendienteCaja(p) {
+    const lista = this._leerPendientesCaja().filter(x => x.claveResolver !== p.claveResolver);
+    lista.push(p);
+    return this._escribirPendientesCaja(lista);
+  },
+  _quitarPendienteCaja(claveResolver) {
+    // Se vuelve a leer la lista ACTUAL y se saca solo esta clave: lo que se haya
+    // agregado mientras se esperaba la red no se pierde.
+    this._escribirPendientesCaja(this._leerPendientesCaja().filter(x => x.claveResolver !== claveResolver));
+  },
+  // Se llama al abrir el CRM y cuando vuelve la conexión. Una sola corrida a la vez.
+  resolverPendientesCaja() {
+    if (this._resolviendoPendientes) return this._resolviendoPendientes;
+    this._resolviendoPendientes = (async () => {
+      for (const p of this._leerPendientesCaja()) {
+        const res = await DB.resolverClaveCaja(p.claveResolver);
+        if (!res) continue;                               // sigue sin red: queda para después
+        this._quitarPendienteCaja(p.claveResolver);
+        if (typeof toast === 'function') {
+          toast(res.estado === 'aplicada'
+            ? `⚠️ El movimiento de caja "${p.descripcion}" SÍ se había aplicado, aunque en su momento se informó que no se pudo confirmar. Revisá la operación que lo generó (gasto, venta, traspaso…) y corregila a mano si hace falta.`
+            : `Se confirmó que el movimiento de caja "${p.descripcion}" NO se aplicó (quedó cancelado).`);
+        }
+      }
+      return this._leerPendientesCaja().length;
+    })().finally(() => { this._resolviendoPendientes = null; });
+    return this._resolviendoPendientes;
+  },
+  iniciarVigilanciaCaja() {
+    this.resolverPendientesCaja();
+    if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') {
+      window.addEventListener('online', () => this.resolverPendientesCaja());
+    }
+  },
+
+  // Devuelve true si el movimiento quedó aplicado y confirmado por la base, y
+  // false si no (rechazado, o sin poder confirmar). Quien llame puede ignorarlo,
+  // pero los flujos que mueven plata entre dos cajas deberían mirarlo.
   async _aplicarSaldo(persona, bolsillo, delta, ref) {
     if (!this.cajas[persona]) this.cajas[persona] = {};
     // Redondear a centavos: los saldos venían con toda la precisión del
@@ -154,26 +260,94 @@ const State = {
     // dar una alarma de descuadre falsa.
     const cent = n => Math.round((Number(n) + Number.EPSILON) * 100) / 100;
     delta = cent(delta);
-    if (!delta) return;
+    if (!delta) return true;
+
     const previo = this.cajas[persona][bolsillo] || 0;
-    const saldoPost = cent(previo + delta);
+    this.cajas[persona][bolsillo] = cent(previo + delta);   // se ve al instante
+
+    // La base suma el delta y anota el libro en UNA transacción, y devuelve el
+    // saldo real que quedó. Ese saldo manda sobre el que calculó la pantalla:
+    // si otra pestaña movió esta misma caja, acá se corrige solo.
+    const claveBase = this._claveMovimiento(ref);
+    let clave = claveBase;
+    let r = await DB.aplicarDeltaCaja(persona, bolsillo, delta, ref, clave);
+    // Una clave CANCELADA (una duda anterior de red) significa que ese intento
+    // comprobadamente nunca se aplicó: se repite con una versión nueva de la clave.
+    for (let v = 2; r.motivo === 'clave_cancelada' && v <= 4; v++) {
+      clave = `${claveBase}:v${v}`;
+      r = await DB.aplicarDeltaCaja(persona, bolsillo, delta, ref, clave);
+    }
+    if (r.ok) {
+      this.cajas[persona][bolsillo] = r.saldoPost;
+      return true;
+    }
+
+    if (r.motivo === 'rpc_ausente') {
+      this.cajas[persona][bolsillo] = previo;
+      this._avisarFaltaMigracion();
+      // El camino viejo no guarda ni mira la clave: una reversión con clave estable
+      // (que se repite "sin miedo" cuando falla el paso siguiente) la volvería a
+      // aplicar. Sin la migración esas operaciones se bloquean en vez de arriesgarlo.
+      if (ref && ref.clave) {
+        if (typeof toast === 'function') toast('Esta operación (anular / eliminar / cancelar) necesita la migración caja_aplicar_delta en Supabase para no devolver la plata dos veces. NO se hizo nada: corré la migración y volvé a intentar.');
+        return false;
+      }
+      return this._aplicarSaldoViejo(persona, bolsillo, delta, ref);
+    }
+
+    if (r.motivo === 'red') {
+      // No llegó la respuesta. En vez de suponer, se cierra la duda por la clave.
+      const d = await this._cerrarDudaCaja(clave, `${persona} · ${bolsillo} ${delta > 0 ? '+' : ''}${delta}`);
+      if (d.estado === 'aplicada') {
+        this.cajas[persona][bolsillo] = d.saldoPost;     // sí se había aplicado
+        return true;
+      }
+      this.cajas[persona][bolsillo] = previo;
+      if (typeof toast === 'function') {
+        toast(d.estado === 'cancelada'
+          ? `⚠️ No se pudo guardar el saldo de ${persona} · ${bolsillo}. El movimiento NO se aplicó.`
+          : `⚠️ Sin conexión: no se pudo confirmar el movimiento de ${persona} · ${bolsillo}. Queda pendiente: apenas vuelva la conexión el sistema comprueba si llegó a aplicarse y te avisa. No lo repitas a mano.`);
+      }
+      return false;
+    }
+
+    // Rechazado por la base: no se aplicó nada (ni saldo ni libro).
+    this.cajas[persona][bolsillo] = previo;
+    if (typeof toast === 'function') {
+      toast(`⚠️ No se pudo guardar el saldo de ${persona} · ${bolsillo}. El movimiento NO se aplicó.`);
+    }
+    return false;
+  },
+
+  // Camino anterior: leer → sumar acá → escribir el saldo absoluto, y el libro
+  // aparte. Queda SOLO como respaldo mientras la migración no esté corrida.
+  async _aplicarSaldoViejo(persona, bolsillo, delta, ref) {
+    const cent = n => Math.round((Number(n) + Number.EPSILON) * 100) / 100;
+    const previo = this.cajas[persona][bolsillo] || 0;
+    // Aun en el camino viejo se parte del saldo REAL de la base y no del que
+    // recuerda esta pestaña: así la ventana para pisar a otra pestaña pasa de
+    // "todo el tiempo que la pestaña lleva abierta" a unos milisegundos. Si no
+    // se puede leer, no se mueve plata a ciegas.
+    const real = await DB.leerSaldoCaja(persona, bolsillo);
+    if (real == null) {
+      if (typeof toast === 'function') {
+        toast(`⚠️ No se pudo leer el saldo real de ${persona} · ${bolsillo}. El movimiento NO se aplicó.`);
+      }
+      return false;
+    }
+    const saldoPost = cent(real + delta);
     this.cajas[persona][bolsillo] = saldoPost;
 
     // Si la base no confirma el guardado, volvemos atrás en pantalla y avisamos.
-    // Antes se disparaba sin esperar respuesta: ante un fallo, la pantalla
-    // mostraba un saldo y la base tenía otro, sin que nadie se enterara.
     const guardado = await DB.actualizarSaldoCaja(persona, bolsillo, saldoPost);
     if (!guardado) {
       this.cajas[persona][bolsillo] = previo;
       if (typeof toast === 'function') {
         toast(`⚠️ No se pudo guardar el saldo de ${persona} · ${bolsillo}. El movimiento NO se aplicó.`);
       }
-      return;
+      return false;
     }
 
-    // Se espera la escritura del libro: antes salía sin await y el error se
-    // tragaba en silencio, así que un fallo dejaba el saldo movido y el libro
-    // sin la fila — justo el descuadre que el libro existe para detectar.
     const anotado = await DB.registrarMovimientoCaja({
       persona, bolsillo, delta, saldoPost,
       tipo: ref?.tipo || 'otro',
@@ -183,15 +357,152 @@ const State = {
     if (!anotado && typeof toast === 'function') {
       toast(`⚠️ El saldo de ${persona} · ${bolsillo} se guardó, pero no quedó anotado en el libro. Revisá el control de cuadre.`);
     }
+    return true;
   },
 
-  // Mueve saldo entre bolsillos (misma o distinta persona)
+  // Mueve saldo entre bolsillos (misma o distinta persona). true SOLO si las
+  // DOS patas quedaron aplicadas y confirmadas.
+  //
+  // Va por UNA función atómica de la base (caja_mover_atomico): salen y entran
+  // las dos patas en la misma transacción, o no pasa nada. Antes eran dos
+  // pedidos sueltos y, si el segundo fallaba, la plata quedaba debitada y nunca
+  // acreditada (o al revés: acreditada sin haber salido del origen).
   async moverCaja(personaOrigen, bolsilloOrigen, montoOrigen, personaDestino, bolsilloDestino, montoDestino, ref) {
+    const cent = n => Math.round((Number(n) + Number.EPSILON) * 100) / 100;
     const r = { tipo: 'movimiento', ...(ref || {}) };
-    await this._moverSaldo(personaOrigen, bolsilloOrigen, -montoOrigen,
-      { ...r, descripcion: r.descripcion || `Pasa a ${personaDestino} · ${bolsilloDestino}` });
-    await this._moverSaldo(personaDestino, bolsilloDestino, +montoDestino,
-      { ...r, descripcion: r.descripcion || `Viene de ${personaOrigen} · ${bolsilloOrigen}` });
+    const mo = cent(montoOrigen), md = cent(montoDestino);
+    if (!mo && !md) return true;                    // nada que mover
+    if (!(mo > 0 && md > 0) || !personaOrigen || !bolsilloOrigen || !personaDestino || !bolsilloDestino) {
+      if (typeof toast === 'function') toast('⚠️ No se pudo mover la plata: faltan datos o los montos de origen y destino tienen que ser mayores que cero.');
+      return false;
+    }
+    const descO = r.descripcionOrigen || r.descripcion || `Pasa a ${personaDestino} · ${bolsilloDestino}`;
+    const descD = r.descripcionDestino || r.descripcion || `Viene de ${personaOrigen} · ${bolsilloOrigen}`;
+
+    // Se encola detrás de lo que esté pendiente en LAS DOS cajas, para que la
+    // pantalla refleje el orden real de los movimientos de esta pestaña.
+    const k1 = `${personaOrigen}||${bolsilloOrigen}`, k2 = `${personaDestino}||${bolsilloDestino}`;
+    const previos = [k1, k2].map(k => (this._colaCaja[k] || Promise.resolve()).catch(() => {}));
+    const turno = Promise.all(previos).then(() =>
+      this._moverAtomico(personaOrigen, bolsilloOrigen, mo, personaDestino, bolsilloDestino, md, descO, descD, r));
+    this._colaCaja[k1] = turno;
+    this._colaCaja[k2] = turno;
+    return turno;
+  },
+
+  async _moverAtomico(po, bo, mo, pd, bd, md, descO, descD, r) {
+    const cent = n => Math.round((Number(n) + Number.EPSILON) * 100) / 100;
+    if (!this.cajas[po]) this.cajas[po] = {};
+    if (!this.cajas[pd]) this.cajas[pd] = {};
+    const prevO = this.cajas[po][bo] || 0, prevD = this.cajas[pd][bd] || 0;
+    this.cajas[po][bo] = cent(prevO - mo);          // se ve al instante
+    this.cajas[pd][bd] = cent(prevD + md);
+
+    const claveBase = this._claveMovimiento(r);
+    let clave = claveBase;
+    const llamar = () => DB.moverCajaAtomico(
+      { persona: po, bolsillo: bo, monto: mo, descripcion: descO },
+      { persona: pd, bolsillo: bd, monto: md, descripcion: descD },
+      r, clave);
+    let res = await llamar();
+    for (let v = 2; res.motivo === 'clave_cancelada' && v <= 4; v++) {
+      clave = `${claveBase}:v${v}`;
+      res = await llamar();
+    }
+
+    if (res.ok) {
+      // Manda el saldo REAL que devolvió la base, no el que calculó la pantalla.
+      this.cajas[po][bo] = res.saldoOrigen;
+      this.cajas[pd][bd] = res.saldoDestino;
+      return true;
+    }
+
+    if (res.motivo === 'rpc_ausente') {
+      // Sin la función atómica NO se hacen traspasos: con dos pedidos sueltos, si el
+      // segundo falla la plata queda debitada y nunca acreditada. Es preferible que
+      // no se pueda a que se pierda. Corriendo la migración se habilita solo.
+      this.cajas[po][bo] = prevO; this.cajas[pd][bd] = prevD;
+      if (typeof toast === 'function') {
+        toast('⚠️ Los traspasos entre cajas están bloqueados hasta correr la migración caja_aplicar_delta en Supabase (sin ella, un fallo a mitad de camino podría perder plata). No se movió nada.');
+      }
+      return false;
+    }
+
+    if (res.motivo === 'red') {
+      // La misma regla que para una caja: se cierra la duda por la clave de la
+      // primera pata (las dos van en una sola transacción: o están las dos o ninguna).
+      const d = await this._cerrarDudaCaja(clave + ':o', `traspaso ${po} · ${bo} → ${pd} · ${bd} (${mo})`);
+      if (d.estado === 'aplicada') {
+        // El traspaso SÍ se aplicó (lo confirma el asiento de la primera pata). Los
+        // saldos a mostrar son los REALES de la base: otra pestaña pudo haber
+        // movido esas cajas después. Si no se pueden leer, se avisa en vez de
+        // inventar un número.
+        const [realO, realD] = await Promise.all([DB.leerSaldoCaja(po, bo), DB.leerSaldoCaja(pd, bd)]);
+        if (realO != null) this.cajas[po][bo] = realO;
+        if (realD != null) this.cajas[pd][bd] = realD;
+        if ((realO == null || realD == null) && typeof toast === 'function') {
+          toast('⚠️ El traspaso se aplicó, pero no se pudieron leer los saldos reales. Recargá la página antes de hacer otro movimiento o ajuste.');
+        }
+        return true;
+      }
+      this.cajas[po][bo] = prevO; this.cajas[pd][bd] = prevD;
+      if (typeof toast === 'function') {
+        toast(d.estado === 'cancelada'
+          ? `⚠️ No se pudo mover la plata de ${po} · ${bo} a ${pd} · ${bd}. El traspaso NO se aplicó (no se movió nada).`
+          : `⚠️ Sin conexión: no se pudo confirmar el traspaso ${po} · ${bo} → ${pd} · ${bd}. Queda pendiente: apenas vuelva la conexión el sistema comprueba si llegó a aplicarse y te avisa. No lo repitas a mano.`);
+      }
+      return false;
+    }
+
+    // Rechazado por la base: no se movió NADA, ninguna de las dos patas.
+    this.cajas[po][bo] = prevO; this.cajas[pd][bd] = prevD;
+    if (typeof toast === 'function') {
+      toast(`⚠️ No se pudo mover la plata de ${po} · ${bo} a ${pd} · ${bd}. El traspaso NO se aplicó (no se movió nada).`);
+    }
+    return false;
+  },
+
+  // Aplica una LISTA de movimientos de una sola caja cada uno, en orden:
+  //   movs = [{ persona, bolsillo, delta, ref }, …]  (delta + entra, − sale)
+  //
+  // Por defecto es "todo o nada": si uno falla, se DESHACEN los que ya se habían
+  // aplicado (en orden inverso) y devuelve false. Es lo que necesita una venta
+  // con varios pagos: si uno de los cobros no entra a su caja, no puede quedar
+  // otro cobro aplicado de una venta que no se guardó.
+  //
+  // { atomico:false } es para las REVERSIONES: hay que deshacer todo lo posible,
+  // así que sigue con el resto aunque uno falle (y avisa cuál). Devuelve false
+  // si alguno no se pudo.
+  async moverVarias(movs, { atomico = true } = {}) {
+    const hechos = [];
+    const fallidos = [];
+    // Los centavos se normalizan UNA vez y se aplican/deshacen exactamente: si el
+    // deshacer redondeara por su cuenta, +1,125 (que entra como +1,13) volvería
+    // como −1,12 y la caja quedaría 1 centavo corrida.
+    movs = movs.map(m => ({ ...m, delta: this.cent(m.delta) }));
+    for (const m of movs) {
+      const ok = await this._moverSaldo(m.persona, m.bolsillo, m.delta, m.ref);
+      if (ok !== false) { hechos.push(m); continue; }
+      fallidos.push(m);
+      if (atomico) break;
+    }
+    if (!fallidos.length) return true;
+
+    if (atomico) {
+      let noSeDeshizo = 0;
+      for (const h of hechos.reverse()) {
+        const deshecho = await this._moverSaldo(h.persona, h.bolsillo, -h.delta,
+          { tipo: h.ref?.tipo || 'otro', referencia: h.ref?.referencia,
+            descripcion: 'Reverso automático: otro movimiento del mismo grupo no se pudo aplicar' });
+        if (deshecho === false) noSeDeshizo++;
+      }
+      if (noSeDeshizo && typeof toast === 'function') {
+        toast(`⚠️ ${noSeDeshizo} movimiento(s) de caja se aplicaron y NO se pudieron deshacer. Revisá los saldos en Cajas y corregí a mano.`);
+      }
+    } else if (typeof toast === 'function') {
+      toast(`⚠️ ${fallidos.length} de ${movs.length} movimientos de caja NO se pudieron aplicar (${fallidos.map(f => `${f.persona} · ${f.bolsillo}`).join(', ')}). Revisá los saldos y corregí a mano.`);
+    }
+    return false;
   },
 
   acreditarCaja(persona, bolsillo, monto, ref) {
@@ -235,7 +546,9 @@ const State = {
     }
     return removed;
   },
-  restaurarStock(stockId, imei) {
+  // Con { sinPersistir:true } solo toca la copia en memoria: quien llama guarda el
+  // stock él mismo y mira si se guardó (anulaciones, donde un fallo hay que avisarlo).
+  restaurarStock(stockId, imei, { sinPersistir = false } = {}) {
     const item = this.stock.find(s => s.id === stockId || s.id == stockId);
     if (!item) return;
     if (item.imeis && imei) {
@@ -249,7 +562,7 @@ const State = {
       if (item.cantidadDeclarada !== undefined) item.cantidadDeclarada += 1;
     }
     // Si vuelve a tener stock y estaba marcado como vendido, lo regresamos a disponible
-    if (this.getStock(item) > 0 && item.estadoInventario === 'vendido') {
+    if (!sinPersistir && this.getStock(item) > 0 && item.estadoInventario === 'vendido') {
       item.estadoInventario = 'disponible';
       DB.actualizarEstadoInventario(stockId, 'disponible');
     }

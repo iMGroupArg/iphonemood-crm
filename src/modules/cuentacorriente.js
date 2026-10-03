@@ -908,15 +908,30 @@ const CuentaCorriente = {
 
       try {
         const opcion = opciones[idx];
-        if (opcion.tipo === 'deuda') {
-          await this._pagarDeudaManual(opcion.id, monto, moneda, persona, bolsillo, notas, cotizUsada);
-        } else {
-          await this._pagarVenta(opcion.id, monto, moneda, persona, bolsillo);
-        }
-
-        // Acreditar caja en memoria
-        State.acreditarCaja(persona, bolsillo, monto,
+        // La plata entra a la caja ANTES de dar el cobro por registrado. Antes el
+        // cobro se anotaba (y la venta podía cerrarse) y la caja se acreditaba
+        // después sin esperarla ni mirar si había entrado.
+        // A la caja va lo que se tipeó, en la moneda del bolsillo: antes entraba
+        // el equivalente en dólares aun a un bolsillo en pesos (100.000 ARS
+        // quedaban como $93).
+        const montoCaja = esARS ? montoRaw : monto;
+        const entro = await State.acreditarCaja(persona, bolsillo, montoCaja,
           { tipo: 'cuenta_corriente', descripcion: 'Cobro de deuda en cuenta corriente' });
+        if (!entro) throw new Error('No se pudo acreditar la plata en la caja (mirá el aviso anterior). El cobro NO se registró.');
+        try {
+          if (opcion.tipo === 'deuda') {
+            await this._pagarDeudaManual(opcion.id, monto, moneda, persona, bolsillo, notas, cotizUsada);
+          } else {
+            await this._pagarVenta(opcion.id, monto, moneda, persona, bolsillo);
+          }
+        } catch (errRegistro) {
+          // La plata ya había entrado pero el cobro no quedó anotado: se saca.
+          const sacado = await State.debitarCaja(persona, bolsillo, montoCaja,
+            { tipo: 'cuenta_corriente', descripcion: 'Reverso: no se pudo registrar el cobro de cuenta corriente' });
+          throw new Error(sacado
+            ? `${errRegistro.message}. El cobro NO se registró y la plata se sacó de la caja.`
+            : `${errRegistro.message}. ATENCIÓN: el cobro NO se registró pero la plata TODAVÍA está en la caja de ${persona}: sacala a mano.`);
+        }
 
         close();
         // Refrescar cliente actual
@@ -959,7 +974,19 @@ const CuentaCorriente = {
       monto_pagado: nuevoPagado,
       estado: deudaPagada ? 'pagada' : 'activa'
     }).eq('id', deudaId);
-    if (e2) throw e2;
+    if (e2) {
+      // El pago ya estaba insertado pero la deuda no se actualizó: se borra el
+      // pago para no dejar un cobro registrado sin su ingreso de caja (quien
+      // llama devuelve la plata de la caja). Sin esto, reintentar lo duplicaba.
+      if (pagoData?.id) {
+        const { error: eLimpieza } = await supa2.from('deuda_pagos').delete().eq('id', pagoData.id);
+        if (eLimpieza) {
+          console.error('No se pudo limpiar el pago huérfano de deuda_pagos:', eLimpieza);
+          throw new Error(`${e2.message || 'No se pudo actualizar la deuda'} y quedó un registro de pago suelto (deuda_pagos #${pagoData.id}) que no se pudo borrar: borralo a mano`);
+        }
+      }
+      throw e2;
+    }
 
     // Actualizar en memoria
     deuda.montoPagado = nuevoPagado;
@@ -973,10 +1000,14 @@ const CuentaCorriente = {
     if (ventaId) {
       const personaId = DB.personaId(persona);
       if (personaId) {
-        await supa2.from('venta_pagos').insert({
+        const { error: eVP } = await supa2.from('venta_pagos').insert({
           venta_id: ventaId, persona_id: personaId, bolsillo,
           monto: montoUSD, es_tarjeta: false
         });
+        if (eVP) {
+          console.error('No se pudo reflejar el cobro en la venta:', eVP);
+          if (typeof toast === 'function') toast(`⚠️ El cobro quedó registrado en la deuda y en la caja, pero no se pudo reflejar en los pagos de la venta #${ventaId}. Cargalo a mano en esa venta si hace falta.`);
+        }
       }
       // Actualizar en memoria y cerrar venta si saldo cubierto
       const v = (State.ventas || []).find(x => x.id === ventaId);

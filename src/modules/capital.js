@@ -577,6 +577,10 @@ const Capital = {
       toast('Activo actualizado.');
     } else {
       const nuevo = await DB.crearActivoFijo(data);
+      if (!nuevo) {
+        toast(`${nombre} NO se agregó: no se pudo guardar. No se tocó ninguna caja.`);
+        return;
+      }
       if (nuevo) { data.id = nuevo.id; if (!State.activosFijos) State.activosFijos = []; State.activosFijos.push(data); }
 
       // Descontar de la caja seleccionada
@@ -593,8 +597,19 @@ const Capital = {
         }
 
         // Por el motor central, para que el descuento quede en el libro de caja
-        await State.debitarCaja(persona, bolsillo, montoADescontar,
+        const debitado = await State.debitarCaja(persona, bolsillo, montoADescontar,
           { tipo: 'activo_fijo', referencia: data.id, descripcion: `Compra de activo fijo: ${nombre}` });
+        if (!debitado) {
+          // La plata no salió de la caja: el activo no puede quedar cargado como
+          // comprado (inflaría el capital con algo que no se pagó).
+          const borrado = nuevo?.id ? await DB.eliminarActivoFijo(nuevo.id) : true;
+          if (borrado) State.activosFijos = (State.activosFijos || []).filter(x => x !== data && x.id !== data.id);
+          toast(borrado
+            ? `${nombre} NO se agregó: no se pudo descontar de la caja (mirá el aviso anterior).`
+            : `⚠️ ATENCIÓN: ${nombre} quedó cargado como activo pero la plata NO salió de la caja. Eliminá ese activo a mano desde Capital.`);
+          this.renderBody();
+          return;
+        }
         toast(`${nombre} agregado. Se descontaron ${bolsillo.startsWith('ARS') ? '$'+montoADescontar.toLocaleString('es-AR') : 'USD '+valorUSD} de ${persona} — ${bolsillo}.`);
       } else {
         toast(`${nombre} agregado a activos fijos.`);

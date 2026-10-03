@@ -939,10 +939,21 @@ const Reparaciones = {
     const o = State.reparaciones.find(x => x.id === this.currentId);
     if (!o) return;
     const pago = { caja: `${persona}-${bolsillo}`, monto, persona, bolsillo };
-    o.pagos.push(pago);
-    State.acreditarCaja(persona, bolsillo, monto,
+    // Primero la plata y SOLO si entró a la caja se anota el pago en la orden.
+    const entro = await State.acreditarCaja(persona, bolsillo, monto,
       { tipo: 'reparacion', referencia: o.id, descripcion: `Cobro de la reparación ${o.id}` });
-    await DB.agregarPagoReparacion(o.id, pago);
+    if (!entro) return;   // State ya avisó; el cobro NO se registró
+    const pagoId = await DB.agregarPagoReparacion(o.id, pago);
+    if (!pagoId) {
+      const sacado = await State.debitarCaja(persona, bolsillo, monto,
+        { tipo: 'reparacion', referencia: o.id, descripcion: `Reverso: el cobro de la reparación ${o.id} no se pudo guardar` });
+      toast(sacado
+        ? 'No se pudo guardar el cobro en la reparación; se sacó la plata de la caja. Probá de nuevo.'
+        : `⚠️ ATENCIÓN: el cobro NO quedó guardado en la reparación pero la plata YA entró a la caja de ${persona} y no se pudo sacar. Corregí el saldo a mano desde Cajas.`);
+      return;
+    }
+    pago.id = pagoId;
+    o.pagos.push(pago);
     this.renderDetail();
     toast(`${State.fmtARS(monto)} acreditado en caja de ${persona}.`);
   },
@@ -1001,10 +1012,21 @@ const Reparaciones = {
       const persona  = document.getElementById('rep-e-persona')?.value;
       const bolsillo = document.getElementById('rep-e-bolsillo')?.value;
       const pago = { caja: `${persona}-${bolsillo}`, monto: saldo, persona, bolsillo };
-      o.pagos.push(pago);
-      State.acreditarCaja(persona, bolsillo, saldo,
+      // Si el saldo no entra a la caja, el equipo NO se entrega como cobrado.
+      const entro = await State.acreditarCaja(persona, bolsillo, saldo,
         { tipo: 'reparacion', referencia: o.id, descripcion: `Saldo al entregar la reparación ${o.id}` });
-      await DB.agregarPagoReparacion(o.id, pago);
+      if (!entro) return;
+      const pagoId = await DB.agregarPagoReparacion(o.id, pago);
+      if (!pagoId) {
+        const sacado = await State.debitarCaja(persona, bolsillo, saldo,
+          { tipo: 'reparacion', referencia: o.id, descripcion: `Reverso: el saldo de la reparación ${o.id} no se pudo guardar` });
+        toast(sacado
+          ? 'No se pudo guardar el cobro del saldo; se sacó la plata de la caja. La reparación NO se entregó. Probá de nuevo.'
+          : `⚠️ ATENCIÓN: el saldo NO quedó guardado pero la plata YA entró a la caja de ${persona} y no se pudo sacar. Corregí el saldo a mano desde Cajas.`);
+        return;
+      }
+      pago.id = pagoId;
+      o.pagos.push(pago);
     }
     o.estado = 'entregado'; o.equipoDevuelto = true;
     await DB.actualizarReparacion(o);
@@ -1019,18 +1041,51 @@ const Reparaciones = {
     const o = State.reparaciones.find(x => x.id === this.currentId);
     if (!o) return;
     if (!confirm(`¿Cancelar la orden ${o.id}? Los pagos se revertirán en sus cajas y los repuestos de stock volverán al inventario.`)) return;
-    await Promise.all(o.pagos.map(p => State.debitarCaja(p.persona, p.bolsillo, p.monto,
-      { tipo: 'reparacion_cancelada', referencia: o.id, descripcion: `Se canceló la reparación ${o.id}` })));
-    for (const r of (o.repuestos || []).filter(r => r.fromStock && r.stockId)) {
-      const item = State.stock.find(s => s.id === r.stockId);
-      if (item && !item.imeis) { item.cantidad = (item.cantidad || 0) + 1; await DB.actualizarCantidadStock(r.stockId, item.cantidad); }
+    // Cada reverso lleva una clave ESTABLE: la del pago (id permanente que le da la
+    // base), así un cobro nuevo e idéntico nunca reutiliza la clave de uno viejo.
+    // Orden de pasos, pensado para poder repetir «Cancelar» sin perder nada:
+    //  1) plata de vuelta a las cajas (repetible por las claves)
+    //  2) marcar la orden como rechazada (queda guardado que se canceló)
+    //  3) devolver los repuestos al stock (esto SÍ sumaría dos veces si se repitiera)
+    //  4) borrar los pagos y repuestos de la orden
+    // Los pagos y repuestos se borran AL FINAL: hasta no haber repuesto el stock, la
+    // base todavía sabe qué repuestos hay que devolver.
+    if (o.pagos.some(p => !p.id)) {
+      toast('Esta orden tiene un cobro sin identificar (recién cargado): recargá la página y volvé a cancelar.');
+      return;
     }
-    await DB.limpiarMovimientosReparacion(o.id);
-    o.pagos = []; o.repuestos = o.repuestos.filter(r => !r.fromStock);
+    const revertido = await State.moverVarias(o.pagos.map(p => ({
+      persona: p.persona, bolsillo: p.bolsillo, delta: -State.cent(p.monto),
+      ref: { clave: `rep-cancelar-${o.id}-${p.id}`, tipo: 'reparacion_cancelada', referencia: o.id, descripcion: `Se canceló la reparación ${o.id}` } })), { atomico: false });
+    if (!revertido) { toast('La orden NO se canceló del todo: alguna caja no devolvió la plata. Volvé a tocar «Cancelar»: lo que ya volvió no se repite.'); return; }
+    // Si la orden YA figuraba rechazada, el stock se repuso en un intento anterior
+    // (quedó pendiente solo la limpieza): no se vuelve a sumar.
+    const stockYaRepuesto = o.estado === 'rechazado';
+    const previo = { estado: o.estado, equipoDevuelto: o.equipoDevuelto, custodio: o.custodio };
     o.estado = 'rechazado'; o.equipoDevuelto = true; o.custodio = '';
-    await DB.actualizarReparacion(o);
+    if (!(await DB.actualizarReparacion(o))) {
+      Object.assign(o, previo);
+      toast('⚠️ La plata ya volvió a las cajas, pero no se pudo marcar la orden como cancelada. Volvé a tocar «Cancelar»: no se devuelve dos veces.');
+      return;
+    }
+    const avisos = [];
+    for (const r of stockYaRepuesto ? [] : (o.repuestos || []).filter(r => r.fromStock && r.stockId)) {
+      const item = State.stock.find(s => s.id === r.stockId);
+      if (item && !item.imeis) {
+        item.cantidad = (item.cantidad || 0) + 1;
+        let guardado = false;
+        try { guardado = (await DB.actualizarCantidadStock(r.stockId, item.cantidad)) !== false; } catch (e) { console.error(e); }
+        if (!guardado) { item.cantidad -= 1; avisos.push(`no se pudo devolver al stock "${r.nombre || r.stockId}" (sumale 1 a mano)`); }
+      }
+    }
+    if (!(await DB.limpiarMovimientosReparacion(o.id))) {
+      avisos.push('no se pudieron borrar los pagos y repuestos de la orden (la plata YA volvió; borralos a mano)');
+    } else {
+      o.pagos = []; o.repuestos = o.repuestos.filter(r => !r.fromStock);
+    }
     this.renderList(); this.renderDetail();
     toast('Orden cancelada y movimientos revertidos.');
+    if (avisos.length) toast('⚠️ ' + avisos.join(' · '));
   },
 };
 

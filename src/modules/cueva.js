@@ -167,15 +167,19 @@ const Cueva = {
     const o = State.cambios.find(x => x.id == id);
     if (!o) return;
     if (!confirm('¿Eliminar esta operación de cambio? Esto revertirá el movimiento en las cajas de origen y destino.')) return;
-    // Revertir el movimiento de plata entre cajas
-    // Esperar la reversión antes de borrar la operación
-    await Promise.all([
-      State.acreditarCaja(o.origenP, o.origenB, o.entrega,
-        { tipo: 'cueva_anulada', descripcion: 'Se deshizo un cambio de cueva' }),
-      State.debitarCaja(o.destinoP, o.destinoB, o.recibe,
-        { tipo: 'cueva_anulada', descripcion: 'Se deshizo un cambio de cueva' }),
-    ]);
-    await DB.eliminarCambio(id);
+    // Revertir el movimiento de plata entre cajas, en UNA operación atómica
+    // (o se deshacen las dos patas o ninguna). Si no se pudo revertir, la
+    // operación NO se borra: borrarla dejaría la plata movida sin registro.
+    const revertido = await State.moverCaja(o.destinoP, o.destinoB, o.recibe, o.origenP, o.origenB, o.entrega,
+      { clave: `cueva-anular-${id}`, tipo: 'cueva_anulada', descripcion: 'Se deshizo un cambio de cueva' });
+    if (!revertido) return;
+    // El reverso lleva clave estable: si el borrado del registro falla y se
+    // repite, la plata no se devuelve dos veces.
+    const borrado = await DB.eliminarCambio(id);
+    if (!borrado) {
+      toast('⚠️ La plata de esta operación ya volvió a las cajas, pero el registro no se pudo borrar. Volvé a tocar «Eliminar»: no se devuelve dos veces.');
+      return;
+    }
     State.cambios = State.cambios.filter(x => x.id != id);
     this.close();
     this.renderTable();
@@ -315,22 +319,37 @@ const Cueva = {
 
     toast('Guardando operación...');
 
-    // Mover la plata de verdad entre cajas (memoria + base de datos)
-    State.debitarCaja(origenP, origenB, entrega,
-      { tipo: 'cueva', descripcion: 'Cambio de moneda (cueva) — entrega' });
-    State.acreditarCaja(destinoP, destinoB, recibe,
-      { tipo: 'cueva', descripcion: 'Cambio de moneda (cueva) — recibe' });
+    // Mover la plata de verdad entre cajas, en UNA operación atómica: o salen y
+    // entran las dos patas o no se mueve nada. Antes eran dos pedidos sueltos
+    // que ni se esperaban: si fallaba el débito pero entraba el crédito se
+    // creaba plata, y la operación se registraba igual como hecha.
+    const movido = await State.moverCaja(origenP, origenB, entrega, destinoP, destinoB, recibe, {
+      tipo: 'cueva',
+      descripcionOrigen: 'Cambio de moneda (cueva) — entrega',
+      descripcionDestino: 'Cambio de moneda (cueva) — recibe',
+    });
+    if (!movido) return;   // State ya avisó qué pasó; la operación NO se registra
 
     const cotizRef = parseFloat(document.getElementById('cf-cotizref')?.value) || null;
     const vieneDeVenta = this.opType === 'ars-usd' && !!document.getElementById('cf-viene-venta')?.checked;
     const nuevoOp = { tipo: this.opType, entrega, recibe, cotiz, cotizRef, vieneDeVenta, origenP, origenB, destinoP, destinoB };
     const cambioId = await DB.crearCambio(nuevoOp);
+    if (!cambioId) {
+      // La plata ya se movió pero la operación no quedó registrada: se deshace el
+      // movimiento para no dejar plata movida sin operación que la explique.
+      const deshecho = await State.moverCaja(destinoP, destinoB, recibe, origenP, origenB, entrega,
+        { tipo: 'cueva_anulada', descripcion: 'Se deshizo un cambio de cueva que no se pudo guardar' });
+      toast(deshecho
+        ? 'No se pudo guardar la operación; se deshizo el movimiento de caja. Probá de nuevo.'
+        : `⚠️ ATENCIÓN: la operación NO se guardó pero la plata ya se movió entre las cajas de ${origenP} y ${destinoP} y no se pudo deshacer. Corregilo a mano desde Cajas.`);
+      return;
+    }
     Sheets.cambio(nuevoOp);
 
     // fechaISO en el momento de crear: sin esto, la operación no entraba en
     // ningún filtro por período (Hoy/Este mes) hasta recargar la página,
     // porque State.cambiosEnPeriodo() solo cuenta sin fecha en "Todo".
-    State.cambios.unshift({ id: cambioId || Date.now(), fecha: 'Hoy', fechaISO: new Date().toISOString(), ...nuevoOp });
+    State.cambios.unshift({ id: cambioId, fecha: 'Hoy', fechaISO: new Date().toISOString(), ...nuevoOp });
     this.close();
     this.renderTable();
     toast(`Operación guardada. Se debitó de la caja de ${origenP} y se acreditó en la de ${destinoP}. El spread quedó reflejado en el resultado financiero del mes.`);

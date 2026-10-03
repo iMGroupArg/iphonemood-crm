@@ -84,24 +84,37 @@ SET search_path = catalogo_aux, pg_temp AS $$
 $$;
 
 -- ¿Sirve como texto para la landing? Sin blancos en los extremos, de 1 a `p_max` caracteres y
--- SIN caracteres fuera del plano básico (emojis…): JavaScript mide en unidades UTF-16 y un
--- emoji cuenta 2, mientras que length() de Postgres cuenta 1: 21 emojis pasaban de 40 sin
--- que esta validación lo notara. Un texto así se descarta (no tiene sentido como color, ni
--- como capacidad ni como modelo).
+-- compuesto SÓLO por letras latinas (con tildes y ñ), dígitos, espacio simple y . , ' ’ " ( ) / + & -
+-- Es una lista CERRADA a propósito: son nombres de modelo, color y capacidad en castellano, y
+-- así no pasan caracteres de control, blancos raros en el medio, emojis (JavaScript los mide
+-- x2: 21 emojis pasaban de 40) ni alfabetos cuyas mayúsculas y minúsculas se comparan distinto
+-- en Postgres y en JavaScript (sigma final, İ…), que romperían la deduplicación.
 CREATE OR REPLACE FUNCTION catalogo_aux.texto_ok(p TEXT, p_max INT)
 RETURNS BOOLEAN LANGUAGE sql IMMUTABLE
 SET search_path = catalogo_aux, pg_temp AS $$
   SELECT p IS NOT NULL
      AND p = catalogo_aux.limpiar(p)
      AND length(p) BETWEEN 1 AND p_max
-     AND p !~ '[\U00010000-\U0010FFFF]'
+     AND p ~ '^[A-Za-z\u00c0-\u00d6\u00d8-\u00f6\u00f8-\u00ff0-9 .,''\u2019"()/+&-]+$'
+$$;
+
+-- Clave de comparación "sin distinguir mayúsculas", IGUAL en cualquier collation del servidor:
+-- lower() de Postgres con collation C sólo baja el ASCII, así que 'Á' y 'á' quedaban como
+-- distintos. Primero se bajan las mayúsculas latinas con tilde (À-Þ → à-þ, salvo × y ÷) y
+-- después lower() hace el resto (ASCII). Para el alfabeto permitido coincide con
+-- toLowerCase() de JavaScript ('ß' sigue distinto de 'ss', como en JS).
+CREATE OR REPLACE FUNCTION catalogo_aux.clave(p TEXT)
+RETURNS TEXT LANGUAGE sql IMMUTABLE
+SET search_path = catalogo_aux, pg_temp AS $$
+  SELECT lower(translate(p, 'ÀÁÂÃÄÅÆÇÈÉÊËÌÍÎÏÐÑÒÓÔÕÖØÙÚÛÜÝÞ', 'àáâãäåæçèéêëìíîïðñòóôõöøùúûüýþ'))
 $$;
 GRANT EXECUTE ON FUNCTION catalogo_aux.limpiar(TEXT)        TO anon, authenticated;
+GRANT EXECUTE ON FUNCTION catalogo_aux.clave(TEXT)          TO anon, authenticated;
 GRANT EXECUTE ON FUNCTION catalogo_aux.texto_ok(TEXT, INT)  TO anon, authenticated;
 
 -- ── Tabla base (sembrada desde el código) ───────────────────────────────────
 CREATE TABLE IF NOT EXISTS public.catalogo_modelos_base (
-  modelo       TEXT PRIMARY KEY CHECK (catalogo_aux.texto_ok(modelo, 60)),   -- contrato de la landing
+  modelo       TEXT PRIMARY KEY,                          -- contrato de la landing: ver el CHECK de abajo
   categoria    TEXT NOT NULL,
   generacion   INTEGER NOT NULL,
   capacidades  TEXT[] NOT NULL DEFAULT '{}',
@@ -123,6 +136,15 @@ REVOKE ALL ON public.catalogo_modelos_base FROM PUBLIC, anon, authenticated;
 -- INSERT no bloquean las lecturas de la vista (MVCC): quien lee ve la versión anterior hasta
 -- que esto confirma.
 DELETE FROM public.catalogo_modelos_base;
+
+-- El CHECK del contrato (texto_ok, 60) se RECREA en cada corrida: CREATE TABLE IF NOT EXISTS
+-- no actualiza una restricción que ya exista (una versión anterior del archivo podría haber
+-- dejado otra más floja). Con la tabla recién vaciada la validación es instantánea.
+ALTER TABLE public.catalogo_modelos_base DROP CONSTRAINT IF EXISTS catalogo_modelos_base_modelo_check;
+ALTER TABLE public.catalogo_modelos_base DROP CONSTRAINT IF EXISTS catalogo_modelos_base_modelo_ok;
+ALTER TABLE public.catalogo_modelos_base
+  ADD CONSTRAINT catalogo_modelos_base_modelo_ok CHECK (catalogo_aux.texto_ok(modelo, 60));
+
 INSERT INTO public.catalogo_modelos_base (modelo, categoria, generacion, capacidades, colores) VALUES
   ('iPhone 18', 'iphone', 18, ARRAY['128GB', '256GB', '512GB']::text[], '{}'::text[]),
   ('iPhone 18 Plus', 'iphone', 18, ARRAY['128GB', '256GB', '512GB']::text[], '{}'::text[]),
@@ -191,7 +213,7 @@ $$;
 
 -- Une la lista declarada con la sumada a mano (un JSON array): la declarada primero,
 -- después la sumada; sin vacíos, sin "Otro", sin repetidos (sin distinguir mayúsculas,
--- queda la primera grafía). Se ignoran: un elemento que no sea texto, uno que no pase
+-- queda la primera grafía; la comparación usa catalogo_aux.clave). Se ignoran: un elemento que no sea texto, uno que no pase
 -- texto_ok(…, 40) (vacío tras limpiar blancos, de más de 40 caracteres o con emojis), y una lista de entrada de más de 200 elementos (entera). Un `p_extra` que no sea
 -- array se ignora. La SALIDA tiene como máximo 30 elementos (los primeros: lo declarado
 -- manda sobre lo sumado): es el contrato de la landing, que descarta la fila entera si una
@@ -203,7 +225,7 @@ SET search_path = catalogo_aux, pg_temp AS $$
     FROM (
      SELECT d.v, d.ord, row_number() OVER (ORDER BY d.ord) AS rn
       FROM (
-      SELECT DISTINCT ON (lower(u.v)) u.v, u.ord
+      SELECT DISTINCT ON (catalogo_aux.clave(u.v)) u.v, u.ord
         FROM (
           SELECT catalogo_aux.limpiar(t.x) AS v, t.n AS ord
             FROM unnest(CASE WHEN cardinality(p_base) <= 200 THEN p_base ELSE '{}'::text[] END)
@@ -216,8 +238,8 @@ SET search_path = catalogo_aux, pg_temp AS $$
                  WITH ORDINALITY AS e(x, n)
            WHERE jsonb_typeof(e.x) = 'string'
         ) u
-       WHERE catalogo_aux.texto_ok(u.v, 40) AND lower(u.v) <> 'otro'
-       ORDER BY lower(u.v), u.ord
+       WHERE catalogo_aux.texto_ok(u.v, 40) AND catalogo_aux.clave(u.v) <> 'otro'
+       ORDER BY catalogo_aux.clave(u.v), u.ord
       ) d
     ) f
    WHERE f.rn <= 30

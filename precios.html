@@ -1829,6 +1829,82 @@ footer strong { color: rgba(255,255,255,.85); }
   .p18-visor { grid-template-columns:minmax(300px,.85fr) 1.15fr; gap:30px; padding:34px 30px; }
   .p18-full { margin:44px 0; }
 }
+
+/* ═══════════════════════════════════════════════════════════
+   ASISTENTE "PLAN CANJE"
+   Hoja a pantalla completa en celular y tarjeta centrada en escritorio.
+   Oscuro, como la sección del 18 Pro. Se construye desde precios.js con DOM
+   (nada de innerHTML con datos de la base) y se abre desde el botón de #canje.
+═══════════════════════════════════════════════════════════ */
+.cj[hidden] { display: none; }
+/* Por encima del botón flotante de WhatsApp (9999): si no, le tapa los botones. */
+.cj { position: fixed; inset: 0; z-index: 10000; background: #0A0A0C; color: #F5F5F7; display: flex; }
+.cj-card {
+  position: relative; display: flex; flex-direction: column; width: 100%; height: 100dvh;
+  padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+  background: #0A0A0C; outline: none;
+}
+.cj-top { display: flex; align-items: center; gap: 12px; padding: 14px 16px 10px; }
+.cj-ico {
+  flex: none; width: 44px; height: 44px; border-radius: 50%; border: 0; cursor: pointer;
+  background: rgba(255,255,255,.08); color: #F5F5F7; font-size: 20px; line-height: 1;
+  display: inline-flex; align-items: center; justify-content: center;
+}
+.cj-ico:hover { background: rgba(255,255,255,.14); }
+.cj-prog { flex: 1; height: 4px; border-radius: 4px; background: rgba(255,255,255,.12); overflow: hidden; }
+.cj-prog-fill { display: block; height: 100%; width: 0; background: #2997FF; border-radius: 4px; transition: width .35s cubic-bezier(.22,.61,.36,1); }
+.cj-body { flex: 1; overflow-y: auto; padding: 8px 20px 20px; -webkit-overflow-scrolling: touch; }
+.cj-paso { font-size: 13px; color: #86868B; margin: 10px 0 6px; }
+.cj-titulo { font-size: 30px; line-height: 1.12; font-weight: 700; letter-spacing: -.02em; outline: none; }
+.cj-sub { font-size: 16px; line-height: 1.45; color: #A1A1A6; margin: 8px 0 20px; }
+.cj-lista { display: flex; flex-direction: column; gap: 10px; }
+.cj-op {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px; width: 100%;
+  min-height: 56px; padding: 14px 18px; text-align: left; font: inherit; font-size: 17px; font-weight: 600;
+  color: #F5F5F7; background: #17171B; border: 1px solid rgba(255,255,255,.10); border-radius: 16px; cursor: pointer;
+  transition: background .15s ease, border-color .15s ease, transform .1s ease;
+}
+.cj-op:hover { background: #1E1E24; border-color: rgba(255,255,255,.22); }
+.cj-op:active { transform: scale(.985); }
+.cj-op[aria-pressed="true"] { border-color: #2997FF; background: rgba(41,151,255,.14); }
+.cj-op small { display: block; margin-top: 2px; font-size: 13.5px; font-weight: 400; color: #A1A1A6; }
+.cj-op .cj-chev { flex: none; color: #86868B; font-size: 20px; }
+.cj-campo { display: flex; flex-direction: column; gap: 8px; margin-top: 14px; }
+.cj-campo label { font-size: 14px; font-weight: 600; color: #D2D2D7; }
+.cj-campo input, .cj-campo textarea {
+  width: 100%; font: inherit; font-size: 17px; color: #F5F5F7; background: #17171B;
+  border: 1px solid rgba(255,255,255,.18); border-radius: 14px; padding: 14px 16px; outline: none;
+}
+.cj-campo textarea { min-height: 96px; resize: vertical; }
+.cj-campo input:focus, .cj-campo textarea:focus { border-color: #2997FF; box-shadow: 0 0 0 3px rgba(41,151,255,.25); }
+.cj-ayuda { font-size: 13.5px; color: #A1A1A6; }
+.cj-error { min-height: 20px; margin-top: 10px; font-size: 14px; font-weight: 600; color: #FF6B5E; }
+.cj-pasos { margin: 0 0 14px; padding-left: 22px; color: #D2D2D7; font-size: 16px; line-height: 1.5; }
+.cj-pasos li { margin-bottom: 6px; }
+.cj-pie { padding: 12px 20px 20px; display: flex; flex-direction: column; gap: 10px; border-top: 1px solid rgba(255,255,255,.06); }
+.cj-btn {
+  display: inline-flex; align-items: center; justify-content: center; min-height: 52px; padding: 0 22px;
+  border-radius: 980px; border: 0; font: inherit; font-size: 17px; font-weight: 600; cursor: pointer;
+}
+.cj-btn.pri { background: #2997FF; color: #fff; }
+.cj-btn.pri:hover { background: #3AA2FF; }
+.cj-btn.sec { background: rgba(255,255,255,.10); color: #F5F5F7; }
+.cj-btn.sec:hover { background: rgba(255,255,255,.16); }
+.cj-btn[disabled] { opacity: .45; cursor: default; }
+.cj-nota { font-size: 13.5px; line-height: 1.45; color: #A1A1A6; text-align: center; }
+.cj-resumen-fila { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.cj-resumen-fila b { display: block; font-size: 13px; font-weight: 500; color: #86868B; margin-bottom: 2px; }
+.cj-resumen-fila span { font-size: 17px; font-weight: 600; word-break: break-word; }
+.cj-sr { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0; }
+@media (min-width: 700px) {
+  .cj { align-items: center; justify-content: center; background: rgba(0,0,0,.62); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); }
+  .cj-card { width: 480px; height: auto; max-height: 86vh; border-radius: 28px; box-shadow: 0 30px 80px rgba(0,0,0,.55); overflow: hidden; border: 1px solid rgba(255,255,255,.08); }
+  .cj-body { min-height: 360px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .cj-prog-fill, .cj-op { transition: none; }
+  .cj-op:active { transform: none; }
+}
 </style>
 </head>
 <body>
@@ -2280,7 +2356,7 @@ footer strong { color: rgba(255,255,255,.85); }
       <div class="tradein-title">Tu iPhone actual es parte de pago.</div>
       <div class="tradein-sub">Contanos qué modelo tenés, su capacidad, porcentaje de batería y estado general. Te decimos cuánto vale y qué diferencia necesitás para cambiarlo.</div>
       <div class="tradein-cta-wrap">
-        <a class="tradein-btn" data-wa-intent="canje" href="https://wa.me/5493416907597?text=Hola!%20Quiero%20cotizar%20mi%20iPhone%20usado." target="_blank">Cotizar mi iPhone →</a>
+        <a class="tradein-btn" data-do="canjeAbrir" data-wa-intent="canje" href="https://wa.me/5493416907597?text=Hola!%20Quiero%20cotizar%20mi%20iPhone%20usado." target="_blank">Cotizar mi iPhone →</a>
       </div>
       <div class="tradein-note">Respuesta personalizada · Sin compromiso</div>
     </div>
@@ -2578,7 +2654,27 @@ footer strong { color: rgba(255,255,255,.85); }
   </div>
 </div>
 
+
+<!-- Asistente "Plan Canje": lo arma y lo maneja precios.js. Arranca oculto. -->
+<div class="cj" id="canje-sheet" hidden>
+  <div class="cj-card" id="cj-card" role="dialog" aria-modal="true" aria-labelledby="cj-titulo" tabindex="-1">
+    <div class="cj-top">
+      <button type="button" class="cj-ico" data-do="canjeAtras" aria-label="Volver al paso anterior">&#8249;</button>
+      <div class="cj-prog" id="cj-prog" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" aria-label="Avance de la consulta"><span class="cj-prog-fill" id="cj-fill"></span></div>
+      <button type="button" class="cj-ico" data-do="canjeCerrar" aria-label="Cerrar el asistente">&#10005;</button>
+    </div>
+    <div class="cj-body" id="cj-body">
+      <div class="cj-paso" id="cj-paso"></div>
+      <h2 class="cj-titulo" id="cj-titulo" tabindex="-1"></h2>
+      <p class="cj-sub" id="cj-sub"></p>
+      <div id="cj-cuerpo"></div>
+      <div class="cj-error" id="cj-error" role="status" aria-live="polite"></div>
+    </div>
+    <div class="cj-pie" id="cj-pie"></div>
+    <div class="cj-sr" id="cj-estado" aria-live="polite"></div>
+  </div>
+</div>
 <script defer src="pixel.js?v=20261001b"></script>
-<script defer src="precios.js?v=20261001d"></script>
+<script defer src="precios.js?v=20261003d"></script>
 </body>
 </html>

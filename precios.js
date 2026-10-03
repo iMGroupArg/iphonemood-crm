@@ -61,6 +61,9 @@ document.addEventListener('click', ev => {
   let u;
   try { u = new URL(a.href, location.href); } catch { return; }
   if (u.protocol !== 'https:' || u.hostname !== 'wa.me') return;
+  // El botón de canje, cuando el clic abre el asistente en vez de navegar, no es
+  // una salida a WhatsApp: sólo emite TradeInStarted (lo hace canjeAbrir).
+  if (a.dataset.do === 'canjeAbrir' && typeof canjeInterceptara === 'function' && canjeInterceptara(ev)) return;
   const intencion = a.dataset.waIntent || '';
   rastrear('WhatsAppClick', intencion ? { intent: intencion } : {}, { custom: true, clave: 'wa:' + intencion });
   if (intencion) rastrearIntencion(intencion, {}, 'estatico');
@@ -334,6 +337,7 @@ async function init() {
   buildTradeIn();
   p18Init();
   p18Revelar();
+  cargarCatalogoCanje();   // sin await: nunca retrasa la página
   buildShowcase();
   construirMenuProductos();
   buildReviews();
@@ -1293,6 +1297,14 @@ function pedirPorWhatsApp() {
 const ACCIONES = {
   // navegación
   seccion:        el => irASeccion(el.dataset.arg),
+  canjeAbrir:     (el, ev) => canjeAbrir(el, ev),
+  canjeCerrar:    () => canjeCerrar(),
+  canjeAtras:     () => canjeAtras(),
+  canjeElegir:    el => cjElegir(el),
+  canjeContinuar: () => cjContinuar(),
+  canjeBateriaNS: () => cjBateriaNS(),
+  canjeEditar:    el => cjEditar(el),
+  canjeEnviar:    () => cjEnviar(),
   scrollA:        el => smoothTo(el.dataset.arg),
   cerrarFicha:    () => closeModal(),
   // menú lateral
@@ -2373,7 +2385,16 @@ function prodPorSlug(slug) {
   return todos.find(x => slugProd(x) === slug) || null;
 }
 
-window.addEventListener('popstate', () => {
+window.addEventListener('popstate', ev => {
+  // El asistente de canje es dueño de su propia entrada de historial ({canje:1}).
+  // Mientras está abierto, un "atrás" lo cierra y no toca la ficha ni el scroll;
+  // un "adelante" hacia esa entrada no lo reabre (su estado vivía en memoria).
+  if (CANJE.ignorarPop) { CANJE.ignorarPop = false; return; }
+  if (CANJE.abierto) {
+    if (!(ev.state && ev.state.canje)) { CANJE.historial = false; cjCerrarUI(); }
+    return;
+  }
+  if (ev.state && ev.state.canje) return;
   const slug = new URLSearchParams(location.search).get('p');
   const p = slug ? prodPorSlug(slug) : null;
   if (p) { abrirFicha(p, { push: false }); return; }
@@ -3300,6 +3321,442 @@ function enviarWA() {
   rastrearIntencion(inqSel, paramsDeProducto(modalProd), modalProd && modalProd.id);
   window.open(waLink(msg), '_blank', 'noopener,noreferrer');
 }
+
+/* ═══════════════════════════════════════════════════════════
+   PLAN CANJE — asistente de consulta
+   Junta los datos del equipo que el cliente quiere entregar y arma el mensaje
+   de WhatsApp. NO calcula ni muestra ningún valor: nuestro esquema sólo guarda
+   la batería, así que una cifra sería inventada. `valorEstimadoCanje()` es el
+   hueco para sumarla cuando exista una tabla de recompra.
+
+   Es una mejora progresiva: el botón de #canje sigue siendo un enlace normal a
+   WhatsApp. Sólo si el catálogo de modelos llegó y se validó, un clic simple lo
+   abre en lugar de navegar. Si la vista falla, viene vacía o inválida, el
+   enlace funciona exactamente como antes.
+═══════════════════════════════════════════════════════════ */
+const CANJE_VISTA = 'catalogo_modelos_publico';
+
+// Condiciones del local para tomar un equipo (p. ej. piezas no originales). Es
+// política del dueño: no se copia de otro local ni se inventa. Vacío = el paso
+// se omite; con textos, se muestran y piden un "Entendido".
+const CANJE_CONDICIONES = [];
+
+const CJ_MAX = { nota: 200, texto: 40, modelo: 60, items: 30 };
+
+const CANJE = {
+  modelos: null,        // filas válidas de la vista; null = todavía no / no disponible
+  listo: false,         // true cuando hay al menos un modelo válido
+  abierto: false,
+  historial: false,     // el asistente es dueño de una entrada de historial
+  atras: false,         // ya se pidió history.back() para cerrar (evita repetirlo)
+  ignorarPop: false,    // el popstate que provoca nuestro propio history.back()
+  sesion: 0,            // número de apertura: identifica a qué sesión pertenece un temporizador
+  timerCierre: null,
+  enviado: false,
+  opener: null,
+  inertes: [],
+  paso: 'modelo',
+  retorno: false,       // se está editando desde el resumen
+  texto: {},            // pasos donde la capacidad/color se escribe a mano
+  S: {},
+};
+
+function valorEstimadoCanje(/* S */) { return null; }
+
+/* ─── datos ─── */
+// Valida la forma de cada fila antes de confiar en ella. Una fila rara se
+// descarta; si no queda ninguna, el asistente no se habilita.
+function validarFilasCanje(rows) {
+  if (!Array.isArray(rows)) return [];
+  // Una lista con cualquier elemento mal formado (no es texto, o es demasiado
+  // largo) invalida la FILA entera: recortar en silencio dejaría pasar datos que
+  // no se entienden. "Otro" y los repetidos sí se normalizan: son parte del
+  // contrato de la vista, no malformaciones.
+  const lista = a => {
+    if (!Array.isArray(a) || a.length > CJ_MAX.items) return null;
+    const vistos = new Set(), out = [];
+    for (const v of a) {
+      if (typeof v !== 'string') return null;
+      const t = v.trim();
+      if (t.length > CJ_MAX.texto) return null;
+      if (!t || t.toLowerCase() === 'otro') continue;
+      const k = t.toLowerCase();
+      if (!vistos.has(k)) { vistos.add(k); out.push(t); }
+    }
+    return out;
+  };
+  const out = [];
+  for (const r of rows) {
+    if (!r || typeof r.modelo !== 'string' || typeof r.orden !== 'number' || !Number.isFinite(r.orden)) continue;
+    const modelo = r.modelo.trim();
+    const capacidades = lista(r.capacidades), colores = lista(r.colores);
+    if (!modelo || modelo.length > CJ_MAX.modelo || !capacidades || !colores) continue;
+    out.push({ modelo, orden: r.orden, capacidades, colores });
+  }
+  // `orden` lo define la vista: 1 = la generación MÁS NUEVA (18 → 1, 17 → 2, …).
+  // O sea, ascendente = del más nuevo al más viejo. Desempate estable por nombre.
+  return out.sort((a, b) => (a.orden - b.orden) || a.modelo.localeCompare(b.modelo, 'es'));
+}
+
+function habilitarCanje(rows) {
+  const ok = validarFilasCanje(rows);
+  CANJE.modelos = ok.length ? ok : null;
+  CANJE.listo = ok.length > 0;
+}
+
+// Se llama sin await desde init(): el catálogo se carga por su cuenta y nunca
+// retrasa la página. Un reintento silencioso y después queda "no disponible".
+async function cargarCatalogoCanje() {
+  for (let intento = 0; intento < 2; intento++) {
+    try {
+      const { data, error } = await supa.from(CANJE_VISTA).select('modelo,orden,capacidades,colores')
+        .order('orden').order('modelo');   // la vista no garantiza el orden de entrega
+      if (!error && Array.isArray(data)) { habilitarCanje(data); return; }
+    } catch { /* se reintenta */ }
+  }
+  CANJE.modelos = null; CANJE.listo = false;
+}
+
+/* ─── DOM ─── */
+function cjEl(tag, props, ...hijos) {
+  const e = document.createElement(tag);
+  for (const [k, v] of Object.entries(props || {})) {
+    if (v == null || v === false) continue;
+    if (k === 'class') e.className = v;
+    else if (k === 'text') e.textContent = v;
+    else if (k === 'data') { for (const [dk, dv] of Object.entries(v)) e.dataset[dk] = dv; }
+    else e.setAttribute(k, v === true ? '' : v);
+  }
+  hijos.flat().forEach(c => { if (c != null && c !== false) e.append(c); });
+  return e;
+}
+const $cj = id => document.getElementById(id);
+
+function cjOpcion(texto, arg, { sub = '', pressed = null, chev = false, accion = 'canjeElegir' } = {}) {
+  return cjEl('button', { type: 'button', class: 'cj-op', data: { do: accion, arg: String(arg) },
+    'aria-pressed': pressed === null ? null : String(pressed) },
+    cjEl('span', {}, texto, sub ? cjEl('small', { text: sub }) : null),
+    chev ? cjEl('span', { class: 'cj-chev', 'aria-hidden': 'true', text: '›' }) : null);
+}
+function cjBoton(texto, accion, tipo = 'pri', arg) {
+  return cjEl('button', { type: 'button', class: 'cj-btn ' + tipo, data: arg === undefined ? { do: accion } : { do: accion, arg: String(arg) }, text: texto });
+}
+function cjCampo(id, etiqueta, { tipo = 'text', valor = '', ayuda = '', max = CJ_MAX.texto, multi = false, extra = {} } = {}) {
+  const ctl = cjEl(multi ? 'textarea' : 'input', Object.assign({ id, maxlength: max, 'aria-describedby': id + '-ayuda cj-error' }, multi ? {} : { type: tipo }, extra));
+  ctl.value = valor;
+  return cjEl('div', { class: 'cj-campo' },
+    cjEl('label', { for: id, text: etiqueta }), ctl,
+    ayuda ? cjEl('div', { class: 'cj-ayuda', id: id + '-ayuda', text: ayuda }) : cjEl('span', { id: id + '-ayuda' }));
+}
+
+/* ─── pasos ─── */
+function cjPasos() {
+  return ['modelo', 'capacidad', 'color', 'bateria', 'estetica', 'funcion',
+    ...(CANJE_CONDICIONES.length ? ['condiciones'] : []), 'video', 'resumen'];
+}
+function cjModelo() { return (CANJE.modelos || []).find(m => m.modelo === CANJE.S.modelo) || null; }
+function cjCompleto(id) {
+  const S = CANJE.S;
+  return ({ modelo: !!S.modelo, capacidad: !!S.capacidad, color: !!S.color,
+    bateria: S.bateria != null || S.bateriaNS === true, estetica: !!S.estetica, funcion: !!S.funcion,
+    condiciones: S.condOK === true, video: S.video === true || S.video === false, resumen: false })[id];
+}
+
+function cjIr(id) {
+  CANJE.paso = id;
+  CANJE.S._notaVisible = false;
+  cjRender();
+}
+function cjSiguiente() {
+  const pasos = cjPasos(), i = pasos.indexOf(CANJE.paso);
+  if (CANJE.retorno) {
+    // Editando desde el resumen: si un cambio dejó pasos incompletos (p. ej. al
+    // cambiar el modelo), se pasa por ellos antes de volver.
+    const falta = pasos.find(p => p !== 'resumen' && !cjCompleto(p));
+    if (falta) return cjIr(falta);
+    CANJE.retorno = false;
+    return cjIr('resumen');
+  }
+  cjIr(pasos[Math.min(i + 1, pasos.length - 1)]);
+}
+function cjError(msg) { const e = $cj('cj-error'); if (e) e.textContent = msg || ''; }
+
+function cjRender() {
+  const pasos = cjPasos(), i = pasos.indexOf(CANJE.paso), S = CANJE.S;
+  const titulo = $cj('cj-titulo'), sub = $cj('cj-sub'), cuerpo = $cj('cj-cuerpo'), pie = $cj('cj-pie');
+  cuerpo.replaceChildren(); pie.replaceChildren(); cjError('');
+  $cj('cj-paso').textContent = 'Paso ' + (i + 1) + ' de ' + pasos.length;
+  const pct = Math.round(((i + 1) / pasos.length) * 100);
+  $cj('cj-fill').style.width = pct + '%';
+  $cj('cj-prog').setAttribute('aria-valuenow', String(pct));
+  const modelo = cjModelo();
+  let foco = null;
+
+  const conLista = (campoTxt, lista, etiqueta, plural) => {
+    const escribir = CANJE.texto[campoTxt] || lista.length === 0;
+    if (!escribir) {
+      cuerpo.append(cjEl('div', { class: 'cj-lista' },
+        lista.map((v, k) => cjOpcion(v, k, { pressed: S[campoTxt] === v })),
+        cjOpcion(plural, 'otro', { chev: true })));
+      return;
+    }
+    cuerpo.append(cjCampo('cj-txt', etiqueta, { valor: lista.includes(S[campoTxt]) ? '' : (S[campoTxt] || ''),
+      ayuda: 'Escribilo como aparece en el equipo.' }));
+    pie.append(cjBoton('Continuar', 'canjeContinuar'));
+    foco = $cj('cj-txt');
+  };
+
+  if (CANJE.paso === 'modelo') {
+    titulo.textContent = '¿Qué iPhone querés entregar?';
+    sub.textContent = 'Elegí tu modelo para armar la consulta.';
+    cuerpo.append(cjEl('div', { class: 'cj-lista' },
+      CANJE.modelos.map((m, k) => cjOpcion(m.modelo, k, { pressed: S.modelo === m.modelo }))));
+  } else if (CANJE.paso === 'capacidad') {
+    titulo.textContent = '¿Qué capacidad tiene?';
+    sub.textContent = 'De tu ' + S.modelo + '.';
+    conLista('capacidad', modelo ? modelo.capacidades : [], 'Capacidad', 'Otra capacidad');
+  } else if (CANJE.paso === 'color') {
+    titulo.textContent = '¿De qué color es?';
+    sub.textContent = 'De tu ' + S.modelo + '.';
+    conLista('color', modelo ? modelo.colores : [], 'Color', 'Otro color');
+  } else if (CANJE.paso === 'bateria') {
+    titulo.textContent = '¿Cómo está la batería?';
+    sub.textContent = 'La ves en Ajustes → Batería → Salud de la batería.';
+    cuerpo.append(cjCampo('cj-bat', 'Salud de la batería (%)', { tipo: 'number', max: 3,
+      valor: S.bateria != null ? String(S.bateria) : '', ayuda: 'Un número del 1 al 100.',
+      extra: { inputmode: 'numeric', min: '1', max: '100', placeholder: 'ej. 88' } }));
+    pie.append(cjBoton('Continuar', 'canjeContinuar'), cjBoton('No lo sé', 'canjeBateriaNS', 'sec'));
+    foco = $cj('cj-bat');
+  } else if (CANJE.paso === 'estetica') {
+    titulo.textContent = '¿Cómo está por fuera?';
+    sub.textContent = 'Pantalla, laterales, tapa y cámaras.';
+    cuerpo.append(cjEl('div', { class: 'cj-lista' },
+      cjOpcion('Impecable', 'ok', { sub: 'Sin rayones, golpes ni vidrios rotos', pressed: S.estetica === 'Impecable' }),
+      cjOpcion('Tiene detalles', 'detalle', { sub: 'Rayones, golpes o marcas', pressed: S.estetica === 'Con detalles' })));
+    if (S._notaVisible || S.estetica === 'Con detalles') {
+      cuerpo.append(cjCampo('cj-nota', 'Contanos qué tiene (opcional)', { multi: true, max: CJ_MAX.nota, valor: S.esteticaNota || '' }));
+      pie.append(cjBoton('Continuar', 'canjeContinuar'));
+    }
+  } else if (CANJE.paso === 'funcion') {
+    titulo.textContent = '¿Funciona todo bien?';
+    sub.textContent = 'Pantalla táctil, Face ID, cámaras, parlantes, micrófono y carga.';
+    cuerpo.append(cjEl('div', { class: 'cj-lista' },
+      cjOpcion('Funciona todo', 'ok', { pressed: S.funcion === 'Funciona todo' }),
+      cjOpcion('Tiene alguna falla', 'falla', { pressed: S.funcion === 'Con alguna falla' })));
+    if (S._notaVisible || S.funcion === 'Con alguna falla') {
+      cuerpo.append(cjCampo('cj-nota', 'Contanos qué falla (opcional)', { multi: true, max: CJ_MAX.nota, valor: S.funcionNota || '' }));
+      pie.append(cjBoton('Continuar', 'canjeContinuar'));
+    }
+  } else if (CANJE.paso === 'condiciones') {
+    titulo.textContent = 'Antes de seguir';
+    sub.textContent = 'Para tomar tu equipo en parte de pago:';
+    cuerpo.append(cjEl('ul', { class: 'cj-pasos' }, CANJE_CONDICIONES.map(t => cjEl('li', { text: t }))));
+    pie.append(cjBoton('Entendido', 'canjeContinuar'));
+  } else if (CANJE.paso === 'video') {
+    titulo.textContent = '¿Querés mostrarnos tu equipo?';
+    sub.textContent = 'Es opcional y nos ayuda a responderte más rápido.';
+    cuerpo.append(
+      cjEl('ol', { class: 'cj-pasos' },
+        ['La pantalla encendida, con el brillo alto.', 'Los cuatro laterales, despacio.',
+         'La tapa trasera y las cámaras.', 'Ajustes → Batería, con la salud de la batería a la vista.']
+          .map(t => cjEl('li', { text: t }))),
+      cjEl('p', { class: 'cj-ayuda', text: 'Alcanzan unos 20 segundos. El video lo mandás vos por el chat de WhatsApp, después de enviar la consulta.' }),
+      cjEl('div', { class: 'cj-lista' },
+        cjOpcion('Sí, te lo mando por WhatsApp', 'si', { pressed: S.video === true }),
+        cjOpcion('Prefiero no mandarlo', 'no', { pressed: S.video === false })));
+  } else if (CANJE.paso === 'resumen') {
+    titulo.textContent = 'Revisá tu consulta';
+    sub.textContent = 'Tocá cualquier dato para cambiarlo.';
+    const filas = [
+      ['modelo', 'Modelo', S.modelo], ['capacidad', 'Capacidad', S.capacidad], ['color', 'Color', S.color],
+      ['bateria', 'Batería', S.bateriaNS ? 'No lo sé' : S.bateria + ' %'],
+      ['estetica', 'Estado por fuera', S.estetica + (S.esteticaNota ? ' · ' + S.esteticaNota : '')],
+      ['funcion', 'Funcionamiento', S.funcion + (S.funcionNota ? ' · ' + S.funcionNota : '')],
+      ['video', 'Video', S.video ? 'Te lo mando por WhatsApp' : 'No'],
+    ];
+    cuerpo.append(cjEl('div', { class: 'cj-lista' }, filas.map(([id, etq, val]) => {
+      const b = cjOpcion('', id, { accion: 'canjeEditar', chev: true });
+      b.querySelector('span').replaceWith(cjEl('span', { class: 'cj-resumen-fila' },
+        cjEl('span', {}, cjEl('b', { text: etq }), cjEl('span', { text: val }))));
+      return b;
+    })));
+    const valor = valorEstimadoCanje(S);
+    if (valor != null) cuerpo.append(cjEl('p', { class: 'cj-nota', text: String(valor) }));
+    cuerpo.append(cjEl('p', { class: 'cj-nota', text: 'Esto no es una cotización: te confirmamos el valor por WhatsApp, después de ver el equipo.' }));
+    pie.append(cjBoton('Enviar por WhatsApp', 'canjeEnviar'));
+  }
+
+  $cj('cj-estado').textContent = titulo.textContent;
+  (foco || titulo).focus({ preventScroll: true });
+  $cj('cj-body').scrollTop = 0;
+}
+
+/* ─── acciones ─── */
+function cjElegir(el) {
+  const S = CANJE.S, idx = el.dataset.arg;
+  const p = CANJE.paso, modelo = cjModelo();
+  if (p === 'modelo') {
+    const m = CANJE.modelos[Number(idx)];
+    if (!m) return;
+    if (S.modelo !== m.modelo) { S.modelo = m.modelo; S.capacidad = ''; S.color = ''; CANJE.texto = {}; }
+    return cjSiguiente();
+  }
+  if (p === 'capacidad' || p === 'color') {
+    const campo = p, lista = modelo ? (p === 'capacidad' ? modelo.capacidades : modelo.colores) : [];
+    if (idx === 'otro') { CANJE.texto[campo] = true; return cjRender(); }
+    const v = lista[Number(idx)];
+    if (v == null) return;
+    S[campo] = v; CANJE.texto[campo] = false;
+    return cjSiguiente();
+  }
+  if (p === 'estetica') {
+    if (idx === 'ok') { S.estetica = 'Impecable'; S.esteticaNota = ''; return cjSiguiente(); }
+    S.estetica = 'Con detalles'; S._notaVisible = true; return cjRender();
+  }
+  if (p === 'funcion') {
+    if (idx === 'ok') { S.funcion = 'Funciona todo'; S.funcionNota = ''; return cjSiguiente(); }
+    S.funcion = 'Con alguna falla'; S._notaVisible = true; return cjRender();
+  }
+  if (p === 'video') { S.video = idx === 'si'; return cjSiguiente(); }
+}
+
+function cjContinuar() {
+  const S = CANJE.S, p = CANJE.paso;
+  if (p === 'capacidad' || p === 'color') {
+    const v = ($cj('cj-txt')?.value || '').trim();
+    if (!v) { cjError('Escribí ' + (p === 'capacidad' ? 'la capacidad' : 'el color') + ' para continuar.'); $cj('cj-txt')?.focus(); return; }
+    S[p] = v.slice(0, CJ_MAX.texto); return cjSiguiente();
+  }
+  if (p === 'bateria') {
+    const raw = ($cj('cj-bat')?.value || '').trim();
+    const n = Number(raw);
+    if (!/^\d{1,3}$/.test(raw) || n < 1 || n > 100) { cjError('Ingresá un número entero del 1 al 100, o tocá "No lo sé".'); $cj('cj-bat')?.focus(); return; }
+    S.bateria = n; S.bateriaNS = false; return cjSiguiente();
+  }
+  if (p === 'estetica') { S.esteticaNota = ($cj('cj-nota')?.value || '').trim().slice(0, CJ_MAX.nota); return cjSiguiente(); }
+  if (p === 'funcion') { S.funcionNota = ($cj('cj-nota')?.value || '').trim().slice(0, CJ_MAX.nota); return cjSiguiente(); }
+  if (p === 'condiciones') { S.condOK = true; return cjSiguiente(); }
+}
+
+function cjMensaje() {
+  const S = CANJE.S;
+  return ['¡Hola! Quiero consultar por mi iPhone usado para dejarlo como parte de pago.', '',
+    '📱 Modelo: ' + S.modelo,
+    '💾 Capacidad: ' + S.capacidad,
+    '🎨 Color: ' + S.color,
+    '🔋 Batería: ' + (S.bateriaNS ? 'no lo sé' : S.bateria + ' %'),
+    '✨ Por fuera: ' + S.estetica + (S.esteticaNota ? ' (' + S.esteticaNota + ')' : ''),
+    '⚙️ Funcionamiento: ' + S.funcion + (S.funcionNota ? ' (' + S.funcionNota + ')' : ''),
+    ...(S.video ? ['🎥 Te mando un video por acá a continuación.'] : []), '',
+    '¿Cuánto me lo toman y qué diferencia tendría que abonar?'].join('\n');
+}
+
+function cjEnviar() {
+  if (CANJE.enviado) return;
+  const faltan = cjPasos().filter(p => p !== 'resumen' && !cjCompleto(p));
+  if (faltan.length) { CANJE.retorno = true; return cjIr(faltan[0]); }   // revalida todo
+  CANJE.enviado = true;
+  // Mide el toque de "Enviar", no que el mensaje ni el video hayan llegado. Sólo
+  // el modelo viaja al rastreo: nada de batería, notas ni texto del cliente.
+  rastrearIntencion('canje', { content_name: CANJE.S.modelo, content_type: 'product' }, 'asistente');
+  window.open(waLink(cjMensaje()), '_blank', 'noopener,noreferrer');
+  cjCerrarUI();
+}
+
+/* ─── abrir / cerrar ─── */
+// ¿Este clic abriría el asistente? Lo usan el despachador y el listener de
+// rastreo de WhatsApp, para que no discrepen: abrir emite sólo TradeInStarted,
+// mientras que un clic que navega a WhatsApp conserva su rastreo de siempre.
+function canjeInterceptara(ev) {
+  if (!CANJE.listo || CANJE.abierto) return false;
+  if (ev && (ev.button !== 0 || ev.ctrlKey || ev.metaKey || ev.shiftKey || ev.altKey)) return false;
+  if (document.getElementById('modal-overlay')?.classList.contains('open')) return false;   // la ficha y el asistente no conviven
+  return true;
+}
+
+function canjeAbrir(el, ev) {
+  if (!canjeInterceptara(ev)) return;          // navegación nativa a WhatsApp
+  ev.preventDefault();
+  CANJE.S = { video: null }; CANJE.texto = {}; CANJE.retorno = false; CANJE.enviado = false;
+  CANJE.opener = el; CANJE.abierto = true; CANJE.sesion++;
+  const hoja = $cj('canje-sheet');
+  hoja.hidden = false;
+  document.body.style.overflow = 'hidden';
+  // Fondo inerte: aria-modal solo no impide interactuar con la página de atrás.
+  CANJE.inertes = [...document.body.children].filter(n => n !== hoja && n.tagName !== 'SCRIPT' && !n.inert);
+  CANJE.inertes.forEach(n => { n.inert = true; });
+  history.pushState({ canje: 1 }, '', location.href);   // misma URL: no toca query ni hash
+  CANJE.historial = true; CANJE.atras = false;
+  rastrear('TradeInStarted', {}, { custom: true, clave: 'canje-abrir' });
+  cjIr('modelo');
+}
+
+function cjCerrarUI() {
+  if (!CANJE.abierto) return;
+  clearTimeout(CANJE.timerCierre);
+  CANJE.abierto = false;
+  $cj('canje-sheet').hidden = true;
+  document.body.style.overflow = '';
+  CANJE.inertes.forEach(n => { n.inert = false; }); CANJE.inertes = [];
+  CANJE.S = {}; CANJE.texto = {};
+  const o = CANJE.opener; CANJE.opener = null;
+  if (o && document.contains(o)) o.focus({ preventScroll: true });
+  // Si se cerró sin pasar por el historial, la entrada que pusimos queda ahí:
+  // se retira para que "atrás" no se sienta roto.
+  if (CANJE.historial && !CANJE.atras && history.state && history.state.canje) { CANJE.atras = true; CANJE.ignorarPop = true; history.back(); }
+  CANJE.historial = false;
+}
+
+function canjeCerrar() {
+  if (!CANJE.abierto) return;
+  if (CANJE.historial && !CANJE.atras) {
+    CANJE.atras = true;
+    history.back();                              // el cierre real ocurre en popstate
+    // Respaldo por si el popstate nunca llega. Se identifica la sesión y se
+    // cancela al cerrar: sin eso, cerrar y reabrir enseguida dejaba que el
+    // temporizador viejo cerrara la sesión NUEVA y le borrara las respuestas.
+    const sesion = CANJE.sesion;
+    clearTimeout(CANJE.timerCierre);
+    CANJE.timerCierre = setTimeout(() => {
+      if (CANJE.abierto && CANJE.sesion === sesion) { CANJE.historial = false; cjCerrarUI(); }
+    }, 400);
+    return;
+  }
+  cjCerrarUI();
+}
+
+function canjeAtras() {
+  const pasos = cjPasos(), i = pasos.indexOf(CANJE.paso);
+  if (i <= 0) return canjeCerrar();
+  // Editando desde el resumen, "atrás" vuelve al resumen y no al paso anterior.
+  if (CANJE.retorno) { CANJE.retorno = false; return cjIr('resumen'); }
+  cjIr(pasos[i - 1]);
+}
+
+// Foco atrapado dentro del asistente mientras está abierto; Esc lo cierra.
+document.addEventListener('keydown', ev => {
+  if (!CANJE.abierto) return;
+  if (ev.key === 'Escape') { ev.preventDefault(); canjeCerrar(); return; }
+  if (ev.key === 'Enter' && ev.target && ev.target.matches && ev.target.matches('#cj-card input')) {
+    ev.preventDefault();
+    const b = document.querySelector('#cj-pie [data-do="canjeContinuar"]');
+    if (b) b.click();
+    return;
+  }
+  if (ev.key !== 'Tab') return;
+  const card = $cj('cj-card');
+  const f = [...card.querySelectorAll('button, input, textarea, [href], [tabindex]:not([tabindex="-1"])')]
+    .filter(e => !e.disabled && e.offsetParent !== null);
+  if (!f.length) { ev.preventDefault(); card.focus(); return; }
+  const primero = f[0], ultimo = f[f.length - 1], act = document.activeElement;
+  if (ev.shiftKey && (act === primero || !card.contains(act))) { ev.preventDefault(); ultimo.focus(); }
+  else if (!ev.shiftKey && (act === ultimo || !card.contains(act))) { ev.preventDefault(); primero.focus(); }
+});
+
+
+function cjBateriaNS() { const S = CANJE.S; S.bateria = null; S.bateriaNS = true; cjSiguiente(); }
+function cjEditar(el) { CANJE.retorno = true; cjIr(el.dataset.arg); }
+
 
 init();
 

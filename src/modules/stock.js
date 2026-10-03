@@ -52,8 +52,8 @@ const Stock = {
   // acá, así que la columna Estado mostraba literalmente "undefined".
   ESTADO_INV_LABEL: { disponible:'Disponible', vendido:'Vendido', reservado:'Reservado', en_reparacion:'En reparación', eliminado:'Dado de baja' },
   ESTADO_INV_CLASS: { disponible:'b-green', vendido:'b-gray', reservado:'b-amber', en_reparacion:'b-purple', eliminado:'b-red' },
-  TIPO_MOV_LABEL: { alta:'Alta', baja:'Eliminado', baja_venta:'Baja por venta', ajuste_cantidad:'Ajuste de cantidad', imei_agregado:'IMEI agregado', imei_quitado:'IMEI quitado', edicion:'Edición', precio:'Cambio de precio', trade_in:'Trade-In Recibido' },
-  TIPO_MOV_CLASS: { alta:'b-green', baja:'b-red', baja_venta:'b-red', ajuste_cantidad:'b-amber', imei_agregado:'b-blue', imei_quitado:'b-gray', edicion:'b-purple', precio:'b-amber', trade_in:'b-green' },
+  TIPO_MOV_LABEL: { alta:'Alta', baja:'Eliminado', baja_venta:'Baja por venta', venta_anulada:'Venta anulada', ajuste_cantidad:'Ajuste de cantidad', imei_agregado:'IMEI agregado', imei_quitado:'IMEI quitado', edicion:'Edición', precio:'Cambio de precio', trade_in:'Trade-In Recibido' },
+  TIPO_MOV_CLASS: { alta:'b-green', baja:'b-red', baja_venta:'b-red', venta_anulada:'b-amber', ajuste_cantidad:'b-amber', imei_agregado:'b-blue', imei_quitado:'b-gray', edicion:'b-purple', precio:'b-amber', trade_in:'b-green' },
   pendingImeis: [],
 
   // El stock real de un producto se calcula en State.getStock (compartido con
@@ -960,14 +960,17 @@ const Stock = {
     'iPhone 17 Pro':      { s:['256GB','512GB','1TB','2TB'],     c:['Naranja Cósmico','Azul Profundo','Plata'] },
     'iPhone 17 Pro Max':  { s:['256GB','512GB','1TB','2TB'],     c:['Naranja Cósmico','Azul Profundo','Plata'] },
     // iPhone 18 — capacidades según el patrón de la generación anterior.
-    // Los colores NO están puestos a propósito: no los tengo confirmados, y un
-    // color inventado termina dentro del nombre del producto y le rompe a la
-    // landing la búsqueda de la foto por convención de nombre. Mientras tanto
-    // caen a la lista genérica y se suman solos los que se vayan cargando.
+    // Colores: en Pro y Pro Max van SÓLO los que ya están cargados en el stock
+    // real (con la grafía exacta que se usó, porque el color termina dentro del
+    // nombre del producto y de ahí la landing arma la búsqueda de la foto). Hay
+    // un cuarto color anunciado, borgoña, que no se declara hasta que se cargue
+    // uno: así se respeta la grafía que se elija y no se inventa una. Se suma
+    // desde la opción "Otro". Del 18 y el 18 Plus no hay nada cargado: se
+    // ofrecen sólo los colores que se vayan cargando (ver specsParaModelo).
     'iPhone 18':          { s:['128GB','256GB','512GB'] },
     'iPhone 18 Plus':     { s:['128GB','256GB','512GB'] },
-    'iPhone 18 Pro':      { s:['256GB','512GB','1TB','2TB'] },
-    'iPhone 18 Pro Max':  { s:['256GB','512GB','1TB','2TB'] },
+    'iPhone 18 Pro':      { s:['256GB','512GB','1TB','2TB'],  c:['Negro','Plata','Glacier'] },
+    'iPhone 18 Pro Max':  { s:['256GB','512GB','1TB','2TB'],  c:['Negro','Plata','Glacier'] },
     // ── Mac ─────────────────────────────────────────────────────
     'MacBook Air M1':     { s:['256GB','512GB','1TB','2TB'],     c:['Plata','Gris Espacial','Dorado'] },
     'MacBook Air M2':     { s:['256GB','512GB','1TB','2TB'],     c:['Plata','Gris Espacial','Dorado','Medianoche'] },
@@ -1039,9 +1042,18 @@ const Stock = {
       const extras = aprendidos(campo).filter(v => !generica.some(g => g.toLowerCase() === v.toLowerCase()));
       return [...generica, ...extras];
     };
+    // Colores de un modelo SIN lista declarada: sólo los que ya se cargaron para
+    // ESE modelo. Antes caía a la lista de todos los colores de iPhone, y a un
+    // Samsung o a un Apple Watch le ofrecía "Titanio Natural". La capacidad
+    // sigue con su lista genérica, que no tiene ese problema.
+    const coloresAprendidos = aprendidos('color').filter(v => v.toLowerCase() !== 'otro');
     return {
       s: resolver(decl.s, 'storage', this.STORAGE_OPCIONES),
-      c: resolver(decl.c, 'color', this.COLOR_OPCIONES),
+      // Con lista declarada manda ella (+ lo sumado a mano). Sin lista, se
+      // juntan lo sumado a mano y lo ya cargado en el stock: antes, en cuanto se
+      // sumaba UN color al catálogo, los demás cargados dejaban de aparecer.
+      c: ((this.SPECS_POR_MODELO[modelo] || {}).c ? [...decl.c] : unir(sumado.c, coloresAprendidos))
+        .filter(v => String(v).toLowerCase() !== 'otro'),
     };
   },
   ESTADO_OPCIONES: ['Nuevo / Sellado','Excelente','Muy bueno','Bueno','Con detalles'],
@@ -1230,12 +1242,12 @@ const Stock = {
 
                 <div id="f-modelo-wrap" style="display:${['iphone','android','mac','ipad','watch','audio'].includes(p.cat)?'block':'none'};margin-bottom:12px">
                   <label style="font-size:11px;color:var(--text-secondary);font-weight:600;display:block;margin-bottom:4px">Modelo *</label>
-                  <select id="f-modelo" onchange="Stock.toggleModeloOtro();Stock._actualizarSpecsDropdowns(this.value==='__otro__'?'':this.value)" style="width:100%;font-size:12px;padding:7px 10px;border:1px solid var(--border-strong);border-radius:8px">
+                  <select id="f-modelo" onchange="Stock.toggleModeloOtro()" style="width:100%;font-size:12px;padding:7px 10px;border:1px solid var(--border-strong);border-radius:8px">
                     <option value="">Seleccionar modelo</option>
                     ${modelosCat.map(m => `<option value="${State.esc(m)}" ${p.modelo===m?'selected':''}>${State.esc(m)}</option>`).join('')}
                     <option value="__otro__" ${modeloEsLibre ? 'selected':''}>Otro (escribir)</option>
                   </select>
-                  <input type="text" id="f-modelo-otro" value="${modeloEsLibre ? State.esc(p.modelo) : ''}" placeholder="Escribí el modelo" style="width:100%;font-size:12px;padding:7px 10px;border:1px solid var(--border-strong);border-radius:8px;margin-top:6px;display:${modeloEsLibre ? 'block':'none'}">
+                  <input type="text" id="f-modelo-otro" oninput="Stock.refrescarSpecsPorModeloEscrito()" value="${modeloEsLibre ? State.esc(p.modelo) : ''}" placeholder="Escribí el modelo" style="width:100%;font-size:12px;padding:7px 10px;border:1px solid var(--border-strong);border-radius:8px;margin-top:6px;display:${modeloEsLibre ? 'block':'none'}">
                 </div>
 
                 <div id="f-nombre-libre-wrap" style="display:${this.esNombreLibre(p.cat)?'block':'none'};margin-bottom:12px">
@@ -1318,10 +1330,12 @@ const Stock = {
                     </select>
                   </div>
                   <div><label style="font-size:11px;color:var(--text-secondary);font-weight:600;display:block;margin-bottom:4px">Color</label>
-                    <select id="f-color" style="width:100%;font-size:12px;padding:7px 10px;border:1px solid var(--border-strong);border-radius:8px">
+                    <select id="f-color" onchange="Stock.onColorChange()" style="width:100%;font-size:12px;padding:7px 10px;border:1px solid var(--border-strong);border-radius:8px">
                       <option value="">Seleccionar</option>
-                      ${this.COLOR_OPCIONES.map(c=>`<option ${p.color===c?'selected':''}>${c}</option>`).join('')}
+                      ${this.COLOR_OPCIONES.filter(c=>c!=='Otro').map(c=>`<option ${p.color===c?'selected':''}>${c}</option>`).join('')}
+                      <option value="Otro" ${p.color==='Otro'?'selected':''}>Otro</option>
                     </select>
+                    <input type="text" id="f-color-otro" placeholder="Escribí el color" style="display:none;margin-top:6px;width:100%;box-sizing:border-box;font-size:12px;padding:7px 10px;border:1px solid var(--border-strong);border-radius:8px">
                   </div>
                 </div>
 
@@ -1471,12 +1485,31 @@ const Stock = {
     if (mode === 'edit') this.renderHistorialProducto(id);
   },
 
+  // Modelo del formulario: el del desplegable o, con "Otro (escribir)", el que
+  // se escribió. Sirve para que un modelo cargado a mano tenga SUS colores y no
+  // la lista de todos.
+  _modeloDelFormulario() {
+    const sel = document.getElementById('f-modelo')?.value || '';
+    return sel === '__otro__'
+      ? (document.getElementById('f-modelo-otro')?.value || '').trim()
+      : sel;
+  },
+
   toggleModeloOtro() {
     const sel = document.getElementById('f-modelo');
     const otroInput = document.getElementById('f-modelo-otro');
     if (!sel || !otroInput) return;
     otroInput.style.display = sel.value === '__otro__' ? 'block' : 'none';
-    this._actualizarSpecsDropdowns(sel.value === '__otro__' ? '' : sel.value);
+    this._actualizarSpecsDropdowns(this._modeloDelFormulario());
+  },
+
+  // Al escribir el modelo se rehacen las listas, conservando lo que ya estaba
+  // elegido (si no está en la lista nueva queda marcado "fuera de catálogo").
+  refrescarSpecsPorModeloEscrito() {
+    this._actualizarSpecsDropdowns(
+      this._modeloDelFormulario(),
+      document.getElementById('f-storage')?.value || '',
+      this._colorDelFormulario());
   },
 
   _actualizarSpecsDropdowns(modelo, storageActual = '', colorActual = '') {
@@ -1499,9 +1532,16 @@ const Stock = {
         conActual(specs.s, storageActual).map(v => opcion(v, storageActual)).join('');
     }
     if (colorSel) {
+      // "Otro" se agrega acá una sola vez: la lista genérica (sin modelo
+      // elegido) ya lo trae, y antes aparecía duplicado.
+      const lista = conActual(specs.c, colorActual).filter(v => v.toLowerCase() !== 'otro');
+      // Si el producto ya estaba guardado como "Otro", esa opción tiene que
+      // quedar elegida: sin esto, abrirlo y guardarlo le borraba el color.
+      const otroElegido = String(colorActual || '').toLowerCase() === 'otro';
       colorSel.innerHTML = '<option value="">Seleccionar color</option>' +
-        conActual(specs.c, colorActual).map(v => opcion(v, colorActual)).join('') +
-        '<option value="Otro">Otro</option>';
+        lista.map(v => opcion(v, colorActual)).join('') +
+        `<option value="Otro" ${otroElegido ? 'selected' : ''}>Otro</option>`;
+      this.onColorChange();
     }
   },
 
@@ -1561,6 +1601,27 @@ const Stock = {
     if (!sel || !otro) return;
     otro.style.display = sel.value === '__otro__' ? 'block' : 'none';
     if (sel.value === '__otro__') otro.focus(); else otro.value = '';
+  },
+
+  // "Otro" en el color abre un campo para escribirlo. Sin esto, un modelo sin
+  // colores cargados (el iPhone 18 base, un Samsung nuevo) no tenía manera de
+  // recibir su color real: el formulario guardaba la palabra "Otro".
+  onColorChange() {
+    const sel = document.getElementById('f-color');
+    const otro = document.getElementById('f-color-otro');
+    if (!sel || !otro) return;
+    const abrir = sel.value === 'Otro';
+    otro.style.display = abrir ? 'block' : 'none';
+    if (abrir && !otro.value) otro.focus(); else if (!abrir) otro.value = '';
+  },
+
+  // Color del formulario: el escrito si eligió "Otro". Si lo dejó vacío se
+  // conserva "Otro" tal cual (como antes), para no bloquear editar OTROS datos
+  // de un producto viejo que ya tenía ese valor.
+  _colorDelFormulario() {
+    const v = document.getElementById('f-color')?.value || '';
+    if (v !== 'Otro') return v;
+    return (document.getElementById('f-color-otro')?.value || '').trim() || 'Otro';
   },
 
   // Tamaño elegido en el formulario, salga del desplegable o del campo libre.
@@ -1894,13 +1955,13 @@ const Stock = {
       const modeloSel = document.getElementById('f-modelo')?.value || '';
       modelo = modeloSel === '__otro__' ? (document.getElementById('f-modelo-otro')?.value.trim() || '') : modeloSel;
       storage = document.getElementById('f-storage')?.value || '';
-      color = document.getElementById('f-color')?.value || '';
+      color = this._colorDelFormulario();
     } else if (cat === 'repuesto') {
       const modeloSel = document.getElementById('f-modelo-repuesto')?.value || '';
       modelo = modeloSel === '__otro__' ? (document.getElementById('f-modelo-repuesto-otro')?.value.trim() || '') : modeloSel;
     } else {
       storage = document.getElementById('f-storage')?.value || '';
-      color = document.getElementById('f-color')?.value || '';
+      color = this._colorDelFormulario();
     }
     const nombreLibre = esLibre ? (document.getElementById('f-nombre-libre')?.value.trim() || '') : '';
 
@@ -1965,7 +2026,8 @@ const Stock = {
     if (modelo && this.MODELOS_POR_CAT[cat]?.includes(modelo)) {
       const specs = this.specsParaModelo(modelo);
       const nuevos = [];
-      if (color && !specs.c.some(v => v.toLowerCase() === color.toLowerCase())
+      // "Otro" es un marcador, no un color: nunca entra al catálogo del modelo.
+      if (color && color.toLowerCase() !== 'otro' && !specs.c.some(v => v.toLowerCase() === color.toLowerCase())
           && await DB.agregarSpecDeModelo(modelo, 'c', color)) nuevos.push(color);
       if (storage && !specs.s.some(v => v.toLowerCase() === storage.toLowerCase())
           && await DB.agregarSpecDeModelo(modelo, 's', storage)) nuevos.push(storage);

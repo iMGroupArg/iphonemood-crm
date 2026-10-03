@@ -524,15 +524,15 @@ const Ventas = {
   // que es lo que habría pasado si el equipo hubiera estado en stock al vender.
   async asignarStockReal(ventaId, itemIdx, stockId) {
     const v = State.ventas.find(x => String(x.id) === String(ventaId));
-    if (!v) { toast('No se encontró la venta.'); return false; }
+    if (!v) { toast('No se encontró la venta.'); return { ok: false, parcial: false }; }
     const it = v.items?.[itemIdx];
-    if (!it) { toast('No se encontró el producto dentro de la venta.'); return false; }
-    if (it.stockId) { toast('Ese producto ya está vinculado a una unidad del stock.'); return false; }
+    if (!it) { toast('No se encontró el producto dentro de la venta.'); return { ok: false, parcial: false }; }
+    if (it.stockId) { toast('Ese producto ya está vinculado a una unidad del stock.'); return { ok: false, parcial: false }; }
 
     const p = State.stock.find(x => String(x.id) === String(stockId));
-    if (!p) { toast('No se encontró el equipo en el stock.'); return false; }
-    if (State.getStock(p) <= 0) { toast(`"${p.nombre}" no tiene unidades disponibles.`); return false; }
-    if ((p.estadoInventario || 'disponible') === 'vendido') { toast(`"${p.nombre}" ya figura como vendido.`); return false; }
+    if (!p) { toast('No se encontró el equipo en el stock.'); return { ok: false, parcial: false }; }
+    if (State.getStock(p) <= 0) { toast(`"${p.nombre}" no tiene unidades disponibles.`); return { ok: false, parcial: false }; }
+    if ((p.estadoInventario || 'disponible') === 'vendido') { toast(`"${p.nombre}" ya figura como vendido.`); return { ok: false, parcial: false }; }
 
     // Una unidad reservada por OTRA venta no se puede volver a vincular: sería
     // prometerle el mismo frasco a dos clientes que ya pagaron la seña. Es el
@@ -543,7 +543,7 @@ const Ventas = {
       (o.items || []).some(i => String(i.stockId || '') === String(p.id)));
     if (reservadaPor && (p.estadoInventario || 'disponible') === 'reservado') {
       toast(`"${p.nombre}" ya está reservado para la venta #${reservadaPor.id}.`);
-      return false;
+      return { ok: false, parcial: false };
     }
 
     // Un solo IMEI por unidad: si la fila tiene varios, se toma el primero
@@ -554,38 +554,58 @@ const Ventas = {
     const ok = await DB.vincularItemVentaAStock(it.id, {
       stockId: p.id, imei, costoUSD: p.costoUSD, nombre: p.nombre,
     });
-    if (!ok) { toast('No se pudo vincular. Revisá la conexión e intentá de nuevo.'); return false; }
+    if (!ok) { toast('No se pudo vincular. Revisá la conexión e intentá de nuevo.'); return { ok: false, parcial: false }; }
 
     it.stockId = p.id;
     it.imei = imei;
     it.costo = p.costoUSD;
     it.nombre = p.nombre;
 
-    if (cerrada) {
-      // La venta ya se cobró entera: la unidad sale del inventario.
-      State.descontarStock(p.id, imei);
-      if (p.imeis) await DB.actualizarImeisStock(p.id, p.imeis);
-      if (p.cantidad !== undefined) await DB.actualizarCantidadStock(p.id, p.cantidad);
-    } else {
-      p.estadoInventario = 'reservado';
-      await DB.actualizarEstadoInventario(p.id, 'reservado');
-    }
-
-    // Nota cruzada en las dos puntas, para que se pueda reconstruir después
-    // mirando cualquiera de los dos lados.
     const nota = cerrada
       ? `Vendido — Venta #${v.id}`
       : `Reservado — Venta #${v.id}, seña ya cobrada`;
+
+    if (cerrada) {
+      // La venta ya se cobró entera: la unidad sale del inventario. El descuento
+      // va POR DELTA en la base, no escribiendo el total calculado acá: así una
+      // venta de Mercado Libre en el medio no se borra.
+      const r = await DB.ajustarStock({
+        stockId: p.id, delta: -1, imei,
+        tipo: 'baja_venta', detalle: `${nota}${imei ? ` — IMEI ${imei}` : ''}`,
+      });
+      if (!r.ok) {
+        // El vínculo YA quedó hecho y confirmado. No se compensa ni se revierte:
+        // ante un fallo SIN CONFIRMAR, reponer podría duplicar la unidad. Se
+        // corta acá — sin nota ni mensaje de éxito — y queda un estado VISIBLE:
+        // el producto figura vinculado en la venta y el stock sin descontar.
+        toast(r.definitivo
+          ? `Se vinculó, pero NO se descontó del stock: ${r.mensaje}`
+          : `Se vinculó, pero no se pudo confirmar el descuento. ⚠️ Verificá el stock de "${p.nombre}" antes de tocar nada.`);
+        return { ok: false, parcial: true, confirmado: !!r.definitivo, mensaje: r.mensaje };
+      }
+      // El movimiento del historial lo escribe la RPC dentro de su transacción:
+      // registrarlo también acá lo duplicaría.
+      State.aplicarRespuestaStock(p.id, r);
+    } else {
+      const guardado = await DB.actualizarEstadoInventario(p.id, 'reservado');
+      if (!guardado) {
+        toast(`Se vinculó, pero NO se pudo reservar "${p.nombre}". Revisalo antes de publicarlo.`);
+        return { ok: false, parcial: true, confirmado: false, mensaje: 'No se pudo reservar' };
+      }
+      p.estadoInventario = 'reservado';
+      await DB.registrarMovimientoStock(p.id, 'edicion',
+        `${nota}${imei ? ` — IMEI ${imei}` : ''}`, State.getStock(p), State.getStock(p));
+    }
+
+    // Nota cruzada en las dos puntas, para que se pueda reconstruir después
+    // mirando cualquiera de los dos lados. Solo si todo salió bien.
     p.notas = [p.notas, nota].filter(Boolean).join(' | ');
     await DB.actualizarNotasStock(p.id, p.notas);
-    await DB.registrarMovimientoStock(p.id, cerrada ? 'baja_venta' : 'edicion',
-      `${nota}${imei ? ` — IMEI ${imei}` : ''}`,
-      State.getStock(p) + (cerrada ? 1 : 0), State.getStock(p));
 
     toast(cerrada
       ? `Vinculado: "${p.nombre}" salió del stock como vendido.`
       : `Vinculado: "${p.nombre}" quedó reservado para la venta #${v.id}.`);
-    return true;
+    return { ok: true };
   },
 
   // Selector de qué unidad del stock corresponde a este item manual.
@@ -645,8 +665,13 @@ const Ventas = {
   },
 
   async _confirmarAsignar(ventaId, itemIdx, stockId) {
-    const ok = await this.asignarStockReal(ventaId, itemIdx, stockId);
-    if (!ok) return;
+    const r = await this.asignarStockReal(ventaId, itemIdx, stockId);
+    // OJO: `asignarStockReal` devuelve un OBJETO. Un `if (!r)` nunca sería
+    // verdadero —todo objeto es truthy— y un fallo seguiría como si fuera éxito.
+    // Si no se hizo nada, el modal queda abierto para corregir y reintentar.
+    if (!r.ok && !r.parcial) return;
+    // Con `parcial` el vínculo SÍ quedó hecho: hay que cerrar y refrescar para
+    // que se vea, aunque el descuento o la reserva hayan fallado.
     document.getElementById('asignar-stock-overlay')?.remove();
     this.viewSale(ventaId);
   },
@@ -924,9 +949,74 @@ const Ventas = {
       </div>`;
   },
 
+  // Capacidades y colores que corresponden al modelo del equipo recibido. Sin
+  // modelo elegido, o con uno escrito a mano que el catálogo no conoce, no hay
+  // nada que acotar y se ofrece la lista general. La fuente es la misma que usa
+  // el formulario de Stock, para que las dos pantallas nunca discrepen.
+  _tiSpecs(modelo) {
+    const S = window.Stock;
+    if (!modelo || !S) return { s: S?.STORAGE_OPCIONES || [], c: S?.COLOR_OPCIONES || [] };
+    return S.specsParaModelo(modelo);
+  },
+
+  // Modelo que tiene elegido el formulario: el del desplegable o, con "Otro
+  // (escribir)", el que se escribió. Así un modelo cargado a mano también
+  // recibe sus propios colores y no la lista de todos.
+  _tiModeloActual() {
+    const sel = document.getElementById('vf-ti-modelo')?.value || '';
+    return sel === '__otro__'
+      ? (document.getElementById('vf-ti-modelo-otro')?.value || '').trim()
+      : sel;
+  },
+
+  // <option>s de un desplegable. Si lo que ya estaba elegido no está en la lista
+  // se conserva igual (marcado), así abrir un canje cargado antes no lo borra
+  // en silencio. "Otro" queda siempre, una sola vez.
+  _tiOpciones(lista, actual, conOtro) {
+    const vals = (lista || []).filter(v => v.toLowerCase() !== 'otro');
+    const a = String(actual || '');
+    const igual = v => v.toLowerCase() === a.toLowerCase();
+    const esOtro = a.toLowerCase() === 'otro';
+    if (a && !esOtro && !vals.some(igual)) vals.push(a);
+    if (conOtro) vals.push('Otro');
+    return vals.map(v => `<option ${a && igual(v) ? 'selected' : ''}>${State.esc(v)}</option>`).join('');
+  },
+
+  // Al cambiar el modelo se rehacen capacidad y color. Si el valor que había
+  // existe también en el modelo nuevo se respeta; si no, queda vacío y hay que
+  // elegir (mismo criterio que el canje de Presupuestos).
+  // "Otro" en el color abre un campo para escribirlo (si no, se guardaba la
+  // palabra "Otro"). Vacío conserva "Otro", como antes.
+  tiColorToggle() {
+    const sel = document.getElementById('vf-ti-color');
+    const otro = document.getElementById('vf-ti-color-otro');
+    if (!sel || !otro) return;
+    const abrir = sel.value === 'Otro';
+    otro.style.display = abrir ? 'block' : 'none';
+    if (abrir && !otro.value) otro.focus(); else if (!abrir) otro.value = '';
+  },
+
+  tiRefrescarSpecs() {
+    const selM = document.getElementById('vf-ti-modelo');
+    if (!selM) return;
+    const specs = this._tiSpecs(this._tiModeloActual());
+    const poner = (id, lista, conOtro) => {
+      const el = document.getElementById(id);
+      if (!el) return;
+      const antes = el.value;
+      const vals = (lista || []).filter(v => v.toLowerCase() !== 'otro');
+      if (conOtro) vals.push('Otro');
+      el.innerHTML = '<option value="">Seleccionar</option>' + vals.map(v => `<option>${State.esc(v)}</option>`).join('');
+      if (antes && vals.some(v => v.toLowerCase() === antes.toLowerCase())) el.value = vals.find(v => v.toLowerCase() === antes.toLowerCase());
+    };
+    poner('vf-ti-storage', specs.s, false);
+    poner('vf-ti-color', specs.c, true);
+    this.tiColorToggle();
+  },
+
   _tiDetalleHTML(cat, ti={}) {
-    const STORAGE = ['32GB','64GB','128GB','256GB','512GB','1TB','2TB'];
-    const COLORES = ['Negro','Blanco','Azul','Verde','Rosa','Rojo','Titanio Natural','Titanio Azul','Titanio Negro','Plata','Dorado','Gris Espacial','Otro'];
+    const _specsTI = this._tiSpecs(ti.modelo || '');
+    const _colorOtro = String(ti.color || '').toLowerCase() === 'otro';
     const ESTADO = ['Nuevo / Sellado','Excelente','Muy bueno','Bueno','Con detalles'];
     const GRADO = ['Sin grado','A+','A','B','C'];
     const modelos = Stock.MODELOS_POR_CAT[cat] || [];
@@ -954,7 +1044,7 @@ const Ventas = {
             ${modelos.map(m=>`<option ${ti.modelo===m?'selected':''}>${m}</option>`).join('')}
             <option value="__otro__" ${ti.modelo && !modelos.includes(ti.modelo)?'selected':''}>Otro (escribir)</option>
           </select>
-          <input type="text" id="vf-ti-modelo-otro" value="${ti.modelo && !modelos.includes(ti.modelo)?ti.modelo:''}" placeholder="Escribí el modelo" style="${INPUT_ST};margin-top:6px;display:${ti.modelo && !modelos.includes(ti.modelo)?'block':'none'}">
+          <input type="text" id="vf-ti-modelo-otro" oninput="Ventas.tiRefrescarSpecs()" value="${ti.modelo && !modelos.includes(ti.modelo)?ti.modelo:''}" placeholder="Escribí el modelo" style="${INPUT_ST};margin-top:6px;display:${ti.modelo && !modelos.includes(ti.modelo)?'block':'none'}">
         </div>
       </div>` : `
       <!-- Nombre libre -->
@@ -970,15 +1060,16 @@ const Ventas = {
           <label style="${LABEL_ST}">Storage *</label>
           <select id="vf-ti-storage" style="${INPUT_ST}">
             <option value="">Seleccionar almacenamiento</option>
-            ${STORAGE.map(s=>`<option ${ti.storage===s?'selected':''}>${s}</option>`).join('')}
+            ${this._tiOpciones(_specsTI.s, ti.storage, false)}
           </select>
         </div>
         <div>
           <label style="${LABEL_ST}">Color *</label>
-          <select id="vf-ti-color" style="${INPUT_ST}">
+          <select id="vf-ti-color" onchange="Ventas.tiColorToggle()" style="${INPUT_ST}">
             <option value="">Seleccionar color</option>
-            ${COLORES.map(c=>`<option ${ti.color===c?'selected':''}>${c}</option>`).join('')}
+            ${this._tiOpciones(_specsTI.c, ti.color, true)}
           </select>
+          <input type="text" id="vf-ti-color-otro" placeholder="Escribí el color" style="${INPUT_ST};margin-top:6px;display:${_colorOtro ? 'block' : 'none'}">
         </div>
       </div>` : ''}
 
@@ -1051,6 +1142,7 @@ const Ventas = {
     const val = document.getElementById('vf-ti-modelo')?.value;
     const otro = document.getElementById('vf-ti-modelo-otro');
     if (otro) otro.style.display = val === '__otro__' ? 'block' : 'none';
+    this.tiRefrescarSpecs();
   },
 
   toggleTI() {
@@ -1074,7 +1166,10 @@ const Ventas = {
       modelo,
       imei: document.getElementById('vf-ti-imei')?.value.trim() || '',
       storage: document.getElementById('vf-ti-storage')?.value || '',
-      color: document.getElementById('vf-ti-color')?.value || '',
+      color: (() => {
+        const v = document.getElementById('vf-ti-color')?.value || '';
+        return v === 'Otro' ? ((document.getElementById('vf-ti-color-otro')?.value || '').trim() || 'Otro') : v;
+      })(),
       bateriaPct: parseFloat(document.getElementById('vf-ti-bateria')?.value) || null,
       estadoProducto: document.getElementById('vf-ti-estado')?.value || '',
       grado: document.getElementById('vf-ti-grado')?.value || 'Sin grado',
@@ -1780,22 +1875,20 @@ const Ventas = {
     const noDescontados = [];
     for (const it of d.items) {
       if (it.stockId) {
-        const removed = State.descontarStock(it.stockId, it.imei);
-        if (removed) {
-          stockMovs.push(removed);
-          const item = State.stock.find(s => s.id === it.stockId);
-          if (item) {
-            // Guardar SIEMPRE las dos columnas: con IMEI se escribía solo
-            // `imeis` y `cantidad` quedaba vieja, dejando el equipo disponible.
-            let guardado = true;
-            if (item.imeis) guardado = (await DB.actualizarImeisStock(it.stockId, item.imeis)) !== false && guardado;
-            if (item.cantidad !== undefined) guardado = (await DB.actualizarCantidadStock(it.stockId, item.cantidad)) !== false && guardado;
-            if (!guardado) stockSinGuardar.push(it.nombre);
-          }
+        // POR DELTA en la base (stock_ajustar): resta sobre el valor REAL de la fila,
+        // no sobre la copia de esta pantalla, así no pisa lo que haya descontado
+        // otra pestaña o Mercado Libre. La pantalla se refresca con la respuesta.
+        const res = await this._ajustarStock(it.stockId, -1, it.imei, 'baja_venta',
+          `Venta a ${d.cliente}`);
+        if (res.ok) {
+          stockMovs.push({ stockId: it.stockId, imei: it.imei || null });
+        } else if (res.definitivo) {
+          // La base lo rechazó y no escribió nada (sin stock, falta elegir el IMEI…).
+          // Igual que antes: la venta sigue y se avisa.
+          noDescontados.push(`${it.nombre}${it.imei ? ` (IMEI ${it.imei})` : ''} — ${this._motivoStock(res)}`);
         } else {
-          // Antes esto se ignoraba: la venta se guardaba igual y el equipo
-          // seguía figurando en stock, sin ningún aviso.
-          noDescontados.push(it.nombre + (it.imei ? ` (IMEI ${it.imei})` : ''));
+          // No se sabe si se descontó. NO se reintenta (descontaría dos veces).
+          stockSinGuardar.push(it.nombre);
         }
 
         // Garantía automática según la condición del producto (nuevo/usado),
@@ -1821,7 +1914,7 @@ const Ventas = {
       }
     }
     if (stockSinGuardar.length) {
-      toast(`⚠️ La venta se guardó, pero la base no aceptó el descuento de stock de: ${stockSinGuardar.join(', ')}. Corregilo a mano en Stock.`);
+      toast(`⚠️ No se pudo CONFIRMAR el descuento de stock de: ${stockSinGuardar.join(', ')} (se cortó la conexión: puede haberse descontado o no). Revisá la cantidad en Stock antes de volver a vender.`);
     }
     if (noDescontados.length) {
       toast(`⚠️ No se pudo descontar del stock: ${noDescontados.join(', ')}. Revisalo a mano en Stock.`);
@@ -1890,19 +1983,14 @@ const Ventas = {
       }
       // Revertir stock descontado
       for (const mov of stockMovs) {
-        State.restaurarStock(mov.stockId, mov.imei, { sinPersistir: true });
-        const item = State.stock.find(s => s.id === mov.stockId || s.id == mov.stockId);
-        if (item) {
-          let guardado = true;
-          if (item.imeis) guardado = (await DB.actualizarImeisStock(mov.stockId, item.imeis)) !== false && guardado;
-          if (item.cantidad !== undefined) guardado = (await DB.actualizarCantidadStock(mov.stockId, item.cantidad)) !== false && guardado;
-          if (State.getStock(item) > 0 && item.estadoInventario !== 'disponible') {
-            item.estadoInventario = 'disponible';
-            guardado = (await DB.actualizarEstadoInventario(mov.stockId, 'disponible')) !== false && guardado;
-          }
-          if (!guardado) avisosRollback.push(`el stock de "${item.nombre || mov.stockId}" no se pudo devolver en la base (revisalo a mano)`);
+        const r = await this._ajustarStock(mov.stockId, +1, mov.imei, 'venta_anulada',
+          'La venta no se llegó a guardar');
+        if (!r.ok) {
+          const it0 = State.stock.find(x => x.id === mov.stockId || x.id == mov.stockId);
+          avisosRollback.push(`el stock de "${it0?.nombre || mov.stockId}" no se pudo devolver (${this._motivoStock(r)}): revisalo a mano`);
         }
       }
+      if (stockSinGuardar.length) avisosRollback.push(`no se pudo confirmar el descuento de stock de ${stockSinGuardar.join(', ')}: revisalo a mano`);
       // Revertir los cobros — SOLO si llegaron a entrar (si la caja los rechazó,
       // moverVarias ya los dejó como estaban y no hay nada que sacar).
       let cobrosDeshechos = true;
@@ -2838,6 +2926,22 @@ const Ventas = {
     this.viewSale(id);
   },
 
+  // Ajuste de stock POR DELTA en la base (stock_ajustar) + refresco de la copia en
+  // pantalla con lo que respondió la base. Nunca reintenta. Ver DB.ajustarStock.
+  async _ajustarStock(stockId, delta, imei, tipo, detalle, estadoDestino = null) {
+    const res = await DB.ajustarStock({ stockId, delta, tipo, detalle, imei, estadoDestino });
+    if (res.ok) State.aplicarRespuestaStock(stockId, res);
+    return res;
+  },
+  _motivoStock(res) {
+    const m = {
+      STOCK_INSUFICIENTE: 'no alcanza el stock', IMEI_REQUERIDO: 'el producto tiene IMEIs: hay que elegir cuál se vende',
+      IMEI_NO_ESTA: 'ese IMEI no está en el producto', STOCK_INEXISTENTE: 'el producto ya no existe',
+      RPC_AUSENTE: 'falta correr stock_ajustar en Supabase', SIN_CONFIRMAR: 'sin confirmar',
+    };
+    return m[res.codigo] || res.mensaje || res.codigo || 'error';
+  },
+
   // Importe que un pago movió (o debe devolver) en SU caja. Es la única fuente para
   // los tres caminos de reverso (eliminar pago, anular venta y Cajas): como
   // comparten la clave eliminar-pago-<id>, tienen que pedir exactamente lo mismo.
@@ -2917,29 +3021,33 @@ const Ventas = {
       toast(`⚠️ La plata de la venta #${id} ya volvió a las cajas, pero la venta no se pudo borrar de la base. Volvé a tocar «Anular»: la plata no se devuelve dos veces.`);
       return;
     }
+    // 'ya_borrada': otra pestaña la anuló antes y es la que repone el stock;
+    // reponerlo acá también lo sumaría dos veces.
+    const yaAnulada = borrada === 'ya_borrada';
     // Revertir stock — si stockMovs no existe (ventas cargadas de DB), usar los items con stockId
     const movsARestaurar = (v.stockMovs && v.stockMovs.length)
       ? v.stockMovs
       : v.items.filter(i => i.stockId).map(i => ({ stockId: i.stockId, imei: i.imei || null }));
     const avisos = [];
-    for (const m of movsARestaurar) {
-      try {
-        State.restaurarStock(m.stockId, m.imei, { sinPersistir: true });
-        const item = State.stock.find(s => s.id === m.stockId || s.id == m.stockId);
-        if (item) {
-          let guardado = true;
-          if (item.imeis) guardado = (await DB.actualizarImeisStock(m.stockId, item.imeis)) !== false && guardado;
-          if (item.cantidad !== undefined) guardado = (await DB.actualizarCantidadStock(m.stockId, item.cantidad)) !== false && guardado;
-          // Siempre restaurar el estado a disponible si tiene stock
-          if (State.getStock(item) > 0 && item.estadoInventario !== 'disponible') {
-            item.estadoInventario = 'disponible';
-            guardado = (await DB.actualizarEstadoInventario(m.stockId, 'disponible')) !== false && guardado;
-          }
-          if (!guardado) avisos.push(`no se pudo guardar la devolución al stock de "${item.nombre || m.stockId}", revisalo a mano`);
-        }
-      } catch (e) {
-        console.error(e);
-        avisos.push(`no se pudo devolver al stock el producto ${m.stockId}, revisalo a mano`);
+    // Si la base ya no tenía la venta, NO se repone solo: cero filas borradas no
+    // prueba quién repuso el stock (otra pestaña, o esta misma anulación que quedó
+    // a medias con la respuesta perdida). Se avisa para conciliarlo a mano.
+    if (yaAnulada && movsARestaurar.length) {
+      const nombres = movsARestaurar.map(m => State.stock.find(x => x.id === m.stockId || x.id == m.stockId)?.nombre || m.stockId);
+      avisos.push(`la venta ya no estaba en la base (otra pestaña u otra anulación que quedó a medias): el stock de ${nombres.join(', ')} NO se tocó, revisá que se haya repuesto una vez`);
+    }
+    for (const m of (yaAnulada ? [] : movsARestaurar)) {
+      // Una unidad que estaba 'reservado' para esta venta se libera al reponer
+      // (antes lo hacía el cambio a 'disponible'). Solo si ninguna otra venta
+      // tiene ese mismo producto: la reserva no puede ser de otra.
+      const fila = State.stock.find(x => x.id === m.stockId || x.id == m.stockId);
+      const deOtra = (State.ventas || []).some(o => o.id !== id && (o.items || []).some(i => i.stockId === m.stockId || i.stockId == m.stockId));
+      const liberar = fila?.estadoInventario === 'reservado' && !deOtra ? 'disponible' : null;
+      const r = await this._ajustarStock(m.stockId, +1, m.imei, 'venta_anulada',
+        `Se anuló la venta #${id}`, liberar);
+      if (!r.ok) {
+        const it0 = State.stock.find(x => x.id === m.stockId || x.id == m.stockId);
+        avisos.push(`no se pudo devolver al stock "${it0?.nombre || m.stockId}" (${this._motivoStock(r)}), revisalo a mano`);
       }
     }
     // Dar de baja el equipo que había entrado como trade-in: la venta deja de

@@ -811,10 +811,53 @@ const DB = {
     await supa.from('stock').delete().eq('id', stockId);
   },
 
+  // Descuento / reposición de stock POR DELTA, atómico en la base (stock_ajustar):
+  // la base suma o resta sobre el valor REAL de la fila, no sobre la copia de la
+  // pantalla, así no pisa lo que otro haya movido (otra pestaña, Mercado Libre).
+  // NO reintenta nunca: la función no tiene clave de idempotencia, y repetir un
+  // pedido cuya respuesta se perdió descontaría dos veces.
+  //   → { ok:true, cantidad, imeis, estado, unidades }
+  //   → { ok:false, definitivo:true,  codigo, mensaje }  la base lo rechazó: NO se escribió nada
+  //   → { ok:false, definitivo:false, codigo:'SIN_CONFIRMAR' }  pudo haberse aplicado o no
+  async ajustarStock({ stockId, delta, tipo, detalle, imei = null, estadoDestino = null }) {
+    let res;
+    try {
+      res = await supa.rpc('stock_ajustar', {
+        p_stock_id: stockId, p_delta: delta, p_tipo: tipo, p_detalle: detalle,
+        p_imei: imei || null, p_estado_destino: estadoDestino || null,
+      });
+    } catch (e) {
+      res = { data: null, error: { message: String(e), code: '' }, status: 0 };
+    }
+    const { data, error } = res;
+    if (error) {
+      const msg = String(error.message || '');
+      if (error.code === 'PGRST202' || error.code === '42883') {
+        return { ok: false, definitivo: true, codigo: 'RPC_AUSENTE', mensaje: 'falta correr stock_ajustar en Supabase' };
+      }
+      const conocido = msg.match(/\b(STOCK_INEXISTENTE|STOCK_INSUFICIENTE|IMEI_NO_ESTA|IMEI_REQUERIDO|IMEI_DELTA_UNO|DELTA_INVALIDO|CANTIDAD_FUERA_DE_RANGO|IMEIS_INVALIDOS|AISLAMIENTO_NO_SOPORTADO|ESTADO_INVALIDO|ESTADO_INCONSISTENTE|TIPO_REQUERIDO)\b/);
+      if (conocido) return { ok: false, definitivo: true, codigo: conocido[1], mensaje: msg };
+      if (/no autorizado|IMEI duplicado/i.test(msg) || error.code === '42501') {
+        return { ok: false, definitivo: true, codigo: 'RECHAZADO', mensaje: msg };
+      }
+      // Cualquier otra cosa (sin código, 5xx, corte de red): no se sabe si se aplicó.
+      console.error('stock_ajustar sin confirmar:', { stockId, delta, tipo }, error);
+      return { ok: false, definitivo: false, codigo: 'SIN_CONFIRMAR', mensaje: msg };
+    }
+    const fila = Array.isArray(data) ? (data.length === 1 ? data[0] : null) : (data && typeof data === 'object' ? data : null);
+    if (!fila || typeof fila.cantidad !== 'number') {
+      console.error('stock_ajustar devolvió una respuesta inesperada:', data);
+      return { ok: false, definitivo: false, codigo: 'SIN_CONFIRMAR', mensaje: 'respuesta inesperada' };
+    }
+    return { ok: true, cantidad: fila.cantidad, imeis: fila.imeis || [], estado: fila.estado_inventario, unidades: fila.unidades };
+  },
+
   async actualizarEstadoInventario(stockId, estado) {
-    const { error } = await supa.from('stock').update({ estado_inventario: estado }).eq('id', stockId);
+    // Mismo arreglo que arriba: sin mirar las filas afectadas, esto decía que
+    // guardó un estado que nunca se escribió.
+    const { data, error } = await supa.from('stock').update({ estado_inventario: estado }).eq('id', stockId).select('id');
     if (error) { console.error('No se pudo guardar el estado del stock:', error); return false; }
-    return true;
+    return Array.isArray(data) && data.length === 1;
   },
 
   // Libro mayor de cajas: deja registrado cada entrada y salida.
@@ -897,9 +940,12 @@ const DB = {
     const row = { stock_id: stockId, imei: imei || null };
     if (costoUSD != null) row.costo_usd = costoUSD;
     if (nombre) row.nombre = nombre;
-    const { error } = await supa.from('venta_items').update(row).eq('id', itemId).select('id');
+    // `.select('id')` + chequeo de filas: antes solo se miraba `error`, así que
+    // devolvía `true` aunque el UPDATE no tocara NINGUNA fila (id inexistente o
+    // RLS). Es el mismo bug que ya se había corregido en `actualizarPrecioStock`.
+    const { data, error } = await supa.from('venta_items').update(row).eq('id', itemId).select('id');
     if (error) { console.error('No se pudo vincular el item de venta al stock:', error); return false; }
-    return true;
+    return Array.isArray(data) && data.length === 1;
   },
 
   async actualizarNotasStock(stockId, notas) {
@@ -1036,9 +1082,11 @@ const DB = {
   },
 
   async anularVenta(ventaId) {
-    const { error } = await supa.from('ventas').delete().eq('id', ventaId); // borra en cascada items y pagos
+    const { data, error } = await supa.from('ventas').delete().eq('id', ventaId).select('id'); // borra en cascada items y pagos
     if (error) { console.error('No se pudo borrar la venta:', error); return false; }
-    return true;
+    // Si no borró ninguna fila, otra pestaña ya la anuló: quien llama NO debe
+    // volver a reponer stock (se repondría dos veces).
+    return (data && data.length) ? true : 'ya_borrada';
   },
 
   // Guarda la cotización usada y devuelve el id del pago.

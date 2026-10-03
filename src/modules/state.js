@@ -108,6 +108,23 @@ const State = {
     return 'ok';
   },
 
+  // Vuelca en la copia en memoria lo que la base confirmó tras un ajuste por
+  // delta. No alcanza con `cantidad`: `getStock()` le da PRIORIDAD a
+  // `cantidadDeclarada`, que es un espejo que vive SOLO en el cliente, así que
+  // si no se actualizan juntos la pantalla muestra un número viejo.
+  refrescarFilaStock(item, fila) {
+    if (!item || !fila) return item;
+    item.cantidad = fila.cantidad;
+    item.cantidadDeclarada = fila.cantidad;
+    item.estadoInventario = fila.estado_inventario;
+    // Los IMEIs solo se tocan si la fila YA era de un rubro con IMEI. La carga
+    // usa arreglo para esos rubros y `undefined` para el resto, y medio código
+    // pregunta `if (!item.imeis)`: convertir un accesorio en `[]` rompería esos
+    // chequeos en silencio (por ejemplo, dejaría de devolver repuestos).
+    if (Array.isArray(item.imeis)) item.imeis = Array.isArray(fila.imeis) ? fila.imeis : [];
+    return item;
+  },
+
   // Modelos a los que les queda la última unidad.
   //
   // Antes se contaba producto por producto con getStockStatus() <= 1, pero como
@@ -566,6 +583,18 @@ const State = {
       item.estadoInventario = 'disponible';
       DB.actualizarEstadoInventario(stockId, 'disponible');
     }
+  },
+
+  // Refresca la copia en pantalla de UNA fila de stock con lo que respondió la base
+  // (stock_ajustar). Es la única fuente de verdad tras un ajuste por delta:
+  // `cantidadDeclarada` es un espejo solo del cliente y getStock() le da prioridad,
+  // así que si no se actualiza la pantalla seguiría mostrando la cantidad vieja.
+  aplicarRespuestaStock(stockId, res) {
+    const item = this.stock.find(s => s.id === stockId || s.id == stockId);
+    if (!item || !res || !res.ok) return;
+    // Una sola implementación del refresco (la de Stock, refrescarFilaStock): adapta
+    // la respuesta de DB.ajustarStock al formato de columnas de la base.
+    this.refrescarFilaStock(item, { cantidad: res.cantidad, imeis: res.imeis, estado_inventario: res.estado || item.estadoInventario });
   },
 
   // Convierte un gasto a USD usando la cotización que tenía vigente al momento de pagarlo

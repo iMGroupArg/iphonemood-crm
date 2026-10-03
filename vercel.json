@@ -1,5 +1,12 @@
 {
   "framework": null,
+  "functions": {
+    "api/meli/worker.js": { "maxDuration": 30 },
+    "api/meli/webhook.js": { "maxDuration": 10 }
+  },
+  "crons": [
+    { "path": "/api/meli/worker", "schedule": "0 9 * * *" }
+  ],
   "rewrites": [
     {
       "source": "/sitemap.xml",

@@ -18,6 +18,7 @@ import './adelantos.js';
 import './reportes.js';
 import './presupuestos.js';
 import './blog.js';
+import './meli.js';
 import Bandeja from './bandeja.js';
 
 const App = {
@@ -40,6 +41,7 @@ const App = {
     presupuestos: { title: 'Presupuestos', module: Presupuestos },
     reportes: { title: 'Reportes', module: Reportes },
     blog: { title: 'Blog', module: Blog },
+    meli: { title: 'Mercado Libre', module: Meli },
     panel: { title: 'Panel de control', module: Panel },
   },
 

@@ -17,7 +17,7 @@ const redondear = n => Math.round((Number(n) + Number.EPSILON) * 100) / 100;
 // "La base": saldos + libro + claves de idempotencia. Dos pestañas pueden
 // compartir UNA misma base, que es justo el caso que antes perdía plata.
 function nuevoServidor() {
-  return { base: {}, libro: [], claves: new Map(), llamadas: 0 };
+  return { base: {}, libro: [], claves: new Map(), llamadas: 0, stock: {}, stockLlamadas: [] };
 }
 
 // Réplica fiel de public.caja_aplicar_delta: suma el delta sobre el saldo REAL
@@ -91,6 +91,33 @@ function nuevoEntorno(opciones = {}) {
   const contadores = { viejo: 0, rpc: 0, rpcMover: 0 };
 
   const DB = {
+    // Réplica de public.stock_ajustar: resta/suma sobre el valor REAL de la fila en
+    // la "base" (servidor.stock), no sobre la copia de la pantalla. La fila se siembra
+    // la primera vez con lo que la pantalla tenía (= lo que cargó al abrir).
+    async ajustarStock({ stockId, delta, tipo, detalle, imei = null, estadoDestino = null }) {
+      servidor.stockLlamadas.push({ stockId, delta, tipo, imei });
+      if (cfg.stockSinRpc) return { ok: false, definitivo: true, codigo: 'RPC_AUSENTE', mensaje: 'falta correr stock_ajustar en Supabase' };
+      if (cfg.stockRed === 'caida') return { ok: false, definitivo: false, codigo: 'SIN_CONFIRMAR', mensaje: 'red' };
+      let f = servidor.stock[stockId];
+      if (!f) {
+        const m = (ctx.window.State.stock || []).find(x => x.id === stockId || x.id == stockId);
+        if (!m) return { ok: false, definitivo: true, codigo: 'STOCK_INEXISTENTE', mensaje: 'STOCK_INEXISTENTE' };
+        f = servidor.stock[stockId] = { cantidad: m.cantidad ?? 0, imeis: m.imeis ? [...m.imeis] : [], estado: m.estadoInventario || 'disponible' };
+      }
+      const unidades = Math.max(f.imeis.length, f.cantidad || 0);
+      if (delta < 0) {
+        if (unidades + delta < 0) return { ok: false, definitivo: true, codigo: 'STOCK_INSUFICIENTE', mensaje: 'STOCK_INSUFICIENTE' };
+        if (imei) {
+          if (!f.imeis.includes(imei)) return { ok: false, definitivo: true, codigo: 'IMEI_NO_ESTA', mensaje: 'IMEI_NO_ESTA' };
+          f.imeis = f.imeis.filter(x => x !== imei);
+        } else if (f.imeis.length) return { ok: false, definitivo: true, codigo: 'IMEI_REQUERIDO', mensaje: 'IMEI_REQUERIDO' };
+      } else if (imei) f.imeis = [...f.imeis, imei];
+      f.cantidad = unidades + delta;
+      const u = Math.max(f.imeis.length, f.cantidad);
+      f.estado = estadoDestino || (u <= 0 ? 'vendido' : (delta > 0 && f.estado === 'vendido' ? 'disponible' : f.estado));
+      if (cfg.stockRed === 'perdida') return { ok: false, definitivo: false, codigo: 'SIN_CONFIRMAR', mensaje: 'red' };
+      return { ok: true, cantidad: f.cantidad, imeis: [...f.imeis], estado: f.estado, unidades: u };
+    },
     // Camino nuevo (atómico)
     async aplicarDeltaCaja(persona, bolsillo, delta, ref, clave) {
       contadores.rpc++; cfg.ultimaClave = clave;
@@ -1297,6 +1324,107 @@ const convDom = () => ({ 'conv-monto': '1000', 'conv-pct': '2', 'conv-p-origen':
   await e.mod.Gastos.deleteGasto(5);
   check('Sin la migración: eliminar un gasto (clave estable) NO mueve plata ni borra el gasto, y explica por qué',
     e.base['Franco||USD cash'] === 100 && e.State.gastos.length === 1 && e.toasts.some(t => t.includes('necesita la migración')), JSON.stringify({ b: e.base, t: e.toasts }));
+}
+
+// 31. STOCK POR DELTA en ventas.js (stock_ajustar): no pisa lo que movió otro, y no se reintenta a ciegas
+const entornoVenta = (extra = {}, cfg = {}) => {
+  const e = nuevoEntorno({ modulos: ['stock.js', 'ventas.js'], ...cfg,
+    dbExtra: { async crearVenta() { return 500; }, async actualizarImeisStock() { return true; }, async actualizarCantidadStock() { return true; },
+               async actualizarEstadoInventario() { return true; }, async cancelarDeudaDeVenta() { return []; }, async buscarStockTradeInDeVenta() { return []; },
+               async anularVenta() { return true; }, ...extra } });
+  e.sembrar({ Franco: { 'USD cash': 0 }, Lautaro: { 'USD cash': 0 } });
+  Object.assign(e.mod.Ventas, { closeModal() {}, renderList() {}, draft: ventaBase() });
+  return e;
+};
+{
+  // a) Mercado Libre (o la otra pestaña) descuenta en la base mientras esta pantalla tiene la copia vieja
+  const e = entornoVenta();
+  Object.assign(e.State, { stock: [{ id: 1, nombre: 'iPhone 15', cat: 'iphone', cantidad: 5, cantidadDeclarada: 5, costoUSD: 800, estadoInventario: 'disponible' }], ventas: [], garantias: [] });
+  e.servidor.stock[1] = { cantidad: 4, imeis: [], estado: 'disponible' };     // alguien ya había descontado: la base tiene 4
+  await e.mod.Ventas._confirmSale();
+  check('Stock por delta: la base tenía 4 (alguien descontó) y esta venta la deja en 3, NO en 4 como habría escrito la copia vieja',
+    e.servidor.stock[1].cantidad === 3, JSON.stringify(e.servidor.stock));
+  check('… y la pantalla se refresca con lo que respondió la base: cantidad y cantidadDeclarada en 3',
+    e.State.stock[0].cantidad === 3 && e.State.stock[0].cantidadDeclarada === 3 && e.State.getStock(e.State.stock[0]) === 3, JSON.stringify(e.State.stock[0]));
+}
+{
+  // b) Última unidad: la base la deja en 0 y 'vendido'; la pantalla lo refleja
+  const e = entornoVenta();
+  Object.assign(e.State, { stock: [{ id: 1, nombre: 'iPhone 15', cat: 'iphone', cantidad: 1, cantidadDeclarada: 1, costoUSD: 800, estadoInventario: 'disponible' }], ventas: [], garantias: [] });
+  await e.mod.Ventas._confirmSale();
+  check('Última unidad: la base queda en 0 y vendido, y la pantalla igual', e.servidor.stock[1].estado === 'vendido' && e.State.stock[0].estadoInventario === 'vendido' && e.State.getStock(e.State.stock[0]) === 0,
+    JSON.stringify({ srv: e.servidor.stock, st: e.State.stock[0] }));
+}
+{
+  // c) Con IMEI: sale ese IMEI del arreglo de la base
+  const e = entornoVenta();
+  e.mod.Ventas.draft.items = [{ nombre: 'iPhone 15', precio: 1000, costo: 800, stockId: 1, imei: '111' }];
+  Object.assign(e.State, { stock: [{ id: 1, nombre: 'iPhone 15', cat: 'iphone', cantidad: 2, cantidadDeclarada: 2, imeis: ['111', '222'], costoUSD: 800, estadoInventario: 'disponible' }], ventas: [], garantias: [] });
+  await e.mod.Ventas._confirmSale();
+  check('Venta con IMEI: la base saca el 111, queda el 222 y la pantalla lo muestra', JSON.stringify(e.servidor.stock[1].imeis) === '["222"]' && JSON.stringify(e.State.stock[0].imeis) === '["222"]',
+    JSON.stringify({ srv: e.servidor.stock, st: e.State.stock[0] }));
+}
+{
+  // d) La base rechaza (no alcanza): la venta sigue, se avisa por qué, y nada se descuenta
+  const e = entornoVenta();
+  Object.assign(e.State, { stock: [{ id: 1, nombre: 'iPhone 15', cat: 'iphone', cantidad: 1, cantidadDeclarada: 1, costoUSD: 800, estadoInventario: 'disponible' }], ventas: [], garantias: [] });
+  e.servidor.stock[1] = { cantidad: 0, imeis: [], estado: 'vendido' };      // en la base ya se vendió
+  await e.mod.Ventas._confirmSale();
+  check('Stock agotado en la base: la venta se guarda, avisa "no alcanza el stock" y no descuenta de más',
+    e.State.ventas.length === 1 && e.toasts.some(t => t.includes('no alcanza el stock')) && e.servidor.stock[1].cantidad === 0, JSON.stringify({ t: e.toasts, srv: e.servidor.stock }));
+}
+{
+  // e) Respuesta perdida: NO se reintenta y se avisa que no se pudo confirmar
+  const e = entornoVenta({}, { stockRed: 'perdida' });
+  Object.assign(e.State, { stock: [{ id: 1, nombre: 'iPhone 15', cat: 'iphone', cantidad: 3, cantidadDeclarada: 3, costoUSD: 800, estadoInventario: 'disponible' }], ventas: [], garantias: [] });
+  await e.mod.Ventas._confirmSale();
+  check('Respuesta de stock perdida: UN solo pedido (sin reintento), la base quedó en 2 (se aplicó) y se avisa "no se pudo CONFIRMAR"',
+    e.servidor.stockLlamadas.length === 1 && e.servidor.stock[1].cantidad === 2 && e.toasts.some(t => t.includes('CONFIRMAR')), JSON.stringify({ n: e.servidor.stockLlamadas.length, srv: e.servidor.stock, t: e.toasts }));
+}
+{
+  // f) Falta la función en Supabase: mensaje claro, la venta no descuenta a ciegas
+  const e = entornoVenta({}, { stockSinRpc: true });
+  Object.assign(e.State, { stock: [{ id: 1, nombre: 'iPhone 15', cat: 'iphone', cantidad: 3, cantidadDeclarada: 3, costoUSD: 800, estadoInventario: 'disponible' }], ventas: [], garantias: [] });
+  await e.mod.Ventas._confirmSale();
+  check('Sin stock_ajustar en Supabase: avisa que falta correrla y la copia en pantalla NO se toca (3)',
+    e.toasts.some(t => t.includes('falta correr stock_ajustar')) && e.State.stock[0].cantidad === 3, JSON.stringify({ t: e.toasts, st: e.State.stock[0] }));
+}
+{
+  // g) La venta no se pudo guardar: la unidad vuelve por delta (+1 sobre el valor real de la base)
+  const e = entornoVenta({ async crearVenta() { return null; } });
+  Object.assign(e.State, { stock: [{ id: 1, nombre: 'iPhone 15', cat: 'iphone', cantidad: 5, cantidadDeclarada: 5, costoUSD: 800, estadoInventario: 'disponible' }], ventas: [], garantias: [] });
+  e.servidor.stock[1] = { cantidad: 4, imeis: [], estado: 'disponible' };    // Mercado Libre ya había descontado una
+  await e.mod.Ventas._confirmSale();
+  check('Venta que no se guardó: el stock vuelve a 4 (lo que tenía la base antes de este intento), no a 5',
+    e.servidor.stock[1].cantidad === 4 && e.State.stock[0].cantidad === 4, JSON.stringify({ srv: e.servidor.stock, st: e.State.stock[0] }));
+}
+{
+  // h) Anular: repone UNA vez por delta; y si otra pestaña ya la había anulado, esta NO repone
+  let yaBorrada = false;
+  const e = entornoVenta({ async anularVenta() { return yaBorrada ? 'ya_borrada' : true; } });
+  Object.assign(e.State, { stock: [{ id: 1, nombre: 'iPhone 15', cat: 'iphone', cantidad: 0, cantidadDeclarada: 0, costoUSD: 800, estadoInventario: 'vendido' }], garantias: [] });
+  e.servidor.stock[1] = { cantidad: 0, imeis: [], estado: 'vendido' };
+  e.State.ventas = [{ id: 7, estado: 'cerrada', cliente: 'x', items: [{ precio: 600, stockId: 1 }], pagos: [{ id: 31, persona: 'Franco', bolsillo: 'USD cash', monto: 0.01 }] }];
+  e.servidor.base['Franco||USD cash'] = 0.01;
+  await e.mod.Ventas.anular(7);
+  check('Anular: la base sube de 0 a 1, pasa de vendido a disponible y la pantalla igual',
+    e.servidor.stock[1].cantidad === 1 && e.servidor.stock[1].estado === 'disponible' && e.State.stock[0].cantidad === 1 && e.State.stock[0].estadoInventario === 'disponible', JSON.stringify({ srv: e.servidor.stock, st: e.State.stock[0] }));
+  // otra pestaña con la misma venta cargada
+  e.State.ventas = [{ id: 7, estado: 'cerrada', cliente: 'x', items: [{ precio: 600, stockId: 1 }], pagos: [{ id: 31, persona: 'Franco', bolsillo: 'USD cash', monto: 0.01 }] }];
+  yaBorrada = true;
+  await e.mod.Ventas.anular(7);
+  check('Anular una venta que otra pestaña ya anuló: NO repone otra vez (la base sigue en 1) y avisa que se concilie a mano',
+    e.servidor.stock[1].cantidad === 1 && e.toasts.some(t => t.includes('NO se tocó')), JSON.stringify({ srv: e.servidor.stock, t: e.toasts }));
+}
+{
+  // i) Anular un producto que quedó 'reservado' para esa venta: se repone y se libera la reserva
+  const e = entornoVenta();
+  Object.assign(e.State, { stock: [{ id: 1, nombre: 'iPhone 15', cat: 'iphone', cantidad: 0, cantidadDeclarada: 0, costoUSD: 800, estadoInventario: 'reservado' }], garantias: [] });
+  e.servidor.stock[1] = { cantidad: 0, imeis: [], estado: 'reservado' };
+  e.State.ventas = [{ id: 7, estado: 'abierta', cliente: 'x', items: [{ precio: 600, stockId: 1 }], pagos: [{ id: 31, persona: 'Franco', bolsillo: 'USD cash', monto: 0.01 }] }];
+  e.servidor.base['Franco||USD cash'] = 0.01;
+  await e.mod.Ventas.anular(7);
+  check('Anular con el producto reservado para esa venta: la reserva se libera (disponible)', e.servidor.stock[1].estado === 'disponible' && e.State.stock[0].estadoInventario === 'disponible', JSON.stringify(e.servidor.stock));
 }
 
 // 30. Altas: si el registro no se puede crear, NO se toca la caja (o se deshace)

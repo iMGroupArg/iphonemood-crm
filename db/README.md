@@ -71,6 +71,7 @@ hacer *después* de correr el SQL (si se hace al revés, se rompe la página).
 |---|---|
 | `stock_cerrar_acceso_anonimo.sql` | **La mitad del arreglo del stock ya está hecha** (vista creada + landing migrada). Falta borrar la política que deja leer `stock` sin login — hasta que se corra, los costos y los IMEI siguen accesibles vía API |
 | `seguimiento_comentarios_rpc.sql` | El chat de seguimiento de reparaciones es legible sin token: cualquiera lee los comentarios de todas las reparaciones (y casi seguro puede escribir en la de otro cliente) |
+| `stock_ajustar_rpc.sql` | Descuento y reposición de stock **por delta**, atómicos. Hay 7 lugares del cliente que escriben la cantidad como valor absoluto desde la copia en memoria (ventas.js, reparaciones.js, stock.js) y se pisan con cualquier otro escritor. **5 migran a esta función; `separarUnidades` (stock.js) no**, porque no es un ajuste por delta. **La función sola no arregla nada: hay que cambiar esas llamadas.** Acepta `p_estado_destino` para reponer y liberar una reserva en una sola sentencia. Revisada por Codex (4 rondas), nunca ejecutada |
 
 Falta un tercer arreglo, de una línea y sin archivo propio: la RPC
 `get_reparacion_publica` es `SECURITY DEFINER` pero **no fija `search_path`**.

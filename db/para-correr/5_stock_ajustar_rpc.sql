@@ -11,14 +11,13 @@
 --  restando uno y escribiendo el valor ABSOLUTO (`update({ cantidad })`). Si algo
 --  tocó esa fila mientras tanto —otra pestaña, otro usuario, un descuento de
 --  Mercado Libre— esa escritura lo borra: dos ventas, una unidad descontada.
---  Hay siete llamadas que escriben así, repartidas en tres módulos. CINCO migran
---  limpio a esta función:
---      ventas.js          555, 556 · 1777, 1778 · 1874, 1875 · 2899, 2900
---      reparaciones.js    1073
---  y UNA NO: stock.js 2162/2165 (`separarUnidades`) no es un ajuste por delta, borra
---  el lote y crea N filas de 1 unidad repartiendo los IMEIs. Ahí la escritura
---  absoluta es parte de la operación; hay que resolverla aparte (una función SQL que
---  envuelva todo el reparto, o asumirla como operación manual y poco frecuente).
+--  Eran siete llamadas que escribían así, repartidas en tres módulos (ventas.js,
+--  reparaciones.js y stock.js). Stock/Inventario ya migró TODAS a esta función
+--  (commits fb37730 y b00619e): ya no queda ninguna escritura absoluta de stock en
+--  ningún módulo. `separarUnidades` (stock.js), que primero se creyó que no migraba
+--  porque no es un ajuste por delta, quedó resuelta: la ruta parcial descuenta por delta
+--  el IMEI de la unidad realmente creada (antes descontaba por posición del lote, y si
+--  fallaba la del medio descontaba el IMEI equivocado).
 --  Esta función hace el descuento/reposición DENTRO de la base, bajo el bloqueo de
 --  la fila, así que dos llamadas simultáneas se ordenan en vez de pisarse. Para
 --  que sirva hay que cambiar esas llamadas del cliente a `stock_ajustar`: la
@@ -114,6 +113,13 @@
 -- ============================================================================
 
 BEGIN;
+
+-- stock_movimientos.datos (JSONB): la crea db/migrations/20260708_stock_movimientos_datos.sql, que
+-- NO está aplicada en producción (comprobado el 2026-10-05: la API responde "column
+-- stock_movimientos.datos does not exist"). Estas funciones la escriben en cada movimiento, y
+-- plpgsql no valida las columnas al crear la función sino al ejecutarla: sin esta línea el
+-- script correría sin error y CADA descuento de stock fallaría. Idempotente.
+ALTER TABLE public.stock_movimientos ADD COLUMN IF NOT EXISTS datos JSONB;
 
 -- La versión de 5 parámetros (sin p_estado_destino), si alguien llegó a crearla. Dos
 -- sobrecargas con valores por defecto no pueden convivir: una llamada que sirve para

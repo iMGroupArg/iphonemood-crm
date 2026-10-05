@@ -163,6 +163,13 @@ CREATE INDEX IF NOT EXISTS meli_publicaciones_stock ON public.meli_publicaciones
 -- stock_a_pedido.sql.
 ALTER TABLE public.stock ADD COLUMN IF NOT EXISTS a_pedido BOOLEAN NOT NULL DEFAULT FALSE;
 
+-- stock_movimientos.datos (JSONB): la crea db/migrations/20260708_stock_movimientos_datos.sql, que
+-- NO está aplicada en producción (comprobado el 2026-10-05: la API responde "column
+-- stock_movimientos.datos does not exist"). Estas funciones la escriben en cada movimiento, y
+-- plpgsql no valida las columnas al crear la función sino al ejecutarla: sin esta línea el
+-- script correría sin error y CADA descuento de stock fallaría. Idempotente.
+ALTER TABLE public.stock_movimientos ADD COLUMN IF NOT EXISTS datos JSONB;
+
 -- Del lado de la publicación: no se puede apuntar a un producto a pedido. FOR SHARE
 -- traba la fila de stock hasta que esta transacción termine, así una marcación
 -- simultánea de a_pedido espera, y al seguir ve el vínculo (y lo rechaza el otro

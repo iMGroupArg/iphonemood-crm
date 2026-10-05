@@ -130,6 +130,8 @@ console.log('\n══ SQL de Mercado Libre → Ventas y Cajas (Postgres en WebAs
   const { rows: [s] } = await db.query(`SELECT cantidad FROM stock WHERE id=$1`, [o.stocks[0]]);
   check('Procesar: crea la venta ABIERTA, tipo mercadolibre, con la cotización congelada y la orden enlazada',
     r.ok && v.estado === 'abierta' && v.tipo_venta === 'mercadolibre' && Number(v.meli_cotizacion) === 1000 && Number(v.meli_orden_id) === o.id, JSON.stringify({ r, v }));
+  const { rows: [vv] } = await db.query(`SELECT vendedor_id FROM ventas WHERE id=$1`, [r.venta_id]);
+  check('La venta queda a nombre de la persona dueña de la cuenta de Mercado Libre (vendedor)', vv.vendedor_id === ctx.pid, JSON.stringify(vv));
   check('… un ítem de USD 100 (100.000 ARS a 1.000) con el costo y el nombre del stock', its.length === 1 && Number(its[0].precio_usd) === 100 && Number(its[0].costo_usd) === 30 && its[0].nombre === 'Perfume X 100ml', JSON.stringify(its));
   check('… y descontó el stock en la base (5 → 4)', s.cantidad === 4, String(s.cantidad));
   const { rows: [ord] } = await db.query(`SELECT procesada, venta_id, stock_descontado FROM meli_ordenes WHERE id=$1`, [o.id]);

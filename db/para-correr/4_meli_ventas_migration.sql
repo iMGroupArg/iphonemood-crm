@@ -146,6 +146,7 @@ DECLARE
   v_cot        NUMERIC;       -- la cotización NORMALIZADA: la única que se usa en todo
   v_cents      BIGINT;
   v_cargado    NUMERIC;
+  v_vendedor   UUID;
 BEGIN
   IF NOT public.is_authorized_user() THEN
     RAISE EXCEPTION 'no autorizado' USING ERRCODE = '42501';
@@ -211,8 +212,13 @@ BEGIN
   -- El nombre del comprador viene de FUERA (Mercado Libre) y el CRM lo pinta en muchas
   -- pantallas: se limpia acá, en el origen, de todo lo que pueda ser HTML o control
   -- (< > & comillas, acentos graves, saltos de línea) y se acota el largo.
-  INSERT INTO public.ventas (cliente, estado, tipo_venta, fecha_venta, meli_orden_id, meli_cotizacion)
-  VALUES (COALESCE(NULLIF(btrim(left(regexp_replace(COALESCE(o.comprador, ''), '[<>&"''`\\[:cntrl:]]', '', 'g'), 80)), ''), 'Mercado Libre'), 'abierta', 'mercadolibre',
+  -- El vendedor de la venta es la persona dueña de la cuenta de Mercado Libre. Si la tabla
+  -- real exigiera vendedor (NOT NULL), la venta no fallaría; si no lo exige, queda igual de útil
+  -- para las comisiones y los reportes por vendedor.
+  SELECT c.persona_id INTO v_vendedor FROM public.meli_cuentas c WHERE c.id = o.cuenta_id;
+
+  INSERT INTO public.ventas (cliente, vendedor_id, estado, tipo_venta, fecha_venta, meli_orden_id, meli_cotizacion)
+  VALUES (COALESCE(NULLIF(btrim(left(regexp_replace(COALESCE(o.comprador, ''), '[<>&"''`\\[:cntrl:]]', '', 'g'), 80)), ''), 'Mercado Libre'), v_vendedor, 'abierta', 'mercadolibre',
           v_fecha, o.id, v_cot)
   RETURNING id INTO v_venta;
 

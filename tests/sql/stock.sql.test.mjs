@@ -116,6 +116,45 @@ console.log('\n══ stock_ajustar y productos "a pedido" (Postgres en WebAssem
   check('En otro orden (ajustar → meli → a_pedido) también carga', e === null, e);
 }
 
+{
+  // Producción NO tiene stock_movimientos.datos (la migración 20260708 no está aplicada, comprobado el
+  // 2026-10-05). Los scripts tienen que agregarla ellos: si no, corren sin error y cada descuento falla.
+  const db = new PGlite({ extensions: { pgcrypto } });
+  await db.exec(`
+    CREATE SCHEMA IF NOT EXISTS extensions; CREATE ROLE anon NOLOGIN; CREATE ROLE authenticated NOLOGIN;
+    CREATE SCHEMA IF NOT EXISTS auth;
+    CREATE FUNCTION auth.jwt() RETURNS jsonb LANGUAGE sql AS $$ SELECT '{"email":"franco@x.com"}'::jsonb $$;
+    CREATE FUNCTION public.is_authorized_user() RETURNS boolean LANGUAGE sql AS $$ SELECT true $$;
+    CREATE TABLE public.personas (id UUID PRIMARY KEY DEFAULT gen_random_uuid(), nombre TEXT);
+    CREATE TABLE public.cajas (id BIGSERIAL PRIMARY KEY, persona_id UUID, bolsillo TEXT NOT NULL, saldo NUMERIC DEFAULT 0);
+    CREATE TABLE public.stock (id UUID PRIMARY KEY DEFAULT gen_random_uuid(), nombre TEXT, categoria TEXT, modelo TEXT, storage TEXT, color TEXT,
+      estado_producto TEXT, bateria_pct INT, imagen_url TEXT, combo_items JSONB, precio_ars NUMERIC, cotizacion NUMERIC,
+      cantidad INTEGER DEFAULT 0, imeis TEXT[] DEFAULT '{}', estado_inventario TEXT DEFAULT 'disponible');
+    CREATE TABLE public.stock_movimientos (id BIGSERIAL PRIMARY KEY, stock_id UUID, tipo TEXT, detalle TEXT, cantidad_antes INT,
+      cantidad_despues INT, usuario_nombre TEXT);   -- SIN datos, como producción
+    CREATE TABLE public.reparacion_repuestos (id BIGSERIAL PRIMARY KEY);
+  `);
+  const sinDatosAntes = (await db.query(`SELECT 1 FROM information_schema.columns WHERE table_name='stock_movimientos' AND column_name='datos'`)).rows.length === 0;
+  await db.exec(SQL('stock_ajustar_rpc.sql'));
+  const e5 = (await db.query(`SELECT 1 FROM information_schema.columns WHERE table_name='stock_movimientos' AND column_name='datos'`)).rows.length === 1;
+  const { rows: [st] } = await db.query(`INSERT INTO stock (nombre, categoria, cantidad) VALUES ('x','perfumeria',3) RETURNING id`);
+  const e = await falla(() => db.query(`SELECT * FROM stock_ajustar($1,-1,'test','d')`, [st.id]));
+  check('Base SIN stock_movimientos.datos (como producción): stock_ajustar.sql la agrega y el descuento funciona', sinDatosAntes && e5 && e === null, e);
+  const db2 = new PGlite({ extensions: { pgcrypto } });
+  await db2.exec(`
+    CREATE SCHEMA IF NOT EXISTS extensions; CREATE ROLE anon NOLOGIN; CREATE ROLE authenticated NOLOGIN; CREATE SCHEMA IF NOT EXISTS auth;
+    CREATE FUNCTION auth.jwt() RETURNS jsonb LANGUAGE sql AS $$ SELECT '{}'::jsonb $$;
+    CREATE FUNCTION public.is_authorized_user() RETURNS boolean LANGUAGE sql AS $$ SELECT true $$;
+    CREATE TABLE public.personas (id UUID PRIMARY KEY DEFAULT gen_random_uuid(), nombre TEXT);
+    CREATE TABLE public.cajas (id BIGSERIAL PRIMARY KEY, persona_id UUID, bolsillo TEXT NOT NULL, saldo NUMERIC DEFAULT 0);
+    CREATE TABLE public.stock (id UUID PRIMARY KEY DEFAULT gen_random_uuid(), nombre TEXT, categoria TEXT, cantidad INTEGER DEFAULT 0,
+      imeis TEXT[] DEFAULT '{}', estado_inventario TEXT DEFAULT 'disponible');
+    CREATE TABLE public.stock_movimientos (id BIGSERIAL PRIMARY KEY, stock_id UUID, tipo TEXT, detalle TEXT, cantidad_antes INT, cantidad_despues INT, usuario_nombre TEXT);`);
+  await db2.exec(SQL('meli_esquema_base.sql'));
+  const e3 = (await db2.query(`SELECT 1 FROM information_schema.columns WHERE table_name='stock_movimientos' AND column_name='datos'`)).rows.length === 1;
+  check('Base SIN stock_movimientos.datos: meli_esquema_base.sql también la agrega (descontar/reponer de Mercado Libre la escriben)', e3);
+}
+
 // ── 2. stock_ajustar SIN a pedido (regresión: no cambió nada) ────────────
 {
   const { db } = await baseNueva();

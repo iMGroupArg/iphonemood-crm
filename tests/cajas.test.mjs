@@ -1195,22 +1195,22 @@ const convDom = () => ({ 'conv-monto': '1000', 'conv-pct': '2', 'conv-p-origen':
 }
 {
   // 29d. Reparación: cancelar, repetir tras fallo al marcar la orden
-  let marcaOk = false, stockEscrito = 0, limpiezas = 0;
+  let marcaOk = false, limpiezas = 0;
   const e = nuevoEntorno({ modulos: ['reparaciones.js'], dbExtra: { async limpiarMovimientosReparacion() { limpiezas++; return true; },
-    async actualizarReparacion() { return marcaOk; }, async actualizarCantidadStock() { stockEscrito++; return true; } } });
+    async actualizarReparacion() { return marcaOk; }, marcarRepuestosPendientes: async () => true, reclamarDevolucionRepuesto: async () => true, marcarDevolucionRepuesto: async () => true } });
   e.sembrar({ Franco: { 'ARS cash': 80000 } });
   Object.assign(e.mod.Reparaciones, { renderList() {}, renderDetail() {}, currentId: 'R1' });
   e.State.stock = [{ id: 4, nombre: 'pantalla', cantidad: 2 }];
   e.State.reparaciones = [{ id: 'R1', estado: 'en_curso', pagos: [{ id: 1, persona: 'Franco', bolsillo: 'ARS cash', monto: 50000 }, { id: 2, persona: 'Franco', bolsillo: 'ARS cash', monto: 30000 }],
-    repuestos: [{ fromStock: true, stockId: 4, nombre: 'pantalla' }] }];
+    repuestos: [{ id: 91, fromStock: true, stockId: 4, nombre: 'pantalla' }] }];
   await e.mod.Reparaciones.cancelarConReversion();
   check('Cancelar reparación y no se puede marcar la orden: la plata volvió, el stock NO se tocó y la orden sigue en curso',
-    e.base['Franco||ARS cash'] === 0 && stockEscrito === 0 && limpiezas === 0 && e.State.stock[0].cantidad === 2 && e.State.reparaciones[0].estado === 'en_curso' && e.State.reparaciones[0].pagos.length === 2,
-    JSON.stringify({ base: e.base, stockEscrito, o: e.State.reparaciones[0] }));
+    e.base['Franco||ARS cash'] === 0 && e.servidor.stockLlamadas.length === 0 && limpiezas === 0 && e.State.stock[0].cantidad === 2 && e.State.reparaciones[0].estado === 'en_curso' && e.State.reparaciones[0].pagos.length === 2,
+    JSON.stringify({ base: e.base, n: e.servidor.stockLlamadas.length, o: e.State.reparaciones[0] }));
   marcaOk = true;
   await e.mod.Reparaciones.cancelarConReversion();
   check('… al repetir: la caja sigue en 0 (no se devolvió dos veces), el stock sube UNA vez (3) y la orden queda rechazada',
-    e.base['Franco||ARS cash'] === 0 && e.State.stock[0].cantidad === 3 && e.State.reparaciones[0].estado === 'rechazado' && stockEscrito === 1,
+    e.base['Franco||ARS cash'] === 0 && e.State.stock[0].cantidad === 3 && e.State.reparaciones[0].estado === 'rechazado' && e.servidor.stockLlamadas.length === 1,
     JSON.stringify({ base: e.base, st: e.State.stock[0], o: e.State.reparaciones[0] }));
 }
 {
@@ -1244,7 +1244,8 @@ const convDom = () => ({ 'conv-monto': '1000', 'conv-pct': '2', 'conv-p-origen':
   // 29g. Reparación: un cobro NUEVO e idéntico después de una cancelación fallida NO hereda la clave del viejo
   let marcaOk = false;
   const e = nuevoEntorno({ modulos: ['reparaciones.js'], dbExtra: { async limpiarMovimientosReparacion() { return true; },
-    async actualizarReparacion() { return marcaOk; }, async actualizarCantidadStock() { return true; }, async agregarPagoReparacion() { return 99; } } });
+    async actualizarReparacion() { return marcaOk; }, async actualizarCantidadStock() { return true; }, async agregarPagoReparacion() { return 99; },
+    marcarRepuestosPendientes: async () => true, reclamarDevolucionRepuesto: async () => true, marcarDevolucionRepuesto: async () => true } });
   e.sembrar({ Franco: { 'ARS cash': 100 } });
   Object.assign(e.mod.Reparaciones, { renderList() {}, renderDetail() {}, currentId: 'R1' });
   e.State.reparaciones = [{ id: 'R1', estado: 'en_curso', pagos: [{ id: 1, persona: 'Franco', bolsillo: 'ARS cash', monto: 100 }], repuestos: [] }];
@@ -1258,31 +1259,31 @@ const convDom = () => ({ 'conv-monto': '1000', 'conv-pct': '2', 'conv-p-origen':
     e.base['Franco||ARS cash'] === 0 && e.State.reparaciones[0].estado === 'rechazado', JSON.stringify(e.base));
 }
 {
-  // 29h. Reparación: el stock se repone ANTES de borrar los repuestos de la base, y si falla se avisa
-  const orden = [];
-  const e = nuevoEntorno({ modulos: ['reparaciones.js'], dbExtra: { async limpiarMovimientosReparacion() { orden.push('limpiar'); return true; },
-    async actualizarReparacion() { orden.push('marcar'); return true; }, async actualizarCantidadStock() { orden.push('stock'); return false; } } });
+  // 29h. Reparación: la orden se marca ANTES de tocar el stock y los repuestos se borran DESPUÉS de devolverlos
+  let e, enMarca = -1, enLimpia = -1;
+  e = nuevoEntorno({ modulos: ['reparaciones.js'], dbExtra: { async limpiarMovimientosReparacion() { enLimpia = e.servidor.stockLlamadas.length; return true; },
+    async actualizarReparacion() { enMarca = e.servidor.stockLlamadas.length; return true; }, marcarRepuestosPendientes: async () => true, reclamarDevolucionRepuesto: async () => true, marcarDevolucionRepuesto: async () => true } });
   e.sembrar({ Franco: { 'ARS cash': 0 } });
   Object.assign(e.mod.Reparaciones, { renderList() {}, renderDetail() {}, currentId: 'R1' });
   e.State.stock = [{ id: 4, nombre: 'pantalla', cantidad: 2 }];
-  e.State.reparaciones = [{ id: 'R1', estado: 'en_curso', pagos: [], repuestos: [{ fromStock: true, stockId: 4, nombre: 'pantalla' }] }];
+  e.State.reparaciones = [{ id: 'R1', estado: 'en_curso', pagos: [], repuestos: [{ id: 91, fromStock: true, stockId: 4, nombre: 'pantalla' }] }];
   await e.mod.Reparaciones.cancelarConReversion();
-  check('Cancelar reparación: orden de pasos marcar → stock → limpiar, y si el stock no se guarda avisa (cantidad vuelve a 2)',
-    orden.join(',') === 'marcar,stock,limpiar' && e.State.stock[0].cantidad === 2 && e.toasts.some(t => t.includes('sumale 1 a mano')), JSON.stringify({ orden, t: e.toasts }));
+  check('Cancelar reparación: se marca la orden (0 ajustes de stock hechos), después se repone el stock y recién al final se limpian los repuestos',
+    enMarca === 0 && enLimpia === 1 && e.State.stock[0].cantidad === 3, JSON.stringify({ enMarca, enLimpia, st: e.State.stock[0] }));
 }
 {
   // 29h2. Reparación: si la limpieza falló y se repite «Cancelar», el stock NO se suma de nuevo
   let limpiaOk = false;
   const e = nuevoEntorno({ modulos: ['reparaciones.js'], dbExtra: { async limpiarMovimientosReparacion() { return limpiaOk; },
-    async actualizarReparacion() { return true; }, async actualizarCantidadStock() { return true; } } });
+    async actualizarReparacion() { return true; }, marcarRepuestosPendientes: async () => true, reclamarDevolucionRepuesto: async () => true, marcarDevolucionRepuesto: async () => true } });
   e.sembrar({ Franco: { 'ARS cash': 0 } });
   Object.assign(e.mod.Reparaciones, { renderList() {}, renderDetail() {}, currentId: 'R1' });
   e.State.stock = [{ id: 4, nombre: 'pantalla', cantidad: 2 }];
-  e.State.reparaciones = [{ id: 'R1', estado: 'en_curso', pagos: [], repuestos: [{ fromStock: true, stockId: 4, nombre: 'pantalla' }] }];
+  e.State.reparaciones = [{ id: 'R1', estado: 'en_curso', pagos: [], repuestos: [{ id: 91, fromStock: true, stockId: 4, nombre: 'pantalla' }] }];
   await e.mod.Reparaciones.cancelarConReversion();
   limpiaOk = true;
   await e.mod.Reparaciones.cancelarConReversion();
-  check('Cancelar reparación con la limpieza fallida y repetir: el stock sube UNA vez (3, no 4)', e.State.stock[0].cantidad === 3, JSON.stringify(e.State.stock[0]));
+  check('Cancelar reparación con la limpieza fallida y repetir: el stock sube UNA vez (3, no 4)', e.State.stock[0].cantidad === 3 && e.servidor.stockLlamadas.length === 1, JSON.stringify({ st: e.State.stock[0], n: e.servidor.stockLlamadas.length }));
 }
 {
   // 29i. Anular: si la deuda a plazos no se pudo cancelar tras borrar la venta, se avisa
@@ -1502,6 +1503,48 @@ const entornoVenta = (extra = {}, cfg = {}) => {
   await e.mod.MeliOrdenes.procesar(3, null);
   check('Procesar una orden que la base deja en revisión: muestra el motivo (no dice que salió bien)',
     llamadas[2].fn === 'meli_procesar_orden' && llamadas[2].args.p_cotizacion === 1000 && e.toasts.some(t => t.includes('IMEI')), JSON.stringify({ l: llamadas[2], t: e.toasts }));
+}
+
+// 33. TRADE-IN: el equipo que entra con la venta tiene que llegar al stock, o decir POR QUÉ no
+{
+  const tradeIn = { cat: 'iphone', modelo: 'iPhone 16 Pro Max', storage: '256GB', color: 'Dorado', valor: 800, imei: '351234567890123', bateriaPct: 90, estadoProducto: '', grado: 'Sin grado', notas: '', custodio: '', revisar: false };
+  const armar = (guardar) => {
+    const llamadas = [];
+    const e = entornoVenta({ async guardarProductoStock(obj) { llamadas.push(JSON.parse(JSON.stringify(obj))); return guardar(obj, llamadas.length); },
+      async actualizarNotasStock() { return true; }, async registrarMovimientoStock() {}, async darDeBajaProductoStock() { return true; } });
+    e.sembrar({ Franco: { 'USD cash': 0 } });
+    e.mod.Ventas.draft = { ...ventaBase(), items: [{ nombre: 'iPhone 17', precio: 1000, costo: 800, stockId: 1, imei: null }], tradeIn, pagos: [{ persona: 'Franco', bolsillo: 'USD cash', monto: 200 }] };
+    Object.assign(e.State, { stock: [{ id: 1, nombre: 'iPhone 17', cat: 'iphone', cantidad: 5, cantidadDeclarada: 5, costoUSD: 800, estadoInventario: 'disponible' }], ventas: [], garantias: [] });
+    return { e, llamadas };
+  };
+  {
+    // a) Todo bien: el equipo entra al stock con su nota de venta
+    const { e, llamadas } = armar(() => ({ id: 'ti-1', error: null }));
+    await e.mod.Ventas._confirmSale();
+    check('Trade-in OK: entra al stock (proveedor Trade-In, con su IMEI) y la venta lo recuerda', llamadas.length === 1 && llamadas[0].proveedor === 'Trade-In' && llamadas[0].imeis[0] === '351234567890123' && e.State.ventas[0].tradeInStockId === 'ti-1', JSON.stringify(llamadas));
+  }
+  {
+    // b) El IMEI ya estaba en otro producto: el equipo entra IGUAL, sin IMEI, con el IMEI anotado, y avisa
+    const { e, llamadas } = armar((obj, n) => n === 1 ? { id: null, error: { message: 'El IMEI 351234567890123 ya está cargado en otro producto del stock' } } : { id: 'ti-2', error: null });
+    await e.mod.Ventas._confirmSale();
+    check('IMEI repetido: se reintenta SIN IMEI, el equipo entra al stock con el IMEI en las notas y se avisa',
+      llamadas.length === 2 && llamadas[1].imeis.length === 0 && /351234567890123/.test(llamadas[1].notas) && e.State.ventas[0].tradeInStockId === 'ti-2' && e.toasts.some(t => t.includes('SIN IMEI')), JSON.stringify({ llamadas, t: e.toasts }));
+  }
+  {
+    // c) Otro error: la venta se guarda, el aviso trae el MOTIVO real y el detalle ofrece ingresarlo a mano
+    let ok = false;
+    const { e, llamadas } = armar(() => ok ? { id: 'ti-3', error: null } : { id: null, error: { message: 'new row for relation "stock" violates check constraint' } });
+    await e.mod.Ventas._confirmSale();
+    check('Error de la base al dar de alta el trade-in: la venta queda guardada y el aviso dice el motivo real',
+      e.State.ventas.length === 1 && !e.State.ventas[0].tradeInStockId && e.toasts.some(t => t.includes('violates check constraint') && t.includes('Ingresar al stock')), JSON.stringify(e.toasts));
+    check('… y la venta se reconoce como "sin el equipo en el stock" (para ofrecer el botón)', e.mod.Ventas._tradeInEnStock(e.State.ventas[0]) === false);
+    ok = true; Object.assign(e.mod.Ventas, { viewSale() {} });
+    await e.mod.Ventas.ingresarTradeInAlStock(e.State.ventas[0].id);
+    check('«Ingresar al stock»: lo da de alta con la nota de la venta y la venta lo reconoce',
+      e.mod.Ventas._tradeInEnStock(e.State.ventas[0]) === true && llamadas.length === 2 && e.State.stock.some(x => x.id === 'ti-3'), JSON.stringify({ n: llamadas.length }));
+    await e.mod.Ventas.ingresarTradeInAlStock(e.State.ventas[0].id);
+    check('Apretarlo otra vez no crea un segundo equipo', llamadas.length === 2 && e.toasts.some(t => t.includes('ya figura')), JSON.stringify(e.toasts.slice(-2)));
+  }
 }
 
 // 30. Altas: si el registro no se puede crear, NO se toca la caja (o se deshace)

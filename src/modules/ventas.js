@@ -1942,34 +1942,18 @@ const Ventas = {
 
     // Ingresar el equipo del Trade-In al stock
     let savedTradeInId = null;
+    let avisoTradeIn = '';
     if (d.tradeIn?.modelo && d.tradeIn?.valor > 0) {
-      const ti = d.tradeIn;
-      const imeis = ti.imei ? [ti.imei] : [];
-      const estadoInv = ti.revisar ? 'en_reparacion' : 'disponible';
-      const nombre = [ti.modelo, ti.storage, ti.color].filter(Boolean).join(' ') || ti.modelo;
-      const tiObj = {
-        cat: ti.cat || 'iphone', nombre, costoUSD: ti.valor,
-        // La columna precio_ars es obligatoria en la base: con null el alta fallaba
-        // siempre y el equipo nunca entraba al stock. Entra en 0 (sin tasar): así
-        // queda fuera de la web pública (precios.html solo lista precio_ars > 0)
-        // hasta que se le ponga precio a mano.
-        cantidad: imeis.length > 0 ? imeis.length : 1, imeis, cotiz: State.refBlue, precioARS: 0,
-        proveedor: 'Trade-In', custodio: ti.custodio || '',
-        notas: [ti.notas, `Trade-in de venta a ${d.cliente}`].filter(Boolean).join(' | '),
-        estadoInventario: estadoInv, grado: ti.grado || 'Sin grado',
-        modelo: ti.modelo, storage: ti.storage || '', color: ti.color || '',
-        bateriaPct: ti.bateriaPct || null, estadoProducto: ti.estadoProducto || '',
-      };
-      const { id: tiId, error: tiErr } = await DB.guardarProductoStock(tiObj, null);
-      if (!tiErr && tiId) {
-        tiObj.id = tiId;
-        State.stock.push(tiObj);
-        savedTradeInId = tiId;
+      const alta = await this._altaTradeIn(d.tradeIn, d.cliente);
+      if (alta.id) {
+        State.stock.push(alta.obj);
+        savedTradeInId = alta.id;
+        avisoTradeIn = alta.aviso;
       } else {
-        // Antes este error se descartaba en silencio: la venta se guardaba igual
-        // y el equipo recibido desaparecía sin dejar rastro.
-        console.error('No se pudo dar de alta el equipo del trade-in:', tiErr);
-        toast(`⚠️ La venta se guardó, pero el equipo "${nombre}" NO entró al stock. Cargalo a mano desde Stock.`);
+        // Antes este error se descartaba en silencio. Se guarda para avisarlo cuando la
+        // venta ya esté guardada (acá todavía no lo está) y con el MOTIVO REAL de la base.
+        console.error('No se pudo dar de alta el equipo del trade-in:', alta.error);
+        avisoTradeIn = `El equipo del trade-in "${alta.nombre}" NO entró al stock (${alta.error?.message || 'error desconocido'}). Ingresalo desde el detalle de la venta con «Ingresar al stock».`;
       }
     }
 
@@ -2053,6 +2037,7 @@ const Ventas = {
       estado, tradeIn: d.tradeIn, stockMovs, tradeInStockId: savedTradeInId
     };
     State.ventas.unshift(venta);
+    if (avisoTradeIn) toast('⚠️ ' + State.esc(avisoTradeIn));
 
     // Registrar deuda a plazos si fue indicada
     if (d.deudaVenta && d.deudaVenta.monto > 0) {
@@ -2292,6 +2277,7 @@ const Ventas = {
                     <div>
                       <div style="font-size:12.5px;font-weight:600;color:var(--green)">Trade-In: ${v.tradeIn.modelo||'Equipo'}</div>
                       <div style="font-size:11px;color:var(--text-secondary)">${v.tradeIn.color||''} ${v.tradeIn.storage||''} ${v.tradeIn.bateriaPct!=null?'· '+v.tradeIn.bateriaPct+'%':''}</div>
+                      ${(!this._tradeInEnStock(v) && v.tradeIn.modelo) ? `<button class="btn btn-sm" style="margin-top:6px;color:var(--amber);border-color:var(--amber)" onclick="Ventas.ingresarTradeInAlStock(${v.id})"><i class="ti ti-package-import"></i> Ingresar al stock</button><div style="font-size:10px;color:var(--amber);margin-top:3px">No figura en el stock</div>` : ''}
                     </div>
                   </div>
                   <div style="font-size:13px;font-weight:600;color:var(--green)">${State.fmtUSD(v.tradeIn.valor)}</div>
@@ -2767,6 +2753,76 @@ const Ventas = {
   // Las ventas de Mercado Libre las mueven SOLO las funciones de la base (procesar,
   // acreditar, revertir): cobrar, cerrar, borrar un pago o anular desde acá rompería
   // la cuenta de lo acreditado.
+  // El equipo que entra como trade-in, listo para guardarse en el stock.
+  _productoDeTradeIn(ti, cliente) {
+    const imeis = ti.imei ? [ti.imei] : [];
+    const nombre = [ti.modelo, ti.storage, ti.color].filter(Boolean).join(' ') || ti.modelo;
+    return {
+      nombre,
+      obj: {
+        cat: ti.cat || 'iphone', nombre, costoUSD: ti.valor,
+        // La columna precio_ars es obligatoria en la base: con null el alta fallaba
+        // siempre y el equipo nunca entraba al stock. Entra en 0 (sin tasar): así
+        // queda fuera de la web pública (precios.html solo lista precio_ars > 0)
+        // hasta que se le ponga precio a mano.
+        cantidad: imeis.length > 0 ? imeis.length : 1, imeis, cotiz: State.refBlue, precioARS: 0,
+        proveedor: 'Trade-In', custodio: ti.custodio || '',
+        notas: [ti.notas, `Trade-in de venta a ${cliente}`].filter(Boolean).join(' | '),
+        estadoInventario: ti.revisar ? 'en_reparacion' : 'disponible', grado: ti.grado || 'Sin grado',
+        modelo: ti.modelo, storage: ti.storage || '', color: ti.color || '',
+        bateriaPct: ti.bateriaPct || null, estadoProducto: ti.estadoProducto || '',
+      },
+    };
+  },
+  // Da de alta el equipo del trade-in. Si la base lo rechaza porque el IMEI YA figura en
+  // otro producto del stock (típico: un equipo que la casa vendió antes y vuelve), el
+  // equipo físico existe igual: entra SIN IMEI, con el IMEI anotado en las notas, y se
+  // avisa para revisarlo. Cualquier otro error se devuelve tal cual, con su motivo.
+  //   → { id, obj, nombre, error, aviso }
+  async _altaTradeIn(ti, cliente) {
+    const { obj, nombre } = this._productoDeTradeIn(ti, cliente);
+    let r = await DB.guardarProductoStock(obj, null);
+    let aviso = '';
+    if ((r.error || !r.id) && obj.imeis.length && /imei/i.test(String(r.error?.message || ''))) {
+      const imei = obj.imeis[0];
+      obj.imeis = []; obj.cantidad = 1;
+      obj.notas = [obj.notas, `IMEI ${imei} (ya figuraba en otro producto del stock: revisar)`].filter(Boolean).join(' | ');
+      const r2 = await DB.guardarProductoStock(obj, null);
+      if (!r2.error && r2.id) {
+        r = r2;
+        aviso = `El equipo "${nombre}" entró al stock SIN IMEI porque el IMEI ${imei} ya estaba cargado en otro producto. Revisalo en Stock.`;
+      }
+    }
+    if (!r.error && r.id) obj.id = r.id;
+    return { id: r.error ? null : r.id, obj, nombre, error: r.error, aviso };
+  },
+  // ¿El equipo de este trade-in ya está en el stock? (la nota «Trade-in de venta #N» lo ata)
+  _tradeInEnStock(v) {
+    if (v.tradeInStockId) return true;
+    return (State.stock || []).some(s => s.proveedor === 'Trade-In' && String(s.notas || '').includes(`Trade-in de venta #${v.id}`));
+  },
+  // Recuperación manual: la venta se guardó pero el equipo no llegó al stock.
+  async ingresarTradeInAlStock(id) {
+    const v = State.ventas.find(x => x.id === id);
+    if (!v?.tradeIn?.modelo || !(v.tradeIn.valor > 0)) { toast('Esta venta no tiene un trade-in para ingresar.'); return; }
+    if (this._tradeInEnStock(v)) { toast('El equipo de este trade-in ya figura en el stock.'); return; }
+    if (!confirm(`¿Ingresar al stock el equipo del trade-in de la venta #${id} (${v.tradeIn.modelo})?\n\nSe crea un equipo NUEVO. Antes mirá en Stock que no esté ya cargado.`)) return;
+    const alta = await this._altaTradeIn(v.tradeIn, v.cliente);
+    if (!alta.id) {
+      toast(`⚠️ No se pudo ingresar: ${State.esc(alta.error?.message || 'error desconocido')}`);
+      return;
+    }
+    const notas = [alta.obj.notas, `Trade-in de venta #${id} — ${v.cliente}`].filter(Boolean).join(' | ');
+    alta.obj.notas = notas;
+    await DB.actualizarNotasStock(alta.id, notas);
+    State.stock.push(alta.obj);
+    v.tradeInStockId = alta.id;
+    DB.registrarMovimientoStock(alta.id, 'trade_in', `Recibido como trade-in de ${v.cliente} en venta #${id} (ingresado después)`,
+      0, v.tradeIn.imei ? 0 : 1, { ventaId: id, cliente: v.cliente, valor: v.tradeIn.valor });
+    toast(alta.aviso ? '⚠️ ' + State.esc(alta.aviso) : 'Equipo del trade-in ingresado al stock.');
+    this.viewSale(id);
+  },
+
   _esMeli(v) { return v?.tipoVenta === 'mercadolibre' || v?.meliOrdenId != null; },
   // Para MOSTRAR el saldo de una venta: { dif: pagado − total (≥ 0 = pagada), aLiberar }.
   // En una venta de Mercado Libre, lo que se quedó el canal (comisión + envío) cuenta

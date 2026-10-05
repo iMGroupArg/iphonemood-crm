@@ -148,7 +148,7 @@ for (const [nombre, valor] of [
   const { rows: fns } = await db.query(`SELECT n.nspname, p.proname, p.prosrc FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
                                           WHERE n.nspname IN ('public','catalogo_aux') AND (p.proname LIKE '%catalogo%' OR n.nspname = 'catalogo_aux') ORDER BY 2`);
   const aux = fns.filter(f => f.nspname === 'catalogo_aux');
-  check('Hay 6 auxiliares, todas en el esquema catalogo_aux y NINGUNA en public (no quedan como RPC de la API)', aux.length === 6 && !fns.some(f => f.nspname === 'public'), JSON.stringify(fns.map(f => f.nspname + '.' + f.proname)));
+  check('Hay 7 auxiliares, todas en el esquema catalogo_aux y NINGUNA en public (no quedan como RPC de la API)', aux.length === 7 && !fns.some(f => f.nspname === 'public'), JSON.stringify(fns.map(f => f.nspname + '.' + f.proname)));
   check('… y NINGUNA lee una tabla (no mencionan configuracion, la tabla base ni stock)', aux.every(f => !/configuracion|catalogo_modelos_base|stock/i.test(f.prosrc)));
   const llamadas = await comoAnon(db, async () => (await db.query(`SELECT catalogo_aux.gb('1TB') AS gb, catalogo_aux.unir('{a}'::text[], '["A","b"]'::jsonb) AS u`)).rows[0]);
   check('… y anon puede ejecutarlas (son puras): 1TB = 1024 y la unión no repite', Number(llamadas.gb) === 1024 && JSON.stringify(llamadas.u) === JSON.stringify(['a', 'b']), JSON.stringify(llamadas));
@@ -264,7 +264,7 @@ function violaciones(rows) {
   const r = de(rows, 'iPhone 18');
   check('CONTRATO — blancos Unicode (\\t, \\n, NBSP, BOM, espacio ideográfico) NO salen como color: la landing los vería vacíos', !r.colores.some(c => !c.trim()), JSON.stringify(r.colores));
   check('… los blancos de los extremos se quitan ("\u2003Borgoña\u00a0" → "Borgoña"), y "Verde"/"verde\\n" no se duplican', r.colores.includes('Borgoña') && r.colores.filter(c => c.toLowerCase() === 'verde').length === 1, JSON.stringify(r.colores));
-  check('… "\u200b" (ancho cero) no es un blanco para JS trim(): pasa, y la landing también lo acepta (no está vacío para ella)', r.colores.every(c => c.trim().length > 0), JSON.stringify(r.colores));
+  check('… el ancho cero (U+200B) no es un blanco para JS trim() pero NO está en la lista cerrada: se descarta, no llega a la landing', !r.colores.some(c => [...c].some(ch => ch.charCodeAt(0) === 0x200b)) && r.colores.every(c => c.trim().length > 0), JSON.stringify(r.colores));
   check('CONTRATO — un color con emojis que mide más de 40 en UTF-16 NO sale (21 emojis = 42); los emojis se descartan en general', !r.colores.some(c => c.length > 40) && !r.colores.some(c => /\p{Extended_Pictographic}/u.test(c)), JSON.stringify(r.colores.map(c => c.length)));
   check('… capacidades: "\u00a0128 GB\u00a0" se limpia y se ordena por tamaño; "😀GB" se descarta', r.capacidades.includes('128 GB') && !r.capacidades.some(c => /😀/u.test(c)) && r.capacidades.indexOf('64GB') < r.capacidades.indexOf('128 GB'), JSON.stringify(r.capacidades));
   const v = violaciones(rows);
@@ -279,6 +279,64 @@ function violaciones(rows) {
   const ok1 = await falla(() => db.query(`INSERT INTO catalogo_modelos_base VALUES ('x', 'iphone', 20, '{}', '{}')`));
   const ok2 = await falla(() => db.query(`INSERT INTO catalogo_modelos_base VALUES ($1, 'iphone', 20, '{}', '{}')`, ['y'.repeat(60)]));
   check('… y acepta uno de 1 y uno de exactamente 60 caracteres', ok1 === null && ok2 === null, `${ok1} | ${ok2}`);
+}
+
+// ── 4e. Lista cerrada de caracteres y deduplicación independiente de la collation ──
+{
+  const db = await baseNueva({ catalogoSpecs: JSON.stringify({ 'iPhone 18': {
+    c: ['Ácido', 'ácido', 'ÁCIDO', 'Ñandú', 'ñANDÚ', 'Straße', 'Strasse', 'ΟΣ', 'Ος', 'İstanbul', 'Azul' + String.fromCharCode(0x200b), 'Con\ttab', 'Con\nsalto', 'A  B', 'Verde Azulado', 'Azul "Mar"', "Té (claro)/oscuro+1 & 2-3.4,5'6" , 'Ünico', 'ÜNICO', 'Naranja ' + String.fromCharCode(0x2019) + 's'] } }) });
+  const r = de(await comoAnon(db, () => vista(db)), 'iPhone 18');
+  const c = r.colores, bajos = c.map(x => x.toLowerCase());
+  check('Dedup sin distinguir mayúsculas con tildes y ñ: "Ácido"/"ácido"/"ÁCIDO" → uno solo, y se queda la primera grafía (en cualquier collation, incluida la C de pglite)', c.filter(x => x.toLowerCase() === 'ácido').length === 1 && c.includes('Ácido') && c.filter(x => x.toLowerCase() === 'ñandú').length === 1 && c.filter(x => x.toLowerCase() === 'ünico').length === 1, JSON.stringify(c));
+  check('… y "Straße" y "Strasse" quedan DISTINTOS, igual que en JavaScript', c.includes('Straße') && c.includes('Strasse'), JSON.stringify(c));
+  check('Lo que está fuera de la lista cerrada se descarta: griego, İ, ancho cero, tabulaciones y saltos en el medio (el espacio sí se permite)', !c.some(x => /[Α-Ωα-ωİ]/.test(x)) && !c.some(x => [...x].some(ch => ch.charCodeAt(0) < 32 || ch.charCodeAt(0) === 0x200b)), JSON.stringify(c));
+  check('… pero los nombres razonables con comillas, paréntesis, barra, +, &, guion, punto, coma, apóstrofe y espacio pasan', c.includes('Azul "Mar"') && c.includes("Té (claro)/oscuro+1 & 2-3.4,5'6") && c.includes('Verde Azulado') && c.includes('A  B'), JSON.stringify(c));
+  check('CONTRATO — el mismo material no deja la vista con duplicados según toLowerCase() de JS', new Set(bajos).size === bajos.length, JSON.stringify(bajos));
+  const rows = await comoAnon(db, () => vista(db));
+  check('CONTRATO — todas las filas siguen cumpliendo las reglas', violaciones(rows).length === 0, violaciones(rows).join(' | '));
+}
+{
+  // Un NUL (o un surrogate suelto) hace inválido el documento para jsonb: se ignora ENTERO, sin romper la vista
+  const db = await baseNueva({ catalogoSpecs: JSON.stringify({ 'iPhone 18': { c: ['Borgoña', 'Rojo' + String.fromCharCode(0)] } }) });
+  const e = await falla(() => comoAnon(db, () => vista(db)));
+  const r = e ? null : de(await comoAnon(db, () => vista(db)), 'iPhone 18');
+  check('catalogo_specs con un NUL adentro: jsonb lo rechaza, se ignora todo el documento y la vista sigue con lo declarado', e === null && r.colores.length === 0 && (await comoAnon(db, () => vista(db))).length === iphones.length, e);
+}
+{
+  const db = await baseNueva();
+  // La clave no usa lower(): se verifica contra la definición de JS para TODO el alfabeto permitido
+  const { rows } = await db.query(`SELECT catalogo_aux.clave($1) AS k`, ['ABCDEFGHIJKLMNOPQRSTUVWXYZ']);
+  const alfa = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ' + Array.from({ length: 0xde - 0xc0 + 1 }, (_, i) => String.fromCharCode(0xc0 + i)).filter(ch => ch !== String.fromCharCode(0xd7)).join('') + 'àáâãäåæçèéêëìíîïðñòóôõöøùúûüýþÿß';
+  const pares = [];
+  for (const ch of alfa) pares.push(ch);
+  const claves = (await db.query(`SELECT x, catalogo_aux.clave(x) AS k FROM unnest($1::text[]) AS x`, [pares])).rows;
+  const difs = claves.filter(r => r.k !== r.x.toLowerCase()).map(r => `${r.x}→${r.k}≠${r.x.toLowerCase()}`);
+  check('clave() coincide con toLowerCase() de JavaScript en TODO el alfabeto permitido (A-Z, À-Þ sin ×, à-ÿ, ß)', rows[0].k === 'abcdefghijklmnopqrstuvwxyz' && difs.length === 0, difs.join(' '));
+  check('clave() no depende de lower(): el fuente no la usa', !/lower\(/i.test(fs.readFileSync(SQLFILE, 'utf8').split('\n').filter(l => !/^\s*--/.test(l)).join('\n')));
+  const r2 = (await db.query(`SELECT catalogo_aux.clave('LIMA') = catalogo_aux.clave('lima') AS iguales`)).rows[0];
+  check('LIMA y lima dan la misma clave (con una collation turca, lower() las separaba)', r2.iguales === true);
+}
+{
+  // Los 29 modelos y todos los colores/capacidades REALES del código pasan la lista cerrada
+  const db = await baseNueva();
+  const rows = await comoAnon(db, () => vista(db));
+  const faltan = iphones.filter(([m, v]) => { const r = de(rows, m); return !r || (v.c || []).length !== r.colores.length || (v.s || []).length !== r.capacidades.length; }).map(([m]) => m);
+  check('La lista cerrada NO descarta nada de lo declarado en el código (ningún color ni capacidad real queda afuera)', faltan.length === 0, faltan.join(', '));
+}
+{
+  // Una tabla creada por una versión anterior del archivo (CHECK flojo): la nueva corrida lo reemplaza
+  const db = new PGlite();
+  await db.exec(`CREATE ROLE anon NOLOGIN; CREATE ROLE authenticated NOLOGIN;
+    CREATE TABLE public.configuracion (clave TEXT PRIMARY KEY, valor TEXT);
+    CREATE SCHEMA catalogo_aux;
+    CREATE TABLE public.catalogo_modelos_base (modelo TEXT PRIMARY KEY CHECK (length(btrim(modelo)) BETWEEN 1 AND 60),
+      categoria TEXT NOT NULL, generacion INTEGER NOT NULL, capacidades TEXT[] NOT NULL DEFAULT '{}', colores TEXT[] NOT NULL DEFAULT '{}');`);
+  const antes = await falla(() => db.query(`INSERT INTO catalogo_modelos_base VALUES (' iPhone 99', 'iphone', 1, '{}', '{}')`));
+  await db.exec(fs.readFileSync(SQLFILE, 'utf8'));
+  const despues = await falla(() => db.query(`INSERT INTO catalogo_modelos_base VALUES (' iPhone 99', 'iphone', 1, '{}', '{}')`));
+  const despues2 = await falla(() => db.query(`INSERT INTO catalogo_modelos_base VALUES ('Emoji ${String.fromCodePoint(0x1f600)}', 'iphone', 1, '{}', '{}')`));
+  const { rows: cks } = await db.query(`SELECT conname FROM pg_constraint WHERE conrelid = 'public.catalogo_modelos_base'::regclass AND contype = 'c' ORDER BY 1`);
+  check('Con una tabla vieja y su CHECK flojo: la corrida lo REEMPLAZA (antes aceptaba el modelo largo con blancos; ahora lo rechaza) y queda un solo CHECK', antes === null && !!despues && !!despues2 && cks.length === 1 && cks[0].conname === 'catalogo_modelos_base_modelo_ok', JSON.stringify({ antes, despues, cks }));
 }
 
 // ── 5. Re-ejecutable ─────────────────────────────────────────────────────

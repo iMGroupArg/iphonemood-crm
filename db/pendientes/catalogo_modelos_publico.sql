@@ -99,15 +99,18 @@ SET search_path = catalogo_aux, pg_temp AS $$
 $$;
 
 -- Clave de comparación "sin distinguir mayúsculas", IGUAL en cualquier collation del servidor:
--- lower() de Postgres con collation C sólo baja el ASCII, así que 'Á' y 'á' quedaban como
--- distintos. Primero se bajan las mayúsculas latinas con tilde (À-Þ → à-þ, salvo × y ÷) y
--- después lower() hace el resto (ASCII). Para el alfabeto permitido coincide con
--- toLowerCase() de JavaScript ('ß' sigue distinto de 'ss', como en JS).
+-- lower() depende de la collation (con la C sólo baja el ASCII y 'Á' quedaba distinta de 'á';
+-- con una turca, la 'I' baja a 'ı' y 'LIMA' ≠ 'lima'). Por eso NO se usa lower(): translate()
+-- baja explícitamente A-Z y las mayúsculas latinas con tilde (À-Þ → à-þ, salvo × y ÷), y el
+-- resultado se fija en collation C. Para el alfabeto permitido coincide con toLowerCase() de
+-- JavaScript ('ß' sigue distinto de 'ss', como en JS).
 CREATE OR REPLACE FUNCTION catalogo_aux.clave(p TEXT)
 RETURNS TEXT LANGUAGE sql IMMUTABLE
 SET search_path = catalogo_aux, pg_temp AS $$
-  SELECT lower(translate(p, 'ÀÁÂÃÄÅÆÇÈÉÊËÌÍÎÏÐÑÒÓÔÕÖØÙÚÛÜÝÞ', 'àáâãäåæçèéêëìíîïðñòóôõöøùúûüýþ'))
+  SELECT translate(p, 'ABCDEFGHIJKLMNOPQRSTUVWXYZÀÁÂÃÄÅÆÇÈÉÊËÌÍÎÏÐÑÒÓÔÕÖØÙÚÛÜÝÞ',
+                      'abcdefghijklmnopqrstuvwxyzàáâãäåæçèéêëìíîïðñòóôõöøùúûüýþ') COLLATE "C"
 $$;
+
 GRANT EXECUTE ON FUNCTION catalogo_aux.limpiar(TEXT)        TO anon, authenticated;
 GRANT EXECUTE ON FUNCTION catalogo_aux.clave(TEXT)          TO anon, authenticated;
 GRANT EXECUTE ON FUNCTION catalogo_aux.texto_ok(TEXT, INT)  TO anon, authenticated;
@@ -133,8 +136,11 @@ END $$;
 REVOKE ALL ON public.catalogo_modelos_base FROM PUBLIC, anon, authenticated;
 
 -- Siembra: se reemplaza todo en la misma transacción (nunca queda a medias). DELETE e
--- INSERT no bloquean las lecturas de la vista (MVCC): quien lee ve la versión anterior hasta
--- que esto confirma.
+-- INSERT no bloquean las lecturas (MVCC: quien lee ve la versión anterior hasta que esto
+-- confirma). Los ALTER TABLE del CHECK de más abajo SÍ piden un candado exclusivo sobre la
+-- tabla base y lo mantienen hasta el COMMIT: las lecturas de la vista esperan esos pocos
+-- milisegundos. `lock_timeout` sólo limita cuánto espera ESTE archivo para obtener el candado,
+-- no cuánto lo retiene después; la transacción entera es corta (29 filas).
 DELETE FROM public.catalogo_modelos_base;
 
 -- El CHECK del contrato (texto_ok, 60) se RECREA en cada corrida: CREATE TABLE IF NOT EXISTS

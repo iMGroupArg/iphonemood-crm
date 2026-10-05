@@ -71,6 +71,7 @@ hacer *después* de correr el SQL (si se hace al revés, se rompe la página).
 |---|---|
 | `stock_cerrar_acceso_anonimo.sql` | **La mitad del arreglo del stock ya está hecha** (vista creada + landing migrada). Falta borrar la política que deja leer `stock` sin login — hasta que se corra, los costos y los IMEI siguen accesibles vía API |
 | `seguimiento_comentarios_rpc.sql` | El chat de seguimiento de reparaciones es legible sin token: cualquiera lee los comentarios de todas las reparaciones (y casi seguro puede escribir en la de otro cliente) |
+| `catalogo_modelos_publico.sql` | Vista pública `catalogo_modelos_publico(modelo, orden, capacidades, colores)` para el asistente de Plan Canje de la landing: sólo iPhone, sólo valores **declarados** (los de `Stock.SPECS_POR_MODELO`, sembrados en la tabla cerrada `catalogo_modelos_base`, más lo que se suma a mano en `configuracion.catalogo_specs`), nunca lo aprendido del stock. Cumple el contrato de la landing (modelo ≤ 60; listas ≤ 30 elementos de ≤ 40 caracteres, sin "Otro" ni repetidos). **Si cambia `SPECS_POR_MODELO` hay que actualizar la siembra: `cd tests/sql && npm run test:catalogo` falla y dice qué difiere.** Correr con el rol `postgres` (lo verifica). Codex la aprobó en 5 rondas |
 | `stock_a_pedido.sql` | Columna `stock.a_pedido` (productos sin stock físico), su CHECK (sin IMEI ni rubro con IMEI), `a_pedido` en la vista pública `stock_publico` y `reparacion_repuestos.devolucion_estado`. Idempotente. Descontar/reponer a pedido no toca la cantidad (lo implementan `stock_ajustar_rpc.sql` y `meli_esquema_base.sql`). **La vista se reemplaza con la definición vigente de `20260829_precio_ars_publico.sql`; si cambia antes de correrlo, actualizarla acá** |
 | `stock_ajustar_rpc.sql` | Descuento y reposición de stock **por delta**, atómicos. Hay 7 lugares del cliente que escriben la cantidad como valor absoluto desde la copia en memoria (ventas.js, reparaciones.js, stock.js) y se pisan con cualquier otro escritor. **5 migran a esta función; `separarUnidades` (stock.js) no**, porque no es un ajuste por delta. **La función sola no arregla nada: hay que cambiar esas llamadas.** Acepta `p_estado_destino` para reponer y liberar una reserva en una sola sentencia. Revisada por Codex (4 rondas) y probada en Postgres real con una sola conexión (`tests/sql/stock.sql.test.mjs`); falta probarla con dos sesiones simultáneas |
 
@@ -131,3 +132,19 @@ como migración nueva.
    correrla dos veces sin romper nada.
 3. Correrla en el SQL Editor de Supabase.
 4. Agregar la fila a la tabla de arriba.
+
+---
+
+## `tests/sql/` — pruebas contra Postgres real (pglite)
+
+Corren el SQL de `pendientes/` sobre un Postgres de verdad en WebAssembly, sin tocar Supabase:
+
+```
+cd tests/sql && npm install && npm run test:todo
+```
+
+`test:caja`, `test:meli`, `test:stock`, `test:catalogo`. **Una sola conexión**: no prueban dos
+sesiones simultáneas, así que los bloqueos de fila, los leases y el candado global de IMEI siguen
+sin probarse en concurrencia. Tampoco reproducen los permisos y políticas reales de Supabase (el
+esquema de prueba es mínimo). Antes de correr algo en producción conviene correr estas pruebas.
+

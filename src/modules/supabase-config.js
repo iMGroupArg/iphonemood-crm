@@ -193,7 +193,7 @@ const DB = {
     const repuestosPorRep = {}, pagosPorRep = {};
     (repRepuestosRes.data || []).forEach(r => {
       if (!repuestosPorRep[r.reparacion_id]) repuestosPorRep[r.reparacion_id] = [];
-      repuestosPorRep[r.reparacion_id].push({ nombre: r.nombre, costo: Number(r.costo_usd), fromStock: r.de_stock, stockId: r.stock_id });
+      repuestosPorRep[r.reparacion_id].push({ id: r.id, nombre: r.nombre, costo: Number(r.costo_usd), fromStock: r.de_stock, stockId: r.stock_id, devolucionEstado: r.devolucion_estado || null });
     });
     (repPagosRes.data || []).forEach(p => {
       if (!pagosPorRep[p.reparacion_id]) pagosPorRep[p.reparacion_id] = [];
@@ -1222,11 +1222,55 @@ const DB = {
     // que una clave de reversión se reutilice con un cobro nuevo.
     return data.id;
   },
-  async limpiarMovimientosReparacion(reparacionId) {
+  // `idsRepuestos` acota qué repuestos de stock se borran. Antes borraba TODOS
+  // los de la orden, incluidos los que no se habían podido devolver: se perdía
+  // el único rastro de qué quedaba pendiente y el reintento no devolvía nada.
+  async limpiarMovimientosReparacion(reparacionId, idsRepuestos = null) {
     const r1 = await supa.from('reparacion_pagos').delete().eq('reparacion_id', reparacionId);
-    const r2 = await supa.from('reparacion_repuestos').delete().eq('reparacion_id', reparacionId).eq('de_stock', true);
+    let q = supa.from('reparacion_repuestos').delete().eq('reparacion_id', reparacionId).eq('de_stock', true);
+    if (Array.isArray(idsRepuestos)) {
+      if (!idsRepuestos.length) return !r1.error;   // nada confirmado: no se borra ninguno
+      q = q.in('id', idsRepuestos);
+    }
+    const r2 = await q;
     if (r1.error || r2.error) { console.error('No se pudieron limpiar los movimientos de la reparación:', r1.error || r2.error); return false; }
     return true;
+  },
+
+  // ── Devolución de repuestos al cancelar una reparación ──────────────
+  // Tres estados en `reparacion_repuestos.devolucion_estado`:
+  //   'pendiente'  hay que devolverlo, y está CONFIRMADO que no se devolvió
+  //   'incierto'   se intentó y no se sabe si se escribió -> NUNCA se reintenta solo
+  //   'devuelto'   devolución confirmada
+  //   NULL         sin devolución pendiente (reparación activa, o dato histórico)
+
+  // Marca 'pendiente' los repuestos de stock de una orden que se empieza a
+  // cancelar. Es el único lugar que pone 'pendiente'. Solo toca los que están
+  // en NULL: no pisa un 'incierto' ni un 'devuelto' de un intento anterior.
+  async marcarRepuestosPendientes(reparacionId) {
+    const { error } = await supa.from('reparacion_repuestos')
+      .update({ devolucion_estado: 'pendiente' })
+      .eq('reparacion_id', reparacionId).eq('de_stock', true).is('devolucion_estado', null);
+    if (error) { console.error('No se pudo marcar los repuestos como pendientes:', error); return false; }
+    return true;
+  },
+
+  // RECLAMO: pasa 'pendiente' -> 'incierto' ANTES de tocar el stock. Solo quien
+  // confirme que modificó la fila llama a la RPC. Cierra la ventana en la que,
+  // si se corta entre reponer y anotarlo, el próximo intento devolvía dos veces.
+  async reclamarDevolucionRepuesto(repuestoId) {
+    const { data, error } = await supa.from('reparacion_repuestos')
+      .update({ devolucion_estado: 'incierto' })
+      .eq('id', repuestoId).eq('devolucion_estado', 'pendiente').select('id');
+    if (error) { console.error('No se pudo reclamar la devolución:', error); return false; }
+    return Array.isArray(data) && data.length === 1;
+  },
+
+  async marcarDevolucionRepuesto(repuestoId, estado) {
+    const { data, error } = await supa.from('reparacion_repuestos')
+      .update({ devolucion_estado: estado }).eq('id', repuestoId).select('id');
+    if (error) { console.error('No se pudo marcar la devolución:', error); return false; }
+    return Array.isArray(data) && data.length === 1;
   },
 
   async getSeguimientoComentarios(reparacionId) {

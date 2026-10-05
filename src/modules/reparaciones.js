@@ -1058,9 +1058,23 @@ const Reparaciones = {
       persona: p.persona, bolsillo: p.bolsillo, delta: -State.cent(p.monto),
       ref: { clave: `rep-cancelar-${o.id}-${p.id}`, tipo: 'reparacion_cancelada', referencia: o.id, descripcion: `Se canceló la reparación ${o.id}` } })), { atomico: false });
     if (!revertido) { toast('La orden NO se canceló del todo: alguna caja no devolvió la plata. Volvé a tocar «Cancelar»: lo que ya volvió no se repite.'); return; }
-    // Si la orden YA figuraba rechazada, el stock se repuso en un intento anterior
-    // (quedó pendiente solo la limpieza): no se vuelve a sumar.
-    const stockYaRepuesto = o.estado === 'rechazado';
+    // El estado de la ORDEN ya no decide si hay que devolver stock: eso lo dice
+    // `devolucionEstado` de cada repuesto. Antes se usaba `o.estado === 'rechazado'`
+    // como comprobante, y si fallaba el segundo repuesto de dos, el reintento no
+    // devolvía ninguno porque la orden ya figuraba rechazada.
+    // Si la orden YA estaba rechazada, los repuestos en NULL son históricos: no
+    // hay forma de saber si se devolvieron, y marcarlos 'pendiente' los
+    // devolvería DOS veces. Se dejan como están, para revisión a mano.
+    const yaEstabaRechazada = o.estado === 'rechazado';
+    let inicializado = true;
+    if (!yaEstabaRechazada) {
+      inicializado = await DB.marcarRepuestosPendientes(o.id);
+      if (inicializado) {
+        (o.repuestos || []).forEach(r => {
+          if (r.fromStock && r.stockId && !r.devolucionEstado) r.devolucionEstado = 'pendiente';
+        });
+      }
+    }
     const previo = { estado: o.estado, equipoDevuelto: o.equipoDevuelto, custodio: o.custodio };
     o.estado = 'rechazado'; o.equipoDevuelto = true; o.custodio = '';
     if (!(await DB.actualizarReparacion(o))) {
@@ -1069,22 +1083,73 @@ const Reparaciones = {
       return;
     }
     const avisos = [];
-    for (const r of stockYaRepuesto ? [] : (o.repuestos || []).filter(r => r.fromStock && r.stockId)) {
+    const devueltos = [];   // ids de repuestos con devolución CONFIRMADA: los únicos que se borran
+    // Solo se reintenta lo que está en 'pendiente'. Nunca un 'incierto' (la RPC
+    // pudo haber repuesto y un segundo +1 duplicaría) ni un 'devuelto'.
+    for (const r of (o.repuestos || []).filter(r => r.fromStock && r.stockId)) {
+      if (r.devolucionEstado === 'devuelto') { devueltos.push(r.id); continue; }
+      if (r.devolucionEstado !== 'pendiente') {
+        if (r.devolucionEstado === 'incierto') {
+          avisos.push(`"${r.nombre || r.stockId}" quedó sin confirmar en un intento anterior — verificá el stock antes de ajustar`);
+        } else if (!r.devolucionEstado) {
+          avisos.push(`"${r.nombre || r.stockId}" es de una cancelación vieja: revisá a mano si ya se devolvió`);
+        }
+        continue;
+      }
       const item = State.stock.find(s => s.id === r.stockId);
-      if (item && !item.imeis) {
-        item.cantidad = (item.cantidad || 0) + 1;
-        let guardado = false;
-        try { guardado = (await DB.actualizarCantidadStock(r.stockId, item.cantidad)) !== false; } catch (e) { console.error(e); }
-        if (!guardado) { item.cantidad -= 1; avisos.push(`no se pudo devolver al stock "${r.nombre || r.stockId}" (sumale 1 a mano)`); }
+      if (!item) { avisos.push(`no se encontró en el stock "${r.nombre || r.stockId}" (devolvelo a mano)`); continue; }
+      if (item.imeis) { avisos.push(`"${r.nombre || r.stockId}" lleva IMEI: devolvelo a mano eligiendo la unidad`); continue; }
+
+      // Reclamo antes de tocar el stock. Si no se logra puede ser que otro lo
+      // esté haciendo o que falle la escritura: en los dos casos NO se devuelve,
+      // y hay que decirlo en vez de saltearlo en silencio.
+      if (!(await DB.reclamarDevolucionRepuesto(r.id))) {
+        avisos.push(`no se pudo reclamar la devolución de "${r.nombre || r.stockId}" — verificá el stock antes de ajustar`);
+        continue;
+      }
+      r.devolucionEstado = 'incierto';
+
+      const res = await DB.ajustarStock({
+        stockId: r.stockId, delta: 1, tipo: 'ajuste_cantidad',
+        detalle: `Repuesto devuelto — reparación #${o.id} cancelada`,
+      });
+      if (res.ok) {
+        State.aplicarRespuestaStock(r.stockId, res);
+        if (await DB.marcarDevolucionRepuesto(r.id, 'devuelto')) {
+          r.devolucionEstado = 'devuelto';
+          devueltos.push(r.id);
+        } else {
+          // Se repuso pero no se pudo anotar: queda 'incierto', que es lo seguro.
+          avisos.push(`"${r.nombre || r.stockId}" se devolvió pero no se pudo registrar — no lo devuelvas de nuevo`);
+        }
+      } else if (res.definitivo) {
+        // Rechazo confirmado: NO se escribió, se puede reintentar. Pero la
+        // memoria solo baja a 'pendiente' si esa escritura se confirma: si no,
+        // queda 'incierto', que es lo seguro (no se ofrece reintentar).
+        if (await DB.marcarDevolucionRepuesto(r.id, 'pendiente')) {
+          r.devolucionEstado = 'pendiente';
+          avisos.push(`no se pudo devolver al stock "${r.nombre || r.stockId}" (${res.mensaje}) — sumale 1 a mano`);
+        } else {
+          avisos.push(`no se pudo devolver al stock "${r.nombre || r.stockId}" (${res.mensaje}) — verificá antes de ajustar`);
+        }
+      } else {
+        // Sin confirmar: queda 'incierto'. Decir "sumale 1" acá sería peligroso.
+        avisos.push(`no se pudo confirmar la devolución de "${r.nombre || r.stockId}" — ⚠️ verificá el stock antes de ajustar`);
       }
     }
-    if (!(await DB.limpiarMovimientosReparacion(o.id))) {
+    if (!(await DB.limpiarMovimientosReparacion(o.id, devueltos))) {
       avisos.push('no se pudieron borrar los pagos y repuestos de la orden (la plata YA volvió; borralos a mano)');
     } else {
-      o.pagos = []; o.repuestos = o.repuestos.filter(r => !r.fromStock);
+      o.pagos = [];
+      // Se conservan los repuestos que NO se devolvieron: son el rastro de lo que
+      // falta corregir. Borrarlos dejaría al usuario sin saber qué quedó pendiente.
+      o.repuestos = o.repuestos.filter(r => !r.fromStock || !devueltos.includes(r.id));
     }
+    if (!inicializado) avisos.push('no se pudo preparar la devolución de los repuestos: NO se devolvió ninguno');
     this.renderList(); this.renderDetail();
-    toast('Orden cancelada y movimientos revertidos.');
+    toast(avisos.length
+      ? 'Orden cancelada, pero quedaron cosas sin resolver.'
+      : 'Orden cancelada y movimientos revertidos.');
     if (avisos.length) toast('⚠️ ' + avisos.join(' · '));
   },
 };

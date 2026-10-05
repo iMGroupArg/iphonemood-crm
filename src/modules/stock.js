@@ -2203,7 +2203,7 @@ const Stock = {
         if (error) { toast(`Error creando unidad ${i}.`); console.error(error); continue; }
         nueva.id = newId;
         State.stock.push(nueva);
-        creadas.push(newId);
+        creadas.push({ id: newId, imei: imeiUnidad[0] || null });
         await DB.registrarMovimientoStock(newId, 'alta',
           `Separado de lote: ${p.nombre} (unidad ${i}/${cant})${imeiUnidad.length ? ` — IMEI ${imeiUnidad[0]}` : ''}`, 0, 1);
       }
@@ -2219,15 +2219,32 @@ const Stock = {
       // salió como unidad suelta y se queda con los IMEIs que no se repartieron.
       // Borrarlo entero acá haría desaparecer las unidades que fallaron.
       if (creadas.length < cant) {
-        const restantes = cant - creadas.length;
-        const imeisRestantes = imeisOriginales.slice(creadas.length);
-        await DB.registrarMovimientoStock(id, 'ajuste_cantidad',
-          `Separación parcial: salieron ${creadas.length} unidad(es), quedan ${restantes} en el lote`, cant, restantes);
-        if (p.imeis) { p.imeis = imeisRestantes; await DB.actualizarImeisStock(id, imeisRestantes); }
-        p.cantidad = restantes;
-        p.cantidadDeclarada = restantes;
-        await DB.actualizarCantidadStock(id, restantes);
-        toast(`⚠️ Se separaron ${creadas.length} de ${cant}. El resto quedó en el lote original.`);
+        // Se descuenta del lote UNA unidad por cada fila creada, por delta y de a
+        // una. Antes se escribía el total calculado acá: si Mercado Libre o el
+        // mostrador vendían del lote en el medio, esa escritura lo borraba.
+        // De a una además porque cada unidad se lleva SU IMEI: la RPC saca el
+        // IMEI del arreglo y baja la cantidad en la misma sentencia.
+        let descontadas = 0;
+        for (const creada of creadas) {
+          // El IMEI sale de la unidad REALMENTE creada, no del índice: si falló
+          // crear la del medio, descontar por posición sacaba el IMEI de otra.
+          const res = await DB.ajustarStock({
+            stockId: id, delta: -1, imei: p.imeis ? creada.imei : null,
+            tipo: 'ajuste_cantidad',
+            detalle: `Separado del lote: salió 1 unidad${creada.imei ? ` — IMEI ${creada.imei}` : ''}`,
+          });
+          if (!res.ok) {
+            toast(res.definitivo
+              ? `⚠️ Se crearon ${creadas.length} unidades, pero el lote solo se descontó ${descontadas}: ${res.mensaje}. Ajustalo a mano.`
+              : `⚠️ Se crearon ${creadas.length} unidades y no se pudo confirmar el descuento del lote. Verificá el stock antes de ajustar.`);
+            break;
+          }
+          descontadas++;
+          State.aplicarRespuestaStock(id, res);
+        }
+        if (descontadas === creadas.length) {
+          toast(`⚠️ Se separaron ${creadas.length} de ${cant}. El resto quedó en el lote original.`);
+        }
         return;
       }
 

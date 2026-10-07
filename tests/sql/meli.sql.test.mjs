@@ -2,7 +2,7 @@
 // (db/pendientes/meli_ventas_migration.sql) contra un Postgres REAL (pglite).
 //
 // Carga los TRES archivos reales, en el orden en que se van a correr:
-//   caja_aplicar_delta.sql → meli_esquema_base.sql → meli_ventas_migration.sql
+//   caja_aplicar_delta.sql → meli_esquema_base.sql → meli_vincular.sql → meli_ventas_migration.sql
 // sobre un esquema mínimo que imita el de producción (stock, ventas, venta_items,
 // venta_pagos, cajas, caja_ledger, personas).
 //
@@ -56,6 +56,7 @@ async function baseNueva() {
   `);
   await db.exec(SQL('caja_aplicar_delta.sql'));
   await db.exec(SQL('meli_esquema_base.sql'));
+  await db.exec(SQL('meli_vincular.sql'));       // script 7: vínculos publicación ↔ stock (da meli__revalidar_orden)
   await db.exec(SQL('meli_ventas_migration.sql'));
   await db.exec(`SELECT set_config('request.jwt.claims', '{"email":"franco@x.com"}', false)`);
 
@@ -91,6 +92,11 @@ async function nuevaOrden(ctx, { items = [{ cant: 1, precio: 100000, stock: {} }
   for (let i = 0; i < items.length; i++) {
     await db.query(`INSERT INTO public.meli_orden_items (orden_id, meli_item_id, titulo, cantidad, precio_unitario, stock_id)
                     VALUES ($1,$2,'t',$3,$4,$5)`, [r.id, `MLA${i}`, items[i].cant, items[i].precio, stocks[i]]);
+    // El vínculo VIGENTE (lo que procesar relee): sin él, revalidar dejaría el ítem sin vincular.
+    if (!opts.sinVinculo) {
+      await db.query(`INSERT INTO public.meli_publicaciones (cuenta_id, meli_item_id, meli_variacion_id, stock_id)
+                      VALUES ($1,$2,NULL,$3) ON CONFLICT DO NOTHING`, [cuentaId, `MLA${i}`, stocks[i]]);
+    }
   }
   return { id: r.id, stocks, total };
 }
@@ -239,6 +245,90 @@ for (const [nombre, opts, esperado] of [
   const e1 = await falla(() => procesar(ctx.db, o.id, 0));
   const e2 = await falla(() => procesar(ctx.db, o.id, null));
   check('Cotización cero o nula: COTIZACION_INVALIDA', e1?.includes('COTIZACION_INVALIDA') && e2?.includes('COTIZACION_INVALIDA'), `${e1} / ${e2}`);
+}
+
+// ── 2b. VÍNCULO VIGENTE: procesar relee el vínculo publicación ↔ stock dentro de su transacción ──
+const nuevoStock = async (db, cant = 5, nombre = 'Otro perfume') =>
+  (await db.query(`INSERT INTO public.stock (nombre, categoria, cantidad, imeis, estado_inventario, costo_usd) VALUES ($1,'perfumeria',$2,'{}','disponible',30) RETURNING id`, [nombre, cant])).rows[0].id;
+const cantidadDe = async (db, id) => (await db.query(`SELECT cantidad FROM stock WHERE id=$1`, [id])).rows[0].cantidad;
+{
+  // a) Entró SIN vincular (ítems sin stock y la orden en revisar por eso); se vincula DESPUÉS: procesar funciona
+  const ctx = await baseNueva(); const { db } = ctx;
+  const o = await nuevaOrden(ctx, { opts: { sinVinculo: true } });
+  await db.query(`UPDATE meli_orden_items SET stock_id = NULL WHERE orden_id=$1`, [o.id]);
+  await db.query(`UPDATE meli_ordenes SET revisar = TRUE, motivo_revisar = 'Hay ítems sin publicación vinculada' WHERE id=$1`, [o.id]);
+  await db.query(`INSERT INTO meli_publicaciones (cuenta_id, meli_item_id, meli_variacion_id, stock_id) VALUES ($1,'MLA0',NULL,$2)`, [ctx.cuentaId, o.stocks[0]]);
+  const r = await procesar(db, o.id);
+  const { rows: [ord] } = await db.query(`SELECT revisar, motivo_revisar, procesada FROM meli_ordenes WHERE id=$1`, [o.id]);
+  check('Orden que entró sin vincular y se vinculó después: procesar funciona (el «revisar» viejo se limpia solo) y descuenta el stock vinculado',
+    r.ok === true && (await cantidadDe(db, o.stocks[0])) === 4 && ord.procesada && ord.revisar === false && ord.motivo_revisar === null, JSON.stringify({ r, ord }));
+}
+{
+  // b) El vínculo CAMBIÓ de producto antes de procesar: se descuenta del producto VIGENTE, no del viejo
+  const ctx = await baseNueva(); const { db } = ctx;
+  const o = await nuevaOrden(ctx);
+  const nuevo = await nuevoStock(db, 5);
+  await db.query(`UPDATE meli_publicaciones SET stock_id=$1 WHERE cuenta_id=$2 AND meli_item_id='MLA0'`, [nuevo, ctx.cuentaId]);
+  const r = await procesar(db, o.id);
+  check('Vínculo cambiado antes de procesar: descuenta del producto NUEVO (5 → 4) y el viejo queda intacto (5)',
+    r.ok === true && (await cantidadDe(db, nuevo)) === 4 && (await cantidadDe(db, o.stocks[0])) === 5, JSON.stringify(r));
+}
+{
+  // c) Se DESVINCULÓ: no se procesa, no se toca el stock
+  const ctx = await baseNueva(); const { db } = ctx;
+  const o = await nuevaOrden(ctx);
+  await db.query(`DELETE FROM meli_publicaciones WHERE cuenta_id=$1`, [ctx.cuentaId]);
+  const e = await falla(() => procesar(db, o.id));
+  check('Publicación desvinculada: procesar se rechaza (ORDEN_EN_REVISION) y el stock no se toca',
+    e?.includes('ORDEN_EN_REVISION') && (await cantidadDe(db, o.stocks[0])) === 5 && (await db.query(`SELECT count(*)::int n FROM ventas`)).rows[0].n === 0, e);
+}
+{
+  // d) Otro motivo de revisión distinto del vínculo: se conserva y sigue bloqueando
+  const ctx = await baseNueva(); const { db } = ctx;
+  const o = await nuevaOrden(ctx);
+  await db.query(`UPDATE meli_ordenes SET revisar = TRUE, motivo_revisar = 'Devolución o contracargo: revisar' WHERE id=$1`, [o.id]);
+  const e = await falla(() => procesar(db, o.id));
+  const { rows: [ord] } = await db.query(`SELECT revisar, motivo_revisar FROM meli_ordenes WHERE id=$1`, [o.id]);
+  check('Un motivo que NO es de vínculo se conserva y sigue bloqueando el procesado', e?.includes('ORDEN_EN_REVISION') && ord.revisar === true && /Devolución/.test(ord.motivo_revisar), JSON.stringify({ e, ord }));
+}
+{
+  // e) Stock YA descontado pero venta no creada (procesada = false): se crea la venta SIN descontar de nuevo
+  const ctx = await baseNueva(); const { db } = ctx;
+  const o = await nuevaOrden(ctx);
+  await db.query(`UPDATE stock SET cantidad = 4 WHERE id=$1`, [o.stocks[0]]);
+  await db.query(`UPDATE meli_ordenes SET stock_descontado = TRUE WHERE id=$1`, [o.id]);
+  const r = await procesar(db, o.id);
+  check('Con el stock ya descontado y sin venta: se crea la venta y el stock NO baja otra vez (sigue en 4)', r.ok === true && (await cantidadDe(db, o.stocks[0])) === 4, JSON.stringify(r));
+}
+{
+  // f) Otra CUENTA con el mismo aviso: no cuenta como vínculo de esta orden
+  const ctx = await baseNueva(); const { db } = ctx;
+  const o = await nuevaOrden(ctx, { opts: { sinVinculo: true } });
+  const { rows: [c2] } = await db.query(`INSERT INTO meli_cuentas (meli_user_id, nickname) VALUES ('888','OTRA') RETURNING id`);
+  await db.query(`INSERT INTO meli_publicaciones (cuenta_id, meli_item_id, meli_variacion_id, stock_id) VALUES ($1,'MLA0',NULL,$2)`, [c2.id, o.stocks[0]]);
+  const e = await falla(() => procesar(db, o.id));
+  check('El vínculo de OTRA cuenta con el mismo aviso no sirve: la orden sigue sin vincular y no se procesa',
+    e?.includes('ORDEN_EN_REVISION') && (await cantidadDe(db, o.stocks[0])) === 5, e);
+}
+{
+  // g) Dos avisos de la misma orden apuntan al MISMO producto y no alcanza para los dos: no se descuenta nada
+  const ctx = await baseNueva(); const { db } = ctx;
+  const o = await nuevaOrden(ctx, { items: [{ cant: 1, precio: 50000, stock: { cantidad: 1 } }, { cant: 1, precio: 50000, stock: { cantidad: 5 } }], neto: 85000 });
+  await db.query(`UPDATE meli_publicaciones SET stock_id=$1 WHERE cuenta_id=$2 AND meli_item_id='MLA1'`, [o.stocks[0], ctx.cuentaId]);
+  const r = await procesar(db, o.id);
+  check('Dos avisos al mismo producto con stock para uno solo: no se descuenta nada y no hay venta',
+    r.ok === false && (await cantidadDe(db, o.stocks[0])) === 1 && (await db.query(`SELECT count(*)::int n FROM ventas`)).rows[0].n === 0, JSON.stringify(r));
+}
+{
+  // h) Procesar, CAMBIAR el vínculo, y revertir: se repone el producto que SÍ se descontó
+  const ctx = await baseNueva(); const { db } = ctx;
+  const o = await nuevaOrden(ctx);
+  await procesar(db, o.id, 1000);
+  const otro = await nuevoStock(db, 5);
+  await db.query(`UPDATE meli_publicaciones SET stock_id=$1 WHERE cuenta_id=$2`, [otro, ctx.cuentaId]);
+  await revertir(db, o.id);
+  check('Procesar → cambiar el vínculo → revertir: se repone el producto original (5) y el otro no se toca (5)',
+    (await cantidadDe(db, o.stocks[0])) === 5 && (await cantidadDe(db, otro)) === 5);
 }
 
 // ── 3. Acreditar ─────────────────────────────────────────────────────────

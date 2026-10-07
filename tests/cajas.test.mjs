@@ -1488,7 +1488,7 @@ const entornoVenta = (extra = {}, cfg = {}) => {
   const e = nuevoEntorno({ modulos: ['meli-ordenes.js'], dom: { 'meliord-monto-7': '85000', 'meliord-fin-7': false, 'meliord-cot-3': '1000' },
     dbExtra: { async cargarTodo() {}, async cargarMeliOrdenes() {} } });
   let respuesta = { data: { ok: true, ya_acreditada: false, monto: 85000, costo_canal_usd: 15 }, error: null };
-  e.cfg.supaRpc = async (fn, args) => { llamadas.push({ fn, args }); return respuesta; };
+  e.cfg.supaRpc = async (fn, args) => { llamadas.push({ fn, args }); return fn === 'meli_orden_revalidar' ? { data: { ok: true, revisar: false, sin_vincular: false, cerrada: false }, error: null } : respuesta; };
   e.State.meliOrdenes = [{ id: 7, orderId: 'ORD7', neto: 85000, bruto: 100000, procesada: true, acreditado: false, financieraCompleta: true, fechaLiberacion: '2020-01-01' }];
   await e.mod.MeliOrdenes.acreditar(7, null);
   check('Acreditar con el monto igual al neto informado: manda monto NULL (que la base use SU neto) y liquidación final falsa',
@@ -1502,7 +1502,7 @@ const entornoVenta = (extra = {}, cfg = {}) => {
   e.State.meliOrdenes.push({ id: 3, orderId: 'ORD3', procesada: false, revisar: false });
   await e.mod.MeliOrdenes.procesar(3, null);
   check('Procesar una orden que la base deja en revisión: muestra el motivo (no dice que salió bien)',
-    llamadas[2].fn === 'meli_procesar_orden' && llamadas[2].args.p_cotizacion === 1000 && e.toasts.some(t => t.includes('IMEI')), JSON.stringify({ l: llamadas[2], t: e.toasts }));
+    llamadas[3].fn === 'meli_procesar_orden' && llamadas[3].args.p_cotizacion === 1000 && e.toasts.some(t => t.includes('IMEI')), JSON.stringify({ l: llamadas[3], t: e.toasts }));
 }
 
 // 33. TRADE-IN: el equipo que entra con la venta tiene que llegar al stock, o decir POR QUÉ no
@@ -1579,6 +1579,73 @@ const entornoVenta = (extra = {}, cfg = {}) => {
   check('Saldos finales: Angel USD cash 120, Angel USDT 1.569,40, Tincho GMG 0',
     base['Angel||USD cash'] === 120 && base['Angel||USDT'] === 1569.4 && base['Tincho GMG||USDT'] === 0, JSON.stringify(base));
   check('… y el libro cuadra con los saldos (control de cuadre en 0)', cuadra(base, libro).length === 0, JSON.stringify(cuadra(base, libro)));
+}
+
+// 36. PANTALLA DE ÓRDENES con vínculos: qué se muestra, cuándo se puede procesar y la revisión previa
+{
+  const llamadas = [];
+  const e = nuevoEntorno({ modulos: ['meli-ordenes.js'], dom: { 'meliord-cot-1': '1000', 'meliord-cot-3': '1000' },
+    dbExtra: { async cargarTodo() {}, async cargarMeliOrdenes() {} } });
+  let rev = { data: { ok: true, revisar: false, motivo: null, cerrada: false, sin_vincular: false }, error: null };
+  let proc = { data: { ok: true, venta_id: 77 }, error: null };
+  e.cfg.supaRpc = async (fn, args) => { llamadas.push({ fn, args }); return fn === 'meli_orden_revalidar' ? rev : proc; };
+  e.State.refBlue = 1000;
+  e.State.stock = [{ id: 's1', nombre: 'Perfume Armaf 100ml' }];
+  const orden = (id, items, extra = {}) => ({ id, orderId: 'O' + id, procesada: false, acreditado: false, revisar: false, items, bruto: 100000, neto: 85000, financieraCompleta: true, ...extra });
+  e.State.meliOrdenes = [
+    orden(1, [{ meli_item_id: 'MLA1', meli_variacion_id: null, titulo: 'Armaf', cantidad: 1, stock_id: 's1' }]),
+    orden(2, [{ meli_item_id: 'MLA<img>', meli_variacion_id: 'V"1', titulo: '<b>Raro</b>', cantidad: 1, stock_id: null }]),
+    orden(3, [{ meli_item_id: 'MLA3', titulo: 'X', cantidad: 1, stock_id: null }], { revisar: true, motivoRevisar: 'Hay ítems sin publicación vinculada' }),
+  ];
+  e.mod.MeliOrdenes._filtro = 'todas';
+  const sinPantalla = e.mod.MeliOrdenes._vista();
+  check('Una orden vinculada muestra «→ Stock: nombre» y tiene Procesar habilitado',
+    sinPantalla.includes('→ Stock: Perfume Armaf 100ml') && /MeliOrdenes\.procesar\(1, this\)/.test(sinPantalla), sinPantalla.slice(0, 400));
+  check('Una orden sin vincular dice «Sin vincular» y su Procesar está DESHABILITADO (no se puede llamar)',
+    sinPantalla.includes('Sin vincular') && sinPantalla.includes('disabled title="Falta vincular una publicación"') && !/MeliOrdenes\.procesar\(2,/.test(sinPantalla));
+  check('Sin la pantalla de vínculos cargada no se ofrece el botón «Vincular»', !sinPantalla.includes('MeliOrdenes.vincular('));
+  check('Una orden en revisión (aún no procesada) ofrece «Revalidar»', /MeliOrdenes\.revalidar\(3, this\)/.test(sinPantalla));
+  e.mod.MeliVincular = { abrir: (...a) => { e.abierto = a; } };
+  const conPantalla = e.mod.MeliOrdenes._vista();
+  check('Con la pantalla de vínculos: botón «Vincular» con los identificadores en data-* ESCAPADOS (nunca dentro de código)',
+    conPantalla.includes('data-item="MLA&lt;img&gt;"') && conPantalla.includes('data-var="V&quot;1"') && !conPantalla.includes('<b>Raro</b>'), conPantalla.slice(conPantalla.indexOf('Sin vincular') - 80, conPantalla.indexOf('Sin vincular') + 400));
+  e.mod.MeliOrdenes.vincular({ dataset: { item: 'MLA9', var: 'V2', cuenta: '5' } });
+  check('«Vincular» abre ESE aviso y esa variación, y le pasa la cuenta de la orden', JSON.stringify(e.abierto) === '["MLA9","V2","5"]', JSON.stringify(e.abierto));
+  // Dos cuentas: la pantalla de vínculos tiene abierta la 1; una orden de la cuenta 2 NO ofrece el botón
+  e.mod.MeliVincular._cuenta = 1;
+  const ordenesOriginales = e.State.meliOrdenes;
+  e.State.meliOrdenes = [
+    orden(11, [{ meli_item_id: 'MLAX', titulo: 'De la cuenta 1', cantidad: 1, stock_id: null }], { cuentaId: 1 }),
+    orden(12, [{ meli_item_id: 'MLAY', titulo: 'De la cuenta 2', cantidad: 1, stock_id: null }], { cuentaId: 2 }),
+  ];
+  const dosCuentas = e.mod.MeliOrdenes._vista();
+  check('Con dos cuentas: la orden de la cuenta abierta ofrece «Vincular» (con data-cuenta) y la de la OTRA cuenta no, y explica por qué',
+    dosCuentas.includes('data-item="MLAX"') && dosCuentas.includes('data-cuenta="1"') && !dosCuentas.includes('data-item="MLAY"') && dosCuentas.includes('es de otra cuenta'), dosCuentas.slice(0, 300));
+  e.mod.MeliVincular._cuenta = null;
+  e.State.meliOrdenes = ordenesOriginales;
+
+  // Procesar: la revisión previa nunca deja pasar a procesar si algo falla
+  const intentar = async (r) => { llamadas.length = 0; rev = r; await e.mod.MeliOrdenes.procesar(1, { disabled: false }); return llamadas.map(l => l.fn).join(','); };
+  check('Procesar con la revisión previa que falla (error de red): NO llama a procesar y avisa',
+    (await intentar({ data: null, error: { message: 'x' } })) === 'meli_orden_revalidar' && e.toasts.some(t => t.includes('No se pudo revisar')));
+  check('Con la orden ocupada por otra operación: NO procesa y pide reintentar',
+    (await intentar({ data: { ok: false, ocupada: true }, error: null })) === 'meli_orden_revalidar' && e.toasts.some(t => t.includes('Otra operación')));
+  check('Si la revisión dice que falta vincular: NO procesa',
+    (await intentar({ data: { ok: true, revisar: true, sin_vincular: true, motivo: 'Hay ítems sin publicación vinculada', cerrada: false }, error: null })) === 'meli_orden_revalidar' && e.toasts.some(t => t.includes('Falta vincular')));
+  check('Si sigue en revisión por otro motivo: NO procesa y muestra el motivo',
+    (await intentar({ data: { ok: true, revisar: true, sin_vincular: false, motivo: 'Devolución', cerrada: false }, error: null })) === 'meli_orden_revalidar' && e.toasts.some(t => t.includes('Devolución')));
+  check('Con todo en orden: revisa y DESPUÉS procesa, con la cotización indicada',
+    (await intentar({ data: { ok: true, revisar: false, sin_vincular: false, cerrada: false }, error: null })) === 'meli_orden_revalidar,meli_procesar_orden' && llamadas[1].args.p_cotizacion === 1000);
+  // Revalidación al abrir: solo las que están en revisión por falta de vínculo y no se repite enseguida
+  llamadas.length = 0;
+  e.mod.MeliOrdenes._ultimaReval = {};
+  rev = { data: { ok: true, revisar: false, sin_vincular: false, cerrada: false, motivo: null }, error: null };
+  const cambio = await e.mod.MeliOrdenes._revalidarSinVincular();
+  check('Al abrir la lista se revalida SOLO la orden en revisión por falta de vínculo (la 3), y avisa que hubo cambios',
+    llamadas.length === 1 && llamadas[0].args.p_orden_id === 3 && cambio === true, JSON.stringify(llamadas));
+  llamadas.length = 0;
+  await e.mod.MeliOrdenes._revalidarSinVincular();
+  check('… y no la vuelve a revalidar dentro de los 30 segundos', llamadas.length === 0);
 }
 
 // 30. Altas: si el registro no se puede crear, NO se toca la caja (o se deshace)

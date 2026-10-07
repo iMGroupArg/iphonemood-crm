@@ -5,8 +5,10 @@
 --     1) caja_aplicar_delta.sql        (cajas atómicas e idempotentes)
 --     2) stock_a_pedido.sql            (de Stock; el orden respecto de 3 no importa, repite su ADD COLUMN)
 --     3) meli_esquema_base.sql         (tablas meli_*; esta migración las necesita por las FK)
---     4) ESTE ARCHIVO
---     5) stock_ajustar_rpc.sql
+--     4) meli_vincular.sql             (script 7: vínculos publicación ↔ stock; da meli__revalidar_orden)
+--     5) ESTE ARCHIVO
+--     6) stock_ajustar_rpc.sql
+--     (en db/para-correr la numeración puede diferir: lo que manda es que 7/meli_vincular va ANTES de este)
 --
 --  ANTES DE CORRER NADA (solo lectura, en el SQL Editor de Supabase, EN ESTE ORDEN)
 --
@@ -59,10 +61,15 @@
 --   · Todo corre con SECURITY DEFINER y search_path fijo; se revoca de PUBLIC (no
 --     alcanza con anon/authenticated: heredan de PUBLIC) y se otorga SOLO a authenticated.
 --     Cada función exige is_authorized_user().
---   · Orden de bloqueos: la fila de la orden primero (FOR UPDATE), después las filas de
---     stock (dentro de meli__descontar_core / meli_reponer_stock), después la venta y por
---     último las cajas (dentro de _caja_aplicar_delta): orden → stock → venta → caja. Es el mismo orden que usan la ingesta y el
---     descuento de Deploy-infra, así que no hay ciclo posible.
+--   · Orden de bloqueos: la fila de la orden primero (FOR UPDATE); después, en procesar, los
+--     vínculos publicación ↔ stock de SUS ítems (FOR SHARE, los toma meli__revalidar_orden y los
+--     mantiene hasta el final) y la clave foránea de meli_orden_items → stock (KEY SHARE, no
+--     bloquea las cuentas de cantidad); después las filas de stock (meli__descontar_core /
+--     meli_reponer_stock), la venta y por último las cajas (_caja_aplicar_delta):
+--     orden → vínculo → stock → venta → caja. La ingesta y el descuento de Deploy-infra toman
+--     lo mismo en el mismo orden y vincular/desvincular nunca toman una orden, así que no hay
+--     ciclo entre estas operaciones. (Operaciones que BORREN o cambien la clave de una fila de
+--     stock no están cubiertas por este análisis.)
 --
 --  QUÉ NO HACE
 --   · No toca la UI ni el código del navegador (eso va en ventas.js / meli.js).
@@ -80,6 +87,9 @@ BEGIN
   END IF;
   IF to_regprocedure('public._caja_aplicar_delta(uuid,text,numeric,text,text,text,text,text)') IS NULL THEN
     RAISE EXCEPTION 'Falta caja_aplicar_delta.sql: correrlo ANTES de este archivo';
+  END IF;
+  IF to_regprocedure('public.meli__revalidar_orden(bigint)') IS NULL THEN
+    RAISE EXCEPTION 'Falta meli_vincular.sql (script 7): correrlo ANTES de este archivo (da meli__revalidar_orden)';
   END IF;
   IF to_regprocedure('public.meli__descontar_core(bigint)') IS NULL
      OR to_regprocedure('public.meli_reponer_stock(bigint)') IS NULL
@@ -167,6 +177,16 @@ BEGIN
   -- reversión compiten por este mismo candado.
   SELECT * INTO o FROM public.meli_ordenes WHERE id = p_orden_id FOR UPDATE;
   IF NOT FOUND THEN RAISE EXCEPTION 'ORDEN_INEXISTENTE'; END IF;
+
+  -- VÍNCULO VIGENTE: se aplica ACÁ, bajo el bloqueo de la orden. Relee los vínculos
+  -- publicación ↔ stock tal como están AHORA (los mantiene bloqueados hasta el final de esta
+  -- transacción: cambiarlos o desvincularlos espera a que termine) y reescribe los ítems y el
+  -- aviso de «revisar» de la orden. Hay que RECARGAR `o` con lo que devuelve: si no, `o.revisar`
+  -- queda viejo y se lanzaría ORDEN_EN_REVISION aunque el único problema (falta de vínculo) ya
+  -- esté resuelto. Si la orden ya está procesada o con stock descontado la devuelve SIN tocar.
+  -- Si después de esto sigue en revisar por OTRO motivo, ORDEN_EN_REVISION deshace también lo
+  -- que escribió (la pantalla guarda el aviso llamando a meli_orden_revalidar por separado).
+  o := public.meli__revalidar_orden(o.id);
 
   -- Revertida primero: una orden revertida tiene venta (anulada) y procesada = TRUE,
   -- y NO debe responder "ya procesada" como si siguiera viva.

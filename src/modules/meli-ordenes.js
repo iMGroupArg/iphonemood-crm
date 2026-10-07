@@ -47,6 +47,62 @@ const MeliOrdenes = {
   async cargar() {
     await DB.cargarMeliOrdenes();
     this.pintar();
+    // Una orden que entró sin vínculo queda en «revisar»; si después se vincula el aviso, SOLO
+    // vuelve a poder procesarse cuando se la revalida. Se hace una por una (cada llamada es su
+    // propia transacción), con tope y con una pausa por orden para no repetir en cada repintado.
+    if (await this._revalidarSinVincular()) { await DB.cargarMeliOrdenes(); this.pintar(); }
+  },
+
+  _ultimaReval: {},
+  _revalidando: false,
+  MOTIVO_SIN_VINCULO: 'sin publicación vinculada',
+  async _revalidarSinVincular() {
+    if (this._revalidando) return false;
+    this._revalidando = true;
+    let cambio = false;
+    try {
+      const ahora = Date.now();
+      const candidatas = (State.meliOrdenes || []).filter(o => !o.procesada && !o.revertidaEn && o.revisar
+        && String(o.motivoRevisar || '').includes(this.MOTIVO_SIN_VINCULO)
+        && !(this._ultimaReval[o.id] && ahora - this._ultimaReval[o.id] < 30000)).slice(0, 20);
+      for (const o of candidatas) {
+        this._ultimaReval[o.id] = Date.now();
+        const r = await this._revalidarOrden(o.id);
+        if (r && r.ok === true && (r.revisar !== true || !r.sin_vincular)) cambio = true;
+      }
+    } finally { this._revalidando = false; }
+    return cambio;
+  },
+  // Una llamada a la base (espera como máximo 3 s por la orden). Devuelve el JSON de la base, o
+  // null si falló / no respondió (nunca tira).
+  async _revalidarOrden(id) {
+    try {
+      const { data, error } = await supa.rpc('meli_orden_revalidar', { p_orden_id: id });
+      if (error || !data || typeof data !== 'object') return null;
+      return data;
+    } catch (e) { console.warn('meli_orden_revalidar', e); return null; }
+  },
+  // Botón «Revalidar» de una orden en revisión.
+  async revalidar(id, btn) {
+    if (btn) btn.disabled = true;
+    try {
+      const r = await this._revalidarOrden(id);
+      if (!r) toast('No se pudo revalidar la orden. Probá de nuevo.');
+      else if (r.ok !== true) toast(r.ocupada ? 'Otra operación está usando esta orden. Probá de nuevo en unos segundos.' : 'No se pudo revalidar la orden.');
+      else if (r.cerrada) toast('La orden ya está procesada: no cambia.');
+      else if (r.revisar) toast('Sigue en revisión: ' + State.esc(r.motivo || 'revisar a mano') + (r.sin_vincular ? '. Falta vincular alguna publicación.' : ''));
+      else toast('Lista: ya se puede procesar.');
+      await DB.cargarMeliOrdenes();
+      this.pintar();
+    } finally { if (btn) btn.disabled = false; }
+  },
+  // «Vincular» abre la pantalla de vínculos de Deploy-infra en ESE aviso. Los identificadores
+  // vienen de data-* (nunca se pegan dentro de código JavaScript).
+  vincular(btn) {
+    const item = btn?.dataset?.item;
+    if (!item || !window.MeliVincular || typeof window.MeliVincular.abrir !== 'function') return;
+    // El tercer dato (cuenta de la orden) lo usa la pantalla de vínculos para no abrir el aviso de otra cuenta.
+    window.MeliVincular.abrir(item, btn.dataset.var || null, btn.dataset.cuenta || null);
   },
 
   pintar() {
@@ -85,11 +141,38 @@ const MeliOrdenes = {
 
     const tarjetas = visibles.map(o => {
       const est = this._estadoDe(o);
-      const items = (o.items || []).map(i => `${i.cantidad || 1}× ${e(i.titulo || 'producto')}`).join(', ');
+      // Cada producto con su vínculo: «→ Stock: nombre» o «Sin vincular» + botón (si la pantalla de
+      // vínculos está cargada). Sin vincular = cantidad > 0 y sin fila de stock.
+      const sinVincular = (o.items || []).some(i => (i.cantidad || 0) > 0 && !i.stock_id);
+      const items = (o.items || []).map(i => {
+        const base = `${i.cantidad || 1}× ${e(i.titulo || 'producto')}`;
+        if (o.procesada || o.revertidaEn) return base;
+        if (i.stock_id) {
+          const nom = (State.stock || []).find(x => x.id === i.stock_id)?.nombre;
+          return `${base} <span style="color:var(--green)">→ Stock: ${e(nom || 'producto')}</span>`;
+        }
+        if ((i.cantidad || 0) <= 0) return `${base} <span style="color:var(--red)">(cantidad inválida)</span>`;
+        // El aviso se identifica por (cuenta, publicación, variación). La pantalla de vínculos trabaja
+        // con UNA cuenta a la vez: si la de esta orden no es la que tiene abierta, no se ofrece el
+        // botón (abriría el aviso de otra cuenta y fallaría) y se indica dónde vincularlo.
+        const cuentaAbierta = window.MeliVincular && window.MeliVincular._cuenta;
+        const otraCuenta = cuentaAbierta && o.cuentaId != null && String(cuentaAbierta) !== String(o.cuentaId);
+        const btnV = (window.MeliVincular && i.meli_item_id)
+          ? (otraCuenta
+              ? ` <span style="font-size:11px;color:var(--text-secondary)">(es de otra cuenta de Mercado Libre: cambiá de cuenta en Vincular publicaciones)</span>`
+              : ` <button class="btn btn-sm" data-item="${e(i.meli_item_id)}" data-var="${e(i.meli_variacion_id || '')}" data-cuenta="${e(o.cuentaId == null ? '' : o.cuentaId)}" onclick="MeliOrdenes.vincular(this)">Vincular</button>`)
+          : '';
+        return `${base} <span style="color:var(--red)">Sin vincular</span>${btnV}`;
+      }).join('<br>');
       const retenido = (o.bruto !== null && o.neto !== null && o.financieraCompleta) ? this._ars(o.bruto - o.neto) : '—';
       let acciones = '';
-      if (!o.revertidaEn && !o.revisar && !o.procesada) {
-        acciones = `
+      if (!o.revertidaEn && !o.procesada && o.revisar) {
+        acciones = `<button class="btn btn-sm" onclick="MeliOrdenes.revalidar(${o.id}, this)" title="Vuelve a mirar los vínculos de esta orden"><i class="ti ti-refresh"></i> Revalidar</button>`;
+      } else if (!o.revertidaEn && !o.revisar && !o.procesada) {
+        acciones = sinVincular
+          ? `<span style="font-size:11.5px;color:var(--text-secondary)">Falta vincular una publicación para poder procesarla.</span>
+             <button class="btn btn-primary btn-sm" disabled title="Falta vincular una publicación"><i class="ti ti-player-play"></i> Procesar</button>`
+          : `
           <input type="number" id="meliord-cot-${o.id}" value="${Math.round(State.refBlue || 0)}" min="1" step="1" title="Cotización ARS por USD, se congela en la venta"
             style="width:90px;font-size:12px;padding:6px 8px;border:1px solid var(--border-strong);border-radius:8px">
           <button class="btn btn-primary btn-sm" onclick="MeliOrdenes.procesar(${o.id}, this)"><i class="ti ti-player-play"></i> Procesar</button>`;
@@ -179,8 +262,26 @@ const MeliOrdenes = {
     const cot = parseFloat(document.getElementById(`meliord-cot-${id}`)?.value);
     if (!(cot > 0)) { toast('Ingresá la cotización (ARS por dólar).'); return; }
     if (!confirm(`¿Procesar esta orden?\n\nSe descuenta el stock y se crea la venta con la cotización $${cot.toLocaleString('es-AR')} (queda fija).`)) return;
-    await this._llamar(btn, 'meli_procesar_orden', { p_orden_id: id, p_cotizacion: cot },
-      d => d.ya_procesada ? 'La orden ya estaba procesada.' : `Orden procesada: venta #${d.venta_id} creada y stock descontado.`);
+    // El botón queda deshabilitado durante las DOS llamadas (revisión previa + procesar).
+    if (btn) btn.disabled = true;
+    try {
+      // Revisión previa: es solo una comodidad (avisa antes de intentar). La garantía real está en
+      // meli_procesar_orden, que vuelve a leer el vínculo vigente dentro de SU transacción.
+      const r = await this._revalidarOrden(id);
+      if (!r) { toast('No se pudo revisar la orden antes de procesarla. Probá de nuevo.'); return; }
+      if (r.ok !== true) {
+        toast(r.ocupada ? 'Otra operación está usando esta orden. Probá de nuevo en unos segundos.' : 'No se pudo revisar la orden antes de procesarla.');
+        return;
+      }
+      if (!r.cerrada && (r.sin_vincular || r.revisar)) {
+        toast(r.sin_vincular ? 'Falta vincular una publicación de esta orden: no se procesó.' : 'La orden sigue en revisión: ' + State.esc(r.motivo || 'revisar a mano'));
+        await DB.cargarMeliOrdenes();
+        this.pintar();
+        return;
+      }
+      await this._llamar(btn, 'meli_procesar_orden', { p_orden_id: id, p_cotizacion: cot },
+        d => d.ya_procesada ? 'La orden ya estaba procesada.' : `Orden procesada: venta #${d.venta_id} creada y stock descontado.`);
+    } finally { if (btn) btn.disabled = false; }
   },
 
   async acreditar(id, btn) {

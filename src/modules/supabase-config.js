@@ -340,7 +340,7 @@ const DB = {
       // devuelve como mucho 1.000 filas por consulta).
       for (let k = 0; k < ids.length; k += 100) {
         const { data: its, error: errIts } = await supa.from('meli_orden_items')
-          .select('orden_id,titulo,cantidad,stock_id').in('orden_id', ids.slice(k, k + 100)).limit(1000);
+          .select('orden_id,meli_item_id,meli_variacion_id,titulo,cantidad,stock_id').in('orden_id', ids.slice(k, k + 100)).limit(1000);
         if (errIts) { State.meliError = true; return; }
         (its || []).forEach(i => { (itemsPor[i.orden_id] = itemsPor[i.orden_id] || []).push(i); });
       }

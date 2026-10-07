@@ -70,7 +70,7 @@ const Meli = {
         <div id="meli-root" class="m-meli-pane" data-p="cuenta"></div>`;
       this.tabMovil(this._tabM || 'ordenes', c);
     } else {
-      c.innerHTML = '<div id="meli-root"></div><div id="meli-ordenes-root" style="margin-top:24px"></div>';
+      c.innerHTML = '<div id="meli-root"></div><div id="meli-vincular-root" style="margin-top:24px"></div><div id="meli-ordenes-root" style="margin-top:24px"></div>';
     }
     setTimeout(() => { this.cargar(); if (window.MeliVincular && document.getElementById('meli-vincular-root')) MeliVincular.cargar(); if (window.MeliOrdenes) MeliOrdenes.cargar(); }, 0);
     return c;

@@ -278,10 +278,11 @@ const MeliVincular = {
   // Revalida una por una (cada llamada es su propia transacción) con un tope de 50 por vez. Las que quedan se guardan en
   // `_resto` y un botón sigue desde ahí: nunca se vuelve a empezar por las primeras (que ya están hechas).
   async _revalidar(abiertas) {
-    const ordenes = abiertas ? abiertas.ids : [];
+    // Las nuevas se SUMAN a las que ya habían quedado pendientes (sin repetir): cambiar otro vínculo no pierde la cola.
+    const todas = [...new Set([...(abiertas ? abiertas.ids : []), ...this._resto])];
     const TOPE = 50;
-    const lote = ordenes.slice(0, TOPE);
-    this._resto = ordenes.slice(TOPE);
+    const lote = todas.slice(0, TOPE);
+    this._resto = todas.slice(TOPE);
     return this._correrRevalidacion(lote);
   },
 

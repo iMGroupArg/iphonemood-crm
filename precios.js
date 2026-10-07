@@ -338,6 +338,7 @@ async function init() {
   p18Init();
   p18Revelar();
   cargarCatalogoCanje();   // sin await: nunca retrasa la página
+  burbujaIniciar();
   buildShowcase();
   construirMenuProductos();
   buildReviews();
@@ -1298,6 +1299,7 @@ const ACCIONES = {
   // navegación
   seccion:        el => irASeccion(el.dataset.arg),
   canjeAbrir:     (el, ev) => canjeAbrir(el, ev),
+  canjeBurbuja:   (el, ev) => canjeBurbuja(el, ev),
   canjeCerrar:    () => canjeCerrar(),
   canjeAtras:     () => canjeAtras(),
   canjeElegir:    el => cjElegir(el),
@@ -2091,6 +2093,7 @@ function sortProducts(a, b) {
 
 function render() {
   p18SegunRubro();
+  burbujaAgendar();   // mide en el frame siguiente, con la grilla ya cambiada
   const fil = todos.filter(p => {
     if (catSel !== 'todos' && !catsDe(catSel).includes(p.categoria)) return false;
     if (subSel !== 'todos' && p.categoria !== subSel) return false;
@@ -3700,7 +3703,13 @@ function cjCerrarUI() {
   CANJE.inertes.forEach(n => { n.inert = false; }); CANJE.inertes = [];
   CANJE.S = {}; CANJE.texto = {};
   const o = CANJE.opener; CANJE.opener = null;
-  if (o && document.contains(o)) o.focus({ preventScroll: true });
+  // El observer de la burbuja es asíncrono y un botón oculto no puede recibir el
+  // foco: se recalcula YA, y si el opener sigue sin verse el foco va al botón de
+  // la sección. (offsetParent no sirve: es null en los elementos `fixed`.)
+  burbujaActualizar();
+  const visible = e => e && document.contains(e) && !e.hidden && e.getClientRects().length > 0;
+  const destino = visible(o) ? o : document.querySelector('.tradein-btn');
+  if (destino) destino.focus({ preventScroll: true });
   // Si se cerró sin pasar por el historial, la entrada que pusimos queda ahí:
   // se retira para que "atrás" no se sienta roto.
   if (CANJE.historial && !CANJE.atras && history.state && history.state.canje) { CANJE.atras = true; CANJE.ignorarPop = true; history.back(); }
@@ -3753,6 +3762,57 @@ document.addEventListener('keydown', ev => {
   else if (!ev.shiftKey && (act === ultimo || !card.contains(act))) { ev.preventDefault(); primero.focus(); }
 });
 
+
+/* ─── BURBUJA "PLAN CANJE" ─── */
+// UNA sola función decide si se ve, combinando todas las condiciones: así el
+// scroll no puede volver a mostrarla en perfumería ni con el asistente abierto.
+// Se oculta con el atributo `hidden`, que además la saca del orden de tabulación
+// y de los lectores de pantalla (un botón tapado por un overlay seguiría
+// siendo enfocable con el teclado). Por defecto queda VISIBLE: si algo falla,
+// no desaparece.
+function burbujaActualizar() {
+  const b = document.getElementById('cj-bubble');
+  if (!b) return;
+  let ocultar = false;
+  try {
+    const cls = (id, c) => !!document.getElementById(id)?.classList.contains(c);
+    const sec = document.getElementById('canje');
+    const r = sec ? sec.getBoundingClientRect() : null;
+    ocultar = catSel === 'perfumeria'
+      || CANJE.abierto
+      || cls('modal-overlay', 'open') || cls('menu-lateral', 'abierto') || cls('cart-panel', 'abierto')
+      // Parcialmente a la vista alcanza: si hiciera falta que entrara entera, en
+      // un celular la burbuja taparía el botón de la propia sección.
+      || (r !== null && r.top < innerHeight && r.bottom > 0);
+  } catch { ocultar = false; }
+  if (b.hidden !== ocultar) b.hidden = ocultar;
+}
+let _burbujaRaf = 0;
+function burbujaAgendar() {
+  if (_burbujaRaf) return;
+  _burbujaRaf = requestAnimationFrame(() => { _burbujaRaf = 0; burbujaActualizar(); });
+}
+function burbujaIniciar() {
+  window.addEventListener('scroll', burbujaAgendar, { passive: true });
+  window.addEventListener('resize', burbujaAgendar, { passive: true });
+  // En vez de tocar cada función que abre o cierra un panel, se observa su clase:
+  // ficha, menú, carrito y el asistente.
+  const mo = new MutationObserver(burbujaAgendar);
+  ['modal-overlay', 'menu-lateral', 'cart-panel', 'canje-sheet'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) mo.observe(el, { attributes: true, attributeFilter: ['class', 'hidden'] });
+  });
+  if (document.readyState === 'complete') burbujaAgendar();
+  else window.addEventListener('load', burbujaAgendar, { once: true });
+}
+
+// Abre el asistente si puede; si no (catálogo caído, ficha abierta), lleva a la
+// sección de canje, cuyo botón sigue siendo el enlace a WhatsApp. Nunca queda
+// un botón muerto.
+function canjeBurbuja(el, ev) {
+  if (canjeInterceptara(ev)) canjeAbrir(el, ev);
+  else irASeccion('canje');
+}
 
 function cjBateriaNS() { const S = CANJE.S; S.bateria = null; S.bateriaNS = true; cjSiguiente(); }
 function cjEditar(el) { CANJE.retorno = true; cjIr(el.dataset.arg); }

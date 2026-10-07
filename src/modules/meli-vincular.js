@@ -13,6 +13,7 @@
 
 const MeliVincular = {
   _cuenta: null,          // id de la cuenta de Mercado Libre con la que se trabaja
+  _cuentas: [],           // las cuentas que se pueden usar (conectadas y sin problema de renovación)
   _estado: 'active',      // active | paused
   _offset: 0,
   _lista: { items: [], errores: [], total: 0, aviso: null },
@@ -143,8 +144,10 @@ const MeliVincular = {
     try {
       const { data: cuentas, error } = await supa.from('meli_cuentas_estado').select('id,nickname,conectada,requiere_reconexion,refresh_ambiguo,activa').order('id');
       if (error) throw new Error('cuentas');
-      const buena = (cuentas || []).find((c) => c.conectada && !c.requiere_reconexion && !c.refresh_ambiguo && c.activa !== false);
-      this._cuenta = buena ? buena.id : null;
+      this._cuentas = (cuentas || []).filter((c) => c.conectada && !c.requiere_reconexion && !c.refresh_ambiguo && c.activa !== false)
+        .map((c) => ({ id: c.id, nickname: c.nickname || `Cuenta ${c.id}` }));
+      // se conserva la cuenta con la que se venía trabajando si sigue siendo usable; si no, la primera
+      this._cuenta = this._cuentas.some((c) => c.id === this._cuenta) ? this._cuenta : (this._cuentas[0] ? this._cuentas[0].id : null);
       if (this._cuenta === null) { this._cargando = false; this.pintar(); return; }
       await Promise.all([this._cargarVinculos(), this._cargarStock()]);
       await this._listar(this._offset);
@@ -205,6 +208,17 @@ const MeliVincular = {
     this._cargando = false; this.pintar();
   },
 
+  async cambiarCuenta(valor) {
+    if (this._cargando || this._ocupado) return;
+    const id = Number(valor);
+    if (id === this._cuenta || !this._cuentas.some((c) => c.id === id)) return;
+    this._cuenta = id; this._sel = null; this._elegido = null; this._offset = 0; this._error = null; this._msg = null; this._resto = [];
+    this._lista = { items: [], errores: [], total: 0, aviso: null, porPagina: 20 };
+    this._cargando = true; this.pintar();
+    try { await this._cargarVinculos(); await this._listar(0); } catch (e) { console.error('meli-vincular:', e.message); this._error = 'No se pudo cargar la cuenta elegida.'; }
+    this._cargando = false; this.pintar();
+  },
+
   async cambiarEstado(estado) {
     if (this._cargando || this._ocupado) return;
     if (!['active', 'paused'].includes(estado) || estado === this._estado) return;
@@ -214,10 +228,22 @@ const MeliVincular = {
   },
 
   // Desde una orden: "Vincular" lleva a ESTE aviso (consulta directa por id: sirve aunque ya esté cerrado).
-  async abrir(itemId, variacionId) {
+  // `cuentaId` (opcional): la cuenta de la orden desde la que se llega. Con más de una cuenta, el aviso hay que buscarlo en
+  // LA DE LA ORDEN, no en la que esté seleccionada: se cambia de cuenta (y se recargan sus vínculos) antes de consultar.
+  async abrir(itemId, variacionId, cuentaId) {
     if (this._ocupado || this._cargando) return;
     if (!this._cuenta) await this.cargar();
     if (!this._cuenta || typeof itemId !== 'string' || this._ocupado || this._cargando) return;
+    if (cuentaId !== undefined && cuentaId !== null && Number(cuentaId) !== this._cuenta) {
+      const id = Number(cuentaId);
+      if (!this._cuentas.some((c) => c.id === id)) {
+        this._error = 'La cuenta de esa orden no está conectada: reconectala en la pantalla de cuentas (arriba).';
+        this.pintar();
+        return;
+      }
+      this._cuenta = id; this._sel = null; this._elegido = null; this._offset = 0;
+      try { await this._cargarVinculos(); } catch { this._error = 'No se pudo cargar los vínculos de esa cuenta.'; this.pintar(); return; }
+    }
     const seq = ++this._seq;
     this._cargando = true; this.pintar();                    // mientras espera, nada de lo viejo se puede tocar
     const r = await this._api('GET', { cuenta: String(this._cuenta), item: itemId });
@@ -483,7 +509,9 @@ const MeliVincular = {
       ? l.items.map((it, i) => ({ it, i })).filter(({ it }) => (it.variaciones.length ? it.variaciones : [null]).some((v) => !(this._vinculo(it.id, v ? v.id : null) || {}).stock_id))
       : l.items.map((it, i) => ({ it, i }));
 
-    const barra = `<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:10px;font-size:12.5px">
+    const selCuenta = this._cuentas.length > 1
+      ? `<select onchange="MeliVincular.cambiarCuenta(this.value)" style="font-size:12px;padding:5px 8px;border-radius:8px;border:1px solid var(--border)">${this._cuentas.map((c) => `<option value="${e(c.id)}" ${c.id === this._cuenta ? 'selected' : ''}>${e(c.nickname)}</option>`).join('')}</select>` : '';
+    const barra = `<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:10px;font-size:12.5px">${selCuenta}
       <select onchange="MeliVincular.cambiarEstado(this.value)" style="font-size:12px;padding:5px 8px;border-radius:8px;border:1px solid var(--border)">
         <option value="active" ${this._estado === 'active' ? 'selected' : ''}>Activas</option>
         <option value="paused" ${this._estado === 'paused' ? 'selected' : ''}>Pausadas</option></select>

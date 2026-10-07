@@ -375,6 +375,38 @@ const resp200 = (json) => ({ ok: true, status: 200, json: async () => json });
   check('… y si el aviso no trae tamaño, sí se puede sugerir uno sin tamaño', sug2.includes('Teriaq Armaf EDP'), JSON.stringify(sug2));
 }
 
+// ── Más de una cuenta de Mercado Libre ──────────────────────────────────
+{
+  const dos = [{ id: 7, nickname: 'IMSTORE_', conectada: true, requiere_reconexion: false, refresh_ambiguo: false, activa: true },
+               { id: 8, nickname: 'OTRA_CUENTA', conectada: true, requiere_reconexion: false, refresh_ambiguo: false, activa: true },
+               { id: 9, nickname: 'ROTA', conectada: true, requiere_reconexion: true, refresh_ambiguo: false, activa: true }];
+  const e = entorno({ cuentas: dos, respuestas: { 'GET item': { status: 200, json: { total: 1, offset: 0, items: [B], errores: [] } } } }); await e.M.cargar();
+  const h = html(e);
+  check('Con dos cuentas usables aparece el selector de cuenta (y no la que hay que reconectar)', h.includes('IMSTORE_') && h.includes('OTRA_CUENTA') && !h.includes('ROTA') && e.M._cuentas.length === 2);
+  check('Con UNA sola cuenta no se muestra selector', !html(await (async () => { const x = entorno(); await x.M.cargar(); return x; })()).includes('cambiarCuenta'));
+  await e.M.abrir('MLA222222222', '5550000001', 8);
+  const g = e.log.fetch.filter((f) => f.url.includes('item='));
+  const vin8 = e.log.from.filter((f) => f.tabla === 'meli_publicaciones').pop();
+  check('abrir(aviso, variación, cuenta 8): cambia a la cuenta de la orden, RECARGA sus vínculos y consulta el aviso en ELLA', e.M._cuenta === 8 && g.length === 1 && g[0].url.includes('cuenta=8') && vin8.filtros.some((f) => f[0] === 'eq' && f[1] === 'cuenta_id' && f[2] === 8), JSON.stringify({ cuenta: e.M._cuenta, url: g[0]?.url }));
+  const e2 = entorno({ cuentas: dos }); await e2.M.cargar();
+  await e2.M.abrir('MLA222222222', null, 9);
+  await e2.M.abrir('MLA222222222', null, 555);
+  check('Una cuenta que no está conectada (reconexión) o que no existe: avisa y NO consulta nada', e2.log.fetch.filter((f) => f.url.includes('item=')).length === 0 && e2.M._cuenta === 7 && html(e2).includes('no está conectada'));
+  const e3 = entorno({ cuentas: dos }); await e3.M.cargar();
+  await e3.M.abrir('MLA222222222', null, 7);
+  await e3.M.abrir('MLA222222222');
+  check('Con la cuenta actual (o sin cuenta) abre como siempre, sin recargar vínculos', e3.log.fetch.filter((f) => f.url.includes('item=')).length === 2 && e3.M._cuenta === 7);
+  const e4 = entorno({ cuentas: dos }); await e4.M.cargar();
+  e4.M.vincular('MLA111111111', ''); e4.M.elegir(S.teriaq5);
+  await e4.M.cambiarCuenta('8');
+  check('cambiarCuenta cierra el panel, limpia la cola pendiente y trae la lista de la cuenta nueva', e4.M._cuenta === 8 && e4.M._sel === null && e4.M._resto.length === 0 && e4.log.fetch.at(-1).url.includes('cuenta=8'));
+  await e4.M.cambiarCuenta('999'); await e4.M.cambiarCuenta('9');
+  check('Elegir una cuenta que no es usable se ignora', e4.M._cuenta === 8);
+  const e5 = entorno({ cuentas: dos }); await e5.M.cargar();
+  await e5.M.cambiarCuenta('8'); await e5.M.cargar();
+  check('Al recargar se conserva la cuenta con la que se venía trabajando', e5.M._cuenta === 8);
+}
+
 // ── Guardias de código ───────────────────────────────────────────────────
 {
   const sinCom = FUENTE.split('\n').filter((l) => !/^\s*\/\//.test(l)).join('\n');

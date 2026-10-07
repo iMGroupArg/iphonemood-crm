@@ -112,7 +112,7 @@ const Meli = {
       else                       { estado = 'Conectada'; clase = 'b-green'; }
 
       const caja = c.persona_id
-        ? `${e(State.personasIdToNombre[c.persona_id] || 'persona')} · ${e(c.bolsillo || '—')}`
+        ? `${e(DB.personasIdToNombre[c.persona_id] || 'persona')} · ${e(c.bolsillo || '—')}`
         : 'Sin caja asignada';
 
       return `
@@ -196,11 +196,14 @@ const Meli = {
   },
 
   async asignarCaja(cuentaId) {
-    const nombres = Object.keys(State.personasMap || {});
+    // Los mapas de personas viven en DB (supabase-config.js), no en State.
+    const mapa = DB.personasMap || {};
+    const nombres = Object.keys(mapa);
     if (!nombres.length) { toast('No hay personas cargadas.'); return; }
     const persona = prompt('¿De quién es esta cuenta? Escribí el nombre exacto:\n\n' + nombres.join('\n'));
     if (!persona) return;
-    const pid = State.personasMap[persona.trim()];
+    const nombre = persona.trim();
+    const pid = Object.hasOwn(mapa, nombre) ? mapa[nombre] : null;   // hasOwn: "constructor" no es una persona
     if (!pid) { toast('No encontré a esa persona.'); return; }
     const bolsillo = prompt('Nombre exacto del bolsillo donde se acredita (el que empieza con ARS se trata como pesos):', 'ARS Mercado Pago');
     if (!bolsillo || !bolsillo.trim()) return;

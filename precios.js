@@ -317,7 +317,14 @@ async function init() {
     // `nombre` va en la clave porque `modelo` solo no alcanza para identificar:
     // sin él, dos perfumes de la misma marca, o una batería y un vidrio del
     // mismo iPhone, se fusionaban en una sola tarjeta con la suma de unidades.
-    const key = [p.categoria, p.modelo||p.nombre, p.storage||'', p.color||'', condP, p.nombre||''].join('|');
+    // Los celulares USADOS se distinguen además por batería, calidad y precio: dos
+    // iPhone 17 negros, uno al 100% y otro al 85%, son equipos distintos con precios
+    // distintos. Antes se fundían en uno solo (el primero) y el otro desaparecía.
+    // Los que coinciden en todo (mismo estado, misma batería, mismo precio) siguen
+    // sumando unidades. Sellados y nuevos no cambian.
+    const distingue = (p.categoria === 'iphone' && condP === 'usado')
+      ? [p.bateria_pct ?? '', p.estado_producto || '', p.precio_usd ?? ''] : [];
+    const key = [p.categoria, p.modelo||p.nombre, p.storage||'', p.color||'', condP, p.nombre||'', ...distingue].join('|');
     if (!grouped[key]) { grouped[key] = { ...p, _qty: qty(p) }; }
     else {
       grouped[key]._qty += qty(p);
@@ -331,6 +338,7 @@ async function init() {
       ingresandoRes?.data ? JSON.parse(ingresandoRes.data.valor) : [], todos);
     if (enCamino.length) todos = todos.concat(enCamino);
   } catch (e) { /* una lista mal guardada no puede tumbar la página */ }
+  asignarSlugsEquipos();
   iniciarTopbar();
   buildHeroCard();
   armarCarruselChips();
@@ -339,6 +347,7 @@ async function init() {
   p18Revelar();
   cargarCatalogoCanje();   // sin await: nunca retrasa la página
   burbujaIniciar();
+  capasIniciar();
   buildShowcase();
   construirMenuProductos();
   buildReviews();
@@ -651,6 +660,59 @@ function variantesDe(p) {
   // respeta igual: el cliente llegó a ESA ficha.
   if (!unicas.some(x => x === p)) return [p];
   return unicas.length > 1 ? unicas : [p];
+}
+
+/* ─── CELULARES USADOS: varias unidades del mismo equipo ───
+   Si hay varios iPhone usados del mismo modelo, capacidad y color (p. ej. un 17
+   negro al 100% y otro al 85%, con precios distintos), la grilla muestra UNA
+   tarjeta con el más barato y la ficha ofrece un botón por unidad, con su batería
+   y su calidad: al tocar uno cambia todo al precio y datos reales de ese equipo.
+   Sellados, nuevos y equipos en camino no se agrupan. */
+function claveEquipo(p) {
+  if (!p || p.categoria !== 'iphone' || p._ingresando) return null;
+  if (condDeEstado(p.estado_producto) !== 'usado') return null;
+  const n = t => String(t || '').trim().toLowerCase();
+  return [n(p.modelo || p.nombre), n(p.storage).replace(/\s+/g, ''), n(p.color)].join('|');
+}
+// Orden de las opciones: la más barata primero (es la que se muestra por defecto);
+// a igual precio, la de mayor batería.
+function ordenEquipo(a, b) {
+  return (Number(a.precio_usd) || 0) - (Number(b.precio_usd) || 0)
+    || (Number(b.bateria_pct) || 0) - (Number(a.bateria_pct) || 0)
+    || String(a.id || '').localeCompare(String(b.id || ''));
+}
+function variantesEquipo(p) {
+  const k = claveEquipo(p);
+  if (!k) return [p];
+  const v = todos.filter(x => claveEquipo(x) === k).sort(ordenEquipo);
+  return v.length ? v : [p];
+}
+// Dirección única y PERMANENTE de cada unidad cuando hay varias del mismo equipo:
+// base + batería + el final del id del stock, que no cambia con el precio ni cuando
+// se vende otra unidad. Un equipo que está solo conserva la dirección de siempre.
+// La dirección vieja (sin sufijo) de un grupo pasa a significar "ese equipo, el más
+// barato": se resuelve por _aliasEquipo. Así un enlace a una unidad concreta nunca
+// cambia de equipo si cambian los precios, y los enlaces ya compartidos siguen
+// abriendo ese modelo.
+let _aliasEquipo = new Map();
+function asignarSlugsEquipos() {
+  todos.forEach(p => { delete p._slug; });
+  _aliasEquipo = new Map();
+  const usados = new Set(todos.map(p => slugBase(p)));
+  const grupos = new Map();
+  todos.forEach(p => { const k = claveEquipo(p); if (k) (grupos.get(k) || grupos.set(k, []).get(k)).push(p); });
+  const tomados = new Set();
+  grupos.forEach(g => {
+    if (g.length < 2) return;
+    g.sort(ordenEquipo);
+    _aliasEquipo.set(slugBase(g[0]), g[0]);
+    g.forEach((p, i) => {
+      const idx = String(p.id || '').replace(/[^a-z0-9]/gi, '').slice(-5).toLowerCase() || String(i);
+      let s = slugBase(p) + '-b' + (p.bateria_pct != null ? p.bateria_pct : 'x') + '-' + idx;
+      while (tomados.has(s) || usados.has(s)) s += 'x';
+      tomados.add(s); p._slug = s;
+    });
+  });
 }
 
 // Etiqueta del botón de tamaño. El decant se aclara porque no es lo mismo
@@ -1300,6 +1362,7 @@ const ACCIONES = {
   seccion:        el => irASeccion(el.dataset.arg),
   canjeAbrir:     (el, ev) => canjeAbrir(el, ev),
   canjeBurbuja:   (el, ev) => canjeBurbuja(el, ev),
+  fichaFondo:     (el, ev) => { if (ev.target === el) closeModal(); },
   canjeCerrar:    () => canjeCerrar(),
   canjeAtras:     () => canjeAtras(),
   canjeElegir:    el => cjElegir(el),
@@ -2147,6 +2210,22 @@ function render() {
     return (propias.length ? propias : vs)[0];
   });
 
+  // Celulares usados iguales en modelo, capacidad y color: una sola tarjeta, con el
+  // MÁS BARATO de los que pasaron los filtros (la ficha muestra el resto).
+  const eqVistos = new Set();
+  const filEquipos = filAgrupado.filter(p => {
+    const k = claveEquipo(p);
+    if (!k) return true;
+    if (eqVistos.has(k)) return false;
+    eqVistos.add(k);
+    return true;
+  }).map(p => {
+    const k = claveEquipo(p);
+    if (!k) return p;
+    return fil.filter(x => claveEquipo(x) === k).sort(ordenEquipo)[0] || p;
+  });
+  filAgrupado.length = 0; filAgrupado.push(...filEquipos);
+
   document.getElementById('sec-count').textContent = filAgrupado.length
     ? `${filAgrupado.length} producto${filAgrupado.length !== 1 ? 's' : ''}` : '';
 
@@ -2222,7 +2301,12 @@ function render() {
     const mostrarPunto = !usaNombre(p) && !!p.color;
     // La batería solo tiene sentido en usados: un sellado siempre es 100%,
     // mostrarla ahí sería ruido. En usados es un dato clave para decidir.
-    if (c === 'usado' && p.bateria_pct != null) detailParts.push(`🔋 ${p.bateria_pct}%`);
+    const opcEquipo = variantesEquipo(p);
+    if (c === 'usado' && p.bateria_pct != null) {
+      const bs = opcEquipo.map(x => Number(x.bateria_pct)).filter(b => b > 0);
+      const lo = bs.length ? Math.min(...bs) : p.bateria_pct, hi = bs.length ? Math.max(...bs) : p.bateria_pct;
+      detailParts.push(`🔋 ${lo === hi ? lo : lo + '–' + hi}%`);
+    }
     const detailRow = `<div class="card-detail-row">
       ${mostrarPunto ? `<span class="card-color-dot" style="background:${colorCSS}"></span>` : ''}
       <span class="card-detail-text">${esc(detailParts.join(' · '))}</span>
@@ -2268,7 +2352,7 @@ function render() {
         ${comboRow}
         ${varRow}
         <div class="card-price-row">
-          <span class="card-usd">${nVar > 1 ? '<span class="card-desde">desde</span>' : ''}${enPesos(p) ? fARS(pARS(p)) : fUSD(u)}</span>
+          <span class="card-usd">${(nVar > 1 || opcEquipo.length > 1) ? '<span class="card-desde">desde</span>' : ''}${enPesos(p) ? fARS(pARS(p)) : fUSD(u)}</span>
         </div>
         ${offerRow}
         <a class="card-info-btn" href="?p=${esc(slugProd(p))}"
@@ -2294,6 +2378,9 @@ function render() {
    y que el link se pueda mandar por WhatsApp y abra directo en el producto.
 ═══════════════════════════════════ */
 function slugProd(p) {
+  return p._slug || slugBase(p);
+}
+function slugBase(p) {
   // En los rubros de nombre libre el nombre ya trae concentración y ml, así que
   // agregarle storage/color repetiría datos; alcanza con identidad + condición.
   // En los rubros de nombre libre el rubro entra en el slug: el mismo nombre
@@ -2385,7 +2472,7 @@ function cerrarFicha() {
 }
 
 function prodPorSlug(slug) {
-  return todos.find(x => slugProd(x) === slug) || null;
+  return todos.find(x => slugProd(x) === slug) || _aliasEquipo.get(slug) || null;
 }
 
 window.addEventListener('popstate', ev => {
@@ -2414,7 +2501,9 @@ function abrirDesdeURL() {
 
   const slug = new URLSearchParams(location.search).get('p');
   if (!slug) return;
-  const p = prodPorSlug(slug);
+  // Una unidad concreta de un grupo (…-b85-ab12c) que ya se vendió: se abre la más
+  // barata del mismo equipo en vez de una pantalla vacía.
+  const p = prodPorSlug(slug) || prodPorSlug(slug.replace(/-b(?:\d+|x)-[a-z0-9]+x*$/, ''));
   if (p) abrirFicha(p, { push: false });
   // Si el equipo ya se vendió, el slug no matchea: se limpia la URL y queda
   // el listado normal en vez de una pantalla vacía.
@@ -2688,7 +2777,7 @@ async function abrirPresupuesto(token) {
 }
 
 function renderPresupuestoVencido() {
-  document.getElementById('m-crumb').innerHTML = 'Presupuesto';
+  document.getElementById('m-crumb').innerHTML = 'Presupuesto'; document.getElementById('m-crumb').classList.add('visible');
   document.getElementById('m-img').innerHTML = '<span class="img-emoji" style="display:flex">⏳</span>';
   document.getElementById('m-cat').textContent = '';
   document.getElementById('m-name').textContent = 'Este presupuesto ya no está disponible';
@@ -2738,7 +2827,7 @@ function renderPresupuesto(d) {
   const nombre = prod.nombre || [prod.modelo, prod.storage, prod.color].filter(Boolean).join(' ') || 'Equipo';
   const emoji = (CAT[prod.categoria] || { emoji: '📱' }).emoji;
   document.getElementById('m-img').innerHTML = imgHtml(prod, nombre, emoji, { lazy: false, ancho: ANCHO_IMG.ficha });
-  document.getElementById('m-crumb').innerHTML = `Presupuesto${d.cliente ? ' · <b>' + esc(d.cliente) + '</b>' : ''}`;
+  document.getElementById('m-crumb').innerHTML = `Presupuesto${d.cliente ? ' · <b>' + esc(d.cliente) + '</b>' : ''}`; document.getElementById('m-crumb').classList.add('visible');
   document.getElementById('m-cat').textContent = 'Presupuesto personalizado';
   document.getElementById('m-name').textContent = nombre;
   document.getElementById('m-detail').textContent =
@@ -2908,6 +2997,7 @@ function renderFicha(p) {
   document.getElementById('m-img').innerHTML = imgHtml(p, nombre, emoji, { lazy: false, ancho: ANCHO_IMG.ficha });
 
   // breadcrumb de la barra superior
+  document.getElementById('m-crumb').classList.remove('visible');
   document.getElementById('m-crumb').innerHTML =
     `Inicio / ${esc(catObj.label)} / <b>${esc(nombre)}</b>`;
 
@@ -3024,6 +3114,28 @@ function renderFicha(p) {
       </div>
     </div>` : '';
 
+  // Celulares usados iguales (mismo modelo, capacidad y color): un botón por unidad,
+  // con la batería grande y la calidad chica. Si dos botones dirían lo mismo (misma
+  // batería y calidad, distinto precio) se les suma el precio para distinguirlos.
+  const opcEq = variantesEquipo(p);
+  const etqEq = v => [v.bateria_pct != null ? v.bateria_pct + '%' : '', v.estado_producto || ''].filter(Boolean);
+  const eqHtml = opcEq.length > 1 ? `
+    <div class="tam-sel eq-sel">
+      <div class="tam-sel-lbl">Elegí el equipo: <b>${esc(etqEq(p).join(' · ') || 'Equipo')}</b></div>
+      <div class="tam-sel-opts">
+        ${opcEq.map((v, i) => {
+          const sel = slugProd(v) === slugProd(p);
+          const [a, b] = etqEq(v);
+          const igual = opcEq.filter(o => etqEq(o).join('|') === etqEq(v).join('|')).length > 1;
+          return `<button class="tam-opt eq-opt${sel ? ' sel' : ''}" data-do="variante" data-arg="${esc(slugProd(v))}" aria-pressed="${sel}">
+            <span class="tam-opt-ml">${esc(a || ('Equipo ' + (i + 1)))}</span>
+            ${b ? `<span class="tam-opt-precio">${esc(b)}</span>` : ''}
+            ${igual ? `<span class="tam-opt-precio">${fUSD(pUSD(v))}</span>` : ''}
+          </button>`;
+        }).join('')}
+      </div>
+    </div>` : '';
+
   // Envíos + botón de carrito. Acá sí se agrega directo: el tamaño ya está
   // elegido, es el producto que se está viendo.
   const addFicha = enPesos(p)
@@ -3040,7 +3152,7 @@ function renderFicha(p) {
     </div>` : '';
 
   document.getElementById('m-pagos').innerHTML =
-    ingresandoHtml + tamHtml + regaloHtml + cashHtml + promosHtml + cuotasHtml + cryptoHtml + addFicha + envioHtml;
+    ingresandoHtml + tamHtml + eqHtml + regaloHtml + cashHtml + promosHtml + cuotasHtml + cryptoHtml + addFicha + envioHtml;
 
   // Ficha técnica + descripción (vacío si el modelo no está en el catálogo)
   document.getElementById('m-ficha').innerHTML = fichaHtml(p);
@@ -3353,6 +3465,7 @@ const CANJE = {
   historial: false,     // el asistente es dueño de una entrada de historial
   atras: false,         // ya se pidió history.back() para cerrar (evita repetirlo)
   ignorarPop: false,    // el popstate que provoca nuestro propio history.back()
+  historico: [],        // último precio vendido por modelo y capacidad (vista pública, a futuro)
   sesion: 0,            // número de apertura: identifica a qué sesión pertenece un temporizador
   timerCierre: null,
   enviado: false,
@@ -3364,7 +3477,47 @@ const CANJE = {
   S: {},
 };
 
-function valorEstimadoCanje(/* S */) { return null; }
+// Cuánto se descuenta del precio público para ofrecer el equipo en canje.
+const CANJE_DESCUENTO_USD = 120;
+// La batería influye en el precio. Dos franjas: de 90% para arriba ("alta") y por debajo
+// de 90 ("baja"). Cada franja se compara con los equipos publicados de SU franja, que ya
+// tienen precios distintos en el stock: no se inventa ningún porcentaje de descuento.
+const CANJE_BATERIA_ALTA = 90;
+const canjeFranja = bat => (Number(bat) >= CANJE_BATERIA_ALTA ? 'alta' : 'baja');
+
+// Valor estimado = precio público de ese modelo, capacidad y franja de batería
+//   − CANJE_DESCUENTO_USD.
+//  1) Se toma el stock publicado AHORA, sólo USADOS de la misma franja de batería: el
+//     precio de un sellado no sirve de referencia para uno usado (inflaría la oferta; el
+//     18 Pro y el 17 Pro Max están sólo sellados), ni el de una batería distinta.
+//  2) Si hay varios, se toma el MÁS BAJO: es la referencia prudente, el cliente nunca
+//     recibe más que lo que publicamos.
+//  3) Sin referencia en stock se usa el último precio vendido (CANJE.historico, que llena
+//     la vista pública de ventas cuando exista, con tope de antigüedad). Esa vista no
+//     distingue batería: es un respaldo.
+// Sin la batería informada no se estima: depende de ella. Devuelve null si no hay
+// referencia: ahí el asistente NO inventa un número y manda la consulta a WhatsApp.
+function valorEstimadoCanje(S) {
+  if (!S || !S.modelo || !S.capacidad) return null;
+  if (S.bateria == null || !Number.isFinite(Number(S.bateria))) return null;
+  const franja = canjeFranja(S.bateria);
+  const norm = t => String(t || '').replace(/\s+/g, '').toUpperCase();
+  const mismo = p => String(p.modelo || '').trim().toLowerCase() === S.modelo.toLowerCase()
+    && norm(p.storage) === norm(S.capacidad);
+  const usados = (typeof todos !== 'undefined' ? todos : [])
+    .filter(p => p.categoria === 'iphone' && !p._ingresando && mismo(p)
+      && condDeEstado(p.estado_producto) === 'usado' && Number(p.precio_usd) > 0
+      && p.bateria_pct != null && canjeFranja(p.bateria_pct) === franja)
+    .map(p => Number(p.precio_usd));
+  let base = usados.length ? Math.min(...usados) : null, origen = 'stock';
+  if (base == null) {
+    const h = (CANJE.historico || []).find(mismo);
+    if (h && Number(h.precio_usd) > 0) { base = Number(h.precio_usd); origen = 'ventas'; }
+  }
+  if (base == null) return null;
+  const usd = Math.round(base - CANJE_DESCUENTO_USD);
+  return usd > 0 ? { usd, base, origen, franja } : null;
+}
 
 /* ─── datos ─── */
 // Valida la forma de cada fila antes de confiar en ella. Una fila rara se
@@ -3401,8 +3554,22 @@ function validarFilasCanje(rows) {
   return out.sort((a, b) => (a.orden - b.orden) || a.modelo.localeCompare(b.modelo, 'es'));
 }
 
+// Qué modelos acepta el canje. La vista trae TODO el catálogo del CRM (del 11 al
+// 18), pero el local sólo toma equipos desde el iPhone 13 en adelante y sin los
+// mini. Además se descartan los nombres que el catálogo tiene cargados y que
+// Apple nunca sacó: en el stock real la línea 18 sólo tiene Pro y Pro Max, y la
+// 17 sólo 17, Pro y Pro Max (sin Plus). Si algún día salen, se quitan de acá.
+const CANJE_DESDE_GENERACION = 13;
+const CANJE_NO_EXISTEN = ['iPhone 17 Plus', 'iPhone 18', 'iPhone 18 Plus'];
+function canjeAcepta(modelo) {
+  const m = /^iPhone (\d+)/.exec(modelo);
+  if (!m || Number(m[1]) < CANJE_DESDE_GENERACION) return false;
+  if (/\bmini\b/i.test(modelo)) return false;
+  return !CANJE_NO_EXISTEN.some(x => x.toLowerCase() === modelo.toLowerCase());
+}
+
 function habilitarCanje(rows) {
-  const ok = validarFilasCanje(rows);
+  const ok = validarFilasCanje(rows).filter(r => canjeAcepta(r.modelo));
   CANJE.modelos = ok.length ? ok : null;
   CANJE.listo = ok.length > 0;
 }
@@ -3568,8 +3735,7 @@ function cjRender() {
         cjOpcion('Sí, te lo mando por WhatsApp', 'si', { pressed: S.video === true }),
         cjOpcion('Prefiero no mandarlo', 'no', { pressed: S.video === false })));
   } else if (CANJE.paso === 'resumen') {
-    titulo.textContent = 'Revisá tu consulta';
-    sub.textContent = 'Tocá cualquier dato para cambiarlo.';
+    const valor = valorEstimadoCanje(S);
     const filas = [
       ['modelo', 'Modelo', S.modelo], ['capacidad', 'Capacidad', S.capacidad], ['color', 'Color', S.color],
       ['bateria', 'Batería', S.bateriaNS ? 'No lo sé' : S.bateria + ' %'],
@@ -3577,16 +3743,38 @@ function cjRender() {
       ['funcion', 'Funcionamiento', S.funcion + (S.funcionNota ? ' · ' + S.funcionNota : '')],
       ['video', 'Video', S.video ? 'Te lo mando por WhatsApp' : 'No'],
     ];
+    if (valor) {
+      titulo.textContent = 'Tu cotización estimada';
+      sub.textContent = 'Sujeta a revisión técnica.';
+      cuerpo.append(cjEl('div', { class: 'cj-valor' },
+        cjEl('div', { class: 'cj-valor-et', text: 'Te lo tomamos por' }),
+        cjEl('div', { class: 'cj-valor-n', text: fUSD(valor.usd) }),
+        cjEl('div', { class: 'cj-valor-eq', text: [S.modelo, S.capacidad, S.color].join(' · ') }),
+        cjEl('div', { class: 'cj-valor-bat', text: (S.bateriaNS ? 'batería sin informar' : 'batería ' + S.bateria + '%') + ' · valor estimado' })));
+      if (valor.franja === 'baja') {
+        cuerpo.append(cjEl('p', { class: 'cj-nota', text: 'Con la batería por debajo del ' + CANJE_BATERIA_ALTA + '% el valor es menor.' }));
+      }
+      if (S.estetica === 'Con detalles' || S.funcion === 'Con alguna falla') {
+        cuerpo.append(cjEl('p', { class: 'cj-nota', text: 'Con detalles o fallas, el valor final puede ser menor.' }));
+      }
+      cuerpo.append(cjEl('p', { class: 'cj-nota', text: 'El valor final se confirma con la revisión presencial del equipo en el local.' }));
+      cuerpo.append(cjEl('p', { class: 'cj-paso', text: 'Tus datos (tocá uno para cambiarlo)' }));
+    } else {
+      titulo.textContent = 'Revisá tu consulta';
+      sub.textContent = 'Tocá cualquier dato para cambiarlo.';
+    }
     cuerpo.append(cjEl('div', { class: 'cj-lista' }, filas.map(([id, etq, val]) => {
       const b = cjOpcion('', id, { accion: 'canjeEditar', chev: true });
       b.querySelector('span').replaceWith(cjEl('span', { class: 'cj-resumen-fila' },
         cjEl('span', {}, cjEl('b', { text: etq }), cjEl('span', { text: val }))));
       return b;
     })));
-    const valor = valorEstimadoCanje(S);
-    if (valor != null) cuerpo.append(cjEl('p', { class: 'cj-nota', text: String(valor) }));
-    cuerpo.append(cjEl('p', { class: 'cj-nota', text: 'Esto no es una cotización: te confirmamos el valor por WhatsApp, después de ver el equipo.' }));
-    pie.append(cjBoton('Enviar por WhatsApp', 'canjeEnviar'));
+    if (!valor) {
+      cuerpo.append(cjEl('p', { class: 'cj-nota', text: S.bateriaNS
+        ? 'Sin la salud de la batería no podemos estimar el valor: te lo cotizamos por WhatsApp.'
+        : 'Para este equipo no tenemos un valor de referencia a la vista: te lo cotizamos por WhatsApp después de ver los datos.' }));
+    }
+    pie.append(cjBoton(valor ? 'Continuar por WhatsApp' : 'Enviar por WhatsApp', 'canjeEnviar'));
   }
 
   $cj('cj-estado').textContent = titulo.textContent;
@@ -3643,6 +3831,7 @@ function cjContinuar() {
 
 function cjMensaje() {
   const S = CANJE.S;
+  const vv = valorEstimadoCanje(S), cjValorTxt = vv ? fUSD(vv.usd) : '';
   return ['¡Hola! Quiero consultar por mi iPhone usado para dejarlo como parte de pago.', '',
     '📱 Modelo: ' + S.modelo,
     '💾 Capacidad: ' + S.capacidad,
@@ -3650,7 +3839,8 @@ function cjMensaje() {
     '🔋 Batería: ' + (S.bateriaNS ? 'no lo sé' : S.bateria + ' %'),
     '✨ Por fuera: ' + S.estetica + (S.esteticaNota ? ' (' + S.esteticaNota + ')' : ''),
     '⚙️ Funcionamiento: ' + S.funcion + (S.funcionNota ? ' (' + S.funcionNota + ')' : ''),
-    ...(S.video ? ['🎥 Te mando un video por acá a continuación.'] : []), '',
+    ...(S.video ? ['🎥 Te mando un video por acá a continuación.'] : []),
+    ...(cjValorTxt ? ['', '💵 En la web me dio una cotización estimada de ' + cjValorTxt + ' (sujeta a revisión).'] : []), '',
     '¿Cuánto me lo toman y qué diferencia tendría que abonar?'].join('\n');
 }
 
@@ -3762,6 +3952,70 @@ document.addEventListener('keydown', ev => {
   else if (!ev.shiftKey && (act === ultimo || !card.contains(act))) { ev.preventDefault(); primero.focus(); }
 });
 
+
+/* ─── CAPAS: scroll, Esc y teclado de la ficha ─── */
+// El scroll del fondo se bloquea mientras CUALQUIERA de las capas siga abierta. Antes
+// cada una lo liberaba por su cuenta: cerrar el carrito con la ficha abierta dejaba
+// scrollear la página de atrás. Se calcula desde el estado real (clases), así que
+// no importa por qué camino se abrió o cerró cada cosa.
+const capaAbierta = id => {
+  const e = document.getElementById(id);
+  if (!e) return false;
+  return id === 'canje-sheet' ? !e.hidden : (e.classList.contains('open') || e.classList.contains('abierto'));
+};
+function bloqueoScroll() {
+  const abierta = ['modal-overlay', 'menu-lateral', 'cart-panel', 'canje-sheet'].some(capaAbierta);
+  document.body.style.overflow = abierta ? 'hidden' : '';
+}
+
+// Foco de la ficha: al abrir va a la X, el fondo queda inerte (salvo el carrito, que
+// tiene que seguir usable por encima de la ficha) y al cerrar el foco vuelve a quien
+// la abrió.
+let _fichaOpener = null, _fichaInertes = [];
+function fichaFoco(abierta) {
+  const ov = document.getElementById('modal-overlay');
+  if (!ov) return;
+  if (abierta && !_fichaInertes.length) {
+    _fichaOpener = document.activeElement && document.activeElement !== document.body ? document.activeElement : null;
+    const libres = new Set(['modal-overlay', 'cart-overlay', 'cart-panel', 'canje-sheet']);
+    _fichaInertes = [...document.body.children]
+      .filter(n => n.tagName !== 'SCRIPT' && !libres.has(n.id) && !n.inert);
+    _fichaInertes.forEach(n => { n.inert = true; });
+    document.getElementById('ficha-cerrar')?.focus({ preventScroll: true });
+  } else if (!abierta && _fichaInertes.length) {
+    _fichaInertes.forEach(n => { n.inert = false; }); _fichaInertes = [];
+    const o = _fichaOpener; _fichaOpener = null;
+    if (o && document.contains(o) && !o.hidden && o.getClientRects().length) o.focus({ preventScroll: true });
+  }
+}
+function capasIniciar() {
+  const mo = new MutationObserver(() => { bloqueoScroll(); fichaFoco(capaAbierta('modal-overlay')); });
+  ['modal-overlay', 'menu-lateral', 'cart-panel', 'canje-sheet'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) mo.observe(el, { attributes: true, attributeFilter: ['class', 'hidden'] });
+  });
+  bloqueoScroll();
+}
+// Esc cierra la capa de ARRIBA: asistente > carrito > menú > ficha. El asistente
+// maneja su propio Esc.
+document.addEventListener('keydown', ev => {
+  if (CANJE.abierto) return;
+  if (ev.key === 'Escape') {
+    if (capaAbierta('cart-panel')) { ev.preventDefault(); toggleCarrito(false); }
+    else if (capaAbierta('menu-lateral')) { ev.preventDefault(); toggleMenu(false); }
+    else if (capaAbierta('modal-overlay')) { ev.preventDefault(); closeModal(); }
+    return;
+  }
+  // Tab queda dentro de la ficha, salvo que haya otra capa encima (carrito, menú).
+  if (ev.key !== 'Tab' || !capaAbierta('modal-overlay') || capaAbierta('cart-panel') || capaAbierta('menu-lateral')) return;
+  const hoja = document.getElementById('modal-sheet');
+  const f = [...hoja.querySelectorAll('button, a[href], input, select, textarea, [tabindex]:not([tabindex="-1"])')]
+    .filter(e => !e.disabled && !e.hidden && e.getClientRects().length);
+  if (!f.length) { ev.preventDefault(); hoja.focus(); return; }
+  const a = document.activeElement;
+  if (ev.shiftKey && (a === f[0] || !hoja.contains(a))) { ev.preventDefault(); f[f.length - 1].focus(); }
+  else if (!ev.shiftKey && (a === f[f.length - 1] || !hoja.contains(a))) { ev.preventDefault(); f[0].focus(); }
+});
 
 /* ─── BURBUJA "PLAN CANJE" ─── */
 // UNA sola función decide si se ve, combinando todas las condiciones: así el

@@ -1822,77 +1822,86 @@ footer strong { color: rgba(255,255,255,.85); }
 
 /* ═══════════════════════════════════════════════════════════
    ASISTENTE "PLAN CANJE"
-   Hoja a pantalla completa en celular y tarjeta centrada en escritorio.
-   Oscuro, como la sección del 18 Pro. Se construye desde precios.js con DOM
-   (nada de innerHTML con datos de la base) y se abre desde el botón de #canje.
+   Claro, como el resto de la landing y la web de Apple: fondo gris #F5F5F7,
+   tarjetas blancas, tipografía grande en #1D1D1F y el azul de la marca para lo
+   elegido. Hoja a pantalla completa en celular y tarjeta centrada en escritorio.
+   Se construye desde precios.js con DOM (nada de innerHTML con datos de la base).
 ═══════════════════════════════════════════════════════════ */
 .cj[hidden] { display: none; }
-/* Por encima del botón flotante de WhatsApp (9999): si no, le tapa los botones. */
-.cj { position: fixed; inset: 0; z-index: 10000; background: #0A0A0C; color: #F5F5F7; display: flex; }
+.cj { position: fixed; inset: 0; z-index: 10000; background: #F5F5F7; color: #1D1D1F; display: flex; }
 .cj-card {
   position: relative; display: flex; flex-direction: column; width: 100%; height: 100dvh;
   padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
-  background: #0A0A0C; outline: none;
+  background: #F5F5F7; outline: none;
 }
 .cj-top { display: flex; align-items: center; gap: 12px; padding: 14px 16px 10px; }
 .cj-ico {
   flex: none; width: 44px; height: 44px; border-radius: 50%; border: 0; cursor: pointer;
-  background: rgba(255,255,255,.08); color: #F5F5F7; font-size: 20px; line-height: 1;
+  background: #E8E8ED; color: #1D1D1F; font-size: 20px; line-height: 1;
   display: inline-flex; align-items: center; justify-content: center;
+  transition: background .15s ease;
 }
-.cj-ico:hover { background: rgba(255,255,255,.14); }
-.cj-prog { flex: 1; height: 4px; border-radius: 4px; background: rgba(255,255,255,.12); overflow: hidden; }
-.cj-prog-fill { display: block; height: 100%; width: 0; background: #2997FF; border-radius: 4px; transition: width .35s cubic-bezier(.22,.61,.36,1); }
+.cj-ico:hover { background: #DCDCE2; }
+.cj-ico:focus-visible, .cj-op:focus-visible, .cj-btn:focus-visible { outline: 3px solid #0071E3; outline-offset: 2px; }
+.cj-prog { flex: 1; height: 4px; border-radius: 4px; background: #D2D2D7; overflow: hidden; }
+.cj-prog-fill { display: block; height: 100%; width: 0; background: #1D1D1F; border-radius: 4px; transition: width .35s cubic-bezier(.22,.61,.36,1); }
 .cj-body { flex: 1; overflow-y: auto; padding: 8px 20px 20px; -webkit-overflow-scrolling: touch; }
-.cj-paso { font-size: 13px; color: #86868B; margin: 10px 0 6px; }
-.cj-titulo { font-size: 30px; line-height: 1.12; font-weight: 700; letter-spacing: -.02em; outline: none; }
-.cj-sub { font-size: 16px; line-height: 1.45; color: #A1A1A6; margin: 8px 0 20px; }
+.cj-paso { font-size: 13px; font-weight: 600; letter-spacing: .02em; color: #6E6E73; margin: 14px 0 8px; }
+.cj-titulo { font-size: 32px; line-height: 1.1; font-weight: 700; letter-spacing: -.025em; color: #1D1D1F; outline: none; }
+.cj-sub { font-size: 17px; line-height: 1.45; color: #6E6E73; margin: 10px 0 22px; }
 .cj-lista { display: flex; flex-direction: column; gap: 10px; }
 .cj-op {
   display: flex; align-items: center; justify-content: space-between; gap: 12px; width: 100%;
-  min-height: 56px; padding: 14px 18px; text-align: left; font: inherit; font-size: 17px; font-weight: 600;
-  color: #F5F5F7; background: #17171B; border: 1px solid rgba(255,255,255,.10); border-radius: 16px; cursor: pointer;
-  transition: background .15s ease, border-color .15s ease, transform .1s ease;
+  min-height: 58px; padding: 14px 18px; text-align: left; font: inherit; font-size: 17px; font-weight: 600;
+  color: #1D1D1F; background: #fff; border: 1px solid #E8E8ED; border-radius: 18px; cursor: pointer;
+  box-shadow: 0 1px 2px rgba(0,0,0,.04);
+  transition: border-color .15s ease, box-shadow .15s ease, transform .1s ease;
 }
-.cj-op:hover { background: #1E1E24; border-color: rgba(255,255,255,.22); }
+.cj-op:hover { border-color: #C7C7CC; box-shadow: 0 4px 14px rgba(0,0,0,.07); }
 .cj-op:active { transform: scale(.985); }
-.cj-op[aria-pressed="true"] { border-color: #2997FF; background: rgba(41,151,255,.14); }
-.cj-op small { display: block; margin-top: 2px; font-size: 13.5px; font-weight: 400; color: #A1A1A6; }
-.cj-op .cj-chev { flex: none; color: #86868B; font-size: 20px; }
+.cj-op[aria-pressed="true"] { border-color: #0071E3; box-shadow: 0 0 0 1px #0071E3 inset; }
+.cj-op small { display: block; margin-top: 2px; font-size: 14px; font-weight: 400; color: #6E6E73; }
+.cj-op .cj-chev { flex: none; color: #86868B; font-size: 22px; font-weight: 400; }
 .cj-campo { display: flex; flex-direction: column; gap: 8px; margin-top: 14px; }
-.cj-campo label { font-size: 14px; font-weight: 600; color: #D2D2D7; }
+.cj-campo label { font-size: 14px; font-weight: 600; color: #1D1D1F; }
 .cj-campo input, .cj-campo textarea {
-  width: 100%; font: inherit; font-size: 17px; color: #F5F5F7; background: #17171B;
-  border: 1px solid rgba(255,255,255,.18); border-radius: 14px; padding: 14px 16px; outline: none;
+  width: 100%; font: inherit; font-size: 17px; color: #1D1D1F; background: #fff;
+  border: 1px solid #D2D2D7; border-radius: 14px; padding: 14px 16px; outline: none;
 }
 .cj-campo textarea { min-height: 96px; resize: vertical; }
-.cj-campo input:focus, .cj-campo textarea:focus { border-color: #2997FF; box-shadow: 0 0 0 3px rgba(41,151,255,.25); }
-.cj-ayuda { font-size: 13.5px; color: #A1A1A6; }
-.cj-error { min-height: 20px; margin-top: 10px; font-size: 14px; font-weight: 600; color: #FF6B5E; }
-.cj-pasos { margin: 0 0 14px; padding-left: 22px; color: #D2D2D7; font-size: 16px; line-height: 1.5; }
+.cj-campo input:focus, .cj-campo textarea:focus { border-color: #0071E3; box-shadow: 0 0 0 4px rgba(0,113,227,.18); }
+.cj-ayuda { font-size: 14px; color: #6E6E73; }
+.cj-error { min-height: 20px; margin-top: 10px; font-size: 14px; font-weight: 600; color: #C0392B; }
+.cj-pasos { margin: 0 0 14px; padding-left: 22px; color: #3A3A3C; font-size: 16px; line-height: 1.5; }
 .cj-pasos li { margin-bottom: 6px; }
-.cj-pie { padding: 12px 20px 20px; display: flex; flex-direction: column; gap: 10px; border-top: 1px solid rgba(255,255,255,.06); }
+.cj-pie { padding: 12px 20px 20px; display: flex; flex-direction: column; gap: 10px; border-top: 1px solid #E8E8ED; background: #F5F5F7; }
 .cj-btn {
   display: inline-flex; align-items: center; justify-content: center; min-height: 52px; padding: 0 22px;
   border-radius: 980px; border: 0; font: inherit; font-size: 17px; font-weight: 600; cursor: pointer;
+  transition: background .15s ease;
 }
-.cj-btn.pri { background: #2997FF; color: #fff; }
-.cj-btn.pri:hover { background: #3AA2FF; }
-.cj-btn.sec { background: rgba(255,255,255,.10); color: #F5F5F7; }
-.cj-btn.sec:hover { background: rgba(255,255,255,.16); }
+.cj-btn.pri { background: #0071E3; color: #fff; }
+.cj-btn.pri:hover { background: #0077ED; }
+.cj-btn.sec { background: #E8E8ED; color: #1D1D1F; }
+.cj-btn.sec:hover { background: #DCDCE2; }
 .cj-btn[disabled] { opacity: .45; cursor: default; }
-.cj-nota { font-size: 13.5px; line-height: 1.45; color: #A1A1A6; text-align: center; }
+.cj-nota { font-size: 14px; line-height: 1.45; color: #6E6E73; text-align: center; margin-top: 12px; }
+.cj-valor { text-align: center; padding: 22px 8px 6px; }
+.cj-valor-et { font-size: 17px; color: #6E6E73; }
+.cj-valor-n { font-size: 58px; line-height: 1.05; font-weight: 800; letter-spacing: -.03em; color: #0071E3; margin: 6px 0 10px; }
+.cj-valor-eq { font-size: 17px; font-weight: 600; color: #1D1D1F; }
+.cj-valor-bat { font-size: 15px; color: #6E6E73; margin-top: 2px; }
 .cj-resumen-fila { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
-.cj-resumen-fila b { display: block; font-size: 13px; font-weight: 500; color: #86868B; margin-bottom: 2px; }
+.cj-resumen-fila b { display: block; font-size: 13px; font-weight: 500; color: #6E6E73; margin-bottom: 2px; }
 .cj-resumen-fila span { font-size: 17px; font-weight: 600; word-break: break-word; }
 .cj-sr { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0; }
 @media (min-width: 700px) {
-  .cj { align-items: center; justify-content: center; background: rgba(0,0,0,.62); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); }
-  .cj-card { width: 480px; height: auto; max-height: 86vh; border-radius: 28px; box-shadow: 0 30px 80px rgba(0,0,0,.55); overflow: hidden; border: 1px solid rgba(255,255,255,.08); }
+  .cj { align-items: center; justify-content: center; background: rgba(29,29,31,.38); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); }
+  .cj-card { width: 500px; height: auto; max-height: 86vh; border-radius: 28px; box-shadow: 0 30px 80px rgba(0,0,0,.28); overflow: hidden; }
   .cj-body { min-height: 360px; }
 }
 @media (prefers-reduced-motion: reduce) {
-  .cj-prog-fill, .cj-op { transition: none; }
+  .cj-prog-fill, .cj-op, .cj-btn, .cj-ico { transition: none; }
   .cj-op:active { transform: none; }
 }
 
@@ -1917,6 +1926,48 @@ footer strong { color: rgba(255,255,255,.85); }
 .cj-bubble:focus-visible { outline: 3px solid #2997FF; outline-offset: 2px; }
 @keyframes cjBubbleIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
 @media (prefers-reduced-motion: reduce) { .cj-bubble { animation: none; } .cj-bubble:active { transform: none; } }
+
+/* ═══════════════════════════════════════════════════════════
+   FICHA COMO POP-UP
+   Tarjeta redondeada sobre el fondo difuminado. En celular sube desde abajo y se
+   ajusta al alto de la pantalla; en escritorio es una tarjeta centrada, más ancha,
+   con la foto a la izquierda y los datos a la derecha. La X es sticky (sigue a la
+   vista al scrollear) y los modales de más arriba (carrito) quedan por encima.
+═══════════════════════════════════════════════════════════ */
+.modal-overlay {
+  background: rgba(29,29,31,.45); align-items: flex-end; justify-content: center; padding: 0;
+  backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); overscroll-behavior: contain;
+}
+.modal-sheet {
+  position: relative; width: 100%; height: auto; max-height: 94vh; max-height: 94dvh;
+  border-radius: 28px 28px 0 0; box-shadow: 0 -10px 60px rgba(0,0,0,.25);
+  padding-bottom: env(safe-area-inset-bottom); overscroll-behavior: contain;
+  animation: fichaSube .28s cubic-bezier(.22,.61,.36,1);
+}
+@keyframes fichaSube { from { transform: translateY(40px); opacity: 0; } to { transform: none; opacity: 1; } }
+.ficha-cerrar {
+  position: sticky; top: 12px; z-index: 25; display: flex; align-items: center; justify-content: center;
+  width: 44px; height: 44px; margin: 12px 12px -56px auto; border: 0; border-radius: 50%;
+  background: rgba(255,255,255,.96); color: #1D1D1F; font-size: 18px; cursor: pointer;
+  box-shadow: 0 2px 12px rgba(0,0,0,.2); -webkit-tap-highlight-color: transparent;
+}
+.ficha-cerrar:hover { background: #fff; }
+.ficha-cerrar:focus-visible { outline: 3px solid #0071E3; outline-offset: 2px; }
+.ficha-topbar { display: none; }
+.ficha-crumb { display: none; }
+.ficha-crumb.visible { display: block; padding: 20px 70px 0 24px; font-size: 13px; }
+@media (min-width: 900px) {
+  .modal-overlay { align-items: center; padding: 24px; }
+  .modal-sheet { width: min(1180px, 94vw); max-height: 90vh; border-radius: 28px; box-shadow: 0 30px 90px rgba(0,0,0,.35); }
+  .ficha-inner { max-width: none; padding: 28px 28px 40px; }
+  .ficha-inner .modal-img { top: 20px; }
+}
+/* El WhatsApp flotante no tiene que tapar acciones del pop-up. */
+body:has(#modal-overlay.open) .wa-float { display: none; }
+/* El carrito se abre desde la ficha en perfumería: queda por encima de ella. */
+#cart-overlay { z-index: 501; }
+.cart-panel { z-index: 502; }
+@media (prefers-reduced-motion: reduce) { .modal-sheet { animation: none; } }
 </style>
 </head>
 <body>
@@ -2543,12 +2594,10 @@ footer strong { color: rgba(255,255,255,.85); }
 </a>
 
 <!-- FICHA DE PRODUCTO — se muestra en la ruta ?p=<slug> -->
-<div class="modal-overlay" id="modal-overlay">
-  <div class="modal-sheet" id="modal-sheet">
-    <div class="ficha-topbar">
-      <button class="ficha-back" data-do="cerrarFicha" aria-label="Volver al listado">←</button>
-      <div class="ficha-crumb" id="m-crumb"></div>
-    </div>
+<div class="modal-overlay" id="modal-overlay" data-do="fichaFondo">
+  <div class="modal-sheet" id="modal-sheet" role="dialog" aria-modal="true" aria-label="Detalle del producto">
+    <button type="button" class="ficha-cerrar" id="ficha-cerrar" data-do="cerrarFicha" aria-label="Cerrar">&#10005;</button>
+    <div class="ficha-crumb" id="m-crumb"></div>
 
     <div class="ficha-inner">
     <div class="modal-img" id="m-img"></div>
@@ -2689,6 +2738,6 @@ footer strong { color: rgba(255,255,255,.85); }
   </div>
 </div>
 <script defer src="pixel.js?v=20261001b"></script>
-<script defer src="precios.js?v=20261007a"></script>
+<script defer src="precios.js?v=20261007e"></script>
 </body>
 </html>

@@ -144,11 +144,21 @@ module.exports = async function handler(req, res) {
         // la ficha de un accesorio tampoco existe para el visitante, y
         // anunciarla en Google lo llevaría a una página que no la tiene.
         const filas = await productosPublicados();
-        const p = filas.find(x => slugProd(x) === slug);
+        // Varias unidades usadas del mismo equipo tienen su propia dirección en la web
+        // (…-b85-ab12c). Acá no se calculan: se usa el equipo base, que comparte título y
+        // foto. Como el precio puede ser el de OTRA unidad del grupo, se dice "Desde".
+        const base = slug.replace(/-b(?:\d+|x)-[a-z0-9]+x*$/, '');
+        // Varias filas pueden compartir la dirección base (usados iguales con distinta
+        // batería): esa dirección significa "el más barato", así que se elige por precio.
+        const baratas = lista => lista.sort((a, b) => (Number(a.precio_usd) || 0) - (Number(b.precio_usd) || 0))[0] || null;
+        const iguales = filas.filter(x => slugProd(x) === slug);
+        const delBase = (!iguales.length && base !== slug) ? filas.filter(x => slugProd(x) === base) : [];
+        const p = baratas(iguales.length ? iguales : delBase);
+        const exacto = iguales.length === 1 ? p : null;   // una sola coincidencia: el precio es el suyo
         if (p) {
           prodSeo = p;
           titulo = `${p.nombre || p.modelo} — iPhone Mood`;
-          desc = `USD ${p.precio_usd}. ${[p.storage, p.color, p.estado_producto].filter(Boolean).join(' · ')}. Stock real con precios actualizados.`;
+          desc = `${exacto ? '' : 'Desde '}USD ${p.precio_usd}. ${[p.storage, p.color, p.estado_producto].filter(Boolean).join(' · ')}. Stock real con precios actualizados.`;
           foto = await fotoDe(p, archivos);
         }
       } else if (token) {

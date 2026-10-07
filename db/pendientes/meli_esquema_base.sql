@@ -372,9 +372,14 @@ ALTER TABLE public.meli_orden_items    ENABLE ROW LEVEL SECURITY;
 -- meli_cuentas: SIN POLÍTICAS a propósito. Con RLS activo y cero políticas,
 -- nadie lee ni escribe desde el cliente. No agregar ninguna.
 
+-- meli_publicaciones: sólo LECTURA desde el navegador. Los vínculos se crean y cambian por el
+-- servidor (api/meli/publicaciones.js → RPC meli_publicacion_vincular / _desvincular, ver
+-- meli_vincular.sql). Antes esta política era FOR ALL: cualquier usuario autorizado podía
+-- escribir la tabla a mano, saltándose las validaciones y la versión.
 DROP POLICY IF EXISTS "meli_publicaciones_all" ON public.meli_publicaciones;
-CREATE POLICY "meli_publicaciones_all" ON public.meli_publicaciones
-  USING (public.is_authorized_user()) WITH CHECK (public.is_authorized_user());
+DROP POLICY IF EXISTS "meli_publicaciones_lectura" ON public.meli_publicaciones;
+CREATE POLICY "meli_publicaciones_lectura" ON public.meli_publicaciones
+  FOR SELECT USING (public.is_authorized_user());
 
 -- Órdenes e ítems: LECTURA para el CRM, escritura NO.
 --
@@ -736,10 +741,19 @@ BEGIN
 
   -- SEGUNDO FRENO — ¿alcanza el stock de TODOS los ítems? Si falta uno, no se
   -- descuenta ninguno: media orden descontada es peor que ninguna.
-  SELECT string_agg(i.meli_item_id, ', ') INTO v_faltante
-    FROM meli_orden_items i
-    JOIN stock s ON s.id = i.stock_id
-   WHERE i.orden_id = p_orden_id AND COALESCE(s.cantidad, 0) < i.cantidad
+  --
+  -- Se SUMA por producto: dos avisos distintos de la misma orden pueden apuntar al MISMO
+  -- stock, y comprobar cada ítem por separado dejaba pasar los dos aunque juntos no
+  -- alcanzaran (el segundo descuento fallaba recién al ejecutarse, con una excepción en vez
+  -- de un `revisar` claro). Acá se detecta antes y no se toca nada.
+  SELECT string_agg(x.items, ', ') INTO v_faltante
+    FROM (SELECT i.stock_id, sum(i.cantidad) AS necesita,
+                 string_agg(DISTINCT i.meli_item_id, ', ') AS items
+            FROM meli_orden_items i
+           WHERE i.orden_id = p_orden_id AND i.stock_id IS NOT NULL
+           GROUP BY i.stock_id) x
+    JOIN stock s ON s.id = x.stock_id
+   WHERE COALESCE(s.cantidad, 0) < x.necesita
      -- Una fila "a pedido" no tiene stock físico que se agote: nunca falta.
      AND NOT COALESCE(s.a_pedido, FALSE);
 

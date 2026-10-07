@@ -11,8 +11,9 @@
 // meli__revalidar_orden tras bloquear la orden y recargar `o`), se le aplica ESE parche en memoria: el
 // archivo real no se toca.
 //
-// LÍMITE: pglite tiene UNA conexión. Los bloqueos entre transacciones (esperas, deadlocks) NO se prueban
-// acá; ver tests/sql/vincular.concurrencia.test.mjs (necesita embedded-postgres).
+// LÍMITE: pglite tiene UNA conexión. Los bloqueos entre transacciones (esperas, deadlocks, doble INSERT simultáneo,
+// ingesta contra vinculación) NO se prueban acá. PENDIENTE y obligatorio antes de desplegar: un banco con DOS
+// conexiones sobre un Postgres real (embedded-postgres, que descarga binarios y necesita OK de Franco).
 import { PGlite } from '@electric-sql/pglite';
 import { pgcrypto } from '@electric-sql/pglite/contrib/pgcrypto';
 import crypto from 'node:crypto';
@@ -30,6 +31,7 @@ const falla = async (fn) => { try { await fn(); return null; } catch (e) { retur
 
 // El parche que se le propone a Ventas+Cueva (una línea + recargar `o`), aplicado SÓLO a meli_procesar_orden.
 export function ventasConParche(sql) {
+  if (sql.includes('o := public.meli__revalidar_orden(o.id);')) return sql;   // Ventas+Cueva ya lo aplicó en su archivo
   const ini = sql.indexOf('FUNCTION public.meli_procesar_orden');
   const marca = "  SELECT * INTO o FROM public.meli_ordenes WHERE id = p_orden_id FOR UPDATE;\n  IF NOT FOUND THEN RAISE EXCEPTION 'ORDEN_INEXISTENTE'; END IF;\n";
   const i = sql.indexOf(marca, ini);
@@ -38,7 +40,7 @@ export function ventasConParche(sql) {
   return sql.slice(0, fin) + '  o := public.meli__revalidar_orden(o.id);\n' + sql.slice(fin);
 }
 
-export async function baseNueva({ conVentas = true } = {}) {
+export async function baseNueva({ conVentas = true, base3 = null } = {}) {
   const db = new PGlite({ extensions: { pgcrypto } });
   await db.exec(`
     CREATE SCHEMA IF NOT EXISTS extensions;
@@ -79,7 +81,7 @@ export async function baseNueva({ conVentas = true } = {}) {
   `);
   await db.exec(SQL('caja_aplicar_delta.sql'));
   await db.exec(SQL('stock_a_pedido.sql'));
-  await db.exec(SQL('meli_esquema_base.sql'));
+  await db.exec(base3 ?? SQL('meli_esquema_base.sql'));
   await db.exec(SQL('meli_vincular.sql'));
   // El hash sembrado es el del secreto REAL; para probar se pone el de uno de prueba (nunca se lee el real).
   await db.query(`UPDATE public.meli_config SET valor = $1 WHERE clave = 'rpc_secret_sha256'`,
@@ -280,6 +282,55 @@ console.log('\n══ Vincular publicaciones de Mercado Libre (Postgres en WebAs
   // las RPC con secreto no son llamables sin secreto por authenticated tampoco
   const eAuth = await falla(() => comoRol(db, 'authenticated', 'franco@x.com', () => vincular(db, { cuenta: cuentaId, item: 'MLA801000001', stock: s, secreto: 'x' })));
   check('Un usuario logueado SIN el secreto tampoco puede vincular (el único camino es el servidor)', eAuth?.includes('no autorizado'), eAuth);
+}
+
+// ── 5a. Permisos exactos de las funciones y de las secuencias ────────────
+{
+  const ctx = await baseNueva(); const { db } = ctx;
+  const f = async (n) => (await db.query(`SELECT has_function_privilege('anon', p.oid, 'EXECUTE') a, has_function_privilege('authenticated', p.oid, 'EXECUTE') u,
+      EXISTS (SELECT 1 FROM aclexplode(COALESCE(p.proacl, acldefault('f', p.proowner))) x WHERE x.grantee = 0 AND x.privilege_type = 'EXECUTE') pub
+      FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace WHERE n.nspname='public' AND p.proname=$1`, [n])).rows[0];
+  const r = {};
+  for (const n of ['meli_publicacion_vincular', 'meli_publicacion_desvincular', 'meli_cuenta_info', 'meli_orden_revalidar', 'meli__revalidar_orden']) r[n] = await f(n);
+  check('Las RPC con secreto: anon y authenticated SÍ, y PUBLIC ya NO (permisos exactos, no el valor por defecto)', ['meli_publicacion_vincular', 'meli_publicacion_desvincular', 'meli_cuenta_info'].every((n) => r[n].a && r[n].u && !r[n].pub), JSON.stringify(r));
+  check('meli_orden_revalidar: sólo authenticated; la interna: nadie', !r.meli_orden_revalidar.a && r.meli_orden_revalidar.u && !r.meli_orden_revalidar.pub && !r.meli__revalidar_orden.a && !r.meli__revalidar_orden.u && !r.meli__revalidar_orden.pub, JSON.stringify(r));
+  const e1 = await falla(() => comoRol(db, 'anon', null, () => db.query(`SELECT nextval('public.meli_vinculos_historial_id_seq')`)));
+  const e2 = await falla(() => comoRol(db, 'authenticated', 'franco@x.com', () => db.query(`SELECT nextval('public.meli_publicaciones_id_seq')`)));
+  check('Las secuencias de estas dos tablas están cerradas para anon y authenticated', /permission denied/.test(e1 || '') && /permission denied/.test(e2 || ''), `${e1} | ${e2}`);
+}
+
+// ── 5b. Datos de la cuenta para el endpoint ──────────────────────────────
+{
+  const ctx = await baseNueva(); const { db, cuentaId } = ctx;
+  const r = (await db.query(`SELECT * FROM public.meli_cuenta_info($1,$2)`, [SECRETO, cuentaId])).rows;
+  check('meli_cuenta_info devuelve el id de vendedor de Mercado Libre y si está activa', r.length === 1 && r[0].meli_user_id === '999' && r[0].activa === true, JSON.stringify(r));
+  const r0 = (await db.query(`SELECT * FROM public.meli_cuenta_info($1,$2)`, [SECRETO, 987654])).rows;
+  const e = await falla(() => db.query(`SELECT * FROM public.meli_cuenta_info($1,$2)`, ['otro-secreto-que-no-es-el-bueno-xx', cuentaId]));
+  const anon = await comoRol(db, 'anon', null, async () => (await db.query(`SELECT * FROM public.meli_cuenta_info($1,$2)`, [SECRETO, cuentaId])).rows.length);
+  check('… cuenta inexistente: 0 filas; secreto malo: "no autorizado"; anon con el secreto correcto sí (así llama el servidor)', r0.length === 0 && e?.includes('no autorizado') && anon === 1, `${r0.length} ${e} ${anon}`);
+}
+
+// ── 5c. Sobre la base TAL COMO QUEDÓ en producción (script 3 de antes de este cambio) ───
+{
+  // El archivo 3 actual ya trae las correcciones de este cambio; lo que corrió en producción NO. Esta prueba
+  // carga esa versión vieja (tests/sql/fixtures) y encima el script 7: es el camino real de la migración.
+  const viejo = fs.readFileSync(path.join(AQUI, 'fixtures/meli_esquema_base.aplicado_en_produccion.sql'), 'utf8');
+  const ctx = await baseNueva({ base3: viejo }); const { db, cuentaId } = ctx;
+  const { rows: pol } = await db.query(`SELECT policyname, cmd FROM pg_policies WHERE tablename='meli_publicaciones' ORDER BY 1`);
+  check('Sobre la base de producción: el script 7 reemplaza la política FOR ALL vieja por la de sólo lectura', pol.length === 1 && pol[0].policyname === 'meli_publicaciones_lectura' && pol[0].cmd === 'SELECT', JSON.stringify(pol));
+  const e = await comoRol(db, 'authenticated', 'franco@x.com', () => falla(() => db.query(`DELETE FROM public.meli_publicaciones`)));
+  check('… y el navegador ya no puede borrar vínculos', e && /permission denied/.test(e), e);
+  // el faltante sumado por producto llega a una base que corrió el script 3 viejo
+  const s = await nuevoStock(db, { cantidad: 3 });
+  await vincular(db, { cuenta: cuentaId, item: 'MLA100100001', stock: s });
+  await vincular(db, { cuenta: cuentaId, item: 'MLA100100002', stock: s });
+  const o = await nuevaOrden(ctx, [{ item: 'MLA100100001', cant: 2 }, { item: 'MLA100100002', cant: 2 }]);
+  const r = (await db.query(`SELECT public.meli_procesar_orden($1, 1000) AS r`, [o])).rows[0].r;
+  check('… y el arreglo del descuento (faltante sumado por producto) también llega: 2 + 2 con 3 disponibles no descuenta nada', r.ok === false && (await db.query(`SELECT cantidad FROM public.stock WHERE id=$1`, [s])).rows[0].cantidad === 3, JSON.stringify(r));
+  const e2 = await falla(() => db.exec(SQL('meli_esquema_base.sql')));
+  const e3 = await falla(() => db.exec(SQL('meli_vincular.sql')));
+  const { rows: pol2 } = await db.query(`SELECT policyname FROM pg_policies WHERE tablename='meli_publicaciones'`);
+  check('Y encima se puede correr el 3 NUEVO y el 7 otra vez sin romper, con la política sólo de lectura', !e2 && !e3 && pol2.length === 1 && pol2[0].policyname === 'meli_publicaciones_lectura', `${e2} | ${e3}`);
 }
 
 // ── 6. Revalidar una orden ───────────────────────────────────────────────

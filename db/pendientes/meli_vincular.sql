@@ -28,6 +28,10 @@
 --    Desvincular deja las órdenes abiertas de ese aviso "sin vincular" (revisar). Las procesadas
 --    o descontadas no se tocan nunca.
 --
+--  ⚠ ORDEN Y REPETICIÓN: si la base ya corrió meli_ventas_migration.sql (4), correr SÓLO este archivo NO actualiza
+--    meli_procesar_orden: hay que volver a correr el 4 actualizado (trae la línea que llama a meli__revalidar_orden).
+--    Hasta entonces Procesar sigue funcionando como antes (sin revalidar), y la pantalla de vincular también.
+--
 --  ERRORES (excepciones con nombre): no autorizado · CUENTA_INEXISTENTE · ITEM_INVALIDO ·
 --    VARIACION_INVALIDA · STOCK_INEXISTENTE · A_PEDIDO_NO_SE_VINCULA · STOCK_CON_IMEI ·
 --    VINCULO_CAMBIO_CONCURRENTE · VINCULO_INEXISTENTE · ORDEN_INEXISTENTE
@@ -93,6 +97,11 @@ GRANT SELECT ON public.meli_vinculos_historial TO authenticated;
 -- el GRANT queda explícito en vez de depender de los privilegios por defecto del entorno.
 GRANT SELECT ON public.meli_ordenes     TO authenticated;
 GRANT SELECT ON public.meli_orden_items TO authenticated;
+
+-- Las secuencias de estas tablas nacen con privilegios por defecto para anon y authenticated en Supabase:
+-- no permiten insertar filas, pero tampoco hay motivo para dejarlas abiertas.
+REVOKE ALL ON SEQUENCE public.meli_vinculos_historial_id_seq FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON SEQUENCE public.meli_publicaciones_id_seq      FROM PUBLIC, anon, authenticated;
 
 
 -- ─── 2 · Quitar una frase de un motivo (pura) ───────────────────────────────
@@ -338,6 +347,23 @@ END;
 $$;
 
 
+-- ─── 6b · Datos mínimos de una cuenta (para el endpoint) ────────────────────
+-- El servidor necesita el id de vendedor de Mercado Libre de la cuenta para listar sus avisos y para
+-- comprobar que un aviso es suyo. Sale de la base por id de cuenta, NUNCA del navegador.
+CREATE OR REPLACE FUNCTION public.meli_cuenta_info(p_secreto TEXT, p_cuenta_id BIGINT)
+RETURNS TABLE (meli_user_id TEXT, activa BOOLEAN)
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+#variable_conflict use_column
+BEGIN
+  IF NOT public.meli_secreto_ok(p_secreto) THEN RAISE EXCEPTION 'no autorizado'; END IF;
+  RETURN QUERY SELECT c.meli_user_id, c.activa FROM public.meli_cuentas c WHERE c.id = p_cuenta_id;
+END;
+$$;
+
+
 -- ─── 7 · Descuento: faltante sumado por producto ────────────────────────────
 -- COPIA EXACTA de meli__descontar_core en meli_esquema_base.sql (el test de sincronía lo verifica).
 -- Está acá para que una base que ya corrió el script 3 reciba el arreglo.
@@ -482,10 +508,17 @@ $$;
 -- ─── 8 · Permisos ───────────────────────────────────────────────────────────
 -- Las RPC con secreto las llama el servidor con la anon key (como el resto de meli_*): anon tiene que
 -- poder EJECUTARLAS, y sin el secreto correcto fallan en la primera línea, sin efectos.
+-- (Postgres da EXECUTE a PUBLIC por defecto: se revoca y se otorga sólo a los dos roles de la API, para que los
+-- permisos queden EXACTOS en vez de depender del valor por defecto.)
+REVOKE EXECUTE ON FUNCTION public.meli_publicacion_vincular(TEXT, BIGINT, TEXT, TEXT, UUID, INTEGER, TEXT, INTEGER, TEXT) FROM PUBLIC;
+REVOKE EXECUTE ON FUNCTION public.meli_publicacion_desvincular(TEXT, BIGINT, TEXT, TEXT, INTEGER, TEXT) FROM PUBLIC;
+REVOKE EXECUTE ON FUNCTION public.meli_cuenta_info(TEXT, BIGINT) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION public.meli_publicacion_vincular(TEXT, BIGINT, TEXT, TEXT, UUID, INTEGER, TEXT, INTEGER, TEXT)
   TO anon, authenticated;
 GRANT EXECUTE ON FUNCTION public.meli_publicacion_desvincular(TEXT, BIGINT, TEXT, TEXT, INTEGER, TEXT)
   TO anon, authenticated;
+
+GRANT EXECUTE ON FUNCTION public.meli_cuenta_info(TEXT, BIGINT) TO anon, authenticated;
 
 -- La del navegador: sólo con sesión de usuario autorizado.
 REVOKE EXECUTE ON FUNCTION public.meli_orden_revalidar(BIGINT) FROM PUBLIC, anon;

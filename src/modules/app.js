@@ -19,6 +19,7 @@ import './reportes.js';
 import './presupuestos.js';
 import './blog.js';
 import './meli.js';
+import './meli-vincular.js';
 import './meli-ordenes.js';
 import Bandeja from './bandeja.js';
 

@@ -290,6 +290,20 @@ const resp200 = (json) => ({ ok: true, status: 200, json: async () => json });
   check('Apretarlo de nuevo sin restantes no hace nada', e.log.rpc.filter((r) => r.n === 'meli_orden_revalidar').length === 51);
 }
 {
+  // La cola pendiente NO se pierde al cambiar OTRO vínculo (hallazgo de la 3.ª revisión)
+  const muchas = Array.from({ length: 51 }, (_, k) => ({ id: k + 1, orden_id: 100 + k }));
+  const e = entorno({ abiertas: muchas }); await e.M.cargar();
+  e.M.vincular('MLA222222222', '5550000001'); e.M.elegir(S.teriaq5); await e.M.confirmar();
+  check('Primer vínculo con 51 órdenes: queda 1 pendiente', e.M._resto.length === 1 && e.M._resto[0] === 150);
+  // el segundo vínculo toca una sola orden (la 999) → la pendiente 150 se conserva y se revalida junto con ella
+  e.ctx.supa.from = ((orig) => (tabla) => { const q = orig(tabla); if (tabla === 'meli_orden_items') { q.range = () => { q.then = (res) => res({ data: [{ id: 1, orden_id: 999 }], error: null }); return q; }; } return q; })(e.ctx.supa.from);
+  const antes = e.log.rpc.filter((r) => r.n === 'meli_orden_revalidar').length;
+  e.M.vincular('MLA111111111', ''); e.M.elegir(S.teriaq5); await e.M.confirmar();
+  const nuevas = e.log.rpc.filter((r) => r.n === 'meli_orden_revalidar').slice(antes).map((r) => r.a.p_orden_id).sort();
+  check('Cambiar otro vínculo NO pierde la cola: la orden pendiente (150) se revalida junto con la nueva (999) y el botón desaparece', nuevas.join() === '150,999' && e.M._resto.length === 0 && !html(e).includes('Actualizar las restantes'), JSON.stringify({ nuevas, resto: e.M._resto }));
+  check('… y una orden repetida entre la cola vieja y la nueva se revalida UNA sola vez', (() => { e.M._resto = [5, 6]; return true; })() && (await (async () => { const r = await e.M._revalidar({ ids: [6, 7], truncado: false }); return r.hechas === 3 && e.M._resto.length === 0; })()));
+}
+{
   // Un pedido colgado no deja la pantalla "ocupada" para siempre
   const e = entorno(); await e.M.cargar();
   e.M._timeoutMs = 40;

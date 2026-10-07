@@ -1547,6 +1547,40 @@ const entornoVenta = (extra = {}, cfg = {}) => {
   }
 }
 
+// 34. CASO REAL (conversión USD→USDT con sobrante): el arreglo de hoy cuadra con los movimientos reales
+{
+  const { State, base, libro, sembrar } = nuevoEntorno();
+  sembrar({ Angel: { 'USD cash': 10000 }, 'Tincho GMG': { 'USDT': 0 } });
+  // Lo que Franco registró en el lote: conversión 8.790 USD → 8.526,30 USDT y pago de 8.526,30 USDT
+  await State.moverCaja('Angel', 'USD cash', 8790, 'Tincho GMG', 'USDT', 8526.30, { tipo: 'proveedor', referencia: 'lote' });
+  await State.debitarCaja('Tincho GMG', 'USDT', 8526.30, { tipo: 'proveedor', referencia: 'lote' });
+  check('Antes del arreglo: Angel 1.210 USD de más (1.210) y Tincho 910 USDT de menos (0)', base['Angel||USD cash'] === 1210 && base['Tincho GMG||USDT'] === 0, JSON.stringify(base));
+  // El arreglo: (1) pasada de manos 1.173,70 USD → USDT; (2) gasto de comisión 36,30 USD desde Angel; (3) pago adicional 263,70 USDT
+  await State.moverCaja('Angel', 'USD cash', 1173.70, 'Tincho GMG', 'USDT', 1173.70, { tipo: 'movimiento' });
+  await State.debitarCaja('Angel', 'USD cash', 36.30, { tipo: 'gasto' });
+  await State.debitarCaja('Tincho GMG', 'USDT', 263.70, { tipo: 'proveedor', referencia: 'lote' });
+  check('Después del arreglo: Angel en 0 (salieron los 10.000 USD) y Tincho GMG en 910 USDT',
+    base['Angel||USD cash'] === 0 && base['Tincho GMG||USDT'] === 910, JSON.stringify(base));
+  check('… y el libro de movimientos cuadra con los saldos (control de cuadre en 0)', cuadra(base, libro).length === 0, JSON.stringify(cuadra(base, libro)));
+}
+
+// 35. VARIANTE con el sobrante en la caja de Angel (USDT): Tincho queda en 0
+{
+  const { State, base, libro, sembrar } = nuevoEntorno();
+  sembrar({ Angel: { 'USD cash': 1330, 'USDT': 659.4 }, 'Tincho GMG': { 'USDT': 0 } });
+  // (1) sobrante: Angel USD cash → Angel USDT (misma persona, distinto bolsillo)
+  const r1 = await State.moverCaja('Angel', 'USD cash', 910, 'Angel', 'USDT', 910, { tipo: 'movimiento' });
+  // (2) lo que faltaba pagar: Angel USD cash → Tincho GMG USDT, y (3) pago al lote desde Tincho
+  const r2 = await State.moverCaja('Angel', 'USD cash', 263.70, 'Tincho GMG', 'USDT', 263.70, { tipo: 'movimiento' });
+  const r3 = await State.debitarCaja('Tincho GMG', 'USDT', 263.70, { tipo: 'proveedor', referencia: 'lote' });
+  // (4) comisión del sobrante como gasto
+  const r4 = await State.debitarCaja('Angel', 'USD cash', 36.30, { tipo: 'gasto' });
+  check('Variante: las 4 operaciones se aplican (traspaso de la misma persona entre bolsillos incluido)', r1 && r2 && r3 && r4);
+  check('Saldos finales: Angel USD cash 120, Angel USDT 1.569,40, Tincho GMG 0',
+    base['Angel||USD cash'] === 120 && base['Angel||USDT'] === 1569.4 && base['Tincho GMG||USDT'] === 0, JSON.stringify(base));
+  check('… y el libro cuadra con los saldos (control de cuadre en 0)', cuadra(base, libro).length === 0, JSON.stringify(cuadra(base, libro)));
+}
+
 // 30. Altas: si el registro no se puede crear, NO se toca la caja (o se deshace)
 {
   const e = nuevoEntorno({ modulos: ['gastos.js'], dom: { 'gf-motivo': 'Alquiler', 'gf-monto': '50', 'gf-caja-persona': 'Franco', 'gf-caja-bolsillo': 'USD cash', 'gf-moneda': 'USD', 'gf-cat': 'x', 'gf-resp': 'Franco' },

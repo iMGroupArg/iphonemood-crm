@@ -304,6 +304,31 @@ const resp200 = (json) => ({ ok: true, status: 200, json: async () => json });
   check('… y una orden repetida entre la cola vieja y la nueva se revalida UNA sola vez', (() => { e.M._resto = [5, 6]; return true; })() && (await (async () => { const r = await e.M._revalidar({ ids: [6, 7], truncado: false }); return r.hechas === 3 && e.M._resto.length === 0; })()));
 }
 {
+  // Las órdenes que FALLAN no se pierden: vuelven a la cola y se reintentan con el botón (hallazgo de la 4.ª revisión)
+  const abiertas = [{ id: 1, orden_id: 101 }, { id: 2, orden_id: 102 }, { id: 3, orden_id: 103 }];
+  const e = entorno({ abiertas }); await e.M.cargar();
+  let fallos = new Set([102, 103]);
+  e.ctx.supa.rpc = async (n, a) => {
+    e.log.rpc.push({ n, a });
+    if (fallos.has(a.p_orden_id)) { if (a.p_orden_id === 103) throw new Error('red caída'); return { data: null, error: { message: 'x' } }; }
+    return { data: { ok: true }, error: null };
+  };
+  e.M.vincular('MLA222222222', '5550000001'); e.M.elegir(S.teriaq5); await e.M.confirmar();
+  check('Si una orden falla (error) y otra explota (excepción de red) en medio del lote, la tercera se intenta igual y las dos fallidas quedan en la cola', e.log.rpc.filter((r) => r.n === 'meli_orden_revalidar').length === 3 && e.M._resto.join() === '102,103' && html(e).includes('Actualizar las restantes (2)'), JSON.stringify({ resto: e.M._resto }));
+  fallos = new Set();
+  await e.M.revalidarResto();
+  check('El botón las reintenta y, si esta vez salen bien, la cola queda vacía', e.M._resto.length === 0 && e.M._msg.texto.includes('Se actualizaron 2 orden(es) más') && !html(e).includes('Actualizar las restantes'));
+}
+{
+  // La cola tiene tope: no crece sin límite y lo dice
+  const muchas = Array.from({ length: 700 }, (_, k) => ({ id: k + 1, orden_id: 1000 + k }));
+  const e = entorno({ abiertas: muchas }); await e.M.cargar();
+  e.M._leerTodoOriginal = e.M._leerTodo;
+  e.M.vincular('MLA222222222', '5550000001'); e.M.elegir(S.teriaq5); await e.M.confirmar();
+  check('Con 700 órdenes pendientes la cola se recorta a 500, avisa, y las 50 primeras igual se revalidaron', e.M._resto.length === 500 && e.M._colaRecortada === true && e.M._msg.texto.includes('más de 500') && e.log.rpc.filter((r) => r.n === 'meli_orden_revalidar').length === 50, JSON.stringify({ resto: e.M._resto.length }));
+}
+
+{
   // Un pedido colgado no deja la pantalla "ocupada" para siempre
   const e = entorno(); await e.M.cargar();
   e.M._timeoutMs = 40;

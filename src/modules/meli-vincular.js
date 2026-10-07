@@ -26,6 +26,7 @@ const MeliVincular = {
   _seq: 0,                // número del último pedido de lista; las respuestas viejas se descartan
   _stockParcial: false,   // el stock tenía más de 5000 productos y se cargó una parte
   _resto: [],             // órdenes abiertas que quedaron SIN revalidar (el tope es de 50 por vez)
+  _colaRecortada: false,  // la cola superó el tope y se recortó
   _timeoutMs: 30000,      // tope de espera de cada pedido al servidor: si no, un pedido colgado dejaría la pantalla "ocupada" para siempre
   _elegido: null,         // id del stock elegido en el panel
   _msg: null,
@@ -277,8 +278,12 @@ const MeliVincular = {
 
   // Revalida una por una (cada llamada es su propia transacción) con un tope de 50 por vez. Las que quedan se guardan en
   // `_resto` y un botón sigue desde ahí: nunca se vuelve a empezar por las primeras (que ya están hechas).
+  //   · Las NUEVAS se suman a las que ya estaban pendientes, sin repetir (cambiar otro vínculo no pierde la cola).
+  //   · Las que FALLAN (orden ocupada, error de red…) vuelven al final de la cola para reintentarse: no se pierden.
+  //   · La cola tiene un tope (500): más allá se avisa y se confía en que Procesar revalida cada orden (red de seguridad).
+  MAX_COLA: 500,
+
   async _revalidar(abiertas) {
-    // Las nuevas se SUMAN a las que ya habían quedado pendientes (sin repetir): cambiar otro vínculo no pierde la cola.
     const todas = [...new Set([...(abiertas ? abiertas.ids : []), ...this._resto])];
     const TOPE = 50;
     const lote = todas.slice(0, TOPE);
@@ -287,13 +292,20 @@ const MeliVincular = {
   },
 
   async _correrRevalidacion(lote) {
-    let hechas = 0, ocupadas = 0;
+    let hechas = 0;
+    const falladas = [];
     for (const id of lote) {
-      const { data, error } = await supa.rpc('meli_orden_revalidar', { p_orden_id: id });
-      if (!error && data && data.ok) hechas++; else ocupadas++;
+      try {
+        const { data, error } = await supa.rpc('meli_orden_revalidar', { p_orden_id: id });
+        if (!error && data && data.ok) hechas++; else falladas.push(id);
+      } catch { falladas.push(id); }       // un pedido que explota no aborta el lote ni se pierde
     }
+    // las fallidas vuelven al FINAL de la cola (sin repetir), con el tope
+    this._resto = [...new Set([...this._resto, ...falladas])];
+    this._colaRecortada = this._resto.length > this.MAX_COLA;
+    if (this._colaRecortada) this._resto = this._resto.slice(0, this.MAX_COLA);
     if (window.MeliOrdenes && typeof MeliOrdenes.cargar === 'function') MeliOrdenes.cargar();
-    return { hechas, ocupadas, restantes: this._resto.length };
+    return { hechas, ocupadas: falladas.length, restantes: this._resto.length, recortada: this._colaRecortada };
   },
 
   // Botón "Actualizar las restantes": sigue con las que quedaron sin revalidar.
@@ -304,7 +316,7 @@ const MeliVincular = {
       const lote = this._resto.slice(0, 50);
       this._resto = this._resto.slice(50);
       const rev = await this._correrRevalidacion(lote);
-      this._msg = { ok: true, texto: `Se actualizaron ${rev.hechas} orden(es) más.${rev.ocupadas ? ` ${rev.ocupadas} estaban ocupadas: se actualizan solas al procesarlas.` : ''}${rev.restantes ? ` Quedan ${rev.restantes}.` : ''}` };
+      this._msg = { ok: true, texto: `Se actualizaron ${rev.hechas} orden(es) más.${rev.ocupadas ? ` ${rev.ocupadas} no se pudieron (quedan en la lista para reintentar).` : ''}${rev.restantes ? ` Quedan ${rev.restantes}.` : ''}` };
     } finally { this._ocupado = false; this.pintar(); }
   },
 
@@ -371,7 +383,8 @@ const MeliVincular = {
   _resumenRevalidar(rev) {
     let t = '';
     if (rev.hechas) t += ` Se actualizaron ${rev.hechas} orden(es) pendiente(s).`;
-    if (rev.ocupadas) t += ` ${rev.ocupadas} orden(es) estaban ocupadas: se actualizan solas al procesarlas.`;
+    if (rev.ocupadas) t += ` ${rev.ocupadas} orden(es) no se pudieron actualizar ahora (quedan en la lista para reintentar y se revisan solas al procesarlas).`;
+    if (rev.recortada) t += ` Hay más de ${this.MAX_COLA} órdenes pendientes: se muestran las primeras; el resto se revisa al procesarlas.`;
     if (rev.restantes) t += ` Quedan ${rev.restantes} más por actualizar: usá el botón "Actualizar las restantes".`;
     return t;
   },

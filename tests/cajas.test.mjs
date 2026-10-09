@@ -1619,8 +1619,8 @@ const entornoVenta = (extra = {}, cfg = {}) => {
     orden(12, [{ meli_item_id: 'MLAY', titulo: 'De la cuenta 2', cantidad: 1, stock_id: null }], { cuentaId: 2 }),
   ];
   const dosCuentas = e.mod.MeliOrdenes._vista();
-  check('Con dos cuentas: la orden de la cuenta abierta ofrece «Vincular» (con data-cuenta) y la de la OTRA cuenta no, y explica por qué',
-    dosCuentas.includes('data-item="MLAX"') && dosCuentas.includes('data-cuenta="1"') && !dosCuentas.includes('data-item="MLAY"') && dosCuentas.includes('es de otra cuenta'), dosCuentas.slice(0, 300));
+  check('Con dos cuentas: cada orden ofrece «Vincular» con SU cuenta en data-cuenta (la pantalla de vínculos cambia de cuenta)',
+    dosCuentas.includes('data-item="MLAX"') && dosCuentas.includes('data-cuenta="1"') && dosCuentas.includes('data-item="MLAY"') && dosCuentas.includes('data-cuenta="2"'), dosCuentas.slice(0, 300));
   e.mod.MeliVincular._cuenta = null;
   e.State.meliOrdenes = ordenesOriginales;
 

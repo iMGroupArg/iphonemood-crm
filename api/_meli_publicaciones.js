@@ -12,10 +12,13 @@
 // no lo que mande el navegador. `vinculado_por` sale de la sesión, nunca del cuerpo.
 //
 // Plan: docs/meli-vincular-plan.md. Esquema y RPC: db/pendientes/meli_vincular.sql.
+//
+// NO es una función de Vercel por sí sola (el plan Hobby permite 12 y ya están usadas): `api/meli/conectar.js`
+// la atiende cuando entra por `/api/meli/publicaciones` (reescritura en vercel.json).
 
-const { limitar } = require('../_ratelimit.js');
-const M = require('../_meli.js');
-const I = require('../_meli_items.js');
+const { limitar } = require('./_ratelimit.js');
+const M = require('./_meli.js');
+const I = require('./_meli_items.js');
 
 // Debe coincidir con `functions` en vercel.json.
 const MAX_DURATION_S = 30;

@@ -1,14 +1,27 @@
 {
   "framework": null,
   "functions": {
-    "api/meli/worker.js": { "maxDuration": 30 },
-    "api/meli/webhook.js": { "maxDuration": 10 },
-    "api/meli/publicaciones.js": { "maxDuration": 30 }
+    "api/meli/worker.js": {
+      "maxDuration": 30
+    },
+    "api/meli/webhook.js": {
+      "maxDuration": 10
+    },
+    "api/meli/conectar.js": {
+      "maxDuration": 30
+    }
   },
   "crons": [
-    { "path": "/api/meli/worker", "schedule": "0 9 * * *" }
+    {
+      "path": "/api/meli/worker",
+      "schedule": "0 9 * * *"
+    }
   ],
   "rewrites": [
+    {
+      "source": "/api/meli/publicaciones",
+      "destination": "/api/meli/conectar?_f=publicaciones"
+    },
     {
       "source": "/sitemap.xml",
       "destination": "/api/sitemap"

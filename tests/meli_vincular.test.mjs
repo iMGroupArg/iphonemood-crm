@@ -1,4 +1,4 @@
-// Pruebas del endpoint api/meli/publicaciones.js y del adaptador api/_meli_items.js, con Supabase y
+// Pruebas del endpoint api/_meli_publicaciones.js y del adaptador api/_meli_items.js, con Supabase y
 // Mercado Libre SIMULADOS (fetch de mentira). Carga el código real.
 //
 //   node tests/meli_vincular.test.mjs
@@ -16,7 +16,7 @@ process.env.SUPABASE_ANON_KEY = 'anon-de-prueba';
 
 const require = createRequire(import.meta.url);
 const RAIZ = new URL('..', import.meta.url).pathname;
-const handler = require(RAIZ + 'api/meli/publicaciones.js');
+const handler = require(RAIZ + 'api/_meli_publicaciones.js');
 const I = require(RAIZ + 'api/_meli_items.js');
 
 let ok = 0, fail = 0;
@@ -340,8 +340,26 @@ console.log('\n══ Endpoint de publicaciones de Mercado Libre (Mercado Libre 
 // ── 8. Tiempo, configuración y sin fugas en ningún error ─────────────────
 {
   const vj = JSON.parse(fs.readFileSync(RAIZ + 'vercel.json', 'utf8'));
-  check('vercel.json le da a este endpoint la misma duración que usa el código (30 s)', vj.functions['api/meli/publicaciones.js']?.maxDuration === handler.MAX_DURATION_S && handler.MAX_DURATION_S === 30);
-  const src = fs.readFileSync(RAIZ + 'api/meli/publicaciones.js', 'utf8');
+  check('vercel.json le da a la función que atiende este endpoint (conectar.js) la misma duración que usa el código (30 s)', vj.functions['api/meli/conectar.js']?.maxDuration === handler.MAX_DURATION_S && handler.MAX_DURATION_S === 30);
+  const src = fs.readFileSync(RAIZ + 'api/_meli_publicaciones.js', 'utf8');
+  // Plan Hobby: máximo 12 funciones. Cuenta los .js de api/ que no empiezan con "_" (Vercel los despliega como función).
+  const contar = d => fs.readdirSync(d, { withFileTypes: true }).reduce((n, e) => n + (e.isDirectory() ? contar(d + '/' + e.name) : (e.name.endsWith('.js') && !e.name.startsWith('_') ? 1 : 0)), 0);
+  check('El proyecto no pasa de 12 funciones de Vercel (límite del plan Hobby)', contar(RAIZ + 'api') <= 12);
+  const rw = (vj.rewrites || [])[0];
+  check('/api/meli/publicaciones se reescribe a conectar.js con el discriminador que ese archivo lee', rw && rw.source === '/api/meli/publicaciones' && rw.destination === '/api/meli/conectar?_f=publicaciones' && /_f\b[\s\S]{0,200}=== 'publicaciones'/.test(fs.readFileSync(RAIZ + 'api/meli/conectar.js', 'utf8')));
+  const conectar = require(RAIZ + 'api/meli/conectar.js');
+  const via = async (query, method = 'GET', token = null) => {
+    const r = { code: null, body: null, setHeader() {}, status(n) { this.code = n; return this; }, json(o) { this.body = o; return this; } };
+    const h = { 'x-forwarded-for': `10.9.9.${++ipN % 250}` }; if (token) h['x-crm-token'] = token;
+    await conectar({ method, query, headers: h, url: '/api/meli/conectar?' + new URLSearchParams(query), socket: {} }, r);
+    return r;
+  };
+  const a = await via({ _f: 'publicaciones', cuenta: 'x' });
+  check('Con _f=publicaciones, conectar.js atiende publicaciones (GET sin sesión → 401)', a.code === 401, JSON.stringify(a.code));
+  const b = await via({});
+  check('Sin _f, conectar.js sigue siendo POST-only (GET → 405)', b.code === 405, JSON.stringify(b.code));
+  const c = await via({ _f: 'publicaciones' }, 'PUT', 'tok-franco');
+  check('Con _f=publicaciones, un método no permitido recibe 405 de publicaciones', c.code === 405, JSON.stringify(c.code));
   const ms = Number(src.match(/PRESUPUESTO_MS = ([\d_]+)/)[1].replace(/_/g, '')), res = Number(src.match(/RESERVA_MS = ([\d_]+)/)[1].replace(/_/g, ''));
   check('El presupuesto de tiempo (24 s) deja margen bajo el límite de la función (30 s) y hay reserva para guardar', ms < 30_000 && ms >= 20_000 && res >= 3_000 && res < ms);
   check('El deadline se fija ANTES de autenticar (t0 al entrar al handler)', /const t0 = Date\.now\(\);[\s\S]{0,900}emailAutorizado/.test(src));

@@ -71,7 +71,7 @@ Nadie toma una orden estando bloqueado por un vínculo o por un stock.
 `GRANT SELECT` **explícito** para `authenticated` en `meli_ordenes`, `meli_orden_items`, `meli_publicaciones`, `meli_vinculos_historial` (con sus políticas SELECT), y se prueba el conteo con un
 usuario autorizado real (rol `authenticated` con claims), no con el dueño.
 
-## (a) Endpoint — `api/meli/publicaciones.js`
+## (a) Endpoint — `api/_meli_publicaciones.js` (URL pública `/api/meli/publicaciones`; la atiende `api/meli/conectar.js` por una reescritura de `vercel.json`: el plan Hobby permite 12 funciones y ya estaban usadas)
 
 - **GET** `?cuenta=<id>[&offset=<n>][&estado=active|paused]` o **`?item=<MLA…>`** (consulta directa de un aviso por id: para llegar desde una orden aunque el aviso
   ya esté cerrado y no aparezca en el listado). Autenticación como `worker.js` POST: `x-crm-token` → `emailAutorizado`; `limitar()`; `Cache-Control: no-store`.
@@ -128,7 +128,7 @@ con el motivo mientras haya ítems sin vincular. Esto vive en `meli-ordenes.js` 
 | Pieza | Archivo |
 |---|---|
 | SQL (script **7**, idempotente) | `db/pendientes/meli_vincular.sql` |
-| Endpoint | `api/meli/publicaciones.js`, adaptador `api/_meli_items.js`, `vercel.json` (`maxDuration`) |
+| Endpoint | `api/_meli_publicaciones.js` (URL pública `/api/meli/publicaciones`; la atiende `api/meli/conectar.js` por una reescritura de `vercel.json`: el plan Hobby permite 12 funciones y ya estaban usadas), adaptador `api/_meli_items.js`, `vercel.json` (`maxDuration`) |
 | Pantalla | `src/modules/meli-vincular.js`, montaje en `meli.js`/`app.js` |
 | Pruebas | `tests/sql/vincular.sql.test.mjs` (pglite) · `tests/meli_vincular.test.mjs` (endpoint con MELI simulado + pantalla en vm) |
 

@@ -5,15 +5,17 @@
   "scripts": {
     "test": "node caja.sql.test.mjs",
     "test:meli": "node meli.sql.test.mjs",
-    "test:todo": "node caja.sql.test.mjs && node meli.sql.test.mjs && node stock.sql.test.mjs && node catalogo.sql.test.mjs && node vincular.sql.test.mjs && node canje.sql.test.mjs && node controles.test.mjs && node paquete.test.mjs",
+    "test:todo": "node caja.sql.test.mjs && node meli.sql.test.mjs && node stock.sql.test.mjs && node catalogo.sql.test.mjs && node vincular.sql.test.mjs && node canje.sql.test.mjs && node controles.test.mjs && node paquete.test.mjs && node vincular.concurrencia.test.mjs",
     "test:stock": "node stock.sql.test.mjs",
     "test:catalogo": "node catalogo.sql.test.mjs",
     "test:vincular": "node vincular.sql.test.mjs",
     "test:paquete": "node paquete.test.mjs",
     "test:canje": "node canje.sql.test.mjs",
-    "test:controles": "node controles.test.mjs"
+    "test:controles": "node controles.test.mjs",
+    "test:concurrencia": "node vincular.concurrencia.test.mjs"
   },
   "devDependencies": {
-    "@electric-sql/pglite": "^0.3.0"
+    "@electric-sql/pglite": "^0.3.0",
+    "embedded-postgres": "^18.4.0-beta.17"
   }
 }

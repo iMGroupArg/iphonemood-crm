@@ -143,8 +143,12 @@ Corren el SQL de `pendientes/` sobre un Postgres de verdad en WebAssembly, sin t
 cd tests/sql && npm install && npm run test:todo
 ```
 
-`test:caja`, `test:meli`, `test:stock`, `test:catalogo`. **Una sola conexión**: no prueban dos
-sesiones simultáneas, así que los bloqueos de fila, los leases y el candado global de IMEI siguen
-sin probarse en concurrencia. Tampoco reproducen los permisos y políticas reales de Supabase (el
-esquema de prueba es mínimo). Antes de correr algo en producción conviene correr estas pruebas.
+`test:caja`, `test:meli`, `test:stock`, `test:catalogo`, `test:vincular`, `test:canje`, `test:controles`, `test:paquete`: en pglite
+(una sola conexión). **`test:concurrencia`** usa un Postgres REAL (paquete de desarrollo `embedded-postgres`, que descarga ~144 MB de
+binarios en `tests/sql/node_modules`, git los ignora y NO entran al deploy) con VARIAS conexiones a la vez: comprueba que cambiar o
+desvincular un vínculo ESPERA a un Procesar en curso, que no se descuenta con un vínculo desactualizado, el doble INSERT, la ingesta
+real contra un cambio de vínculo, la pantalla contra una orden ocupada, y una prueba de esfuerzo (procesos simultáneos de procesar,
+cambiar y desvincular, y revalidar) sin deadlocks y con el stock cuadrando exacto. El motor es PostgreSQL 18 (beta); Supabase corre otra
+versión: cubre la semántica de bloqueos, no es idéntico a producción. Siguen sin reproducir los permisos y políticas reales de
+Supabase (el esquema de prueba es mínimo). Antes de correr algo en producción conviene correr estas pruebas.
 

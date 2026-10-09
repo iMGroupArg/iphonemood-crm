@@ -1648,6 +1648,50 @@ const entornoVenta = (extra = {}, cfg = {}) => {
   check('… y no la vuelve a revalidar dentro de los 30 segundos', llamadas.length === 0);
 }
 
+// 37. GASTOS: la caja que paga se elige a propósito y tiene que ser de la misma moneda
+{
+  const armar = (dom) => {
+    const e = nuevoEntorno({ modulos: ['gastos.js'], dom: { 'gf-motivo': 'Nafta', 'gf-monto': '100', 'gf-cat': 'x', 'gf-resp': 'Angel', 'gf-moneda': 'USD', ...dom },
+      dbExtra: { async crearGasto() { return 9; }, async eliminarGasto() { return true; } } });
+    e.sembrar({ Angel: { 'USD cash': 1000, 'ARS cash': 500000 }, Padre: { 'USD cash': 800, 'ARS cash': 0 } });
+    Object.assign(e.mod.Gastos, { close() {}, renderChips() {}, renderKpis() {}, renderTable() {}, mesActual: '2026-10', catObj: () => ({ nombre: 'x' }) });
+    e.State.gastos = []; e.State.categoriasGasto = [{ id: 'x', nombre: 'x', color: '#000' }]; e.State.personas = ['Angel', 'Padre'];
+    return e;
+  };
+  {
+    const e = armar({ 'gf-caja-persona': '', 'gf-caja-bolsillo': '' });
+    await e.mod.Gastos.save();
+    check('Gasto sin elegir caja: no se guarda ni se toca ninguna caja, y pide elegirla', e.State.gastos.length === 0 && e.servidor.llamadas === 0 && e.toasts.some(t => t.includes('Elegí de qué caja')), JSON.stringify(e.toasts));
+  }
+  {
+    const e = armar({ 'gf-moneda': 'ARS', 'gf-monto': '50000', 'gf-caja-persona': 'Angel', 'gf-caja-bolsillo': 'USD cash' });
+    await e.mod.Gastos.save();
+    check('Gasto de 50.000 ARS desde una caja en USD: se frena (antes descontaba 50.000 dólares) y no se guarda nada',
+      e.State.gastos.length === 0 && e.base['Angel||USD cash'] === 1000 && e.toasts.some(t => t.includes('misma moneda')), JSON.stringify({ b: e.base, t: e.toasts }));
+  }
+  {
+    const e = armar({ 'gf-caja-persona': 'Padre', 'gf-caja-bolsillo': 'USD cash' });
+    await e.mod.Gastos.save();
+    check('Gasto de 100 USD desde la caja de Padre: se descuenta de ESA caja (800 → 700) y no de otra',
+      e.base['Padre||USD cash'] === 700 && e.base['Angel||USD cash'] === 1000 && e.State.gastos.length === 1, JSON.stringify(e.base));
+    check('… y el aviso dice de qué caja salió y cuánto queda', e.toasts.some(t => t.includes('Padre · USD cash') && t.includes('queda')), JSON.stringify(e.toasts));
+  }
+  {
+    const e = armar({ 'gf-caja-persona': 'Angel', 'gf-caja-bolsillo': 'USDT' });
+    e.sembrar({ Angel: { 'USDT': 500 }, Padre: {} });
+    await e.mod.Gastos.save();
+    check('Un gasto en USD se puede pagar desde una caja USDT (1 a 1)', e.base['Angel||USDT'] === 400, JSON.stringify(e.base));
+  }
+  {
+    // La lista de cajas sigue a la moneda
+    const e = armar({});
+    e.State.cajas = { Angel: { 'ARS cash': 1, 'ARS Mercado Pago': 1, 'USD cash': 1, 'USDT': 1 } };
+    const ars = e.mod.Gastos._opcionesBolsillo('ARS'), usd = e.mod.Gastos._opcionesBolsillo('USD');
+    check('Las cajas ofrecidas siguen a la moneda: ARS incluye «ARS Mercado Pago» y excluye USD; USD incluye USD cash y USDT',
+      ars.includes('ARS Mercado Pago') && !ars.includes('USD cash') && usd.includes('USD cash') && usd.includes('USDT') && !usd.includes('ARS'), ars + ' | ' + usd);
+  }
+}
+
 // 30. Altas: si el registro no se puede crear, NO se toca la caja (o se deshace)
 {
   const e = nuevoEntorno({ modulos: ['gastos.js'], dom: { 'gf-motivo': 'Alquiler', 'gf-monto': '50', 'gf-caja-persona': 'Franco', 'gf-caja-bolsillo': 'USD cash', 'gf-moneda': 'USD', 'gf-cat': 'x', 'gf-resp': 'Franco' },

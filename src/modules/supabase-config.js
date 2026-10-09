@@ -100,7 +100,7 @@ const DB = {
 
     // gastos
     State.gastos = (gastosRes.data || []).map(g => ({
-      id: g.id, fecha: this.fmtFecha(g.creado_en), fechaISO: g.creado_en, motivo: g.motivo, cat: g.categoria_id,
+      id: g.id, fecha: this.fmtFecha(this._utc(g.creado_en)), fechaISO: this._utc(g.creado_en), motivo: g.motivo, cat: g.categoria_id,
       responsable: this.personasIdToNombre[g.responsable_id] || '',
       caja: `${this.personasIdToNombre[g.persona_caja_id] || ''}-${g.bolsillo}`,
       moneda: g.moneda, monto: Number(g.monto), estado: g.estado,
@@ -140,7 +140,7 @@ const DB = {
 
     // cambios (cueva)
     State.cambios = (cambiosRes.data || []).map(c => ({
-      id: c.id, fecha: this.fmtFecha(c.creado_en), fechaISO: c.creado_en, tipo: c.tipo,
+      id: c.id, fecha: this.fmtFecha(this._utc(c.creado_en)), fechaISO: this._utc(c.creado_en), tipo: c.tipo,
       entrega: Number(c.entrega), recibe: Number(c.recibe), cotiz: Number(c.cotizacion),
       cotizRef: c.cotiz_ref ? Number(c.cotiz_ref) : null,
       vieneDeVenta: !!c.viene_de_venta,
@@ -173,7 +173,7 @@ const DB = {
     // Las ventas ANULADAS (hoy solo las de Mercado Libre revertidas: esas no se borran,
     // para no perder el rastro de la plata) no se cargan: no cuentan en nada.
     State.ventas = (ventasRes.data || []).filter(v => v.estado !== 'anulada').map(v => ({
-      id: v.id, fecha: this.fmtFecha(v.fecha_venta || v.creado_en), fechaISO: v.fecha_venta || v.creado_en, cliente: v.cliente,
+      id: v.id, fecha: this.fmtFecha(v.fecha_venta || this._utc(v.creado_en)), fechaISO: v.fecha_venta || this._utc(v.creado_en), cliente: v.cliente,
       clienteDni: v.cliente_dni || '', clienteTel: v.cliente_tel || '', clienteEmail: v.cliente_email || '',
       tipoVenta: v.tipo_venta || 'minorista',
       // Mercado Libre: la orden de origen, la cotización congelada al procesar y el costo
@@ -202,7 +202,7 @@ const DB = {
     });
     State.reparaciones = (reparacionesRes.data || []).map(r => ({
       id: r.id, cliente: r.cliente, tel: r.telefono || '', equipo: r.equipo, falla: r.falla || '',
-      clave: r.clave_desbloqueo || '', estado: r.estado, fechaIngreso: this.fmtFecha(r.creado_en),
+      clave: r.clave_desbloqueo || '', estado: r.estado, fechaIngreso: this.fmtFecha(this._utc(r.creado_en)),
       diagnostico: r.diagnostico || '', presupuestoAprobado: r.presupuesto_aprobado,
       repuestos: repuestosPorRep[r.id] || [], pagos: pagosPorRep[r.id] || [],
       costoMO: Number(r.costo_mano_obra), precioFinal: Number(r.precio_final),
@@ -576,6 +576,17 @@ const DB = {
     ]);
   },
 
+  // Algunas columnas `creado_en` (gastos, operaciones de cueva…) guardan la hora SIN zona horaria,
+  // en UTC. Sin zona, el navegador la toma como hora LOCAL y un gasto cargado el 8/10 a las 21:02
+  // (Argentina) aparecía como 9/10 00:02. Si el texto no trae zona, se asume UTC; si la trae
+  // (timestamptz) o es solo fecha, queda como está.
+  _utc(v) {
+    if (typeof v !== 'string' || !v) return v;
+    const t = v.trim();
+    if (/^\d{4}-\d{2}-\d{2}$/.test(t)) return v;                 // solo fecha
+    if (/(Z|[+-]\d{2}(:?\d{2})?)$/i.test(t)) return v;            // ya trae zona
+    return t.replace(' ', 'T') + 'Z';
+  },
   fmtFecha(iso) {
     if (!iso) return 'Hoy';
     // Una fecha sola ("2026-07-30") la interpreta el navegador como medianoche

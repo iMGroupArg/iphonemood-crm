@@ -1692,6 +1692,21 @@ const entornoVenta = (extra = {}, cfg = {}) => {
   }
 }
 
+// 38. FECHAS: una hora sin zona horaria se toma como UTC (un gasto de las 21:02 no puede aparecer a las 00:02 del día siguiente)
+{
+  const fuente = fs.readFileSync('/Users/francovelas/crm-complete/iphonemood-crm/src/modules/supabase-config.js', 'utf8');
+  const ctxDB = { window: { __APP_CONFIG__: { SUPABASE_URL: 'x', SUPABASE_ANON_KEY: 'y' } }, supabase: { createClient: () => ({}) },
+    console: { log() {}, warn() {}, error() {} }, Auth: {}, State: {}, toast() {}, Date, Math, Number, JSON, String, Promise, Error };
+  vm.createContext(ctxDB);
+  vm.runInContext(fuente + '\nthis.__DB = DB;', ctxDB, { filename: 'supabase-config.js' });
+  const DBr = ctxDB.__DB;
+  const dia = iso => new Date(DBr._utc(iso)).toISOString();
+  check('Hora sin zona (como la devuelve una columna timestamp): se toma como UTC → 2026-10-09T00:02 UTC = 21:02 del 8/10 en Argentina',
+    dia('2026-10-09T00:02:11.5') === '2026-10-09T00:02:11.500Z' && dia('2026-10-09 00:02:11') === '2026-10-09T00:02:11.000Z');
+  check('Una hora que YA trae zona no se toca (timestamptz)', DBr._utc('2026-10-09T00:02:11+00:00') === '2026-10-09T00:02:11+00:00' && DBr._utc('2026-10-09T00:02:11Z') === '2026-10-09T00:02:11Z' && DBr._utc('2026-10-08T21:02:11-03:00') === '2026-10-08T21:02:11-03:00');
+  check('Una fecha sola ("2026-10-09") y los valores vacíos quedan como están', DBr._utc('2026-10-09') === '2026-10-09' && DBr._utc(null) === null && DBr._utc(undefined) === undefined);
+}
+
 // 30. Altas: si el registro no se puede crear, NO se toca la caja (o se deshace)
 {
   const e = nuevoEntorno({ modulos: ['gastos.js'], dom: { 'gf-motivo': 'Alquiler', 'gf-monto': '50', 'gf-caja-persona': 'Franco', 'gf-caja-bolsillo': 'USD cash', 'gf-moneda': 'USD', 'gf-cat': 'x', 'gf-resp': 'Franco' },

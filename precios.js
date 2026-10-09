@@ -346,6 +346,7 @@ async function init() {
   p18Init();
   p18Revelar();
   cargarCatalogoCanje();   // sin await: nunca retrasa la página
+  cargarHistoricoCanje();  // idem: respaldo del valor estimado
   burbujaIniciar();
   capasIniciar();
   buildShowcase();
@@ -3572,6 +3573,27 @@ function habilitarCanje(rows) {
   const ok = validarFilasCanje(rows).filter(r => canjeAcepta(r.modelo));
   CANJE.modelos = ok.length ? ok : null;
   CANJE.listo = ok.length > 0;
+}
+
+// Último precio vendido por modelo y capacidad (vista pública, sólo ventas de los últimos
+// 60 días, ya filtrada y acotada en la base). Es el RESPALDO del valor estimado cuando no
+// hay usados publicados de esa franja de batería. Cada fila se valida acá también: lo que
+// no tenga la forma esperada se descarta, y si todo falla queda vacío (sin número, a
+// WhatsApp). Nunca puede tumbar el asistente ni la página.
+const CANJE_VISTA_VENTAS = 'canje_ultimo_precio_publico';
+function validarHistoricoCanje(rows) {
+  if (!Array.isArray(rows)) return [];
+  return rows.filter(r => r && typeof r.modelo === 'string' && r.modelo.trim() && r.modelo.length <= CJ_MAX.modelo
+    && typeof r.storage === 'string' && r.storage.trim() && r.storage.length <= CJ_MAX.texto
+    && typeof r.precio_usd === 'number' && Number.isInteger(r.precio_usd)
+    && r.precio_usd >= 50 && r.precio_usd <= 5000)
+    .map(r => ({ modelo: r.modelo.trim(), storage: r.storage.trim(), precio_usd: r.precio_usd }));
+}
+async function cargarHistoricoCanje() {
+  try {
+    const { data, error } = await supa.from(CANJE_VISTA_VENTAS).select('modelo,storage,precio_usd');
+    CANJE.historico = (!error && Array.isArray(data)) ? validarHistoricoCanje(data) : [];
+  } catch { CANJE.historico = []; }
 }
 
 // Se llama sin await desde init(): el catálogo se carga por su cuenta y nunca

@@ -101,7 +101,7 @@ const MeliOrdenes = {
   vincular(btn) {
     const item = btn?.dataset?.item;
     if (!item || !window.MeliVincular || typeof window.MeliVincular.abrir !== 'function') return;
-    // El tercer dato (cuenta de la orden) lo usa la pantalla de vínculos para no abrir el aviso de otra cuenta.
+    // El tercer dato (cuenta de la orden): la pantalla de vínculos cambia a esa cuenta antes de consultar.
     window.MeliVincular.abrir(item, btn.dataset.var || null, btn.dataset.cuenta || null);
   },
 
@@ -152,15 +152,10 @@ const MeliOrdenes = {
           return `${base} <span style="color:var(--green)">→ Stock: ${e(nom || 'producto')}</span>`;
         }
         if ((i.cantidad || 0) <= 0) return `${base} <span style="color:var(--red)">(cantidad inválida)</span>`;
-        // El aviso se identifica por (cuenta, publicación, variación). La pantalla de vínculos trabaja
-        // con UNA cuenta a la vez: si la de esta orden no es la que tiene abierta, no se ofrece el
-        // botón (abriría el aviso de otra cuenta y fallaría) y se indica dónde vincularlo.
-        const cuentaAbierta = window.MeliVincular && window.MeliVincular._cuenta;
-        const otraCuenta = cuentaAbierta && o.cuentaId != null && String(cuentaAbierta) !== String(o.cuentaId);
+        // El aviso se identifica por (cuenta, publicación, variación): se pasa la cuenta de la orden y la
+        // pantalla de vínculos cambia a esa cuenta antes de consultar el aviso.
         const btnV = (window.MeliVincular && i.meli_item_id)
-          ? (otraCuenta
-              ? ` <span style="font-size:11px;color:var(--text-secondary)">(es de otra cuenta de Mercado Libre: cambiá de cuenta en Vincular publicaciones)</span>`
-              : ` <button class="btn btn-sm" data-item="${e(i.meli_item_id)}" data-var="${e(i.meli_variacion_id || '')}" data-cuenta="${e(o.cuentaId == null ? '' : o.cuentaId)}" onclick="MeliOrdenes.vincular(this)">Vincular</button>`)
+          ? ` <button class="btn btn-sm" data-item="${e(i.meli_item_id)}" data-var="${e(i.meli_variacion_id || '')}" data-cuenta="${e(o.cuentaId == null ? '' : o.cuentaId)}" onclick="MeliOrdenes.vincular(this)">Vincular</button>`
           : '';
         return `${base} <span style="color:var(--red)">Sin vincular</span>${btnV}`;
       }).join('<br>');

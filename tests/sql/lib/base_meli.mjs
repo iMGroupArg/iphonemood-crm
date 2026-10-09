@@ -23,9 +23,9 @@ export function ventasConParche(sql) {
   return sql.slice(0, fin) + '  o := public.meli__revalidar_orden(o.id);\n' + sql.slice(fin);
 }
 
-export async function baseNueva({ conVentas = true, base3 = null, sin7 = false } = {}) {
-  const db = new PGlite({ extensions: { pgcrypto } });
-  await db.exec(`
+// Esquema mínimo que imita el de producción (tablas, roles, auth.jwt, is_authorized_user) y los privilegios por defecto
+// de Supabase. Lo usan pglite (una conexión) y el banco de concurrencia (Postgres real, varias conexiones).
+export const ESQUEMA_MINIMO = `
     CREATE SCHEMA IF NOT EXISTS extensions;
     CREATE ROLE anon NOLOGIN; CREATE ROLE authenticated NOLOGIN;
     GRANT USAGE ON SCHEMA public TO anon, authenticated;
@@ -61,7 +61,11 @@ export async function baseNueva({ conVentas = true, base3 = null, sin7 = false }
     CREATE TABLE public.venta_pagos (id BIGSERIAL PRIMARY KEY, venta_id BIGINT REFERENCES public.ventas(id) ON DELETE CASCADE,
       persona_id UUID, bolsillo TEXT, monto NUMERIC, es_tarjeta BOOLEAN DEFAULT false, diferencial_ars NUMERIC DEFAULT 0, cotizacion_diferencial NUMERIC);
     INSERT INTO public.usuarios_autorizados VALUES ('franco@x.com', true), ('baja@x.com', false);
-  `);
+`;
+
+export async function baseNueva({ conVentas = true, base3 = null, sin7 = false } = {}) {
+  const db = new PGlite({ extensions: { pgcrypto } });
+  await db.exec(ESQUEMA_MINIMO);
   await db.exec(SQL('caja_aplicar_delta.sql'));
   await db.exec(SQL('stock_a_pedido.sql'));
   await db.exec(base3 ?? SQL('meli_esquema_base.sql'));

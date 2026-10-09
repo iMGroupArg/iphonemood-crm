@@ -1,5 +1,13 @@
 # Mercado Libre — pantalla "Vincular publicaciones" (PLAN v3)
 
+> **ESTADO (2026-10-09): CONSTRUIDA y probada.** Código revisado por Codex (3 rondas + confirmaciones), pruebas con Postgres real
+> (pglite, una conexión) y **con varias conexiones a la vez** (`tests/sql/vincular.concurrencia.test.mjs`, `npm run test:concurrencia`,
+> 42 checks: espera real verificada con `pg_blocking_pids`, esfuerzo con dos avisos en orden cruzado, mutaciones que producen deadlocks
+> y se detectan). El requisito "concurrencia obligatoria antes de desplegar" quedó **cumplido**; Codex aprobó el banco.
+> **Riesgo que NO cubre:** la competencia por las últimas unidades de stock contra ventas locales o reposiciones (el esfuerzo usa stock
+> abundante y sólo actores de Mercado Libre). Es previo a esta función y lo cubre `stock_ajustar`, no esta pantalla.
+> Motor de las pruebas de concurrencia: PostgreSQL 18 (beta) vía `embedded-postgres`; Supabase corre otra versión.
+
 Estado: **plan v3, corregido tras la revisión de Codex (rondas 1 y 2: REVISE)**; la ronda 3 aportó los puntos de esta versión.
 Pedido por el moderador el 2026-10-07; Franco pidió construirla. Autor: Deploy-infra.
 

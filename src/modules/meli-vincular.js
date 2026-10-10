@@ -20,7 +20,7 @@ const MeliVincular = {
   _vinculos: new Map(),   // "MLA…|variación" → { stock_id, version }
   _stock: [],             // productos del stock (columnas mínimas)
   _soloSinVincular: false,
-  _mostrarOtros: false,   // incluir rubros que no son perfumería
+  _rubro: 'perfumeria',   // filtro de la lista de stock: perfumeria | decant | combo | otros | todos
   _busca: '',
   _sel: null,             // { item, variacion }: se identifica por ID de aviso y de variación, NUNCA por posición
   _ocupado: false,        // hay un guardado en curso: se ignoran los clics
@@ -100,6 +100,24 @@ const MeliVincular = {
     return true;
   },
   _esPerfume(s) { return this.CATS_PERFUME.includes(String(s.categoria || '').toLowerCase()); },
+
+  // Rubros del selector. Los decants NO se mezclan con los perfumes: un frasco de 100 ml y un
+  // decant de 5 ml se parecen en el nombre y son artículos distintos, con otro precio y otro stock.
+  RUBROS: [['perfumeria', 'Perfumes'], ['decant', 'Decants'], ['combo', 'Combos'], ['otros', 'Otros rubros'], ['todos', 'Todos']],
+  _enRubro(s, rubro) {
+    const c = String(s.categoria || '').toLowerCase();
+    if (rubro === 'todos') return true;
+    if (rubro === 'otros') return !['perfumeria', 'decant', 'combo'].includes(c);
+    return c === rubro;
+  },
+  // Rubro con el que se abre la lista para un aviso: tamaño chico (<= 20 ml) = decant, "combo/set/kit" =
+  // combo, el resto perfume. Es sólo el punto de partida: los botones lo cambian.
+  _rubroInicial(texto) {
+    const t = this._normalizar(texto);
+    if (/\b(combo|set|kit|pack)\b/.test(t)) return 'combo';
+    const ml = this._ml(texto);
+    return (ml !== null && ml <= 20) ? 'decant' : 'perfumeria';
+  },
 
   _clave(item, variacion) { return `${item}|${variacion || ''}`; },
   _vinculo(item, variacion) { return this._vinculos.get(this._clave(item, variacion)) || null; },
@@ -267,12 +285,17 @@ const MeliVincular = {
   vincular(item, variacion) {
     if (this._cargando || this._ocupado) return;
     if (!this._fila({ item, variacion: variacion || null })) return;
-    this._sel = { item, variacion: variacion || null }; this._elegido = null; this._busca = ''; this._msg = null; this.pintar();
+    this._sel = { item, variacion: variacion || null }; this._elegido = null; this._busca = ''; this._msg = null;
+    const f0 = this._fila(this._sel);
+    this._rubro = this._rubroInicial(f0 ? `${f0.it.titulo} ${f0.etiqueta}` : '');
+    this.pintar();
   },
   cancelar() { if (this._ocupado) return; this._sel = null; this._elegido = null; this.pintar(); },
   elegir(id) { if (this._ocupado || this._cargando || !this._sel) return; this._elegido = id; this._pintarPanelAccion(); },
   buscar(v) { this._busca = String(v || '').slice(0, 80); this._pintarCandidatos(); },
-  otrosRubros(v) { this._mostrarOtros = !!v; this._pintarCandidatos(); },
+  // Compatibilidad: la casilla vieja "Mostrar otros rubros" equivale al botón "Todos".
+  otrosRubros(v) { this._rubro = v ? 'todos' : (this._rubro === 'todos' ? 'perfumeria' : this._rubro); this._pintarCandidatos(); },
+  rubro(r) { if (!this.RUBROS.some((x) => x[0] === r)) return; this._rubro = r; this._pintarCandidatos(); },
   soloSinVincular(v) { this._soloSinVincular = !!v; this.pintar(); },
 
   // Resuelve qué aviso y qué variación es la fila elegida, sobre la lista ACTUAL. null si ya no está.
@@ -427,7 +450,7 @@ const MeliVincular = {
   _candidatos() {
     const q = this._normalizar(this._busca).trim();
     return this._stock
-      .filter((s) => this._esVendible(s) && (this._mostrarOtros || this._esPerfume(s)))
+      .filter((s) => this._esVendible(s) && this._enRubro(s, this._rubro))
       .filter((s) => !q || this._normalizar(s.nombre).includes(q))
       .sort((a, b) => String(a.nombre).localeCompare(String(b.nombre), 'es')).slice(0, 40);
   },
@@ -448,8 +471,18 @@ const MeliVincular = {
     const el = document.getElementById('meli-vincular-candidatos');
     if (!el || !this._sel) return;
     const f = this._fila(this._sel);
-    const sug = f ? this._sugerencias(`${f.it.titulo} ${f.etiqueta}`) : [];
+    const sug = (f ? this._sugerencias(`${f.it.titulo} ${f.etiqueta}`) : []).filter((x) => this._enRubro(x, this._rubro));
     const lista = this._candidatos();
+    const filtros = document.getElementById('meli-vincular-filtros');
+    if (filtros) {
+      const q = this._normalizar(this._busca).trim();
+      const base = this._stock.filter((x) => this._esVendible(x) && (!q || this._normalizar(x.nombre).includes(q)));
+      filtros.innerHTML = this.RUBROS.map(([k, etq]) => {
+        const n = base.filter((x) => this._enRubro(x, k)).length;
+        const on = this._rubro === k;
+        return `<button type="button" class="btn btn-sm${on ? ' btn-primary' : ''}" aria-pressed="${on}" onclick="MeliVincular.rubro('${k}')">${this._e(etq)} <span style="opacity:.7">${n}</span></button>`;
+      }).join('');
+    }
     el.innerHTML = `
       ${sug.length ? `<div style="font-size:11.5px;color:var(--text-secondary);margin:6px 0 4px">Sugeridos (revisá antes de elegir)</div>${sug.map((s) => this._opcionStock(s)).join('')}` : ''}
       <div style="font-size:11.5px;color:var(--text-secondary);margin:8px 0 4px">${lista.length ? `Productos (${lista.length}${lista.length === 40 ? ', mostrando los primeros 40: escribí para acotar' : ''})` : 'No hay productos que coincidan.'}</div>
@@ -550,7 +583,8 @@ const MeliVincular = {
       <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
         <input type="search" placeholder="Buscar por nombre…" value="${this._e(this._busca)}" oninput="MeliVincular.buscar(this.value)"
           style="flex:1;min-width:200px;font-size:12.5px;padding:7px 10px;border:1px solid var(--border);border-radius:8px">
-        <label style="font-size:12px"><input type="checkbox" ${this._mostrarOtros ? 'checked' : ''} onchange="MeliVincular.otrosRubros(this.checked)"> Mostrar otros rubros</label></div>
+      </div>
+      <div id="meli-vincular-filtros" style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px"></div>
       ${this._stockParcial ? '<div style="font-size:11.5px;color:var(--text-secondary);margin-top:6px">Hay más de 5000 productos: se muestra una parte. Escribí para buscar.</div>' : ''}
       <div id="meli-vincular-candidatos" style="max-height:260px;overflow-y:auto;margin-top:8px"></div>
       <div style="display:flex;gap:10px;align-items:center;margin-top:10px">

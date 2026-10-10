@@ -199,7 +199,46 @@ const Meli = {
         Se registran las ventas <b>desde la fecha de conexión en adelante</b>; no se trae el historial anterior.
         Los avisos se procesan mientras el CRM está abierto y una vez por día aunque no lo esté:
         si nadie abre el CRM, una venta puede tardar hasta un día en aparecer.
+      </div>
+      <div class="card" style="margin-top:14px">
+        <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+          <div style="flex:1;min-width:220px;font-size:12px;color:var(--text-secondary);line-height:1.5">
+            <b style="color:var(--text)">Diagnóstico de datos (solo lectura).</b> Pregunta a Mercado Libre qué campos
+            trae una venta, su pago y su envío y muestra <b>solo los nombres de los campos, no los datos</b>.
+            No guarda ni cambia nada.</div>
+          <button class="btn btn-sm" id="meli-btn-sonda" onclick="Meli.sonda()"><i class="ti ti-stethoscope"></i> Ejecutar diagnóstico</button>
+        </div>
+        <div id="meli-sonda-salida" style="margin-top:10px"></div>
       </div>`;
+  },
+
+  // Diagnóstico de solo lectura: la forma de las respuestas de Mercado Libre, sin valores (api/_meli_sonda.js).
+  async sonda() {
+    const cuenta = this._cuentas.find((c) => c.conectada && c.activa !== false && !c.requiere_reconexion);
+    const out = document.getElementById('meli-sonda-salida');
+    if (!cuenta) { toast('No hay una cuenta conectada para consultar.'); return; }
+    const btn = document.getElementById('meli-btn-sonda');
+    if (btn) btn.disabled = true;
+    if (out) out.textContent = 'Consultando…';
+    try {
+      const token = await this._token();
+      const r = await fetch('/api/meli/worker', {
+        method: 'POST', headers: { 'x-crm-token': token, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ accion: 'sonda', cuenta: cuenta.id }),
+      });
+      let json = null;
+      try { json = await r.json(); } catch { /* sin cuerpo */ }
+      if (!out) return;
+      if (!r.ok || !json) { out.textContent = 'No se pudo ejecutar el diagnóstico (HTTP ' + r.status + ').'; return; }
+      const texto = JSON.stringify(json, null, 2);
+      out.innerHTML = '<div style="font-size:11.5px;color:var(--text-secondary);margin-bottom:6px">Copiá este texto y pasáselo a quien lo pidió. No contiene datos de compradores.</div>'
+        + '<textarea readonly style="width:100%;height:220px;font-family:monospace;font-size:11px;padding:8px;border:1px solid var(--border);border-radius:8px"></textarea>';
+      out.querySelector('textarea').value = texto;   // value, no innerHTML: el texto nunca se interpreta como HTML
+    } catch {
+      if (out) out.textContent = 'No se pudo ejecutar el diagnóstico.';
+    } finally {
+      if (btn) btn.disabled = false;
+    }
   },
 
   // ── Acciones ──

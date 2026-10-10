@@ -15,6 +15,7 @@
 const { limitar } = require('../_ratelimit.js');
 const M = require('../_meli.js');
 const { procesarNotificacion } = require('../_meli_ingesta.js');
+const { sonda } = require('../_meli_sonda.js');
 
 // Debe coincidir con `functions` en vercel.json.
 const MAX_DURATION_S = 30;
@@ -130,6 +131,21 @@ module.exports = async function handler(req, res) {
   } else {
     res.setHeader('Allow', 'GET, POST');
     res.status(405).json({ error: 'Método no permitido' });
+    return;
+  }
+
+  // Diagnóstico de solo lectura (docs/meli-ventas-envios-plan.md, Fase 0): solo por POST con sesión.
+  // Devuelve la forma de las respuestas de Mercado Libre, nunca valores. No drena ni escribe nada.
+  if (req.method === 'POST' && req.body && typeof req.body === 'object' && req.body.accion === 'sonda') {
+    const cuentaId = Number(req.body.cuenta);
+    if (!Number.isSafeInteger(cuentaId) || cuentaId <= 0) { res.status(400).json({ error: 'Cuenta inválida' }); return; }
+    try {
+      res.status(200).json(await sonda({ cuentaId, ordenId: req.body.orden },
+        M.presupuestoHasta(t0 + PRESUPUESTO_MS - RESERVA_MS, t0 + PRESUPUESTO_MS)));
+    } catch (e) {
+      console.error('meli/worker (sonda):', e.codigo || '', e.message);
+      res.status(502).json({ error: 'No se pudo consultar' });
+    }
     return;
   }
 

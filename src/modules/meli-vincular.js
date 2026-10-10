@@ -58,7 +58,6 @@ const MeliVincular = {
   },
 
   CATS_IMEI: ['iphone', 'android', 'mac', 'ipad'],
-  CATS_PERFUME: ['perfumeria', 'decant'],
 
   _e(s) { return State.esc(s == null ? '' : String(s)); },
 
@@ -99,7 +98,6 @@ const MeliVincular = {
     if (Array.isArray(s.imeis) && s.imeis.length > 0) return false;
     return true;
   },
-  _esPerfume(s) { return this.CATS_PERFUME.includes(String(s.categoria || '').toLowerCase()); },
 
   // Rubros del selector. Los decants NO se mezclan con los perfumes: un frasco de 100 ml y un
   // decant de 5 ml se parecen en el nombre y son artículos distintos, con otro precio y otro stock.

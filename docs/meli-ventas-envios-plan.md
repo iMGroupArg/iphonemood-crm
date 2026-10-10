@@ -152,6 +152,24 @@ Cada fase se entrega con script SQL numerado (lo corre Franco), tests y revisió
 * Cambios de MELI sin aviso: por eso se guarda un resumen del payload (no el crudo con datos personales) y los tests usan respuestas simuladas por fase.
 * Nuestro webhook no verifica firma (decisión del repo, partiendo de que MELI no firma los avisos **[NV]**): todo lo que se muestre sale de una consulta con nuestro token, nunca del aviso.
 
+## 7b. Resultado de la sonda real (10/10/2026, cuenta IMSTORE_, solo forma de los campos)
+
+Se ejecutó el diagnóstico en producción. **Todas las consultas dieron 200**: los permisos de la app alcanzan para órdenes, pagos, envíos, costos de envío y búsqueda. Lo que quedó **verificado** (ya no es [NV]):
+
+| Tema | Resultado |
+|---|---|
+| Búsqueda | `GET /orders/search?seller=…&sort=date_asc&limit=5&order.date_last_updated.from=…` funciona y devuelve `paging {total, offset, limit}` y **las órdenes completas** en `results` (pagos, ítems, envío). En las últimas 48 h había 4 órdenes; en total (recientes) **14**. La estrategia de rebanadas con verificación de `total` (5.4) es viable. |
+| `fee_details` | **Vacío** (0 elementos) en el pago real. Confirmado: **no sirve** para el desglose. Hoy `comision_declarada` queda en 0 y toda la retención aparece como "sin explicar". |
+| Cargo por venta | `order_items[].sale_fee` (número, por unidad) existe, y `listing_type_id` (`gold_special`). |
+| Impuestos | `charges_details[]` del pago de Mercado Pago: 3 cargos, con `type` (se vio `tax`), `name`, `rate`, `amounts.original`. `payments[].taxes_amount` también está en la orden. De los otros 2 cargos no se vio el `type`. |
+| Envío (costo del vendedor) | `GET /shipments/{id}/costs`: `gross_amount`, `senders[].cost`, `senders[].discounts[]`, `senders[].charges`, `receiver.cost`. |
+| Neto | `amounts.collector.net_received` en el pago. **Pendiente de confirmar** que `transaction_details.net_received_amount` (el que usa la ingesta) esté: el diagnóstico cortó el listado a 60 campos y dejó "6 campos más" sin mostrar. |
+| Envío | `status`, `substatus` (venía `null` en uno entregado), `logistic_type` (`drop_off`), `tracking_number`, `tracking_method`, `status_history.date_*` (despacho, listo para enviar, entregado), `substatus_history[]`, `order_id`, `shipping_option` con `estimated_delivery_time/limit/final`, `estimated_schedule_limit`, `buffering`, `processing_time`, `shipping_method_id`, `name`, `cost`. Con `order_id` en el envío, el camino de la ingesta por aviso de envío ya funciona. |
+| Falta | El **límite de despacho** ("a despachar hoy") no apareció: la muestra era un envío ya entregado. Hay que ver un envío en `ready_to_ship` para saber qué campo lo da. |
+| Datos personales | La orden trae `buyer.first_name`, `last_name` y `billing_info.id`; el envío trae nombre, teléfono, dirección y coordenadas del destinatario. **Nada de eso se guarda hoy** (`resumenOrden` conserva solo id y apodo del comprador) y el plan sigue sin guardarlo. |
+
+**Siguiente paso propuesto (otra pasada de la sonda, solo lectura):** (a) mostrar todos los campos (subir el tope de 60), (b) listar los `type` de **todos** los cargos de `charges_details`, (c) un modo "conciliación" que devuelva **solo importes** (precio, cargo por venta, cada cargo por tipo, costo de envío del vendedor, neto) de las últimas 6 órdenes y diga si `precio − cargo − impuestos − envío = neto`, y (d) estado y subestado de esos envíos y los nombres de los campos de fecha de `shipping_option`. Los importes son del negocio, no de compradores.
+
 ## 8. Preguntas para Franco
 1. ¿Querés el **nombre** del comprador, o alcanza con el usuario (nickname) + localidad?
 2. ¿Aceptás borrar nombre y localidad a los 180 días de entregado?

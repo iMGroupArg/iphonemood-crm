@@ -23,6 +23,8 @@ const resp = (status, json) => ({ ok: status >= 200 && status < 300, status, jso
 const PERSONALES = ['Juanita', 'Pérez', 'Siempreviva', '12345678', 'juanita@correo.com', '1155550101', 'ABC123456', 'Rosario', 'Santa Fe', 'jperez_nick'];
 const ENVIO = { id: 4444, status: 'ready_to_ship', substatus: 'printed', logistic_type: 'xd_drop_off', tracking_number: 'ABC123456', tracking_method: 'Correo Argentino',
   lead_time: { estimated_delivery_time: { date: '2026-10-14T00:00:00Z' }, cost: 5500 },
+  shipping_option: { estimated_delivery_time: { date: '2026-10-14T00:00:00Z' }, estimated_delivery_limit: { date: '2026-10-16T00:00:00Z' } },
+  status_history: { date_shipped: null, date_ready_to_ship: '2026-10-10T10:00:00Z' },
   receiver_address: { receiver_name: 'Juanita Pérez', address_line: 'Av. Siempreviva 742', city: { name: 'Rosario' }, state: { name: 'Santa Fe' }, receiver_phone: '1155550101', comment: 'dejar con el portero' },
   '123456789': { dinamica: true } };
 const PAGO = { id: 3333, status: 'approved', status_detail: 'accredited', transaction_amount: 65990, currency_id: 'ARS',
@@ -133,6 +135,85 @@ console.log('\n══ Sonda de solo lectura de Mercado Libre ══\n');
   mundo.rpc.meli_notificacion_reclamar = resp(200, []);
   const r = await pedir(undefined);
   check('Un POST sin cuerpo sigue drenando la cola como antes', r.code === 200 && r.body.reclamadas === 0, JSON.stringify(r.body));
+}
+
+{
+  // ── Extensión: valores de listas, campos completos y conciliación de importes ──
+  reiniciar();
+  const ORD = (id, tot, fee) => ({ id, status: 'paid', date_created: '2026-10-08T23:06:00.000-03:00', total_amount: tot,
+    buyer: { id: 99, nickname: 'jperez_nick', first_name: 'Juanita', last_name: 'Pérez' },
+    order_items: [{ item: { id: 'MLA3483031562', title: 'Perfume Lattafa' }, quantity: 2, unit_price: tot / 2, sale_fee: fee }],
+    payments: [{ id: 3333, status: 'approved' }], shipping: { id: 4444 } });
+  mundo.api['/orders/search'] = resp(200, { paging: { total: 2, limit: 6, offset: 0 }, results: [ORD(2000018883051330, 1000, 150), ORD(2000018747526358, 500, 75)] });
+  mundo.api['/v1/payments/3333'] = resp(200, { id: 3333, status: 'approved', transaction_amount: 1000, taxes_amount: 0, shipping_amount: 0,
+    amounts: { collector: { net_received: 700 } }, money_release_date: '2026-10-21T10:00:00.000-04:00', fee_details: [],
+    payer: { email: 'juanita@correo.com' },
+    charges_details: [{ name: 'financing_fee', type: 'fee', amounts: { original: 100 } }, { name: 'mercadopago_fee', type: 'fee', amounts: { original: 100 } },
+                      { name: 'tax_iibb', type: 'tax', amounts: { original: 50 } }] });
+  mundo.api['/shipments/4444/costs'] = resp(200, { gross_amount: 600, senders: [{ cost: 50 }], receiver: { cost: 0 } });
+  const r = await pedir({ accion: 'conciliar', cuenta: 1 });
+  const t = JSON.stringify(r.body);
+  const o = r.body.ordenes && r.body.ordenes[0];
+  check('conciliar: responde las órdenes con importes', r.code === 200 && r.body.ok && r.body.ordenes.length === 2 && o.precio === 1000 && o.cargo_venta_sale_fee === 300, t.slice(0, 300));
+  check('conciliar: cada cargo del pago sale por tipo y nombre, y los impuestos aparte', o.pagos[0].cargos_por_tipo_y_nombre['fee:financing_fee'] === 100 && o.pagos[0].cargos_por_tipo_y_nombre['tax:tax_iibb'] === 50 && o.impuestos_type_tax === 50);
+  check('conciliar: informa el costo de envío del vendedor y el neto', o.envio.costo_vendedor_senders_cost === 50 && o.neto_total === 700);
+  check('conciliar: dice qué fórmula cierra (cargos del pago + envío: 1000−250−50−700 = 0)', o.diferencia_con_todos_los_cargos_del_pago === 0 && o.diferencia_con_sale_fee === -100, JSON.stringify([o.diferencia_con_todos_los_cargos_del_pago, o.diferencia_con_sale_fee]));
+  check('conciliar: envío con estado, subestado y campos de fecha (solo nombres)', o.envio.estado === 'ready_to_ship' && o.envio.subestado === 'printed' && o.envio.campos_de_fecha.includes('shipping_option.estimated_delivery_time') && o.envio.campos_de_fecha.some((x) => x.startsWith('status_history.')));
+  check('conciliar: NINGÚN dato personal (nombre, mail, dirección, seguimiento, ciudad, apodo, teléfono)', PERSONALES.every((p) => !t.includes(p)), PERSONALES.filter((p) => t.includes(p)).join());
+  const ml = llamadas.filter((c) => /api\.(mercadolibre|mercadopago)\.com/.test(c.url));
+  check('conciliar: todo GET, nada de facturación, y no más de 1 + 6×(3 pagos + 3) pedidos', ml.every((c) => c.metodo === 'GET') && !llamadas.some((c) => /billing/i.test(c.url)) && ml.length <= 37, String(ml.length));
+  check('conciliar: solo lee de la base (cuenta y token)', llamadas.filter((c) => c.url.includes('/rpc/')).every((c) => /meli_cuenta_info|meli_tokens_tomar/.test(c.url)));
+  const sin = await pedir({ accion: 'conciliar', cuenta: 'x' });
+  check('conciliar: cuenta inválida → 400', sin.code === 400);
+
+  // El tipo de TODOS los cargos de una lista sale en "valores", y `name` solo se muestra dentro de charges_details.
+  const f = S.forma({ charges_details: [{ type: 'fee', name: 'financing_fee' }, { type: 'tax', name: 'tax_iibb' }, { type: 'fee', name: 'x' }],
+                      receiver_address: { name: 'juanita', type: 'forward' } }, '', 0);
+  check('forma(): lista de cargos con los tipos y nombres de todos los elementos', JSON.stringify(f.charges_details.valores.type) === '["fee","tax"]' && f.charges_details.valores.name.includes('financing_fee'));
+  check('forma(): "name" fuera de charges_details no se muestra', f.receiver_address.name === 'string' && !JSON.stringify(f).includes('juanita'));
+  // Cargos con un nombre que no es de cargo, y fechas con basura: no se copian.
+  const g = S.forma({ charges_details: [{ type: 'fee', name: 'juanita' }, { type: 'tax', name: 'rosario_tax' }] }, '', 0);
+  check('forma(): el nombre de un cargo solo sale si usa vocabulario de cargos ("juanita" no, "rosario_tax" sí es vocabulario)', JSON.stringify(g.charges_details.valores.name) === '["<otro>","rosario_tax"]', JSON.stringify(g.charges_details.valores));
+  {
+    reiniciar();
+    const conBasura = { ...ORD(2000018883051330, 1000, 150), date_created: 'jperez_nick@correo.com' };
+    mundo.api['/orders/search'] = resp(200, { paging: { total: 1 }, results: [conBasura] });
+    mundo.api['/v1/payments/3333'] = resp(200, { id: 3333, status: 'approved', transaction_amount: 1000, amounts: { collector: { net_received: 700 } },
+      money_release_date: 'Juanita Pérez 12345678', charges_details: [{ name: 'juanita', type: 'fee', amounts: { original: 250 } }] });
+    mundo.api['/shipments/4444/costs'] = resp(500, { error: 'internal' });
+    const x = await pedir({ accion: 'conciliar', cuenta: 1 });
+    const tx = JSON.stringify(x.body), oo = x.body.ordenes[0];
+    check('conciliar: una fecha con basura no se copia (null) y nada personal sale', oo.fecha_creada === null && oo.pagos[0].fecha_liberacion === null && PERSONALES.every((p) => !tx.includes(p)) && !tx.includes('juanita'), tx.slice(0, 300));
+    check('conciliar: si falla el costo de envío la orden queda "incompleta" y NINGUNA diferencia se calcula (no se toma como 0)',
+      oo.incompleta === true && oo.diferencia_con_sale_fee === null && oo.diferencia_con_todos_los_cargos_del_pago === null && oo.diferencia_sin_envio_con_todos_los_cargos === null, tx.slice(0, 400));
+  }
+  {
+    reiniciar();
+    mundo.api['/orders/search'] = resp(200, { paging: { total: 1 }, results: [{ ...ORD(2000018883051330, 1000, 150), payments: [{ id: 3333 }, { id: 3334 }, { id: 3335 }, { id: 3336 }] }] });
+    mundo.api['/v1/payments/333'] = resp(200, { id: 3333, status: 'approved', transaction_amount: 250, amounts: { collector: { net_received: 175 } }, charges_details: [] });
+    mundo.api['/shipments/4444/costs'] = resp(200, { gross_amount: 0, senders: [{ cost: 0 }] });
+    const y = await pedir({ accion: 'conciliar', cuenta: 1 });
+    check('conciliar: una orden con más de 3 pagos queda incompleta (no se suma un total parcial)', y.body.ordenes[0].incompleta === true && y.body.ordenes[0].neto_total === null && y.body.ordenes[0].diferencia_con_sale_fee === null);
+  }
+  {
+    // Se agota el tiempo ENTRE el envío y sus costos: no se pide el costo y la orden queda incompleta y parcial.
+    reiniciar();
+    mundo.api['/orders/search'] = resp(200, { paging: { total: 1 }, results: [ORD(2000018883051330, 1000, 150)] });
+    mundo.api['/v1/payments/3333'] = resp(200, { id: 3333, status: 'approved', transaction_amount: 1000, amounts: { collector: { net_received: 700 } }, charges_details: [] });
+    const lento = resp(200, ENVIO);
+    mundo.api['/shipments/4444'] = lento;
+    mundo.api['/shipments/4444/costs'] = resp(200, { gross_amount: 600, senders: [{ cost: 50 }] });
+    const antes = globalThis.fetch;
+    globalThis.fetch = async (url, opts) => { if (String(url).endsWith('/shipments/4444')) await new Promise((r) => setTimeout(r, 6600)); return antes(url, opts); };
+    const pres = require(RAIZ + 'api/_meli.js').presupuestoHasta(Date.now() + 9000);
+    const z = await S.conciliar({ cuentaId: 1 }, pres);
+    globalThis.fetch = antes;
+    const oz = z.ordenes[0];
+    check('conciliar: si se agota el tiempo entre el envío y los costos NO se pide /costs, queda parcial/incompleta y sin diferencias',
+      z.cortado === true && oz.parcial === true && oz.incompleta === true && oz.diferencia_con_sale_fee === null && !llamadas.some((c) => c.url.endsWith('/costs')), JSON.stringify(z).slice(0, 300));
+  }
+  const ancho = {}; for (let i = 0; i < 100; i++) ancho['campo_' + i] = 1;
+  check('forma(): se listan hasta 150 campos por objeto (antes cortaba en 60)', Object.keys(S.forma(ancho, '', 0)).length === 100);
 }
 
 console.log(`\n${ok} pasan, ${fail} fallan de ${ok + fail}`);

@@ -16,6 +16,7 @@ const { limitar } = require('../_ratelimit.js');
 const M = require('../_meli.js');
 const { procesarNotificacion } = require('../_meli_ingesta.js');
 const { sonda, conciliar } = require('../_meli_sonda.js');
+const { barrer, barrerTodas } = require('../_meli_barrido.js');
 
 // Debe coincidir con `functions` en vercel.json.
 const MAX_DURATION_S = 30;
@@ -33,6 +34,9 @@ const RESERVA_MS = 5000;
 const COSTO_ESTIMADO_MS = 5000;
 
 const LOTE = 2;
+// Tope del barrido dentro de la corrida del cron (desde que empieza la función): el resto es para drenar.
+const BARRIDO_CRON_MS = 12_000;
+const BARRIDO_CIERRE_MS = 2_000;       // tramo del barrido para guardar y cerrar (después de las consultas)
 
 // `t0` es el instante en que EMPEZÓ el handler, antes de autenticar. La
 // autenticación del POST ya gastó tiempo (hasta 5 s), y ese tiempo hay que
@@ -114,6 +118,7 @@ module.exports = async function handler(req, res) {
     return;
   }
 
+  let email = null;
   if (req.method === 'GET') {
     // Sólo el cron. Sin CRON_SECRET cargado, el GET queda cerrado.
     const cron = process.env.CRON_SECRET;
@@ -123,7 +128,7 @@ module.exports = async function handler(req, res) {
       return;
     }
   } else if (req.method === 'POST') {
-    const email = await M.emailAutorizado(req.headers['x-crm-token'], M.presupuesto(5000));
+    email = await M.emailAutorizado(req.headers['x-crm-token'], M.presupuesto(5000));
     if (!email) {
       res.status(401).json({ error: 'No autorizado' });
       return;
@@ -131,6 +136,22 @@ module.exports = async function handler(req, res) {
   } else {
     res.setHeader('Allow', 'GET, POST');
     res.status(405).json({ error: 'Método no permitido' });
+    return;
+  }
+
+  // Barrido de ventas recientes (botón "Buscar ventas recientes"): le pregunta a Mercado Libre qué órdenes se
+  // actualizaron y ENCOLA las que faltan o están atrasadas. No procesa nada: eso lo hace el drenaje de siempre.
+  if (req.method === 'POST' && req.body && typeof req.body === 'object' && req.body.accion === 'barrido') {
+    const cuentaId = Number(req.body.cuenta);
+    if (!Number.isSafeInteger(cuentaId) || cuentaId <= 0) { res.status(400).json({ error: 'Cuenta inválida' }); return; }
+    try {
+      const limite = t0 + PRESUPUESTO_MS;
+      const pres = M.presupuestoHasta(limite - RESERVA_MS, limite);
+      res.status(200).json(await barrer({ cuentaId, origen: 'boton', usuario: email }, pres, M.presupuestoHasta(limite)));
+    } catch (e) {
+      console.error('meli/worker (barrido):', e.codigo || '', e.message);
+      res.status(502).json({ error: 'No se pudo buscar ventas' });
+    }
     return;
   }
 
@@ -152,7 +173,22 @@ module.exports = async function handler(req, res) {
   }
 
   try {
-    res.status(200).json(await drenar(t0));
+    // El cron diario hace primero el barrido (encola lo que falte) y con el tiempo que queda drena. El barrido se
+    // topea a ~12 s para que el drenaje conserve el resto. Si el barrido falla, el drenaje corre igual.
+    let barrido = null;
+    if (req.method === 'GET') {
+      try {
+        // El barrido tiene SU PROPIO plazo, que incluye sus escrituras y el cierre: así una base lenta no se come el tiempo
+        // del drenaje (consultas hasta t0+12 s; guardar y cerrar hasta t0+14 s).
+        const finBarrido = t0 + BARRIDO_CRON_MS + BARRIDO_CIERRE_MS;
+        barrido = await barrerTodas({ origen: 'cron' }, M.presupuestoHasta(t0 + BARRIDO_CRON_MS, finBarrido), M.presupuestoHasta(finBarrido));
+      } catch (e) {
+        console.error('meli/worker (barrido del cron):', e.codigo || '', e.message);
+        barrido = [{ ok: false, motivo: 'ERROR' }];
+      }
+    }
+    const r = await drenar(t0);
+    res.status(200).json(barrido ? { ...r, barrido } : r);
   } catch (e) {
     console.error('meli/worker:', e.codigo || '', e.message);
     res.status(502).json({ error: 'No se pudo procesar la cola' });

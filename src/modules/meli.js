@@ -42,9 +42,10 @@ const Meli = {
     } catch { return ''; }
   },
 
-  async _post(ruta) {
+  async _post(ruta, cuerpo) {
     const token = await this._token();
-    const r = await fetch(ruta, { method: 'POST', headers: { 'x-crm-token': token, 'Content-Type': 'application/json' } });
+    const r = await fetch(ruta, { method: 'POST', headers: { 'x-crm-token': token, 'Content-Type': 'application/json' },
+      ...(cuerpo ? { body: JSON.stringify(cuerpo) } : {}) });
     let json = null;
     try { json = await r.json(); } catch { /* sin cuerpo */ }
     return { ok: r.ok, status: r.status, json };
@@ -60,7 +61,7 @@ const Meli = {
   },
 
   async cargar() {
-    await Promise.all([this._cargarCuentas(), this._cargarCola()]);
+    await Promise.all([this._cargarCuentas(), this._cargarCola(), this._cargarBarrido()]);
     this.pintar();
   },
 
@@ -84,6 +85,15 @@ const Meli = {
       .in('estado', ['pendiente', 'fallida'])
       .order('recibida_en', { ascending: false }).limit(10);
     this._cola = { pendientes, fallidas, recientes: data || [] };
+  },
+
+  // Hasta cuándo está verificado con Mercado Libre (script 10). Si todavía no se corrió, la tarjeta lo dice.
+  async _cargarBarrido() {
+    const { data, error } = await supa.from('meli_barrido_estado').select('*');
+    if (error) { this._barrido = { disponible: false }; return; }
+    const { count } = await supa.from('meli_ordenes').select('id', { count: 'exact', head: true })
+      .eq('financiera_completa', false).eq('revisar', false);
+    this._barrido = { disponible: true, estados: data || [], incompletas: count || 0 };
   },
 
   pintar() {
@@ -160,6 +170,7 @@ const Meli = {
           <i class="ti ti-refresh"></i> Procesar pendientes
         </button>
       </div>
+      ${this._vistaBarrido()}
       <div class="card" style="margin-bottom:8px">
         <div style="display:flex;gap:24px;flex-wrap:wrap">
           <div><div style="font-size:22px;font-weight:600">${cola.pendientes}</div>
@@ -214,6 +225,97 @@ const Meli = {
       if (out) out.textContent = 'No se pudo ejecutar el diagnóstico.';
     } finally {
       btns.forEach((b) => { b.disabled = false; });
+    }
+  },
+
+  // Dos datos SEPARADOS, porque encontrar ventas no es lo mismo que tenerlas cargadas:
+  //   1) hasta cuándo se verificó con Mercado Libre; 2) cuánto de lo encontrado ya se cargó (pendientes, fallidos, incompletas).
+  _vistaBarrido() {
+    const e = (s) => State.esc(s == null ? '' : String(s));
+    const b = this._barrido;
+    const nCuentas = this._cuentas.filter((c) => c.conectada && !c.requiere_reconexion && c.activa !== false).length;
+    const cola = this._cola;
+    if (!b || !b.disponible) {
+      return `<div class="card" style="margin-bottom:8px;font-size:12.5px;color:var(--text-secondary)">
+        <b style="color:var(--text)">Buscar ventas recientes</b> todavía no está disponible: falta correr el script 10 en la base.</div>`;
+    }
+    const hace = (iso) => {
+      const h = (Date.now() - new Date(iso).getTime()) / 3600000;
+      if (!Number.isFinite(h)) return '';
+      return h < 1 ? 'hace menos de 1 hora' : h < 48 ? `hace ${Math.round(h)} h` : `hace ${Math.round(h / 24)} días`;
+    };
+    const cuando = (iso) => new Date(iso).toLocaleString('es-AR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+    const MOTIVOS = {
+      RECONEXION: 'La cuenta pide reconectarse.', MELI_LIMITANDO: 'Mercado Libre pidió esperar.', SIN_AVANCE: 'No se pudo avanzar.',
+      RESPUESTA_SIN_TOTAL: 'Mercado Libre respondió algo inesperado.', TOTAL_NO_COINCIDE: 'La búsqueda no cerró; se reintenta.',
+      BASE_NO_RESPONDE: 'La base no respondió.',
+    };
+    const filas = this._cuentas.filter((c) => c.conectada).map((c) => {
+      const st = b.estados.find((x) => x.cuenta_id === c.id) || {};
+      const falla = st.ultimo_error ? (MOTIVOS[st.ultimo_error] || 'La última búsqueda falló.') : null;
+      const viejo = !st.ultimo_ok_en || (Date.now() - new Date(st.ultimo_ok_en).getTime()) > 36 * 3600000;
+      const color = (falla || viejo) ? 'var(--red)' : 'var(--green)';
+      const parcial = st.ultimo_estado === 'parcial';
+      return `<div style="font-size:12.5px;margin-top:6px">
+        <b>${e(c.nickname || 'Cuenta')}</b>: ${st.cubierto_hasta
+          ? `ventas verificadas con Mercado Libre hasta el <span style="color:${color};font-weight:600">${e(cuando(st.cubierto_hasta))}</span> (última búsqueda ${e(hace(st.ultimo_ok_en || st.cubierto_hasta))})`
+          : '<span style="color:var(--red);font-weight:600">todavía no se buscó</span>'}
+        ${parcial ? '<div style="color:var(--amber)">Cobertura parcial: la última búsqueda se cortó por tiempo. Apretá de nuevo (en 2 minutos) o se completa sola mañana.</div>' : ''}
+        ${st.ultimo_aproximado ? '<div style="color:var(--amber)">Búsqueda aproximada: Mercado Libre no permitió verificarla del todo.</div>' : ''}
+        ${falla ? `<div style="color:var(--red)">${e(falla)}</div>` : ''}
+        ${!falla && viejo && st.ultimo_ok_en ? '<div style="color:var(--red)">Hace más de 36 horas que no se busca.</div>' : ''}
+      </div>`;
+    }).join('');
+    return `<div class="card" style="margin-bottom:8px">
+      <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+        <div style="flex:1;min-width:220px;font-size:12px;color:var(--text-secondary);line-height:1.5">
+          <b style="color:var(--text)">Verificación con Mercado Libre.</b> Los avisos pueden no llegar. Esto le pregunta a Mercado Libre qué ventas
+          hay y trae las que falten (no las procesa: eso sigue siendo el botón de cada orden).</div>
+        <button class="btn btn-sm btn-primary" id="meli-btn-barrido" ${nCuentas ? '' : 'disabled'} onclick="Meli.buscarVentas()">
+          <i class="ti ti-search"></i> Buscar ventas recientes</button>
+      </div>
+      ${filas}
+      <div style="font-size:12.5px;margin-top:8px;padding-top:8px;border-top:1px solid var(--border)">
+        <b>Datos cargados:</b> ${Number(cola.pendientes)} aviso(s) pendiente(s) de procesar ·
+        <span style="color:${cola.fallidas ? 'var(--red)' : 'inherit'}">${Number(cola.fallidas)} fallido(s)</span> ·
+        <span style="color:${b.incompletas ? 'var(--amber)' : 'inherit'}">${Number(b.incompletas)} orden(es) con datos de pago incompletos</span>
+      </div>
+    </div>`;
+  },
+
+  async buscarVentas() {
+    if (this._buscando) return;
+    const cuenta = this._cuentas.find((c) => c.conectada && !c.requiere_reconexion && c.activa !== false);
+    if (!cuenta) { toast('No hay una cuenta conectada.'); return; }
+    this._buscando = true;
+    const btn = document.getElementById('meli-btn-barrido');
+    if (btn) btn.disabled = true;
+    try {
+      toast('Buscando ventas en Mercado Libre…');
+      const r = await this._post('/api/meli/worker', { accion: 'barrido', cuenta: cuenta.id });
+      const ultimo = r.json || {};
+      if (!r.ok) { toast(r.status === 401 ? 'Tu sesión no está autorizada.' : 'No se pudo buscar ventas.'); return; }
+      if (ultimo.motivo === 'MUY_PRONTO') { toast(`Esperá ${Number(ultimo.espera_seg) || 120} segundos para volver a buscar.`); return; }
+      if (ultimo.motivo === 'EN_CURSO') { toast('Ya hay una búsqueda en curso.'); return; }
+      if (ultimo.motivo === 'CUENTA_BLOQUEADA') { toast('La cuenta pide reconectarse.'); return; }
+      if (ultimo.ok === true) {
+        const n = Number(ultimo.encoladas) || 0;
+        if (ultimo.estado === 'parcial') {
+          toast(`Se buscó solo una parte${n ? ` (${n} venta(s) encontradas)` : ''}; el resto sigue en la próxima búsqueda, en 2 minutos o mañana solo.`);
+        } else if (ultimo.aproximado) {
+          toast(`Búsqueda terminada, pero aproximada${n ? ` (${n} venta(s) encontradas)` : ''}: Mercado Libre no permitió verificarla del todo.`);
+        } else {
+          toast(n ? `Se encontraron ${n} venta(s) que faltaban. Procesando los avisos…` : 'No se encontraron ventas nuevas para cargar.');
+        }
+        await this._drenar(true);
+      } else {
+        toast('La búsqueda no terminó. Mirá el estado debajo.');
+      }
+    } catch {
+      toast('No se pudo buscar ventas.');
+    } finally {
+      this._buscando = false;
+      await this.cargar();
     }
   },
 

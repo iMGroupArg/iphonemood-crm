@@ -170,6 +170,12 @@ Se ejecutó el diagnóstico en producción. **Todas las consultas dieron 200**: 
 
 **Siguiente paso propuesto (otra pasada de la sonda, solo lectura):** (a) mostrar todos los campos (subir el tope de 60), (b) listar los `type` de **todos** los cargos de `charges_details`, (c) un modo "conciliación" que devuelva **solo importes** (precio, cargo por venta, cada cargo por tipo, costo de envío del vendedor, neto) de las últimas 6 órdenes y diga si `precio − cargo − impuestos − envío = neto`, y (d) estado y subestado de esos envíos y los nombres de los campos de fecha de `shipping_option`. Los importes son del negocio, no de compradores.
 
+## 7c. Estado de la Fase 1 (barrido) — 11/10/2026
+
+**Construida y probada en local; sin SQL corrido ni desplegada.** Script `db/para-correr/10_meli_barrido.sql` (con verificación ✅/❌ al final), `api/_meli_barrido.js`, acción `barrido` y barrido previo al drenaje del cron en `api/meli/worker.js`, tarjeta "Verificación con Mercado Libre" y botón "Buscar ventas recientes" en `src/modules/meli.js`. Pruebas: SQL 65, servidor + base real 25, Postgres real con varias conexiones 10. Codex: 2 rondas, aprobada.
+Decisiones tomadas al construirla (las dos primeras salieron de la revisión): (1) un tramo que no se puede verificar (más de 1000 órdenes en un tramo chico, ids repetidos o inválidos, total que no coincide) **no avanza lo cubierto** y deja el error a la vista; (2) una corrida cortada por tiempo **se reanuda** donde quedó en vez de repetir el relleno de 48 h; (3) todo lo que crea un aviso pendiente toma un **candado de la cola** (un deadlock real entre el barrido y un reintento apareció en el banco con Postgres real); (4) el barrido del cron tiene su propio plazo para no comerse el drenaje.
+Límites conocidos: `order.date_last_updated.to` no estaba verificado (se detecta y, si Mercado Libre lo ignora, se recorre por páginas y se marca "aproximado"); el cron diario encuentra y encola pero procesa 2 avisos por corrida; la primera vez trae lo actualizado desde la conexión de la cuenta (hasta 30 días), y esas órdenes aparecen como "Para procesar" (nada se descuenta ni se acredita solo).
+
 ## 8. Preguntas para Franco
 1. ¿Querés el **nombre** del comprador, o alcanza con el usuario (nickname) + localidad?
 2. ¿Aceptás borrar nombre y localidad a los 180 días de entregado?

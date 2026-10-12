@@ -34,11 +34,7 @@ const Proveedores = {
     const activas = lotes.filter(l => !['recibido', 'cancelado'].includes(l.estado)).length;
     const pendienteTotal = lotes
       .filter(l => !['recibido', 'cancelado'].includes(l.estado))
-      .reduce((s, l) => {
-        const tot = items.filter(i => i.loteId === l.id).reduce((a, i) => a + i.precioUsd * i.cantidad, 0);
-        const pag = pagos.filter(p => p.loteId === l.id && p.tipo === 'pago_proveedor').reduce((a, p) => a + p.montoUsd, 0);
-        return s + Math.max(0, tot - pag);
-      }, 0);
+      .reduce((s, l) => s + this._cuentaLote(l.id).restante, 0);
     const retrasadas = lotes.filter(l =>
       !['recibido', 'cancelado'].includes(l.estado) &&
       l.fechaLlegadaEsperada && new Date(l.fechaLlegadaEsperada) < new Date()
@@ -78,11 +74,7 @@ const Proveedores = {
       const lotesP = lotes.filter(l => l.proveedorId === p.id);
       const activos = lotesP.filter(l => !['recibido', 'cancelado'].includes(l.estado));
       const totalGastado = lotesP.flatMap(l => items.filter(i => i.loteId === l.id)).reduce((s, i) => s + i.precioUsd * i.cantidad, 0);
-      const pendiente = activos.reduce((s, l) => {
-        const tot = items.filter(i => i.loteId === l.id).reduce((a, i) => a + i.precioUsd * i.cantidad, 0);
-        const pag = pagos.filter(pg => pg.loteId === l.id && pg.tipo === 'pago_proveedor').reduce((a, pg) => a + pg.montoUsd, 0);
-        return s + Math.max(0, tot - pag);
-      }, 0);
+      const pendiente = activos.reduce((s, l) => s + this._cuentaLote(l.id).restante, 0);
       const enStock = (State.stock || []).filter(s => s.proveedor === p.nombre).length;
       const retrasado = activos.some(l => l.fechaLlegadaEsperada && new Date(l.fechaLlegadaEsperada) < new Date());
       return `<tr style="border-bottom:1px solid var(--border);cursor:pointer" onclick="Proveedores.verProveedor('${p.id}')" onmouseenter="this.style.background='var(--bg-secondary)'" onmouseleave="this.style.background=''">
@@ -179,6 +171,37 @@ const Proveedores = {
   // Saldo a favor CON el proveedor (plata que nos debe, no al revés).
   // Cuenta corriente propia: 'generado' suma, 'aplicado' resta. No usa cajas,
   // así que no se mezcla con el efectivo real del negocio.
+  // CUENTA DE UN LOTE: dos conceptos que NO se mezclan.
+  //  · SALDO CON EL PROVEEDOR (lo que se le debe) = ítems − (pagos al proveedor + saldo a favor
+  //    aplicado − devoluciones). La comisión de la conversión y los envíos/costos NO se le deben al
+  //    proveedor (se pagan a terceros o son el costo del cambio): no entran acá.
+  //  · COSTO DE ADQUISICIÓN (lo que cuesta la mercadería) = ítems + comisión de la conversión +
+  //    envíos / costos adicionales / diferencial. De acá sale el costo por unidad.
+  // Antes todo el módulo comparaba «pagado» contra el costo de adquisición: un lote con conversión
+  // mostraba siempre una deuda falsa igual a la comisión, y el excedente (saldo a favor) se
+  // calculaba contra lo equivocado. Una sola función para que no vuelvan a divergir.
+  _cuentaLote(loteId) {
+    const items = (State.loteItems || []).filter(i => i.loteId === loteId);
+    const pagos = (State.lotePagos || []).filter(p => p.loteId === loteId);
+    const c = State.cent.bind(State);
+    const suma = tipos => c(pagos.filter(p => tipos.includes(p.tipo)).reduce((s, p) => s + (Number(p.montoUsd) || 0), 0));
+    const totalItems = c(items.reduce((s, i) => s + i.precioUsd * i.cantidad, 0));
+    const conv = pagos.find(p => p.tipo === 'conversion');
+    const comision = c(conv?.comisionUsd || 0);
+    const envio = suma(['envio', 'costo', 'diferencial']);
+    const pagadoProveedor = suma(['pago_proveedor']);
+    const creditoAplicado = suma(['credito_aplicado']);
+    const devuelto = suma(['devolucion']);
+    const pagadoNeto = c(pagadoProveedor + creditoAplicado - devuelto);
+    const saldo = c(totalItems - pagadoNeto);        // > 0: se le debe · < 0: se le pagó de más
+    return {
+      totalItems, comision, envio, conv,
+      costoAdquisicion: c(totalItems + comision + envio),
+      pagadoProveedor, creditoAplicado, devuelto, pagadoNeto,
+      restante: Math.max(0, saldo), excedenteBruto: Math.max(0, -saldo),
+    };
+  },
+
   saldoCredito(proveedorId) {
     return (State.proveedorCreditos || [])
       .filter(c => c.proveedorId === proveedorId)
@@ -193,11 +216,7 @@ const Proveedores = {
     const pagos = State.lotePagos || [];
 
     const totalGastado = lotes.flatMap(l => items.filter(i => i.loteId === l.id)).reduce((s, i) => s + i.precioUsd * i.cantidad, 0);
-    const pendiente = lotes.filter(l => !['recibido', 'cancelado'].includes(l.estado)).reduce((s, l) => {
-      const tot = items.filter(i => i.loteId === l.id).reduce((a, i) => a + i.precioUsd * i.cantidad, 0);
-      const pag = pagos.filter(pg => pg.loteId === l.id && ['pago_proveedor', 'credito_aplicado'].includes(pg.tipo)).reduce((a, pg) => a + pg.montoUsd, 0);
-      return s + Math.max(0, tot - pag);
-    }, 0);
+    const pendiente = lotes.filter(l => !['recibido', 'cancelado'].includes(l.estado)).reduce((s, l) => s + this._cuentaLote(l.id).restante, 0);
     const enStock = (State.stock || []).filter(s => s.proveedor === p.nombre).length;
     const saldoCredito = this.saldoCredito(p.id);
     const creditos = (State.proveedorCreditos || []).filter(c => c.proveedorId === p.id).slice().reverse();
@@ -269,21 +288,21 @@ const Proveedores = {
 
     const totalItems = items.reduce((s, i) => s + i.precioUsd * i.cantidad, 0);
     const totalUds = items.reduce((s, i) => s + i.cantidad, 0);
-    const conv = pagos.find(p => p.tipo === 'conversion');
-    const pagadoProveedor = pagos.filter(p => p.tipo === 'pago_proveedor').reduce((s, p) => s + p.montoUsd, 0);
-    const creditoAplicadoLote = pagos.filter(p => p.tipo === 'credito_aplicado').reduce((s, p) => s + p.montoUsd, 0);
-    const totalEnvio = pagos.filter(p => ['envio','costo','diferencial'].includes(p.tipo)).reduce((s, p) => s + p.montoUsd, 0);
-    const comisionUsd = conv?.comisionUsd || 0;
-    const costoTotal = totalItems + comisionUsd + totalEnvio;
+    const cuenta = this._cuentaLote(l.id);
+    const conv = cuenta.conv;
+    const creditoAplicadoLote = cuenta.creditoAplicado;
+    const totalEnvio = cuenta.envio;
+    const comisionUsd = cuenta.comision;
+    const costoTotal = cuenta.costoAdquisicion;    // lo que cuesta la mercadería (NO lo que se le debe al proveedor)
     const costoUnit = totalUds > 0 ? costoTotal / totalUds : 0;
     const isTerminal = ['recibido', 'cancelado'].includes(l.estado);
 
-    // Pagado = efectivo + saldo a favor aplicado. Si supera el costo, esa
-    // diferencia es plata pagada de más que hay que guardar como crédito con
+    // Pagado = efectivo + saldo a favor aplicado − devoluciones. Si supera lo que el proveedor
+    // facturó (ítems), esa diferencia es plata pagada de más que hay que guardar como crédito con
     // el proveedor — si no, queda flotando sin registrar en ningún lado.
-    const pagadoTotal = pagadoProveedor + creditoAplicadoLote;
-    const restante = Math.max(0, costoTotal - pagadoTotal);
-    const excedenteBruto = Math.max(0, pagadoTotal - costoTotal);
+    const pagadoTotal = cuenta.pagadoNeto;
+    const restante = cuenta.restante;
+    const excedenteBruto = cuenta.excedenteBruto;
     const creditoYaGeneradoDeLote = (State.proveedorCreditos || [])
       .filter(c => c.loteId === l.id && c.tipo === 'generado').reduce((s, c) => s + c.montoUsd, 0);
     const excedenteSinConvertir = +Math.max(0, excedenteBruto - creditoYaGeneradoDeLote).toFixed(2);
@@ -327,7 +346,8 @@ const Proveedores = {
            ['Envío', State.fmtUSD(totalEnvio), '🚚', totalEnvio > 0 ? 'var(--text)' : 'var(--text-secondary)'],
            ['Costo total', State.fmtUSD(costoTotal), '💰', 'var(--blue)'],
            ['Costo / unidad', State.fmtUSD(costoUnit), '📊', 'var(--green)'],
-           ['Pagado' + (creditoAplicadoLote > 0 ? ` (${State.fmtUSD(creditoAplicadoLote)} en crédito)` : ''), State.fmtUSD(pagadoTotal), '✅', restante > 0 ? 'var(--amber)' : 'var(--green)'],
+           ['Pagado al proveedor' + (creditoAplicadoLote > 0 ? ` (${State.fmtUSD(creditoAplicadoLote)} en crédito)` : ''), State.fmtUSD(pagadoTotal), '✅', restante > 0 ? 'var(--amber)' : 'var(--green)'],
+           ['Saldo con el proveedor', restante > 0 ? 'Debés ' + State.fmtUSD(restante) : 'Saldado', restante > 0 ? '⏳' : '✔️', restante > 0 ? 'var(--amber)' : 'var(--green)'],
           ].map(([label, val, e, c]) => `<div class="card" style="padding:10px 12px;margin-bottom:0;min-width:110px;flex:1">
             <label style="font-size:10px;color:var(--text-secondary);display:block;margin-bottom:3px">${label}</label>
             <div style="font-size:14px;font-weight:700;color:${c}">${e} ${val}</div>
@@ -1008,6 +1028,15 @@ const Proveedores = {
 
   modalPago(loteId) {
     const conv = (State.lotePagos || []).find(p => p.loteId === loteId && p.tipo === 'conversion');
+    // Lo sugerido sale de lo que TODAVÍA se le debe al proveedor (no de lo convertido):
+    // con pagos previos o saldo a favor aplicado ya no propone pagar de nuevo todo.
+    // Si hay conversión, el primer pago no pasa de los USDT que esa conversión dejó.
+    const cuentaPago = this._cuentaLote(loteId);
+    let sugeridoPago = cuentaPago.restante;
+    if (conv) {
+      const dispon = State.cent(Math.max(0, (Number(conv.montoUsdt) || 0) - cuentaPago.pagadoProveedor));
+      if (dispon > 0) sugeridoPago = Math.min(sugeridoPago, dispon);
+    }
     const personas = State.personas || [];
     const BOLSILLOS_POR_MONEDA = {
       'USDT':  ['USDT'],
@@ -1046,7 +1075,7 @@ const Proveedores = {
             <div>
               <label style="font-size:11px;color:var(--text-secondary);display:block;margin-bottom:4px">MONTO</label>
               <input id="pago-monto" type="number" min="0" step="0.01"
-                value="${conv ? conv.montoUsdt.toFixed(2) : ''}"
+                value="${sugeridoPago > 0 ? sugeridoPago.toFixed(2) : ''}"
                 oninput="Proveedores._calcPagoEquiv()"
                 style="width:100%;font-size:14px;padding:8px 10px;background:var(--bg-secondary);border:1px solid var(--border-strong);border-radius:8px;color:var(--text)">
             </div>
@@ -1920,9 +1949,18 @@ const Proveedores = {
   async confirmarDevolucion(loteId) {
     const persona = document.getElementById('dev-persona')?.value;
     const bolsillo = document.getElementById('dev-bolsillo')?.value;
-    const monto = parseFloat(document.getElementById('dev-monto')?.value) || 0;
+    const monto = State.cent(parseFloat(document.getElementById('dev-monto')?.value) || 0);
     const notas = document.getElementById('dev-notas')?.value || '';
     if (!persona || !bolsillo || !monto) { toast('Completá todos los campos.'); return; }
+
+    // Si el sobrepago ya se guardó como saldo a favor, esa plata no puede volver
+    // también por devolución: quedaría un saldo a favor que ya no existe.
+    const cuentaDev = this._cuentaLote(loteId);
+    const creditoGenerado = State.cent((State.proveedorCreditos || []).filter(c => c.loteId === loteId && c.tipo === 'generado').reduce((s, c) => s + (Number(c.montoUsd) || 0), 0));
+    if (creditoGenerado > 0 && monto > State.cent(cuentaDev.excedenteBruto - creditoGenerado)) {
+      toast(`Ya guardaste ${creditoGenerado.toFixed(2)} de este lote como saldo a favor: esa parte no puede volver también como devolución. Máximo a devolver: ${Math.max(0, State.cent(cuentaDev.excedenteBruto - creditoGenerado)).toFixed(2)}.`);
+      return;
+    }
 
     // Acreditar en la caja. Si la plata no entra, la devolución NO se registra.
     const acreditado = await State.acreditarCaja(persona, bolsillo, monto, { tipo: 'proveedor', descripcion: 'Movimiento con proveedor' });
@@ -2000,13 +2038,10 @@ const Proveedores = {
     if (!l) return;
     const items = (State.loteItems || []).filter(i => i.loteId === loteId);
     const pagos = (State.lotePagos || []).filter(p => p.loteId === loteId);
-    const conv = pagos.find(p => p.tipo === 'conversion');
-    const totalItems = items.reduce((s, i) => s + i.precioUsd * i.cantidad, 0);
-    const totalEnvio = pagos.filter(p => ['envio','costo','diferencial'].includes(p.tipo)).reduce((s, p) => s + p.montoUsd, 0);
-    const costoTotal = totalItems + (conv?.comisionUsd || 0) + totalEnvio;
-    const pagadoTotal = pagos.filter(p => ['pago_proveedor','credito_aplicado'].includes(p.tipo)).reduce((s, p) => s + p.montoUsd, 0);
     const creditoYaGenerado = (State.proveedorCreditos || []).filter(c => c.loteId === loteId && c.tipo === 'generado').reduce((s, c) => s + c.montoUsd, 0);
-    const excedente = +Math.max(0, (pagadoTotal - costoTotal) - creditoYaGenerado).toFixed(2);
+    // Excedente = lo pagado de más contra lo que el PROVEEDOR facturó (ítems), no contra el costo de
+    // la mercadería (que incluye comisión y envíos que no se le pagan a él).
+    const excedente = +Math.max(0, this._cuentaLote(loteId).excedenteBruto - creditoYaGenerado).toFixed(2);
     if (excedente <= 0) { toast('No hay excedente sin convertir en este lote.'); return; }
     if (!confirm(`¿Guardar ${State.fmtUSD(excedente)} como saldo a favor con este proveedor? Vas a poder usarlo como pago en otra orden.`)) return;
 
@@ -2022,14 +2057,7 @@ const Proveedores = {
     const disponible = this.saldoCredito(l.proveedorId);
     if (disponible <= 0) { toast('Este proveedor no tiene saldo a favor.'); return; }
 
-    const items = (State.loteItems || []).filter(i => i.loteId === loteId);
-    const pagos = (State.lotePagos || []).filter(p => p.loteId === loteId);
-    const conv = pagos.find(p => p.tipo === 'conversion');
-    const totalItems = items.reduce((s, i) => s + i.precioUsd * i.cantidad, 0);
-    const totalEnvio = pagos.filter(p => ['envio','costo','diferencial'].includes(p.tipo)).reduce((s, p) => s + p.montoUsd, 0);
-    const costoTotal = totalItems + (conv?.comisionUsd || 0) + totalEnvio;
-    const yaAplicado = pagos.filter(p => ['pago_proveedor','credito_aplicado'].includes(p.tipo)).reduce((s, p) => s + p.montoUsd, 0);
-    const restante = Math.max(0, costoTotal - yaAplicado);
+    const restante = this._cuentaLote(loteId).restante;   // lo que todavía se le debe al proveedor
     const sugerido = +Math.min(disponible, restante).toFixed(2);
 
     const overlay = document.createElement('div');

@@ -216,7 +216,7 @@ function nuevoEntorno(opciones = {}) {
     }
   };
 
-  return { State, base, libro, toasts, sembrar, contadores, servidor, cfg, mod: ctx.window, dom, almacen };
+  return { State, base, libro, toasts, sembrar, contadores, servidor, cfg, mod: ctx.window, dom, almacen, ctx };
 }
 
 // ── Aserciones ───────────────────────────────────────────────────────────
@@ -1705,6 +1705,109 @@ const entornoVenta = (extra = {}, cfg = {}) => {
     dia('2026-10-09T00:02:11.5') === '2026-10-09T00:02:11.500Z' && dia('2026-10-09 00:02:11') === '2026-10-09T00:02:11.000Z');
   check('Una hora que YA trae zona no se toca (timestamptz)', DBr._utc('2026-10-09T00:02:11+00:00') === '2026-10-09T00:02:11+00:00' && DBr._utc('2026-10-09T00:02:11Z') === '2026-10-09T00:02:11Z' && DBr._utc('2026-10-08T21:02:11-03:00') === '2026-10-08T21:02:11-03:00');
   check('Una fecha sola ("2026-10-09") y los valores vacíos quedan como están', DBr._utc('2026-10-09') === '2026-10-09' && DBr._utc(null) === null && DBr._utc(undefined) === undefined);
+}
+
+// 39. PLAN CONVERSIONES · FASE 0: saldo con el proveedor ≠ costo de la mercadería, y Capital en tránsito sin doble conteo
+{
+  const armar = (lotes, items, pagos, creditos = []) => {
+    const e = nuevoEntorno({ modulos: ['proveedores.js', 'capital.js'], dbExtra: { async guardarLotePago(loteId, p) { e.State.lotePagos.push({ id: Math.random(), loteId, ...p }); return true; }, async crearProveedorCredito(c) { e.creditosCreados.push(c); e.State.proveedorCreditos.push({ id: 99, tipo: 'generado', ...c }); return true; } } });
+    e.creditosCreados = [];
+    Object.assign(e.State, { lotesCompra: lotes, loteItems: items, lotePagos: pagos, proveedorCreditos: creditos, proveedores: [{ id: 1, nombre: 'P', activo: true }], stock: [], cajas: {}, activosFijos: [], inversores: [], inversorPagos: [], deudas: [], ventas: [] });
+    e.State.refBlue = 1000; e.State.refUsdt = 1000;
+    return e;
+  };
+  const lote = (estado = 'pagado') => [{ id: 1, proveedorId: 1, estado }];
+  const item = (precio, cant = 1) => [{ loteId: 1, precioUsd: precio, cantidad: cant }];
+  const pg = (tipo, montoUsd, extra = {}) => ({ id: Math.random(), loteId: 1, tipo, montoUsd, montoUsdt: extra.montoUsdt || 0, comisionUsd: extra.comisionUsd || 0, moneda: 'USDT', ...extra });
+  // Caso real: ítems 8.790 USDT, conversión con comisión 263,70, pagos 8.526,30 + 263,70 = 8.790
+  {
+    const e = armar(lote(), item(8790), [pg('conversion', 8790, { montoUsdt: 8526.3, comisionUsd: 263.7 }), pg('pago_proveedor', 8526.3), pg('pago_proveedor', 263.7)]);
+    const c = e.mod.Proveedores._cuentaLote(1);
+    check('Caso real: pagados los 8.790 que facturó el proveedor, el lote queda SALDADO (antes mostraba 263,70 de deuda falsa)', c.restante === 0 && c.excedenteBruto === 0 && c.pagadoNeto === 8790, JSON.stringify(c));
+    check('… y el costo de la mercadería sigue incluyendo la comisión (8.790 + 263,70 = 9.053,70)', c.costoAdquisicion === 9053.7, String(c.costoAdquisicion));
+    const cap = e.mod.Capital.calcular();
+    check('Capital en tránsito del caso real: 8.790 pagados + 263,70 de comisión = 9.053,70 (no 17.580 sumando la conversión)', Math.abs(cap.pedidosEnTransito - 9053.7) < 0.005, String(cap.pedidosEnTransito));
+  }
+  {
+    const e = armar(lote(), item(8790), []);
+    check('Sin pagos: se le debe todo (8.790)', e.mod.Proveedores._cuentaLote(1).restante === 8790);
+  }
+  {
+    const e = armar(lote(), item(1000), [pg('envio', 50, { moneda: 'USD' }), pg('pago_proveedor', 1000)]);
+    check('Un envío pagado aparte NO se le debe al proveedor: 1.000 pagados de 1.000 facturados = saldado', e.mod.Proveedores._cuentaLote(1).restante === 0);
+  }
+  {
+    const e = armar(lote(), item(1000), [pg('credito_aplicado', 400), pg('pago_proveedor', 600)]);
+    check('El saldo a favor aplicado cuenta como pagado (400 + 600 de 1.000 = saldado)', e.mod.Proveedores._cuentaLote(1).restante === 0);
+  }
+  {
+    // Orden reducida de 9.000 a 8.000, ya se pagaron 9.000 y el proveedor devolvió 1.000: NO hay excedente
+    const e = armar(lote(), item(8000), [pg('pago_proveedor', 9000), pg('devolucion', 1000)]);
+    const c = e.mod.Proveedores._cuentaLote(1);
+    check('Con devolución del proveedor: 9.000 pagados − 1.000 devueltos = 8.000 = lo facturado: sin excedente ni deuda (antes ofrecía guardar 1.000 como crédito, que ya había vuelto a caja)', c.restante === 0 && c.excedenteBruto === 0, JSON.stringify(c));
+    const cap = e.mod.Capital.calcular();
+    check('… y Capital en tránsito resta la devolución (8.000, no 10.000)', cap.pedidosEnTransito === 8000, String(cap.pedidosEnTransito));
+  }
+  {
+    // Pagó de más de verdad: 100 de excedente → ese monto se ofrece como crédito, calculado contra los ítems
+    const e = armar(lote(), item(1000), [pg('conversion', 1000, { montoUsdt: 970, comisionUsd: 30 }), pg('pago_proveedor', 1100)]);
+    const c = e.mod.Proveedores._cuentaLote(1);
+    check('Pago de más contra lo facturado: excedente 100 (aunque el costo con comisión sea 1.030)', c.excedenteBruto === 100 && c.restante === 0, JSON.stringify(c));
+    e.mod.Proveedores.renderContent = () => {};
+    await e.mod.Proveedores.convertirExcedenteACredito(1);
+    check('«Guardar como saldo a favor» guarda 100 (no 70 = 1.100 − 1.030)', e.creditosCreados.length === 1 && e.creditosCreados[0].montoUsd === 100, JSON.stringify(e.creditosCreados));
+    const cap = e.mod.Capital.calcular();
+    check('Capital en tránsito tras ese excedente: 1.100 pagados − 100 guardados como crédito + 30 de comisión = 1.030', Math.abs(cap.pedidosEnTransito - 1030) < 0.005, String(cap.pedidosEnTransito));
+  }
+  // Modal de pago: lo sugerido sale de lo que falta pagar, no de lo convertido
+  {
+    const modalMonto = e => {
+      let html = '';
+      e.ctx.document.createElement = () => ({ set innerHTML(v) { html = v; }, get innerHTML() { return html; }, style: {}, classList: { add() {}, remove() {} }, remove() {}, querySelector: () => null });
+      e.mod.Proveedores.modalPago(1);
+      const m = html.match(/id="pago-monto"[^>]*?value="([^"]*)"/s);
+      return m ? m[1] : null;
+    };
+    const e1 = armar(lote('pendiente'), item(1000), [pg('conversion', 1000, { montoUsdt: 970, comisionUsd: 30 })]);
+    check('Modal de pago, primer pago con conversión: propone los USDT convertidos (970)', modalMonto(e1) === '970.00', String(modalMonto(e1)));
+    const e2 = armar(lote('pendiente'), item(1000), [pg('conversion', 1000, { montoUsdt: 970, comisionUsd: 30 }), pg('pago_proveedor', 600)]);
+    check('Modal de pago con 600 ya pagados: propone lo que falta (370, no 970 de nuevo)', modalMonto(e2) === '370.00', String(modalMonto(e2)));
+    const e3 = armar(lote('pendiente'), item(1000), [pg('credito_aplicado', 400)]);
+    check('Modal de pago sin conversión y con saldo a favor aplicado: propone 600', modalMonto(e3) === '600.00', String(modalMonto(e3)));
+    const e4 = armar(lote(), item(1000), [pg('pago_proveedor', 1000)]);
+    check('Modal de pago con el lote saldado: no propone nada', modalMonto(e4) === '', String(modalMonto(e4)));
+  }
+  // Devolución sobre un excedente que ya se guardó como saldo a favor: bloqueada
+  {
+    const e = armar(lote(), item(900), [pg('pago_proveedor', 1000)], [{ id: 1, proveedorId: 1, loteId: 1, tipo: 'generado', montoUsd: 100 }]);
+    Object.assign(e.dom, { 'dev-persona': 'Franco', 'dev-bolsillo': 'USDT', 'dev-monto': '100', 'dev-notas': '' });
+    e.sembrar({ Franco: { USDT: 0 } });
+    const antes = e.contadores.llamadas ?? 0;
+    await e.mod.Proveedores.confirmarDevolucion(1);
+    check('Devolver 100 cuando esos 100 ya son saldo a favor: se bloquea y no entra plata a la caja', e.State.cajas.Franco.USDT === 0 && e.State.lotePagos.filter(p => p.tipo === 'devolucion').length === 0 && e.toasts.some(t => /saldo a favor/.test(t)), JSON.stringify(e.toasts));
+    const e2 = armar(lote(), item(900), [pg('pago_proveedor', 1000)]);
+    Object.assign(e2.dom, { 'dev-persona': 'Franco', 'dev-bolsillo': 'USDT', 'dev-monto': '100', 'dev-notas': '' });
+    e2.sembrar({ Franco: { USDT: 0 } });
+    e2.mod.Proveedores.renderKpis = () => {}; e2.mod.Proveedores.renderContent = () => {};
+    await e2.mod.Proveedores.confirmarDevolucion(1);
+    const e3 = armar(lote(), item(900), [pg('pago_proveedor', 1000)], [{ id: 1, proveedorId: 1, loteId: 1, tipo: 'generado', montoUsd: 100 }]);
+    Object.assign(e3.dom, { 'dev-persona': 'Franco', 'dev-bolsillo': 'USDT', 'dev-monto': '0.005', 'dev-notas': '' });
+    e3.sembrar({ Franco: { USDT: 0 } });
+    await e3.mod.Proveedores.confirmarDevolucion(1);
+    check('Devolver 0,005 con máximo 0 se bloquea (no se cuela por redondeo a 0,01)', e3.State.cajas.Franco.USDT === 0 && e3.State.lotePagos.filter(p => p.tipo === 'devolucion').length === 0, String(e3.State.cajas.Franco.USDT));
+    check('Sin saldo a favor generado, la misma devolución de 100 sí se permite', e2.State.cajas.Franco.USDT === 100, String(e2.State.cajas.Franco?.USDT));
+  }
+  {
+    const e = armar(lote(), item(900), [pg('pago_proveedor', 1000)], [{ id: 1, proveedorId: 1, loteId: 1, tipo: 'generado', montoUsd: 100 }]);
+    const cap = e.mod.Capital.calcular();
+    check('Pagó 1.000 de una orden de 900 y 100 ya son saldo a favor: en tránsito 900 (el crédito se cuenta en su línea, sin duplicar)', cap.pedidosEnTransito === 900, String(cap.pedidosEnTransito));
+  }
+  {
+    const e = armar(lote('cancelado'), item(1000), [pg('conversion', 1000, { montoUsdt: 970, comisionUsd: 30 }), pg('pago_proveedor', 970)]);
+    check('Un lote CANCELADO no cuenta en tránsito (devolvió la plata aunque conserve las filas)', e.mod.Capital.calcular().pedidosEnTransito === 0);
+    const r = armar(lote('recibido'), item(1000), [pg('pago_proveedor', 1000)]);
+    check('Un lote RECIBIDO tampoco', r.mod.Capital.calcular().pedidosEnTransito === 0);
+  }
 }
 
 // 30. Altas: si el registro no se puede crear, NO se toca la caja (o se deshace)

@@ -9,10 +9,12 @@
 const ventanas = new Map();
 const MAXIMO_ENTRADAS = 5000; // tope de IPs recordadas, para no crecer sin fin
 
-function limitar(req, res, { max = 60, ventanaMs = 60_000 } = {}) {
+// `ambito`: separa los contadores de endpoints que comparten función (por ejemplo /api/catalogo y /api/presupuesto-bot): sin él, el tráfico de
+// uno consumiría el límite del otro. Sin `ambito` el comportamiento es el de siempre.
+function limitar(req, res, { max = 60, ventanaMs = 60_000, ambito = '' } = {}) {
   const ip = (req.headers['x-forwarded-for'] || '').split(',')[0].trim()
     || req.socket?.remoteAddress || 'desconocida';
-  const clave = `${ip}`;
+  const clave = ambito ? `${ip}|${ambito}` : `${ip}`;
   const ahora = Date.now();
 
   let marcas = ventanas.get(clave) || [];

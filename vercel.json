@@ -9,6 +9,9 @@
     },
     "api/meli/conectar.js": {
       "maxDuration": 30
+    },
+    "api/catalogo.js": {
+      "maxDuration": 10
     }
   },
   "crons": [
@@ -21,6 +24,10 @@
     {
       "source": "/api/meli/publicaciones",
       "destination": "/api/meli/conectar?_f=publicaciones"
+    },
+    {
+      "source": "/api/presupuesto-bot",
+      "destination": "/api/catalogo?_f=presupuesto"
     },
     {
       "source": "/sitemap.xml",
@@ -96,6 +103,21 @@
     }
   ],
   "headers": [
+    {
+      "source": "/precios.html",
+      "has": [
+        {
+          "type": "query",
+          "key": "presupuesto"
+        }
+      ],
+      "headers": [
+        {
+          "key": "X-Robots-Tag",
+          "value": "noindex, nofollow"
+        }
+      ]
+    },
     {
       "source": "/(.*)",
       "headers": [

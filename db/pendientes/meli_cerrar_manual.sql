@@ -175,7 +175,10 @@ BEGIN
 
   UPDATE public.meli_ordenes
      SET cerrada_manual_en = NULL, cerrada_manual_por = NULL, cerrada_manual_motivo = NULL,
-         cerrada_manual_nota = NULL, cerrada_manual_venta_id = NULL, actualizado_en = now()
+         cerrada_manual_nota = NULL, cerrada_manual_venta_id = NULL, actualizado_en = now(),
+         -- Cerrar puso `revisar` en falso pero dejó los motivos: al reabrir vuelve a estar en revisión si todavía
+         -- hay motivos (la revalidación de abajo solo recalcula cuando cambia el texto, así que se restituye acá).
+         revisar = COALESCE(btrim(motivo_revisar), '') <> ''
    WHERE id = o.id;
 
   o := public.meli__revalidar_orden(o.id);

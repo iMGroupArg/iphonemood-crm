@@ -34,6 +34,13 @@ const MeliOrdenes = {
     MONTO_MENOR_AL_NETO: 'El monto es menor al que informó Mercado Libre. Si es lo que de verdad llegó y no va a llegar más, tildá «liquidación final».',
     VENTA_SIN_COTIZACION: 'La venta no tiene cotización guardada.',
     ACREDITACION_SIN_DATOS: 'No se sabe en qué caja entró la plata: revisalo a mano.',
+    ORDEN_YA_PROCESADA: 'Esta orden ya se procesó (tiene venta y stock descontado): no se puede cerrar a mano. Si fue un error, usá «Revertir».',
+    ORDEN_CERRADA_MANUAL: 'Esta orden está cerrada a mano: no se puede procesar ni acreditar. Reabrila primero si hace falta.',
+    VENTA_YA_ENLAZADA: 'Esa venta ya está enlazada a otra orden de Mercado Libre.',
+    VENTA_INEXISTENTE: 'No encuentro esa venta (o está anulada). Revisá el número.',
+    VENTA_NO_APLICA: 'Solo «ya la cargué a mano» admite enlazar una venta.',
+    NOTA_INVALIDA: 'La nota es muy larga (máximo 200 caracteres) o tiene caracteres raros.',
+    MOTIVO_INVALIDO: 'No se pudo cerrar la orden: motivo inválido.',
     'no autorizado': 'Tu usuario no está autorizado.',
   },
   _msgError(error) {
@@ -62,7 +69,7 @@ const MeliOrdenes = {
     let cambio = false;
     try {
       const ahora = Date.now();
-      const candidatas = (State.meliOrdenes || []).filter(o => !o.procesada && !o.revertidaEn && o.revisar
+      const candidatas = (State.meliOrdenes || []).filter(o => !o.procesada && !o.revertidaEn && !o.cerradaManual && o.revisar
         && String(o.motivoRevisar || '').includes(this.MOTIVO_SIN_VINCULO)
         && !(this._ultimaReval[o.id] && ahora - this._ultimaReval[o.id] < 30000)).slice(0, 20);
       for (const o of candidatas) {
@@ -112,6 +119,8 @@ const MeliOrdenes = {
   },
 
   _estadoDe(o) {
+    // Cerrada a mano (script 12): ya cargada en Ventas o descartada. No se procesa ni se acredita.
+    if (o.cerradaManual) return { clave: 'cerradas', txt: o.cerradaManual.motivo === 'ya_cargada' ? 'Ya cargada a mano' : 'Descartada', clase: 'b-gray' };
     if (o.revertidaEn) return { clave: 'cerradas', txt: 'Revertida', clase: 'b-gray' };
     if (o.revisar) return { clave: 'revision', txt: 'Revisar', clase: 'b-red' };
     if (!o.procesada) return { clave: 'pendientes', txt: 'Para procesar', clase: 'b-amber' };
@@ -161,7 +170,9 @@ const MeliOrdenes = {
       }).join('<br>');
       const retenido = (o.bruto !== null && o.neto !== null && o.financieraCompleta) ? this._ars(o.bruto - o.neto) : '—';
       let acciones = '';
-      if (!o.revertidaEn && !o.procesada && o.revisar) {
+      if (o.cerradaManual) {
+        // Cerrada a mano: sin Revalidar ni Procesar; solo se puede reabrir (abajo).
+      } else if (!o.revertidaEn && !o.procesada && o.revisar) {
         acciones = `<button class="btn btn-sm" onclick="MeliOrdenes.revalidar(${o.id}, this)" title="Vuelve a mirar los vínculos de esta orden"><i class="ti ti-refresh"></i> Revalidar</button>`;
       } else if (!o.revertidaEn && !o.revisar && !o.procesada) {
         acciones = sinVincular
@@ -179,6 +190,13 @@ const MeliOrdenes = {
           <button class="btn btn-primary btn-sm" onclick="MeliOrdenes.acreditar(${o.id}, this)"><i class="ti ti-check"></i> Confirmar acreditación</button>`;
       }
       acciones += `<button class="btn btn-sm" onclick="MeliOrdenes.abrirDetalle(${o.id})"><i class="ti ti-list-details"></i> Detalle</button>`;
+      if (!o.revertidaEn && !o.procesada && !o.cerradaManual) {
+        acciones += `<button class="btn btn-sm" onclick="MeliOrdenes.abrirCierre(${o.id}, 'ya_cargada')" title="La venta ya está cargada en Ventas: cierra la orden sin descontar stock ni mover plata"><i class="ti ti-check"></i> Ya la cargué a mano</button>
+          <button class="btn btn-sm" onclick="MeliOrdenes.abrirCierre(${o.id}, 'descartada')" title="No tomar en cuenta esta orden"><i class="ti ti-ban"></i> Descartar</button>`;
+      }
+      if (o.cerradaManual && !o.procesada) {
+        acciones += `<button class="btn btn-sm" onclick="MeliOrdenes.reabrirCierre(${o.id}, this)"><i class="ti ti-arrow-back-up"></i> Reabrir</button>`;
+      }
       if (o.procesada && !o.revertidaEn) {
         acciones += `<button class="btn btn-sm" style="color:var(--red)" onclick="MeliOrdenes.revertir(${o.id}, this)"><i class="ti ti-arrow-back-up"></i> Revertir</button>`;
       }
@@ -199,6 +217,7 @@ const MeliOrdenes = {
             ${o.acreditado ? `<span>Acreditado <b>${this._ars(o.montoAcreditado)}</b></span>` : ''}
             ${o.ventaId ? `<span>Venta #${o.ventaId}</span>` : ''}
           </div>
+          ${o.cerradaManual ? `<div style="font-size:12px;color:var(--text-secondary);margin-top:6px"><i class="ti ti-lock"></i> ${o.cerradaManual.motivo === 'ya_cargada' ? 'Ya cargada a mano' : 'Descartada'} por ${e(o.cerradaManual.por || '—')} el ${this._dia(o.cerradaManual.en)}${o.cerradaManual.ventaId ? ` · venta #${e(o.cerradaManual.ventaId)}` : ''}${o.cerradaManual.nota ? ` · ${e(o.cerradaManual.nota)}` : ''}. No descuenta stock ni mueve plata.</div>` : ''}
           ${o.revisar ? `<div style="font-size:12px;color:var(--red);margin-top:6px"><i class="ti ti-alert-triangle"></i> ${e(o.motivoRevisar || 'Hay que revisar esta orden')}</div>` : ''}
           ${acciones ? `<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:10px">${acciones}</div>` : ''}
         </div>`;
@@ -320,7 +339,55 @@ const MeliOrdenes = {
     document.getElementById('meliord-overlay')?.remove();
   },
 
+  // ── Cerrar a mano (script 12): «ya la cargué a mano» y «descartar». No tocan stock, ventas ni caja ──
+  abrirCierre(id, motivo) {
+    const o = (State.meliOrdenes || []).find(x => x.id === id);
+    if (!o || o.procesada || o.revertidaEn || o.cerradaManual || !['ya_cargada', 'descartada'].includes(motivo)) return;
+    this.cerrarCuadro();
+    const tok = ++this._cuadroTok;                    // la respuesta de un cierre solo cierra ESTE cuadro, no otro que se haya abierto después
+    const e = s => State.esc(s == null ? '' : String(s));
+    const ya = motivo === 'ya_cargada';
+    const ov = document.createElement('div');
+    ov.id = 'meliord-overlay';
+    ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.6);backdrop-filter:blur(4px);z-index:800;display:flex;align-items:center;justify-content:center;padding:20px';
+    const inp = 'width:100%;font-size:13px;padding:7px 9px;border:1px solid var(--border-strong);border-radius:8px';
+    ov.innerHTML = `
+      <div style="background:var(--bg-elevated);border:1px solid var(--border-strong);border-radius:var(--radius-xl);width:min(480px,96vw);max-height:90dvh;overflow:auto;padding:18px">
+        <div style="font-size:15px;font-weight:700;margin-bottom:4px">${ya ? 'Ya la cargué a mano' : 'Descartar'} · orden ${e(o.orderId)}</div>
+        <div style="font-size:12px;color:var(--text-secondary);line-height:1.5;margin-bottom:12px">
+          ${ya ? 'La venta ya está cargada en Ventas. Esto cierra la orden <b>sin descontar stock, sin crear otra venta y sin mover plata</b>: la plata que Mercado Libre libere la cargás vos en la caja, como hasta ahora.'
+               : 'La orden no se va a tomar en cuenta. <b>No descuenta stock, no crea venta y no mueve plata.</b>'}
+          Si te equivocás, la podés reabrir.</div>
+        ${ya ? `<label style="font-size:11px;font-weight:600;display:block;margin-bottom:4px">Número de la venta en Ventas (opcional)</label>
+          <input type="number" id="meliord-cvta-${id}" min="1" step="1" style="${inp};margin-bottom:10px">` : ''}
+        <label style="font-size:11px;font-weight:600;display:block;margin-bottom:4px">Nota (opcional)</label>
+        <input type="text" id="meliord-cnota-${id}" maxlength="200" placeholder="${ya ? 'Ej.: cargada en Ventas el 5/10' : 'Ej.: no se toma en cuenta'}" style="${inp};margin-bottom:14px">
+        <div style="display:flex;gap:8px;justify-content:flex-end">
+          <button class="btn btn-sm" onclick="MeliOrdenes.cerrarCuadro()">Cancelar</button>
+          <button class="btn btn-primary btn-sm" onclick="MeliOrdenes.cerrarManual(${id}, '${motivo}', this, ${tok})">Confirmar</button>
+        </div>
+      </div>`;
+    document.body.appendChild(ov);
+  },
+  async cerrarManual(id, motivo, btn, tok) {
+    if (!['ya_cargada', 'descartada'].includes(motivo)) return;
+    const nota = document.getElementById(`meliord-cnota-${id}`)?.value.trim() || null;
+    const vtxt = document.getElementById(`meliord-cvta-${id}`)?.value.trim() || '';
+    let venta = null;
+    if (vtxt) { if (!/^[0-9]{1,12}$/.test(vtxt)) { toast('El número de venta no es válido.'); return; } venta = Number(vtxt); }
+    if (nota && nota.length > 200) { toast('La nota es muy larga (máximo 200 caracteres).'); return; }
+    const r = await this._llamar(btn, 'meli_orden_cerrar_manual', { p_orden_id: id, p_motivo: motivo, p_venta_id: venta, p_nota: nota },
+      d => (d && d.ya_cerrada) ? 'La orden ya estaba cerrada.' : (motivo === 'ya_cargada' ? 'Orden cerrada: ya estaba cargada a mano.' : 'Orden descartada.'));
+    if (r) this.cerrarCuadro(tok);
+  },
+  async reabrirCierre(id, btn) {
+    if (!confirm('¿Reabrir esta orden? Vuelve a «Para procesar» o «En revisión», según corresponda.')) return;
+    await this._llamar(btn, 'meli_orden_reabrir_cierre', { p_orden_id: id }, () => 'Orden reabierta.');
+  },
+
   async abrirProcesar(id) {
+    const o0 = (State.meliOrdenes || []).find(x => x.id === id);
+    if (o0 && o0.cerradaManual) { toast('Esta orden está cerrada a mano. Reabrila si hace falta procesarla.'); return; }
     const o = (State.meliOrdenes || []).find(x => x.id === id);
     if (!o || o.procesada || o.revertidaEn) return;
     this.cerrarCuadro();

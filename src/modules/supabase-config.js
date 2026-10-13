@@ -308,7 +308,14 @@ const DB = {
   async cargarMeliOrdenes() {
     State.meliOrdenes = []; State.meliError = false;
     try {
-      const COLS = 'id,meli_order_id,cuenta_id,estado,estado_envio,comprador,fecha_orden,moneda,bruto,neto,comision_envio,fecha_liberacion,financiera_completa,revisar,motivo_revisar,procesada,stock_descontado,venta_id,acreditado,monto_acreditado,acreditado_en,revertida_en';
+      const COLS_BASE = 'id,meli_order_id,cuenta_id,estado,estado_envio,comprador,fecha_orden,moneda,bruto,neto,comision_envio,fecha_liberacion,financiera_completa,revisar,motivo_revisar,procesada,stock_descontado,venta_id,acreditado,monto_acreditado,acreditado_en,revertida_en';
+      // Cierre a mano (script 12): si todavía no se corrió, esas columnas no existen y se sigue sin ellas (la pantalla no se rompe).
+      const sondaCierre = await supa.from('meli_ordenes').select('cerrada_manual_en').limit(1);
+      // Solo una columna INEXISTENTE (script 12 sin correr) habilita el modo sin cierre; cualquier otro error corta la carga:
+      // si no, un fallo pasajero haría ver como abiertas a las órdenes cerradas.
+      const faltaColumna = sondaCierre.error && (sondaCierre.error.code === '42703' || /cerrada_manual|column .* does not exist|Could not find/i.test(String(sondaCierre.error.message || '')));
+      if (sondaCierre.error && !faltaColumna) { State.meliError = true; return; }
+      const COLS = sondaCierre.error ? COLS_BASE : COLS_BASE + ',cerrada_manual_en,cerrada_manual_por,cerrada_manual_motivo,cerrada_manual_nota,cerrada_manual_venta_id';
       // Las 300 más nuevas para la pantalla, MÁS todas las que siguen abiertas sin importar
       // cuán viejas sean: "pendiente de liberar" y el Capital se calculan con esto, y una
       // orden vieja sin acreditar no puede desaparecer de la suma por quedar fuera del límite.
@@ -356,6 +363,7 @@ const DB = {
         procesada: !!o.procesada, stockDescontado: !!o.stock_descontado, ventaId: o.venta_id,
         acreditado: !!o.acreditado, montoAcreditado: num(o.monto_acreditado), acreditadoEn: o.acreditado_en,
         revertidaEn: o.revertida_en, items: itemsPor[o.id] || [],
+        cerradaManual: o.cerrada_manual_en ? { en: o.cerrada_manual_en, por: o.cerrada_manual_por, motivo: o.cerrada_manual_motivo, nota: o.cerrada_manual_nota, ventaId: o.cerrada_manual_venta_id } : null,
       }));
     } catch (e) {
       console.warn('No se pudieron leer las órdenes de Mercado Libre:', e);

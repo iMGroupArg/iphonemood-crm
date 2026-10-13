@@ -319,7 +319,9 @@ const MeliVincular = {
         q = variacion ? q.eq('meli_variacion_id', variacion) : q.is('meli_variacion_id', null);
         return q.order('id');
       });
-      return { ids: [...new Set(filas.map((x) => x.orden_id))], truncado };
+      // Las órdenes cerradas a mano (script 12) no se revalidan: están fuera del circuito.
+      const cerradas = new Set((window.State && State.meliOrdenes ? State.meliOrdenes : []).filter((o) => o.cerradaManual).map((o) => o.id));
+      return { ids: [...new Set(filas.map((x) => x.orden_id))].filter((id) => !cerradas.has(id)), truncado };
     } catch { return null; }
   },
 

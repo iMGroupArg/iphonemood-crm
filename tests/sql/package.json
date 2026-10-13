@@ -5,7 +5,7 @@
   "scripts": {
     "test": "node caja.sql.test.mjs",
     "test:meli": "node meli.sql.test.mjs",
-    "test:todo": "node barrido.sql.test.mjs && node barrido.servidor.test.mjs && node caja.sql.test.mjs && node meli.sql.test.mjs && node stock.sql.test.mjs && node catalogo.sql.test.mjs && node vincular.sql.test.mjs && node canje.sql.test.mjs && node controles.test.mjs && node paquete.test.mjs && node vincular.concurrencia.test.mjs",
+    "test:todo": "node presupuesto_token.test.mjs && node barrido.sql.test.mjs && node barrido.servidor.test.mjs && node caja.sql.test.mjs && node meli.sql.test.mjs && node stock.sql.test.mjs && node catalogo.sql.test.mjs && node vincular.sql.test.mjs && node canje.sql.test.mjs && node controles.test.mjs && node paquete.test.mjs && node vincular.concurrencia.test.mjs",
     "test:stock": "node stock.sql.test.mjs",
     "test:catalogo": "node catalogo.sql.test.mjs",
     "test:vincular": "node vincular.sql.test.mjs",

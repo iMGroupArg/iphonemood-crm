@@ -1512,6 +1512,59 @@ const entornoVenta = (extra = {}, cfg = {}) => {
     llamadas[3].fn === 'meli_procesar_orden' && llamadas[3].args.p_cotizacion === 1000 && e.toasts.some(t => t.includes('IMEI')), JSON.stringify({ l: llamadas[3], t: e.toasts }));
 }
 
+// 32b. CERRAR A MANO (script 12): «ya la cargué a mano» y «descartar» no procesan, no descuentan, no acreditan
+{
+  const llamadas = [];
+  const e = nuevoEntorno({ modulos: ['meli-ordenes.js'], dom: { 'meliord-cnota-1': ' cargada el 5/10 ', 'meliord-cvta-1': '321', 'meliord-cnota-3': '', 'meliord-cvta-3': '12ab' },
+    dbExtra: { async cargarTodo() {}, async cargarMeliOrdenes() {} } });
+  let respuesta = { data: { ok: true, orden_id: 1, motivo: 'ya_cargada', venta_id: 321 }, error: null };
+  e.cfg.supaRpc = async (fn, args) => { llamadas.push({ fn, args }); return respuesta; };
+  const M = e.mod.MeliOrdenes;
+  const cerr = { en: '2026-10-12T15:00:00Z', por: 'franco@x.com', motivo: 'ya_cargada', nota: 'ya estaba', ventaId: 55 };
+  e.State.meliOrdenes = [
+    { id: 1, orderId: 'ORD1', procesada: false, revisar: false, items: [{ cantidad: 1, stock_id: 's1', titulo: 'Perfume A' }], cuentaId: 1, bruto: 1000, neto: 800, financieraCompleta: true },
+    { id: 2, orderId: 'ORD2', procesada: false, revisar: false, cerradaManual: cerr, items: [{ cantidad: 1, stock_id: 's1', titulo: 'Perfume A' }], cuentaId: 1 },
+    { id: 3, orderId: 'ORD3', procesada: false, revisar: true, motivoRevisar: 'Hay ítems sin publicación vinculada', items: [{ cantidad: 1, titulo: 'Perfume B' }], cuentaId: 1 },
+    { id: 4, orderId: 'ORD4', procesada: false, revisar: true, motivoRevisar: 'Mercado Libre la canceló', cerradaManual: { ...cerr, motivo: 'descartada', ventaId: null, nota: null }, items: [], cuentaId: 1 },
+    { id: 5, orderId: 'ORD5', procesada: true, acreditado: false, revisar: false, financieraCompleta: true, items: [], cuentaId: 1 },
+  ];
+  M._filtro = 'todas';
+  const v = M._vista();
+  const tarjeta = (id) => { const i = v.indexOf(`Orden ORD${id} `); const j = v.indexOf('Orden ORD', i + 5); return v.slice(i, j < 0 ? undefined : j); };
+  check('Una orden sin procesar y una en revisión ofrecen «Ya la cargué a mano» y «Descartar»', /abrirCierre\(1, 'ya_cargada'\)/.test(tarjeta(1)) && /abrirCierre\(1, 'descartada'\)/.test(tarjeta(1)) && /abrirCierre\(3, 'ya_cargada'\)/.test(tarjeta(3)), tarjeta(1).slice(-400));
+  check('Una orden CERRADA a mano: etiqueta, quién y cuándo, la nota y la venta enlazada; sin Procesar, sin Revalidar y sin cerrar de nuevo; con «Reabrir»',
+    tarjeta(2).includes('Ya cargada a mano') && tarjeta(2).includes('venta #55') && tarjeta(2).includes('ya estaba') && !/MeliOrdenes\.(abrirProcesar|revalidar|abrirCierre)\(2/.test(tarjeta(2)) && /MeliOrdenes\.reabrirCierre\(2/.test(tarjeta(2)), tarjeta(2).slice(-500));
+  check('Una cerrada que Mercado Libre volvió a marcar para revisar muestra el aviso en rojo, y sigue sin poder procesarse', tarjeta(4).includes('Descartada') && tarjeta(4).includes('la canceló') && !/MeliOrdenes\.(abrirProcesar|revalidar)\(4/.test(tarjeta(4)));
+  const cuenta = k => e.State.meliOrdenes.filter(o => M._estadoDe(o).clave === k).length;
+  check('Las cerradas a mano van a la solapa «Cerradas»; no cuentan en «Para procesar» ni en «En revisión»', cuenta('cerradas') === 2 && cuenta('pendientes') === 1 && cuenta('revision') === 1 && M._estadoDe(e.State.meliOrdenes[1]).clave === 'cerradas');
+  check('La solapa «a liberar» solo cuenta lo procesado y sin acreditar: las cerradas a mano no suman', e.State.meliPendienteLiberar().ordenes === 1);
+  await M.cerrarManual(1, 'ya_cargada', null);
+  check('«Ya la cargué a mano» llama a meli_orden_cerrar_manual con la orden, el motivo, la venta como NÚMERO y la nota sin espacios sobrantes',
+    llamadas.length === 1 && llamadas[0].fn === 'meli_orden_cerrar_manual' && llamadas[0].args.p_orden_id === 1 && llamadas[0].args.p_motivo === 'ya_cargada' && llamadas[0].args.p_venta_id === 321 && llamadas[0].args.p_nota === 'cargada el 5/10', JSON.stringify(llamadas));
+  await M.cerrarManual(3, 'ya_cargada', null);
+  check('Un número de venta que no es un número se rechaza ANTES de llamar a la base', llamadas.length === 1 && e.toasts.some(t => t.includes('número de venta no es válido')), JSON.stringify(e.toasts));
+  await M.cerrarManual(3, 'otra', null);
+  check('Un motivo que no es ninguno de los dos no llama a la base', llamadas.length === 1);
+  respuesta = { data: null, error: { message: 'ORDEN_YA_PROCESADA' } };
+  e.dom['meliord-cvta-3'] = '';
+  await M.cerrarManual(3, 'descartada', null);
+  check('Si la base dice que ya está procesada, se explica en castellano (y se manda sin venta, porque descartar no la admite)', llamadas[1].args.p_motivo === 'descartada' && llamadas[1].args.p_venta_id === null && e.toasts.some(t => t.includes('ya se procesó')), JSON.stringify({ l: llamadas[1], t: e.toasts }));
+  for (const [codigo, texto] of [['ORDEN_CERRADA_MANUAL', 'cerrada a mano'], ['VENTA_YA_ENLAZADA', 'ya está enlazada'], ['VENTA_INEXISTENTE', 'No encuentro esa venta'], ['NOTA_INVALIDA', 'La nota']]) {
+    respuesta = { data: null, error: { message: codigo } };
+    e.toasts.length = 0;
+    await M.cerrarManual(1, 'ya_cargada', null);
+    if (!e.toasts.some(t => t.includes(texto))) { check(`El error ${codigo} se explica en castellano`, false, JSON.stringify(e.toasts)); }
+  }
+  check('Los errores de la base (cerrada, venta ya enlazada, venta inexistente, nota) se explican en castellano', true);
+  const antes = llamadas.length;
+  e.toasts.length = 0;
+  await M.abrirProcesar(2);
+  check('Abrir «Procesar» de una orden cerrada a mano no abre nada: avisa que hay que reabrirla', e.toasts.some(t => t.includes('cerrada a mano')) && llamadas.length === antes);
+  respuesta = { data: { ok: true, orden_id: 2, revisar: false }, error: null };
+  const confirmOrig = e.cfg.confirm;
+  await M.reabrirCierre(2, null);
+}
+
 // 33. TRADE-IN: el equipo que entra con la venta tiene que llegar al stock, o decir POR QUÉ no
 {
   const tradeIn = { cat: 'iphone', modelo: 'iPhone 16 Pro Max', storage: '256GB', color: 'Dorado', valor: 800, imei: '351234567890123', bateriaPct: 90, estadoProducto: '', grado: 'Sin grado', notas: '', custodio: '', revisar: false };

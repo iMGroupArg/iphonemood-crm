@@ -55,3 +55,23 @@ Pendientes de decisión de Franco (no se resuelven desde el SQL):
 1. **Tipo de comprobante** (A/B/C…): ¿F1 asume un único tipo (por ejemplo, todo Factura C) o se registra el tipo junto al número? Define la unicidad del comprobante.
 2. **Comprobante repetido en otra orden:** ¿un número = una orden (índice único estricto), o puede una factura cubrir varias órdenes? Y si se reabre una y el número aparece en otra, ¿es una corrección legítima? Mi propuesta: estricto, y la corrección se hace reabriendo (queda en el historial).
 3. **Motivo como catálogo cerrado** en lugar de texto libre (cambia el contrato y la UI de Codex; los textos de la lista son propuestos).
+
+## 8 · Estado (13-10-2026): script 16 escrito y probado en local — NO corrido en producción
+Archivos: `db/pendientes/meli_facturas.sql` = `db/para-correr/16_meli_facturas.sql`; bancos `tests/sql/facturas_meli.sql.test.mjs` (68 controles, pglite, con 6 mutaciones) y `tests/sql/facturas_meli.concurrencia.test.mjs` (17, Postgres real, intercalados forzados y esfuerzo de 20 s: cero deadlocks). Codex: ronda 1 REVISE (incorporada), ronda 2 REVISE (incorporada: el nombre del perfil ya no se guarda, solo el email verificado), ronda 3 REVISE con tres puntos (estructura preexistente completa, `detail` exacto, autor y versiones en el esfuerzo): corregidos y con pruebas; la ronda 4 no se hizo.
+
+### Contrato definitivo para la pantalla
+**Lectura:** `supa.from('meli_facturas').select('orden_id,estado,tipo,pto_venta,numero,emitida_el,motivo,version,marcada_por,marcada_en')`. La clave es `orden_id` = `meli_ordenes.meli_order_id` (TEXTO, no el id interno). Sin fila = pendiente. Si la tabla no existe (error `42P01`/`PGRST205`) la pantalla se oculta sin romperse. El historial (`meli_facturas_historial`) también se puede leer, solo lectura.
+
+**Escritura (única):** `supa.rpc('meli_factura_marcar', { p_orden, p_estado, p_tipo, p_pto_venta, p_numero, p_emitida_el, p_motivo, p_version_esperada })` con nombres EXACTOS; los que no aplican se omiten o van `null`.
+- `p_estado`: `'emitida'` | `'no_corresponde'` | `'pendiente'` (esta última = **reabrir**).
+- emitida: `p_tipo` 'A'|'B'|'C'|'E'|'M'; `p_pto_venta` entero 1–99999; `p_numero` entero 1–99999999; `p_emitida_el` fecha `YYYY-MM-DD` no futura (hora de Argentina). Nada de `p_motivo`.
+- no_corresponde: `p_motivo` ∈ `no_es_venta_real` | `cancelada_o_devuelta` | `factura_global_de_otro_periodo` | `exenta_o_no_gravada` | `otro_ver_nota_interna` (lista cerrada, sin texto libre). Nada más.
+- pendiente (reabrir): todo `null` salvo la versión.
+- `p_version_esperada`: la `version` de la fila que la pantalla tiene en la mano; `null` si la orden no tenía fila. SIEMPRE se manda.
+- Respuesta: `{ ok:true, orden_id, estado, version, sin_cambios? }`. `sin_cambios:true` = ya estaba así (éxito, no hay que avisar de error).
+- El número se muestra como `C 0003-00001234` (tipo, punto de venta a 4 dígitos, número a 8) pero se envía y guarda como enteros separados.
+- Quién marcó: lo pone la base (email del token); la pantalla no manda ni muestra otro nombre.
+
+**Errores** (llegan en `error.message`; el detalle útil en `error.details`): `FACTURA_CAMBIO_RECARGAR` (otra persona la cambió: recargar la lista y volver a intentar), `FACTURA_YA_REGISTRADA` (hay que **reabrir** antes de cambiar el comprobante o el motivo), `NUMERO_REPETIDO` (ese comprobante ya está en otra orden; `details` dice cuál), `ESTADO_INVALIDO`, `TIPO_INVALIDO`, `PUNTO_VENTA_INVALIDO`, `NUMERO_INVALIDO`, `FECHA_INVALIDA`, `MOTIVO_INVALIDO`, `DATOS_SOBRANTES`, `ORDEN_INEXISTENTE`, y `no autorizado` (código 42501). Cualquier error: mostrarlo en castellano y NO cambiar el estado en pantalla.
+
+**Textos fijos:** reabrir NO anula el comprobante ante ARCA (el número queda en el historial); cancelar o revertir la orden no cambia su factura. La cuenta de "ventas sin factura" (pendiente o sin fila, y la orden no está revertida/cancelada/cerrada a mano) la calcula la pantalla.

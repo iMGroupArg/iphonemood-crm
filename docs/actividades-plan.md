@@ -3,7 +3,7 @@
 Plan breve (Ventas+Cueva, 2026-10-13). Para revisión de Codex antes de construir. Nada se publica sin pedido de Franco.
 
 ## Pedido
-Mercado Libre deposita en una cuenta de Mercado Pago personal. Esa plata hay que pasarla a la cuenta de la empresa. Franco quiere (1) un aviso de cuándo se libera, (2) una sección «Actividades» con checks («Transferir $X de Mercado Pago a la cuenta de la empresa») que se tilde como hecho. Decisiones de Franco: la cuenta de la empresa es la caja **«ARS transferencia» de la persona «Caja Franco»**; la transferencia no tiene costo ni impuesto; quiere además un email diario (F4, después).
+Mercado Libre deposita en una cuenta de Mercado Pago personal. Esa plata hay que pasarla a la cuenta de la empresa. Franco quiere (1) un aviso de cuándo se libera, (2) una sección «Actividades» con checks («Transferir $X de Mercado Pago a la cuenta de la empresa») que se tilde como hecho. Decisiones de Franco: la cuenta de la empresa es la caja **«ARS transferencia» de la persona «Franco»** (confirmado por captura de Cajas: la misma persona tiene también la caja «ARS Mercado Pago», de donde sale la plata); la transferencia no tiene costo ni impuesto; quiere además un email diario (F4, después).
 
 ## Cómo encaja con lo que ya existe
 * Al **confirmar la acreditación** (`meli_acreditar_orden`), la plata entra a la caja `ARS Mercado Pago` (la caja de la cuenta de MELI) y la orden queda con `acreditado`, `monto_acreditado`, `acreditado_en`, `acreditado_persona_id`, `acreditado_bolsillo`.
@@ -28,9 +28,9 @@ Un **trigger AFTER UPDATE** sobre `meli_ordenes` (misma transacción, SECURITY D
 * Un traspaso de pesos a pesos no cambia el total de plata: no toca cuenta corriente ni Capital (se prueba que Dashboard y Capital no cuenten doble).
 
 ### Pantalla
-* Sección «Actividades» en el menú con **badge** = pendientes vencidas o de hoy. Agrupadas por día, con monto, orden de origen, y botón «Transferir…» (cuadro: destino predeterminado **Caja Franco · ARS transferencia**, editable; el predeterminado se recuerda en `configuracion` clave `actividades_caja_empresa`; nota opcional; dos botones: **«Registrar traspaso en el CRM»** y **«Solo marcar como hecha»**).
+* Sección «Actividades» en el menú con **badge** = pendientes vencidas o de hoy. Agrupadas por día, con monto, orden de origen, y botón «Transferir…» (cuadro: destino predeterminado **Franco · ARS transferencia**, editable; el predeterminado se recuerda en `configuracion` clave `actividades_caja_empresa`; nota opcional; dos botones: **«Registrar traspaso en el CRM»** y **«Solo marcar como hecha»**).
 * **Aviso al abrir el CRM**: «Hoy se liberan $X (N órdenes) · tenés N transferencias pendientes por $Y». «Se libera hoy» sale de `meli_ordenes.fecha_liberacion` (datos que la pantalla ya carga); es informativo y no crea actividades.
-* El nombre de la persona «Caja Franco» no está en el código: se confirma contra Cajas la primera vez y queda guardado.
+* La persona se llama «Franco» (confirmado en Cajas): origen y destino son la MISMA persona con bolsillos distintos («ARS Mercado Pago» → «ARS transferencia»); la validación «destino distinto del origen» compara persona + bolsillo.
 
 ## Fases
 * **F1 (S, sin SQL):** «Hoy se liberan $X» y «Liberadas sin confirmar» (órdenes con fecha de liberación cumplida y sin acreditar) en la pantalla de Mercado Libre, en el aviso al abrir y en un badge. Solo datos ya cargados.

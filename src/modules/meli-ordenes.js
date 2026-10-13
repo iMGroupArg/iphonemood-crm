@@ -116,6 +116,7 @@ const MeliOrdenes = {
     const root = document.getElementById('meli-ordenes-root');
     if (!root) return;
     root.innerHTML = this._vista();
+    window.Liberaciones?.actualizarBadge?.();   // el badge del menú sale de los mismos datos que la tarjeta
   },
 
   _estadoDe(o) {
@@ -228,6 +229,7 @@ const MeliOrdenes = {
         <h3 style="font-size:13px;font-weight:600;color:var(--text-secondary);text-transform:uppercase;letter-spacing:.4px;flex:1">Ventas de Mercado Libre</h3>
         <button class="btn btn-sm" onclick="MeliOrdenes.cargar()"><i class="ti ti-refresh"></i> Actualizar</button>
       </div>
+      ${window.Liberaciones ? window.Liberaciones.tarjetaHtml() : ''}
       <div class="card" style="margin-bottom:10px;display:flex;gap:24px;flex-wrap:wrap">
         <div><div style="font-size:22px;font-weight:600;color:var(--amber)">${this._ars(pend.ars)}</div>
           <div style="font-size:11.5px;color:var(--text-secondary)">a liberar (${pend.ordenes} orden${pend.ordenes === 1 ? '' : 'es'}${pend.sinDato ? `, ${pend.sinDato} sin importe confirmado` : ''})</div></div>
@@ -267,6 +269,7 @@ const MeliOrdenes = {
   async _recargar() {
     // Stock, ventas y cajas cambiaron en la base: se vuelve a leer todo.
     await DB.cargarTodo();
+    if (window.Actividades?.cargar) await window.Actividades.cargar();   // acreditar crea una actividad: el badge tiene que verla
     this.pintar();
     if (typeof App !== 'undefined' && App.actualizarBadges) App.actualizarBadges();
   },

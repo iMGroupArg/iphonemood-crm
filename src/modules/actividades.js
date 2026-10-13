@@ -62,7 +62,9 @@ const Actividades = {
   // ── Carga ───────────────────────────────────────────────────────────────────
   // Nunca tira: ante cualquier error deja la lista como estaba y marca el estado. Si la tabla todavía no existe
   // (script 15 sin correr) lo dice aparte.
+  _cargaSeq: 0,
   async cargar() {
+    const mi = ++this._cargaSeq;   // si hay varias cargas a la vez, la ÚLTIMA gana: una respuesta vieja no pisa una nueva
     try {
       // Las PENDIENTES se piden aparte y sin competir con las hechas: una pendiente vieja nunca puede quedar fuera por el
       // tope. Del resto (hechas y anuladas) se traen las 300 más recientes.
@@ -71,6 +73,7 @@ const Actividades = {
         supa.from('actividades').select('*').eq('estado', 'pendiente').order('fecha_objetivo', { ascending: false }).order('id', { ascending: false }).limit(TOPE_PEND),
         supa.from('actividades').select('*').neq('estado', 'pendiente').order('fecha_objetivo', { ascending: false }).order('id', { ascending: false }).limit(300),
       ]);
+      if (mi !== this._cargaSeq) return true;   // llegó otra carga más nueva mientras esperaba
       const r = pend.error ? pend : resto;
       if (pend.error || resto.error) {
         const t = `${r.error.code || ''} ${r.error.message || ''}`.toLowerCase();
@@ -120,6 +123,13 @@ const Actividades = {
   // Pendientes de transferir con fecha de hoy o anterior.
   pendientesVencidas(lista = this._lista, hoy = this._hoyAR()) {
     return (lista || []).filter(a => a.estado === 'pendiente' && String(a.fechaObjetivo || '').slice(0, 10) <= hoy);
+  },
+  // Para el aviso al abrir el CRM (lo usa Liberaciones.textoAviso): todas las transferencias pendientes, no solo las vencidas.
+  textoPendientes(lista = this._lista) {
+    const p = (lista || []).filter(a => a.estado === 'pendiente' && a.tipo === 'meli_transferir');
+    if (!p.length) return '';
+    const total = p.reduce((s, a) => s + (a.monto || 0), 0);
+    return `Tenés ${p.length} ${p.length === 1 ? 'transferencia pendiente' : 'transferencias pendientes'} por ${State.fmtARS(total)}.`;
   },
   actualizarBadge() {
     const el = document.getElementById('badge-actividades');

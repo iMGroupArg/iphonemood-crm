@@ -2495,6 +2495,34 @@ const entornoVenta = (extra = {}, cfg = {}) => {
   // Errores traducidos
   check('Los códigos de la base se traducen a castellano', A._msgError({ message: 'ORDEN_YA_TRANSFERIDA' }).includes('deshacé la transferencia') && A._msgError({ message: 'DESTINO_IGUAL_ORIGEN' }).includes('misma que la de origen') && A._msgError({ message: 'x<b>y' }).includes('&lt;b&gt;'));
 
+  // Cargas simultáneas: la ÚLTIMA gana (una respuesta vieja que llega tarde no pisa la nueva)
+  {
+    const respuestas = [];
+    const lenta = (rows) => new Proxy({}, { get: (_, k) => k === 'then' ? (ok, ko) => new Promise(r => respuestas.push(() => r({ data: rows, error: null }))).then(ok, ko) : () => lenta(rows) });
+    const guardadoFrom = e.cfg.supaFrom, guardadaLista = A._lista;
+    e.cfg.supaFrom = t => t === 'actividades' ? lenta([fila(500, { estado: 'pendiente' })].filter(() => true)) : { select: () => consultaFalsa({ data: null, error: null }) };
+    const c1 = A.cargar();                       // la primera queda esperando
+    e.cfg.supaFrom = t => t === 'actividades' ? lenta([fila(600, { estado: 'pendiente' })]) : { select: () => consultaFalsa({ data: null, error: null }) };
+    const c2 = A.cargar();                       // la segunda es más nueva
+    await dormirTest();
+    respuestas.slice(2).forEach(f => f());       // se resuelve primero la NUEVA (sus dos consultas)…
+    await c2;
+    respuestas.slice(0, 2).forEach(f => f());    // …y recién después llega la vieja
+    await c1;
+    check('Dos cargas a la vez: queda la lista de la ÚLTIMA aunque la vieja llegue tarde', A._lista.some(a => a.id === 600) && !A._lista.some(a => a.id === 500), JSON.stringify(A._lista.map(a => a.id)));
+    e.cfg.supaFrom = guardadoFrom; A._lista = guardadaLista;
+  }
+
+  // Aviso al abrir: transferencias pendientes
+  A._lista = [{ id: 1, tipo: 'meli_transferir', estado: 'pendiente', monto: 85000 }, { id: 2, tipo: 'meli_transferir', estado: 'pendiente', monto: 85000 }, { id: 3, tipo: 'manual', estado: 'pendiente', monto: null }, { id: 4, tipo: 'meli_transferir', estado: 'hecha', monto: 1 }];
+  check('textoPendientes: cuenta SOLO transferencias pendientes (no manuales ni hechas) con su total', A.textoPendientes() === 'Tenés 2 transferencias pendientes por $170.000.', A.textoPendientes());
+  check('… en singular con una, y vacío sin ninguna', A.textoPendientes([{ tipo: 'meli_transferir', estado: 'pendiente', monto: 5 }]) === 'Tenés 1 transferencia pendiente por $5.' && A.textoPendientes([]) === '');
+  // Cableado: la pantalla está conectada al menú y a la app
+  const appJs = fs.readFileSync('/Users/francovelas/crm-complete/iphonemood-crm/src/modules/app.js', 'utf8'), crmHtml = fs.readFileSync('/Users/francovelas/crm-complete/iphonemood-crm/crm.html', 'utf8');
+  check('Cableado: app.js importa actividades.js y la registra en PAGES; crm.html tiene el ítem del menú y su badge propio (distinto del de Mercado Libre)',
+    /import '\.\/actividades\.js'/.test(appJs) && /actividades: \{ title: 'Actividades', module: Actividades \}/.test(appJs) && /data-page="actividades"/.test(crmHtml) && /id="badge-actividades"/.test(crmHtml) && /id="badge-meli"/.test(crmHtml));
+  check('Cableado: el aviso de apertura espera a las actividades y el badge se actualiza con el resto', /Actividades\?\.cargar\?\.\(\)/.test(appJs) && /Actividades\?\.actualizarBadge\?\.\(\)/.test(appJs));
+
   // Nueva actividad
   llamadas.length = 0;
   e.dom['act-titulo'] = '  '; await A.crear(null);

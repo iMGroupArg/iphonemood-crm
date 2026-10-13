@@ -315,6 +315,7 @@ const DB = {
       // si no, un fallo pasajero haría ver como abiertas a las órdenes cerradas.
       const faltaColumna = sondaCierre.error && (sondaCierre.error.code === '42703' || /cerrada_manual|column .* does not exist|Could not find/i.test(String(sondaCierre.error.message || '')));
       if (sondaCierre.error && !faltaColumna) { State.meliError = true; return; }
+      State.meliCierre = !sondaCierre.error;    // false = el script 12 no está corrido: la pantalla no ofrece los botones de cierre
       const COLS = sondaCierre.error ? COLS_BASE : COLS_BASE + ',cerrada_manual_en,cerrada_manual_por,cerrada_manual_motivo,cerrada_manual_nota,cerrada_manual_venta_id';
       // Las 300 más nuevas para la pantalla, MÁS todas las que siguen abiertas sin importar
       // cuán viejas sean: "pendiente de liberar" y el Capital se calculan con esto, y una

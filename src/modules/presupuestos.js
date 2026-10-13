@@ -120,6 +120,7 @@ const Presupuestos = {
   _sel: new Set(),
 
   async cargar() {
+    if (DB.limpiarContactosPresupuestos) await DB.limpiarContactosPresupuestos();   // plazo de 180 días del contacto
     this.lista = await DB.listarPresupuestos();
     // Sobreviven solo los que todavía existen: si dos personas borran a la vez,
     // la selección no puede quedar apuntando a algo que ya no está.
@@ -230,12 +231,12 @@ const Presupuestos = {
                  style="width:17px;height:17px;cursor:pointer;accent-color:var(--blue)">
         </label>
         <div style="flex:1;min-width:200px">
-          <div style="font-size:13px;font-weight:700">${State.esc(prod.nombre || 'Equipo')}${Number(prod.cantidad) > 1 ? ` <span class="badge b-blue">× ${Number(prod.cantidad)}</span>` : ''}</div>
+          <div style="font-size:13px;font-weight:700">${State.esc(prod.nombre || 'Equipo')}${Number(prod.cantidad) > 1 ? ` <span class="badge b-blue">× ${Number(prod.cantidad)}</span>` : ''}${p.origen === 'bot' ? ` <span class="badge b-green" title="Lo armó el bot de WhatsApp">Bot${p.canal ? ' · ' + State.esc(p.canal) : ''}</span>` : ''}</div>
           <div style="font-size:11.5px;color:var(--text-secondary);margin-top:2px">
             ${p.cliente ? State.esc(p.cliente) + ' · ' : ''}${ti && ti.modelo ? `canje ${(ti.equipos && ti.equipos.length > 1) ? `${ti.equipos.length} equipos` : State.esc(ti.modelo)} U$D ${ti.valor_usd} · ` : ''}${ti?.efectivo ? `${State.esc(ti.efectivo.concepto)} U$D ${ti.efectivo.monto_usd} · ` : ''}saldo <strong>U$D ${saldo}</strong>
           </div>
           <div style="font-size:10.5px;color:var(--text-secondary);margin-top:3px">
-            ${DB.fmtFecha(p.creado_en)}${vencido ? ' · <span style="color:var(--red)">VENCIDO</span>' : ''}
+            ${DB.fmtFecha(p.creado_en)}${vencido ? ' · <span style="color:var(--red)">VENCIDO</span>' : ''}${p.contacto ? ` · ${p.contacto_tipo === 'instagram' ? 'Instagram @' : 'Tel. '}${State.esc(p.contacto)}` : ''}
           </div>
         </div>
         <button class="btn btn-sm" onclick="Presupuestos.copiarLink('${p.token}')">🔗 Copiar link</button>

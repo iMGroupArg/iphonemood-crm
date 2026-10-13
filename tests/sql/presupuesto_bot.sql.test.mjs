@@ -54,9 +54,14 @@ const vender = async (db, modelo, storage, precio, dias = 10) => {
   await db.query(`INSERT INTO public.venta_items (venta_id, stock_id, nombre, costo_usd, precio_usd) VALUES ($1,$2,'x',100,$3)`, [v.id, s.id, precio]);
 };
 let idem = 0;
-const crear = (db, o = {}) => db.query(`SELECT public.presupuesto_bot_crear($1,$2,$3,$4,$5,$6,$7,$8) AS r`, [
-  o.secreto === undefined ? SECRETO : o.secreto, o.unidad, o.cantidad === undefined ? 1 : o.cantidad, o.canje === undefined ? null : JSON.stringify(o.canje),
-  o.cliente ?? 'Juan', o.contacto ?? '+54 9 11 5555-0123', o.canal ?? 'whatsapp', o.idem ?? `clave-${String(++idem).padStart(4, 'a')}-zzzz`]).then((x) => x.rows[0].r);
+// `contacto` = un teléfono (compatibilidad con las pruebas del contrato v1); `contacto_tipo` + `contacto_valor` para Instagram y casos finos.
+const crear = (db, o = {}) => {
+  const tipo = o.contacto_tipo !== undefined ? o.contacto_tipo : (o.contacto === null ? null : 'telefono');
+  const valor = o.contacto_valor !== undefined ? o.contacto_valor : (o.contacto === undefined ? '+54 9 11 5555-0123' : o.contacto);
+  return db.query(`SELECT public.presupuesto_bot_crear($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) AS r`, [
+    o.secreto === undefined ? SECRETO : o.secreto, o.unidad, o.cantidad === undefined ? 1 : o.cantidad, o.canje === undefined ? null : JSON.stringify(o.canje),
+    o.cliente ?? 'Juan', tipo, valor, o.canal ?? 'whatsapp', o.idem ?? `clave-${String(++idem).padStart(4, 'a')}-zzzz`, o.modo ?? 'real']).then((x) => x.rows[0].r);
+};
 const fila = async (db, token) => (await db.query(`SELECT * FROM public.presupuestos WHERE token=$1`, [token])).rows[0];
 const uso = async (db) => (await db.query(`SELECT COALESCE(sum(n),0)::int n FROM public.presupuesto_bot_uso`)).rows[0].n;
 const cuantos = async (db) => (await db.query(`SELECT count(*)::int n FROM public.presupuestos WHERE origen='bot'`)).rows[0].n;
@@ -146,8 +151,10 @@ console.log('\n══ Presupuestos creados por el bot (Postgres en WebAssembly) 
   await vender(db, m.modelo, m.storage, 400);
   const canje1 = (o = {}) => [{ modelo: m.modelo, storage: m.storage, estado: 'Excelente', bateria_pct: 90, valor_usd: 200, ...o }];
   const intentos = {
-    'unidad inexistente': [{ unidad: '00000000-0000-4000-8000-000000000000' }, 'UNIDAD_NO_DISPONIBLE'],
-    'unidad vendida': [{ unidad: await unidad(db, { inv: 'vendido' }) }, 'UNIDAD_NO_DISPONIBLE'],
+    'unidad inexistente': [{ unidad: '00000000-0000-4000-8000-000000000000' }, 'UNIDAD_INEXISTENTE'],
+    'unidad vendida': [{ unidad: await unidad(db, { inv: 'vendido' }) }, 'UNIDAD_VENDIDA'],
+    'unidad reservada': [{ unidad: await unidad(db, { inv: 'reservado' }) }, 'UNIDAD_NO_DISPONIBLE'],
+    'unidad eliminada': [{ unidad: await unidad(db, { inv: 'eliminado' }) }, 'UNIDAD_INEXISTENTE'],
     'unidad a pedido (el esquema ya impide que un equipo lo sea)': [{ unidad: await unidad(db, { a_pedido: true, categoria: 'perfumeria' }) }, 'UNIDAD_NO_DISPONIBLE'],
     'categoría que no es equipo': [{ unidad: await unidad(db, { categoria: 'perfumeria' }) }, 'UNIDAD_NO_DISPONIBLE'],
     'sin precio': [{ unidad: await unidad(db, { precio_ars: 0 }) }, 'UNIDAD_NO_DISPONIBLE'],
@@ -170,6 +177,16 @@ console.log('\n══ Presupuestos creados por el bot (Postgres en WebAssembly) 
     'canje con modelo inexistente': [{ unidad: u, canje: canje1({ modelo: 'iPhone 99 Ultra' }) }, 'CANJE_MODELO_INEXISTENTE'],
     'canje con capacidad inexistente': [{ unidad: u, canje: canje1({ storage: '7TB' }) }, 'CANJE_CAPACIDAD_INEXISTENTE'],
     'canje con estado inventado': [{ unidad: u, canje: canje1({ estado: 'Roto' }) }, 'CANJE_ESTADO_INVALIDO'],
+    'canje con valor por debajo del mínimo (50)': [{ unidad: u, canje: canje1({ valor_usd: 49 }) }, 'CANJE_VALOR_FUERA_DE_RANGO'],
+    'canje con valor por encima del máximo (2500)': [{ unidad: u, canje: canje1({ valor_usd: 2501 }) }, 'CANJE_VALOR_FUERA_DE_RANGO'],
+    'contacto teléfono sin el +': [{ unidad: u, contacto: '5491155550123' }, 'CUERPO_INVALIDO'],
+    'contacto teléfono con 7 dígitos': [{ unidad: u, contacto: '+1234567' }, 'CUERPO_INVALIDO'],
+    'contacto tipo inventado': [{ unidad: u, contacto_tipo: 'email', contacto_valor: 'a@b.com' }, 'CUERPO_INVALIDO'],
+    'tipo de contacto sin valor': [{ unidad: u, contacto_tipo: 'instagram', contacto_valor: null }, 'CUERPO_INVALIDO'],
+    'valor de contacto sin tipo': [{ unidad: u, contacto_tipo: null, contacto_valor: '+5491155550123' }, 'CUERPO_INVALIDO'],
+    'instagram con símbolos': [{ unidad: u, contacto_tipo: 'instagram', contacto_valor: '@juan perez!' }, 'CUERPO_INVALIDO'],
+    'instagram de más de 30': [{ unidad: u, contacto_tipo: 'instagram', contacto_valor: 'a'.repeat(31) }, 'CUERPO_INVALIDO'],
+    'modo desconocido': [{ unidad: u, modo: 'produccion' }, 'CUERPO_INVALIDO'],
     'canje con batería 0': [{ unidad: u, canje: canje1({ bateria_pct: 0 }) }, 'CANJE_BATERIA_INVALIDA'],
     'canje con batería 101': [{ unidad: u, canje: canje1({ bateria_pct: 101 }) }, 'CANJE_BATERIA_INVALIDA'],
     'canje con valor 0': [{ unidad: u, canje: canje1({ valor_usd: 0 }) }, 'CANJE_VALOR_INVALIDO'],
@@ -321,8 +338,8 @@ console.log('\n══ Presupuestos creados por el bot (Postgres en WebAssembly) 
   await crear(db, { unidad: u, contacto: null });
   check('Y crear un presupuesto nuevo también limpia los teléfonos vencidos (aunque nadie abra el CRM)', (await fila(db, t5)).contacto === null);
   // Lotes de 500
-  await db.exec(`INSERT INTO public.presupuestos (token, producto, cotizacion, pagos_cfg, contacto, contacto_borrar_en)
-    SELECT 'lote-' || g, '{}'::jsonb, 1, '{}'::jsonb, '+54911' || lpad(g::text, 7, '0'), now() - interval '1 day' FROM generate_series(1, 1200) g`);
+  await db.exec(`INSERT INTO public.presupuestos (token, producto, cotizacion, pagos_cfg, contacto_tipo, contacto, contacto_borrar_en)
+    SELECT 'lote-' || g, '{}'::jsonb, 1, '{}'::jsonb, 'telefono', '+54911' || lpad(g::text, 7, '0'), now() - interval '1 day' FROM generate_series(1, 1200) g`);
   const nl = await comoRol(db, 'authenticated', 'franco@x.com', async () => (await db.query(`SELECT public.presupuestos_limpiar_contactos() AS n`)).rows[0].n);
   const nl2 = await comoRol(db, 'authenticated', 'franco@x.com', async () => (await db.query(`SELECT public.presupuestos_limpiar_contactos() AS n`)).rows[0].n);
   check('La limpieza va por lotes de 500 (1200 vencidos: 500, 500 y el resto en la tercera pasada)', nl === 500 && nl2 === 500, `${nl} ${nl2}`);
@@ -335,15 +352,15 @@ console.log('\n══ Presupuestos creados por el bot (Postgres en WebAssembly) 
   await vender(db, m.modelo, m.storage, 400);
   const completo = { modelo: m.modelo, storage: m.storage, estado: 'Excelente', bateria_pct: 90, valor_usd: 200 };
   const malos = [];
-  for (const k of ['modelo', 'storage', 'estado', 'bateria_pct', 'valor_usd']) {
+  for (const k of ['modelo', 'storage', 'bateria_pct', 'valor_usd']) {
     const sin = { ...completo }; delete sin[k];
     const e = await falla(() => crear(db, { unidad: u, canje: [sin] }));
     if (codigo(e) !== 'CUERPO_INVALIDO') malos.push(`sin ${k}: ${e}`);
   }
   const mixto = { ...completo }; delete mixto.valor_usd;
-  const e1 = await falla(() => crear(db, { unidad: u, canje: [completo, mixto] }));
+  const e1 = await falla(() => crear(db, { unidad: u, canje: [completo, mixto] }));   // el segundo equipo no tiene valor_usd
   const e2 = await falla(() => crear(db, { unidad: u, canje: [{ ...completo, valor_usd: null }] }));
-  check('Un canje al que le falta CUALQUIERA de las 5 claves (o con valor nulo, o uno bueno y otro incompleto) se rechaza: no se guarda un total nulo', malos.length === 0 && codigo(e1) === 'CUERPO_INVALIDO' && codigo(e2) === 'CUERPO_INVALIDO' && await cuantos(db) === 0, `${malos.join(' | ')} ${e1} ${e2}`);
+  check('Un canje al que le falta CUALQUIERA de las 4 claves obligatorias (el estado es opcional) (o con valor nulo, o uno bueno y otro incompleto) se rechaza: no se guarda un total nulo', malos.length === 0 && codigo(e1) === 'CUERPO_INVALIDO' && codigo(e2) === 'CUERPO_INVALIDO' && await cuantos(db) === 0, `${malos.join(' | ')} ${e1} ${e2}`);
 
   const fin = {
     'cuota sin n': { promo: { cuotas: [{ coef: 1.2 }] } },
@@ -398,6 +415,90 @@ console.log('\n══ Presupuestos creados por el bot (Postgres en WebAssembly) 
   const e5 = await falla(() => db4.exec(SQL('presupuesto_bot.sql')));
   const col = (await db4.query(`SELECT count(*)::int n FROM information_schema.columns WHERE table_name='presupuestos' AND column_name='contacto'`)).rows[0].n;
   check('Si presupuesto_por_token volvió a la versión vieja (fila entera), el script 13 se frena y NO aplica nada', e5 && e5.includes('volvió a la versión vieja') && col === 0, `${e5} ${col}`);
+}
+
+// ── 10c · Contrato v2 (pedido de Angel) ───────────────────────────────────────
+{
+  const db = await base();
+  const u = await unidad(db, { cantidad: 9 }); const m = await modeloCanje(db);
+  await vender(db, m.modelo, m.storage, 400);
+  await cfg(db, 'tope_por_minuto', 1000);
+  // Instagram: @usuario o id, guardado sin la @ y en minúscula; retención igual que el teléfono
+  const ig = await crear(db, { unidad: u, contacto_tipo: 'instagram', contacto_valor: '@Juan.Perez_89' });
+  const fi = await fila(db, ig.token);
+  check('Contacto de Instagram: se guarda sin la @ y en minúscula, con su tipo y la fecha de borrado a los 180 días', fi.contacto_tipo === 'instagram' && fi.contacto === 'juan.perez_89' && Math.abs(new Date(fi.contacto_borrar_en) - Date.now() - 180 * 864e5) < 60000, JSON.stringify([fi.contacto_tipo, fi.contacto]));
+  const igId = await crear(db, { unidad: u, contacto_tipo: 'instagram', contacto_valor: '17841400000000000' });
+  const tel = await crear(db, { unidad: u, contacto_tipo: 'telefono', contacto_valor: '+54 (9) 11-5555.0123' });
+  check('El id numérico de Instagram entra; el teléfono se normaliza (espacios, paréntesis, guiones y puntos fuera)', (await fila(db, igId.token)).contacto === '17841400000000000' && (await fila(db, tel.token)).contacto === '+5491155550123');
+  const pubIg = await comoRol(db, 'anon', null, async () => (await db.query(`SELECT public.presupuesto_por_token($1) AS r`, [ig.token])).rows[0].r);
+  check('Ni el usuario de Instagram ni su tipo salen por el link público', !JSON.stringify(pubIg).includes('juan.perez_89') && !JSON.stringify(pubIg).includes('instagram') && !('contacto' in pubIg) && !('contacto_tipo' in pubIg), JSON.stringify(pubIg));
+  const c1 = await falla(() => db.query(`INSERT INTO public.presupuestos (token, producto, cotizacion, pagos_cfg, contacto_tipo, contacto) VALUES ('t-mal1','{}'::jsonb,1,'{}'::jsonb,'telefono','@juan')`));
+  const c2 = await falla(() => db.query(`INSERT INTO public.presupuestos (token, producto, cotizacion, pagos_cfg, contacto) VALUES ('t-mal2','{}'::jsonb,1,'{}'::jsonb,'+5491155550123')`));
+  const c3 = await falla(() => db.query(`INSERT INTO public.presupuestos (token, producto, cotizacion, pagos_cfg, contacto_tipo) VALUES ('t-mal3','{}'::jsonb,1,'{}'::jsonb,'instagram')`));
+  check('La base misma rechaza un teléfono sin formato internacional, un contacto sin tipo y un tipo sin contacto', c1?.includes('presupuestos_contacto_ck') && c2?.includes('presupuestos_contacto_ck') && c3?.includes('presupuestos_contacto_ck'), `${c1} | ${c2} | ${c3}`);
+
+  // Estado opcional
+  const sinEstado = await crear(db, { unidad: u, canje: [{ modelo: m.modelo, storage: m.storage, bateria_pct: 88, valor_usd: 200 }] });
+  const fe = await fila(db, sinEstado.token);
+  const conEstadoVacio = await crear(db, { unidad: u, canje: [{ modelo: m.modelo, storage: m.storage, estado: '', bateria_pct: 88, valor_usd: 150 }] });
+  check('El estado del canje es OPCIONAL: sin estado (o vacío) se guarda "" y el presupuesto sale igual', fe.trade_in.equipos[0].estado === '' && fe.trade_in.estado === '' && conEstadoVacio.ok, JSON.stringify(fe.trade_in));
+  const ee = await falla(() => crear(db, { unidad: u, canje: [{ modelo: m.modelo, storage: m.storage, estado: 'Roto', bateria_pct: 88, valor_usd: 100 }] }));
+  const buen = await crear(db, { unidad: u, canje: [{ modelo: m.modelo, storage: m.storage, estado: ' muy  BUENO ', bateria_pct: 88, valor_usd: 100 }] });
+  check('Si el estado viene, se valida (inventado = CANJE_ESTADO_INVALIDO) y se compara sin mayúsculas ni espacios, guardado con el nombre oficial', codigo(ee) === 'CANJE_ESTADO_INVALIDO' && (await fila(db, buen.token)).trade_in.estado === 'Muy bueno', ee);
+
+  // Nombres de modelo y capacidad sin distinguir mayúsculas, tildes ni espacios
+  const raro = m.modelo.toUpperCase().replace(/ /g, '  ');
+  const cap = m.storage.replace(/(\d+)(GB|TB)/i, '$1 $2').toLowerCase();
+  const norm = await crear(db, { unidad: u, canje: [{ modelo: raro, storage: cap, bateria_pct: 90, valor_usd: 120 }] });
+  const fn = await fila(db, norm.token);
+  check('El modelo y la capacidad se aceptan sin distinguir mayúsculas ni espacios ("128 gb" = "128GB") y se guardan con el nombre del catálogo', fn.trade_in.equipos[0].modelo === m.modelo && fn.trade_in.equipos[0].storage === m.storage, JSON.stringify([raro, cap, fn.trade_in.equipos[0]]));
+  const eM = await db.query(`SELECT public.presupuesto_bot_crear($1,$2,1,$3,'Juan',NULL,NULL,'whatsapp','idem-detalle-modelo-1','real')`, [SECRETO, u, JSON.stringify([{ modelo: 'iPhone 99', storage: '128GB', bateria_pct: 90, valor_usd: 100 }])]).then(() => null, (e) => e);
+  const dM = JSON.parse(eM.detail || '{}');
+  check('El error de modelo inexistente trae lo recibido y la lista de modelos válidos (en DETAIL)', eM.message === 'CANJE_MODELO_INEXISTENTE' && dM.recibido === 'iPhone 99' && Array.isArray(dM.validos) && dM.validos.includes(m.modelo), JSON.stringify(dM).slice(0, 200));
+  const eC = await db.query(`SELECT public.presupuesto_bot_crear($1,$2,1,$3,'Juan',NULL,NULL,'whatsapp','idem-detalle-cap-0001','real')`, [SECRETO, u, JSON.stringify([{ modelo: m.modelo, storage: '7 TB', bateria_pct: 90, valor_usd: 100 }])]).then(() => null, (e) => e);
+  const dC = JSON.parse(eC.detail || '{}');
+  check('El error de capacidad trae lo recibido, el modelo y las capacidades válidas', eC.message === 'CANJE_CAPACIDAD_INEXISTENTE' && dC.recibido === '7 TB' && dC.modelo === m.modelo && dC.validos.includes(m.storage), JSON.stringify(dC));
+  const eR = await db.query(`SELECT public.presupuesto_bot_crear($1,$2,1,$3,'Juan',NULL,NULL,'whatsapp','idem-detalle-rango-01','real')`, [SECRETO, u, JSON.stringify([{ modelo: m.modelo, storage: m.storage, bateria_pct: 90, valor_usd: 9 }])]).then(() => null, (e) => e);
+  check('El error de rango trae el mínimo y el máximo', eR.message === 'CANJE_VALOR_FUERA_DE_RANGO' && JSON.parse(eR.detail).minimo === 50 && JSON.parse(eR.detail).maximo === 2500, eR.detail);
+
+  // Tope diario por defecto y modo de prueba
+  const defaults = Object.fromEntries((await (await base()).query(`SELECT clave, valor FROM public.presupuesto_bot_config`)).rows.map((r) => [r.clave, r.valor]));
+  check('Valores por defecto: 60 por día, 5 por minuto, vencimiento de 2 días, rango del canje 50–2500, pruebas de 30 minutos y 100 por día', defaults.tope_diario === '60' && defaults.tope_por_minuto === '5' && defaults.dias_validez === '2' && defaults.canje_valor_min === '50' && defaults.canje_valor_max === '2500' && defaults.prueba_vence_min === '30' && defaults.tope_prueba_diario === '100', JSON.stringify(defaults));
+}
+{
+  const db = await base(); const u = await unidad(db, { cantidad: 9 });
+  await rapido(db);
+  const r = await crear(db, { unidad: u, modo: 'prueba', contacto_tipo: 'instagram', contacto_valor: '@alguien', cliente: 'María José' });
+  const f = await fila(db, r.token);
+  check('Presupuesto de PRUEBA: origen "bot_prueba", dura 30 minutos, modo "prueba" y NO guarda el contacto aunque se lo manden', r.modo === 'prueba' && f.origen === 'bot_prueba' && Math.abs(new Date(f.vence_en) - Date.now() - 30 * 60000) < 60000 && f.contacto === null && f.contacto_tipo === null && f.contacto_borrar_en === null, JSON.stringify(f));
+  const pubP = await comoRol(db, 'anon', null, async () => (await db.query(`SELECT public.presupuesto_por_token($1) AS r`, [r.token])).rows[0].r);
+  check('… ni el NOMBRE del cliente (saldría por el link público): ni en la fila ni en el link', f.cliente === null && pubP.cliente === null && !JSON.stringify(pubP).includes('María'), JSON.stringify([f.cliente, pubP.cliente]));
+  check('… y NO gasta el cupo de los reales: usa su propio contador', (await db.query(`SELECT modo, n FROM public.presupuesto_bot_uso ORDER BY modo`)).rows.map((x) => `${x.modo}:${x.n}`).join() === 'prueba:1', JSON.stringify((await db.query(`SELECT * FROM public.presupuesto_bot_uso`)).rows));
+  await cfg(db, 'tope_diario', 1);
+  await rapido(db);
+  const real = await crear(db, { unidad: u });
+  await rapido(db);
+  const e1 = await falla(() => crear(db, { unidad: u }));
+  const prueba2 = await crear(db, { unidad: u, modo: 'prueba' });
+  check('Con el cupo REAL agotado (1) las pruebas siguen pudiendo crear: los topes son independientes', real.ok && codigo(e1) === 'TOPE_DIARIO' && prueba2.ok === true, `${e1}`);
+  // Se ve igual por el link público (la página es la misma)
+  const pub = await comoRol(db, 'anon', null, async () => (await db.query(`SELECT public.presupuesto_por_token($1) AS r`, [r.token])).rows[0].r);
+  check('El presupuesto de prueba se abre por el link como cualquier otro (misma página)', pub && pub.producto.precio_usd === 800);
+  // Limpieza automática a las 24 horas
+  await db.query(`UPDATE public.presupuestos SET creado_en = now() - interval '25 hours' WHERE origen = 'bot_prueba'`);
+  await cfg(db, 'tope_diario', 100);
+  await rapido(db);
+  const nuevo = await crear(db, { unidad: u });
+  const quedan = (await db.query(`SELECT count(*)::int n FROM public.presupuestos WHERE origen = 'bot_prueba'`)).rows[0].n;
+  check('Los presupuestos de prueba de más de 24 horas se borran solos al crear el siguiente; los reales NO se tocan', quedan === 0 && (await db.query(`SELECT count(*)::int n FROM public.presupuestos WHERE origen = 'bot'`)).rows[0].n === 2, String(quedan));
+  await crear(db, { unidad: u, modo: 'prueba', idem: 'prueba-vieja-abcd-0001' });
+  await db.query(`UPDATE public.presupuestos SET creado_en = now() - interval '25 hours' WHERE origen = 'bot_prueba'`);
+  await db.query(`SELECT public.presupuestos_limpiar_contactos_cron($1)`, [SECRETO]);
+  check('… y el cron diario también los borra', (await db.query(`SELECT count(*)::int n FROM public.presupuestos WHERE origen = 'bot_prueba'`)).rows[0].n === 0);
+  const idem = 'misma-clave-real-prueba-1';
+  const a = await crear(db, { unidad: u, idem, modo: 'prueba' });
+  const e2 = await falla(() => crear(db, { unidad: u, idem, modo: 'real' }));
+  check('La misma clave de idempotencia en modo real y en prueba NO se confunde (otro pedido → conflicto)', a.ok && codigo(e2) === 'IDEMPOTENCIA_CONFLICTO', e2);
 }
 
 // ── 11 · El paquete ────────────────────────────────────────────────────────

@@ -78,7 +78,7 @@ try {
   let nIdem = 0;
   // Claves sin 8 dígitos seguidos (la función las rechaza): el número va en base 36 con una letra delante y el azar sin dígitos.
   const clave = () => `k${(++nIdem).toString(36)}x${crypto.randomBytes(5).toString('hex').replace(/[0-9]/g, (d) => 'ghijklmnop'[d])}`;
-  const crear = (c, idem, extra = {}) => c.query(`SELECT public.presupuesto_bot_crear($1,$2,1,NULL,'Juan',$3,'whatsapp',$4) AS r`, [SECRETO, un.id, extra.tel ?? '+5491155550123', idem]).then((x) => ({ ok: true, r: x.rows[0].r }), (e) => ({ ok: false, e }));
+  const crear = (c, idem, extra = {}) => c.query(`SELECT public.presupuesto_bot_crear($1,$2,1,NULL,'Juan',$3,$4,'whatsapp',$5,'real') AS r`, [SECRETO, un.id, extra.tel === null ? null : 'telefono', extra.tel === null ? null : (extra.tel ?? '+5491155550123'), idem]).then((x) => ({ ok: true, r: x.rows[0].r }), (e) => ({ ok: false, e }));
   const filas = async () => (await admin.query(`SELECT count(*)::int n FROM public.presupuestos WHERE origen='bot'`)).rows[0].n;
   const uso = async () => (await admin.query(`SELECT COALESCE(sum(n),0)::int n FROM public.presupuesto_bot_uso`)).rows[0].n;
   const reset = async () => { await admin.query(`DELETE FROM public.presupuestos`); await admin.query(`DELETE FROM public.presupuesto_bot_uso`); };

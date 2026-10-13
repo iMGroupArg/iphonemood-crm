@@ -536,8 +536,17 @@ const DB = {
 
   // ─── Presupuestos con canje ───
   async listarPresupuestos() {
-    const { data } = await supa.from('presupuestos').select('*').order('creado_en', { ascending: false }).limit(100);
-    return data || [];
+    // Los presupuestos de PRUEBA del bot (origen 'bot_prueba') no van en la lista: se excluyen ANTES del límite de 100 para que no
+    // desplacen a los reales. Si todavía no se corrió el script 13 (la columna no existe), se sigue sin el filtro.
+    let r = await supa.from('presupuestos').select('*').neq('origen', 'bot_prueba').order('creado_en', { ascending: false }).limit(100);
+    if (r.error && (r.error.code === '42703' || /origen/i.test(String(r.error.message || '')))) {
+      r = await supa.from('presupuestos').select('*').order('creado_en', { ascending: false }).limit(100);
+    }
+    return r.data || [];
+  },
+  // Borra los teléfonos / usuarios de contacto vencidos (180 días). Silencioso: si todavía no se corrió el script 13, no hace nada.
+  async limpiarContactosPresupuestos() {
+    try { await supa.rpc('presupuestos_limpiar_contactos'); } catch { /* sin el script 13 */ }
   },
   async crearPresupuesto(fila) {
     return await supa.from('presupuestos').insert(fila);

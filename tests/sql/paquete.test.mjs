@@ -20,6 +20,7 @@ const PAQUETE = [
   ['12_meli_cerrar_manual', 'meli_cerrar_manual'],
   ['13_presupuesto_bot', 'presupuesto_bot'],
   ['14_lote_pagos_conversion_lote', 'lote_pagos_conversion_lote'],
+  ['15_actividades', 'actividades'],
 ];
 const leer = (f) => (fs.existsSync(f) ? fs.readFileSync(f, 'utf8') : null);
 

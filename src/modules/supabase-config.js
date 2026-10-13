@@ -233,6 +233,8 @@ const DB = {
       id: p.id, loteId: p.lote_id, tipo: p.tipo,
       montoUsd: Number(p.monto_usd), montoUsdt: Number(p.monto_usdt),
       comisionPct: Number(p.comision_pct), comisionUsd: Number(p.comision_usd),
+      // Conversión con sobrante (script 14): NULL = fila vieja, se lee como siempre. Un 0 es un valor.
+      usdtLote: p.usdt_lote == null ? null : Number(p.usdt_lote), comisionLoteUsd: p.comision_lote_usd == null ? null : Number(p.comision_lote_usd),
       moneda: p.moneda || 'USD', persona: p.persona || '', bolsillo: p.bolsillo || '',
       personaDest: p.persona_dest || '', bolsilloDestino: p.bolsillo_dest || '',
       fecha: p.fecha || '', notas: p.notas || '',
@@ -1406,16 +1408,30 @@ const DB = {
     return loteObj;
   },
 
+  // ¿Existen en la base las columnas de la conversión con sobrante (script 14)? true / false / null
+  // (null = no se pudo saber: red, permisos). Solo se recuerda el true; un false se vuelve a mirar
+  // (Franco puede correr el script sin recargar la página).
+  async columnasConversionListas() {
+    if (this._colsConversion === true) return true;
+    try {
+      const { error } = await supa.from('lote_pagos').select('usdt_lote,comision_lote_usd').limit(1);
+      if (!error) { this._colsConversion = true; return true; }
+      return this._esErrorDeColumnaFaltante(error) ? false : null;
+    } catch (e) { return null; }
+  },
+
   async guardarLotePago(loteId, p) {
+    const conLote = p.usdtLote != null && p.comisionLoteUsd != null;   // las dos o ninguna (la base lo exige)
     const { data: row } = await supa.from('lote_pagos').insert({
       lote_id: loteId, tipo: p.tipo, monto_usd: p.montoUsd, monto_usdt: p.montoUsdt || 0,
       comision_pct: p.comisionPct || 0, comision_usd: p.comisionUsd || 0,
+      ...(conLote ? { usdt_lote: p.usdtLote, comision_lote_usd: p.comisionLoteUsd } : {}),
       moneda: p.moneda || 'USD', persona: p.persona || '', bolsillo: p.bolsillo || '',
       persona_dest: p.personaDest || '', bolsillo_dest: p.bolsilloDestino || '',
       fecha: p.fecha || new Date().toISOString().slice(0, 10), notas: p.notas || '',
     }).select().single();
     if (!row) return false;
-    State.lotePagos.push({ id: row.id, loteId, tipo: p.tipo, montoUsd: Number(p.montoUsd), montoUsdt: Number(p.montoUsdt || 0), comisionPct: Number(p.comisionPct || 0), comisionUsd: Number(p.comisionUsd || 0), moneda: p.moneda || 'USD', persona: p.persona || '', bolsillo: p.bolsillo || '', personaDest: p.personaDest || '', bolsilloDestino: p.bolsilloDestino || '', fecha: p.fecha || '', notas: p.notas || '' });
+    State.lotePagos.push({ id: row.id, loteId, tipo: p.tipo, montoUsd: Number(p.montoUsd), montoUsdt: Number(p.montoUsdt || 0), comisionPct: Number(p.comisionPct || 0), comisionUsd: Number(p.comisionUsd || 0), usdtLote: conLote ? Number(p.usdtLote) : null, comisionLoteUsd: conLote ? Number(p.comisionLoteUsd) : null, moneda: p.moneda || 'USD', persona: p.persona || '', bolsillo: p.bolsillo || '', personaDest: p.personaDest || '', bolsilloDestino: p.bolsilloDestino || '', fecha: p.fecha || '', notas: p.notas || '' });
     return true;
   },
 

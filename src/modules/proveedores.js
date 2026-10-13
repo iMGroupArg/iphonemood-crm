@@ -128,7 +128,6 @@ const Proveedores = {
     const pagos = (State.lotePagos || []).filter(p => p.loteId === l.id);
     const totalUsd = items.reduce((s, i) => s + i.precioUsd * i.cantidad, 0);
     const totalUds = items.reduce((s, i) => s + i.cantidad, 0);
-    const conv = pagos.find(p => p.tipo === 'conversion');
     const isRetrasado = !['recibido', 'cancelado'].includes(l.estado) && l.fechaLlegadaEsperada && new Date(l.fechaLlegadaEsperada) < new Date();
     const estadoStyle = {
       programado: ['🗓️', 'var(--text-secondary)', 'var(--bg-secondary)'],
@@ -146,7 +145,7 @@ const Proveedores = {
             ${isRetrasado ? '<span style="background:var(--red-light);color:var(--red);border-radius:10px;padding:2px 8px;font-size:11px;font-weight:600">⚠️ retrasado</span>' : ''}
           </div>
           <div style="font-size:12px;color:var(--text-secondary);margin-top:3px">${prov?.nombre || '—'} · ${items.length} ítem(s) · ${totalUds} uds · ${l.fechaOrden}</div>
-          ${conv ? `<div style="font-size:11px;color:var(--text-tertiary);margin-top:2px">💱 Conversión: ${State.fmtUSD(conv.montoUsd)} → ${conv.montoUsdt.toFixed(2)} USDT (comisión ${conv.comisionPct}%)</div>` : ''}
+          ${this._resumenConversion(pagos)}
         </div>
         <div style="text-align:right;flex-shrink:0">
           <div style="font-size:16px;font-weight:700">${State.fmtUSD(totalUsd)}</div>
@@ -177,6 +176,38 @@ const Proveedores = {
   //    proveedor (se pagan a terceros o son el costo del cambio): no entran acá.
   //  · COSTO DE ADQUISICIÓN (lo que cuesta la mercadería) = ítems + comisión de la conversión +
   //    envíos / costos adicionales / diferencial. De acá sale el costo por unidad.
+  // ── Conversiones del lote ────────────────────────────────────────────────
+  // Una conversión puede cambiar MÁS USD de los que el lote usa (sobrante). Las filas nuevas traen
+  // `usdtLote` (USDT que usa este lote) y `comisionLoteUsd` (la parte de la comisión que se le carga).
+  // Las filas viejas los tienen en NULL y se leen como siempre: SOLO la primera conversión del lote
+  // cuenta, con su comisión y USDT completos. Un 0 explícito es un valor (no cae al valor viejo).
+  _conversiones(pagos) { return (pagos || []).filter(p => p.tipo === 'conversion'); },
+  _comisionDelLote(pagos) {
+    const conv = this._conversiones(pagos);
+    const viejaPrimera = conv.find(p => p.comisionLoteUsd == null);
+    const nuevas = conv.filter(p => p.comisionLoteUsd != null).reduce((s, p) => s + Number(p.comisionLoteUsd), 0);
+    return State.cent(nuevas + (viejaPrimera ? (Number(viejaPrimera.comisionUsd) || 0) : 0));
+  },
+  _usdtDelLote(pagos) {
+    const conv = this._conversiones(pagos);
+    const viejaPrimera = conv.find(p => p.usdtLote == null);
+    const nuevas = conv.filter(p => p.usdtLote != null).reduce((s, p) => s + Number(p.usdtLote), 0);
+    return State.cent(nuevas + (viejaPrimera ? (Number(viejaPrimera.montoUsdt) || 0) : 0));
+  },
+  // Una línea para la tarjeta del lote.
+  _resumenConversion(pagos) {
+    const conv = this._conversiones(pagos);
+    if (!conv.length) return '';
+    const usdt = x => Number(x.montoUsdt).toFixed(2);
+    if (conv.length === 1) {
+      const c = conv[0];
+      const sobra = c.usdtLote != null && c.usdtLote < c.montoUsdt;
+      return `<div style="font-size:11px;color:var(--text-tertiary);margin-top:2px">💱 Conversión: ${State.fmtUSD(c.montoUsd)} → ${usdt(c)} USDT (comisión ${c.comisionPct}%)${sobra ? ` · este lote usa ${Number(c.usdtLote).toFixed(2)} USDT` : ''}</div>`;
+    }
+    const totUsd = conv.reduce((a, c) => a + c.montoUsd, 0), totUsdt = conv.reduce((a, c) => a + c.montoUsdt, 0);
+    return `<div style="font-size:11px;color:var(--text-tertiary);margin-top:2px">💱 ${conv.length} conversiones: ${State.fmtUSD(totUsd)} → ${totUsdt.toFixed(2)} USDT · este lote usa ${this._usdtDelLote(pagos).toFixed(2)} USDT</div>`;
+  },
+
   // Antes todo el módulo comparaba «pagado» contra el costo de adquisición: un lote con conversión
   // mostraba siempre una deuda falsa igual a la comisión, y el excedente (saldo a favor) se
   // calculaba contra lo equivocado. Una sola función para que no vuelvan a divergir.
@@ -187,7 +218,7 @@ const Proveedores = {
     const suma = tipos => c(pagos.filter(p => tipos.includes(p.tipo)).reduce((s, p) => s + (Number(p.montoUsd) || 0), 0));
     const totalItems = c(items.reduce((s, i) => s + i.precioUsd * i.cantidad, 0));
     const conv = pagos.find(p => p.tipo === 'conversion');
-    const comision = c(conv?.comisionUsd || 0);
+    const comision = this._comisionDelLote(pagos);
     const envio = suma(['envio', 'costo', 'diferencial']);
     const pagadoProveedor = suma(['pago_proveedor']);
     const creditoAplicado = suma(['credito_aplicado']);
@@ -195,7 +226,7 @@ const Proveedores = {
     const pagadoNeto = c(pagadoProveedor + creditoAplicado - devuelto);
     const saldo = c(totalItems - pagadoNeto);        // > 0: se le debe · < 0: se le pagó de más
     return {
-      totalItems, comision, envio, conv,
+      totalItems, comision, envio, conv, usdtLote: this._usdtDelLote(pagos),
       costoAdquisicion: c(totalItems + comision + envio),
       pagadoProveedor, creditoAplicado, devuelto, pagadoNeto,
       restante: Math.max(0, saldo), excedenteBruto: Math.max(0, -saldo),
@@ -323,7 +354,7 @@ const Proveedores = {
           </div>
         </div>
         ${!isTerminal ? `<div style="display:flex;gap:6px;flex-wrap:wrap">
-          ${!conv ? `<button class="btn btn-sm" onclick="Proveedores.modalConversion(${l.id})">💱 Conversión USD→USDT</button>` : ''}
+          <button class="btn btn-sm" onclick="Proveedores.modalConversion(${l.id})">${conv ? '💱 Otra conversión' : '💱 Conversión USD→USDT'}</button>
           <button class="btn btn-sm btn-primary" onclick="Proveedores.modalPago(${l.id})">💸 Registrar pago</button>
           ${saldoCreditoProv > 0 ? `<button class="btn btn-sm" onclick="Proveedores.modalUsarCredito(${l.id})">💳 Usar saldo a favor (${State.fmtUSD(saldoCreditoProv)})</button>` : ''}
           <button class="btn btn-sm" onclick="Proveedores.modalCostoAdicional(${l.id})">💰 Agregar costo</button>
@@ -420,7 +451,7 @@ const Proveedores = {
           ? '<div style="color:var(--text-secondary);font-size:12px">Sin movimientos aún. Registrá la conversión o el pago al proveedor.</div>'
           : pagos.map(pg => {
               const desc = pg.tipo === 'conversion'
-                ? `${State.fmtUSD(pg.montoUsd)} USD desde <b>${pg.persona}</b> (${pg.bolsillo}) → <b>${pg.montoUsdt.toFixed(2)} USDT</b> en ${pg.personaDest || pg.persona} · Comisión ${pg.comisionPct}% = ${State.fmtUSD(pg.comisionUsd)}`
+                ? `${State.fmtUSD(pg.montoUsd)} USD desde <b>${pg.persona}</b> (${pg.bolsillo}) → <b>${pg.montoUsdt.toFixed(2)} USDT</b> en ${pg.personaDest || pg.persona} · Comisión ${pg.comisionPct}% = ${State.fmtUSD(pg.comisionUsd)}${pg.usdtLote != null && pg.usdtLote < pg.montoUsdt ? ` · <b>este lote usa ${Number(pg.usdtLote).toFixed(2)} USDT</b> (comisión del lote ${State.fmtUSD(pg.comisionLoteUsd)}; sobran ${(pg.montoUsdt - pg.usdtLote).toFixed(2)} USDT)` : ''}`
                 : pg.tipo === 'pago_proveedor'
                 ? `${pg.moneda === 'ARS' ? State.fmtARS(pg.montoUsd * (State.refBlue||1)) : (pg.moneda === 'USDT' ? pg.montoUsdt?.toFixed(2) : pg.montoUsd.toFixed(2))} ${pg.moneda} desde <b>${pg.persona}</b> (${pg.bolsillo})${pg.moneda === 'ARS' ? ` ≈ ${State.fmtUSD(pg.montoUsd)}` : ''}`
                 : pg.tipo === 'devolucion'
@@ -918,6 +949,10 @@ const Proveedores = {
               <input id="conv-pct" type="number" min="0" max="20" step="0.1" value="3" oninput="Proveedores._calcConv()" style="width:100%;font-size:14px;padding:8px 10px;background:var(--bg-secondary);border:1px solid var(--border-strong);border-radius:8px;color:var(--text)">
             </div>
           </div>
+          <div>
+            <label style="font-size:11px;color:var(--text-secondary);display:block;margin-bottom:4px">USDT que usa ESTE lote <span style="font-weight:400">(vacío = todos los que recibís; si convertís de más, el resto queda en la caja)</span></label>
+            <input id="conv-usdt-lote" type="number" min="0" step="0.01" placeholder="Todos" oninput="Proveedores._calcConv()" style="width:100%;font-size:14px;padding:8px 10px;background:var(--bg-secondary);border:1px solid var(--border-strong);border-radius:8px;color:var(--text)">
+          </div>
           <div id="conv-resumen" style="background:var(--bg-secondary);border-radius:8px;padding:10px;font-size:12px"></div>
           <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
             <div>
@@ -968,24 +1003,60 @@ const Proveedores = {
     this._calcConv();
   },
 
+  // Una sola lectura del formulario para la vista previa Y para confirmar: lo que se ve es lo que se guarda.
+  // Todo en centavos. comisión del lote = comisión total × USDT del lote ÷ USDT recibidos (en centavos).
+  _leerConversion() {
+    const aCent = x => Math.round((Number(x) || 0) * 100);
+    const pct = parseFloat(document.getElementById('conv-pct')?.value);
+    const montoC = aCent(parseFloat(document.getElementById('conv-monto')?.value));
+    const comisionC = Number.isFinite(pct) ? Math.round(montoC * pct / 100) : 0;
+    const usdtC = montoC - comisionC;
+    const crudo = document.getElementById('conv-usdt-lote')?.value;
+    const vacio = crudo === undefined || crudo === null || String(crudo).trim() === '';
+    const loteC = vacio ? usdtC : aCent(parseFloat(crudo));
+    let error = null;
+    if (!(montoC > 0)) error = 'Ingresá un monto válido';
+    else if (!Number.isFinite(pct) || pct < 0 || pct >= 100) error = 'La comisión tiene que estar entre 0 y menos de 100 %';
+    else if (!(usdtC > 0)) error = 'La comisión no puede dejar el monto en cero';
+    else if (!Number.isFinite(loteC) || loteC <= 0 || (!vacio && !Number.isFinite(parseFloat(crudo)))) error = 'Los USDT que usa el lote tienen que ser mayores a cero';
+    else if (loteC > usdtC) error = `El lote no puede usar más de lo que recibís (${(usdtC / 100).toFixed(2)} USDT)`;
+    const sobranteC = error ? 0 : usdtC - loteC;
+    // Reparto con enteros (centavos), redondeando la mitad hacia arriba: comisión × usdtLote ÷ recibidos.
+    const comisionLoteC = error ? 0 : (sobranteC === 0 ? comisionC : Math.floor((2 * comisionC * loteC + usdtC) / (2 * usdtC)));
+    const montoUsd = montoC / 100, montoUsdt = usdtC / 100;
+    return { montoUsd, pct: Number.isFinite(pct) ? pct : 0, comisionUsd: comisionC / 100, montoUsdt, usdtLote: loteC / 100, sobrante: sobranteC / 100,
+      comisionLote: comisionLoteC / 100, costoPorUsdt: usdtC > 0 ? montoC / usdtC : 0, error };
+  },
+
   _calcConv() {
-    const monto = parseFloat(document.getElementById('conv-monto')?.value) || 0;
-    const pct = parseFloat(document.getElementById('conv-pct')?.value) || 0;
-    const comision = monto * pct / 100;
-    const usdt = monto - comision;
+    const r = this._leerConversion();
     const el = document.getElementById('conv-resumen');
+    const fila = (t, v, extra = '') => `<div style="display:flex;justify-content:space-between;margin-bottom:3px"><span style="color:var(--text-secondary)">${t}</span><b${extra}>${v}</b></div>`;
     if (el) el.innerHTML = `
-      <div style="display:flex;justify-content:space-between;margin-bottom:3px"><span style="color:var(--text-secondary)">USD a convertir:</span><b>${State.fmtUSD(monto)}</b></div>
-      <div style="display:flex;justify-content:space-between;margin-bottom:3px"><span style="color:var(--red)">Comisión (${pct}%):</span><b style="color:var(--red)">− ${State.fmtUSD(comision)}</b></div>
-      <div style="display:flex;justify-content:space-between;border-top:1px solid var(--border);padding-top:5px;margin-top:2px"><span style="color:var(--text-secondary)">USDT a recibir:</span><b style="color:var(--green)">${usdt.toFixed(2)} USDT</b></div>
+      ${fila('USD a convertir:', State.fmtUSD(r.montoUsd))}
+      ${fila(`Comisión (${r.pct}%):`, '− ' + State.fmtUSD(r.comisionUsd), ' style="color:var(--red)"')}
+      <div style="display:flex;justify-content:space-between;border-top:1px solid var(--border);padding-top:5px;margin-top:2px"><span style="color:var(--text-secondary)">USDT a recibir:</span><b style="color:var(--green)">${r.montoUsdt.toFixed(2)} USDT</b></div>
+      ${r.error ? `<div style="color:var(--red);margin-top:6px">${r.error}</div>` : `
+      <div style="border-top:1px solid var(--border);margin-top:6px;padding-top:6px">
+        ${fila('USDT que usa este lote:', r.usdtLote.toFixed(2) + ' USDT')}
+        ${fila('Comisión que se carga a este lote:', State.fmtUSD(r.comisionLote))}
+        ${r.sobrante > 0 ? `<div style="color:var(--amber);margin-top:4px">Sobran <b>${r.sobrante.toFixed(2)} USDT</b> en la caja destino, a un costo real de <b>${r.costoPorUsdt.toFixed(4)}</b> USD por USDT. La comisión de esa parte (${State.fmtUSD(State.cent(r.comisionUsd - r.comisionLote))}) no se carga a ningún lote.</div>` : ''}
+      </div>`}
     `;
   },
 
+  // Doble clic / Enter repetido: una sola conversión a la vez (la guarda se toma ANTES del primer await).
+  _convEnCurso: false,
   async _confirmarConversion(loteId) {
-    const montoUsd = parseFloat(document.getElementById('conv-monto')?.value) || 0;
-    const comisionPct = parseFloat(document.getElementById('conv-pct')?.value) || 0;
-    const comisionUsd = Math.round(montoUsd * comisionPct) / 100;
-    const montoUsdt = montoUsd - comisionUsd;
+    if (this._convEnCurso) return;
+    this._convEnCurso = true;
+    try { await this._ejecutarConversion(loteId); } finally { this._convEnCurso = false; }
+  },
+
+  async _ejecutarConversion(loteId) {
+    const r = this._leerConversion();
+    const { montoUsd, comisionUsd, montoUsdt, usdtLote, sobrante, comisionLote } = r;
+    const comisionPct = r.pct;
     const persona = document.getElementById('conv-p-origen')?.value;
     const bolsillo = document.getElementById('conv-b-origen')?.value;
     const personaDest = document.getElementById('conv-p-dest')?.value;
@@ -993,7 +1064,18 @@ const Proveedores = {
     const fecha = document.getElementById('conv-fecha')?.value;
     const notas = document.getElementById('conv-notas')?.value.trim();
 
-    if (!montoUsd || montoUsd <= 0) { toast('Ingresá un monto válido', 'error'); return; }
+    if (r.error) { toast(r.error, 'error'); return; }
+
+    // Antes de mover plata: ¿la base tiene las columnas del script 14? Con sobrante son imprescindibles
+    // (sin ellas el lote no sabría cuánto usó). Sin sobrante se sigue como siempre si faltan.
+    const columnas = await DB.columnasConversionListas();
+    if (sobrante > 0 && columnas !== true) {
+      toast(columnas === false
+        ? 'Para convertir de más hace falta correr antes el script 14 en la base (columnas de la conversión con sobrante). No se movió nada.'
+        : 'No se pudo comprobar la base. No se movió nada: probá de nuevo.', 'error');
+      return;
+    }
+    const conLote = columnas === true;
 
     // Impactar cajas por el motor central, en UNA operación atómica: sale de un
     // lado y entra del otro, o no pasa nada. Antes eran dos pedidos que ni se
@@ -1006,7 +1088,16 @@ const Proveedores = {
     });
     if (!movido) return;   // State ya avisó; la conversión NO se registra
 
-    const anotada = await DB.guardarLotePago(loteId, { tipo: 'conversion', montoUsd, montoUsdt, comisionPct, comisionUsd, moneda: 'USD', persona, bolsillo, personaDest, bolsilloDestino, fecha, notas });
+    let anotada;
+    try {
+      anotada = await DB.guardarLotePago(loteId, { tipo: 'conversion', montoUsd, montoUsdt, comisionPct, comisionUsd, usdtLote: conLote ? usdtLote : null, comisionLoteUsd: conLote ? comisionLote : null, moneda: 'USD', persona, bolsillo, personaDest, bolsilloDestino, fecha, notas });
+    } catch (err) {
+      // Sin respuesta: NO se sabe si el registro se guardó. Devolver la plata podría dejar una
+      // conversión anotada con la plata de vuelta en su lugar; por eso no se toca nada solo.
+      console.error('Conversión: se cortó al registrarla en el lote', err);
+      toast('⚠️ Se cortó la conexión al registrar la conversión y no se sabe si quedó anotada. La plata YA se movió. Actualizá la pantalla y mirá el lote y Cajas antes de repetir.');
+      return;
+    }
     if (!anotada) {
       // La plata ya se movió pero la conversión no quedó anotada en el lote: se
       // devuelve (traspaso inverso, atómico) para no dejar plata movida sin registro.
@@ -1034,8 +1125,13 @@ const Proveedores = {
     const cuentaPago = this._cuentaLote(loteId);
     let sugeridoPago = cuentaPago.restante;
     if (conv) {
-      const dispon = State.cent(Math.max(0, (Number(conv.montoUsdt) || 0) - cuentaPago.pagadoProveedor));
-      if (dispon > 0) sugeridoPago = Math.min(sugeridoPago, dispon);
+      // USDT que usa ESTE lote (no todos los convertidos: puede haber sobrante) menos lo ya pagado.
+      // Solo lo ya pagado EN USDT descuenta de los USDT del lote (un pago en pesos o dólares no los gasta).
+      const pagadoUsdt = State.cent((State.lotePagos || []).filter(p => p.loteId === loteId && p.tipo === 'pago_proveedor' && p.moneda === 'USDT')
+        .reduce((a, p) => a + (Number(p.montoUsdt) || Number(p.montoUsd) || 0), 0));
+      const dispon = State.cent(Math.max(0, cuentaPago.usdtLote - pagadoUsdt));
+      // Agotados los USDT de este lote no se sugiere nada: sugerir el resto gastaría el sobrante.
+      sugeridoPago = Math.min(sugeridoPago, dispon);
     }
     const personas = State.personas || [];
     const BOLSILLOS_POR_MONEDA = {
@@ -1057,7 +1153,7 @@ const Proveedores = {
 
           ${conv ? `
             <div style="background:rgba(52,199,89,.1);border:1px solid rgba(52,199,89,.3);border-radius:8px;padding:10px 14px;font-size:13px;color:var(--green)">
-              ✅ Conversión registrada: <b>${conv.montoUsdt.toFixed(2)} USDT</b> disponibles
+              ✅ Conversión registrada: <b>${cuentaPago.usdtLote.toFixed(2)} USDT</b> para este lote${cuentaPago.usdtLote < (Number(conv.montoUsdt) || 0) - 0.005 || this._conversiones(State.lotePagos.filter(p => p.loteId === loteId)).length > 1 ? ` (convertidos en total: ${this._conversiones(State.lotePagos.filter(p => p.loteId === loteId)).reduce((a, x) => a + x.montoUsdt, 0).toFixed(2)})` : ''}
             </div>` : `
             <div style="background:rgba(255,179,0,.1);border:1px solid rgba(255,179,0,.3);border-radius:8px;padding:10px 14px;font-size:13px;color:var(--amber)">
               ℹ️ Pago directo — sin conversión previa. El monto en USD se usa para el cálculo de costo.
@@ -1487,7 +1583,7 @@ const Proveedores = {
     const pagos = (State.lotePagos || []).filter(p => p.loteId === loteId);
     const totalItems = items.reduce((s, i) => s + i.precioUsd * i.cantidad, 0);
     const totalUds = items.reduce((s, i) => s + i.cantidad, 0);
-    const comision = pagos.find(p => p.tipo === 'conversion')?.comisionUsd || 0;
+    const comision = this._comisionDelLote(pagos);
     const envio = pagos.filter(p => ['envio','costo','diferencial'].includes(p.tipo)).reduce((s, p) => s + p.montoUsd, 0);
     const logistica = comision + envio;
     const logPorUnidad = totalUds > 0 ? logistica / totalUds : 0;
@@ -1589,7 +1685,7 @@ const Proveedores = {
     const l = (State.lotesCompra || []).find(x => x.id === loteId);
     const prov = (State.proveedores || []).find(p => p.id === l?.proveedorId);
     const pagos = (State.lotePagos || []).filter(p => p.loteId === loteId);
-    const comision = pagos.find(p => p.tipo === 'conversion')?.comisionUsd || 0;
+    const comision = this._comisionDelLote(pagos);
     const envio = pagos.filter(p => ['envio','costo','diferencial'].includes(p.tipo)).reduce((s, p) => s + p.montoUsd, 0);
     const totalUds = items.reduce((s, i) => s + i.cantidad, 0);
     const logPorUnidad = totalUds > 0 ? (comision + envio) / totalUds : 0;

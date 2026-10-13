@@ -96,6 +96,8 @@ function nuevoEntorno(opciones = {}) {
   const contadores = { viejo: 0, rpc: 0, rpcMover: 0 };
 
   const DB = {
+    // ¿Están las columnas del script 14 (conversión con sobrante)? Por defecto sí; las pruebas lo cambian con cfg.columnasConversion.
+    async columnasConversionListas() { return cfg.columnasConversion === undefined ? true : cfg.columnasConversion; },
     // Réplica de public.stock_ajustar: resta/suma sobre el valor REAL de la fila en
     // la "base" (servidor.stock), no sobre la copia de la pantalla. La fila se siembra
     // la primera vez con lo que la pantalla tenía (= lo que cargó al abrir).
@@ -2043,6 +2045,192 @@ const entornoVenta = (extra = {}, cfg = {}) => {
   // La tarjeta tiene el botón
   e.State.meliOrdenes = [lattafa]; M._filtro = 'todas';
   check('La tarjeta de cada orden tiene el botón «Detalle»', /MeliOrdenes\.abrirDetalle\(1\)/.test(M._vista()));
+}
+
+// 42. PLAN CONVERSIONES · FASE A: convertir de más, comisión prorrateada al lote, varias conversiones, filas viejas
+{
+  const filas = [];
+  const mk = (dom, extraDom = {}, cfgx = {}) => {
+    const e = nuevoEntorno({ modulos: ['proveedores.js', 'capital.js'], dom: { 'conv-monto': '10000', 'conv-pct': '3', 'conv-usdt-lote': '8790', 'conv-p-origen': 'Franco', 'conv-b-origen': 'USD cash',
+      'conv-p-dest': 'Franco', 'conv-b-dest': 'USDT', 'conv-fecha': '2026-10-10', 'conv-notas': '', ...dom, ...extraDom },
+      dbExtra: { async guardarLotePago(loteId, p) { e.filas.push(p); e.State.lotePagos.push({ id: Math.random(), loteId, ...p }); return true; } } });
+    Object.assign(e.cfg, cfgx);
+    e.filas = [];
+    e.sembrar({ Franco: { 'USD cash': 20000, 'USDT': 0 } });
+    Object.assign(e.mod.Proveedores, { renderKpis() {}, renderContent() {} });
+    Object.assign(e.State, { lotesCompra: [{ id: 1, proveedorId: 1, estado: 'pagado' }], loteItems: [{ loteId: 1, precioUsd: 8790, cantidad: 1 }], lotePagos: [], proveedorCreditos: [],
+      proveedores: [{ id: 1, nombre: 'P', activo: true }], activosFijos: [], inversores: [], inversorPagos: [], deudas: [], ventas: [] });
+    e.State.refBlue = 1000; e.State.refUsdt = 1000;
+    return e;
+  };
+
+  // Caso real: 10.000 USD, 3 %, el lote usa 8.790
+  {
+    const e = mk();
+    await e.mod.Proveedores._confirmarConversion(1);
+    const f = e.filas[0] || {};
+    check('Caso real: salen 10.000 USD y entran 9.700 USDT (un solo traspaso por el TOTAL)', e.base['Franco||USD cash'] === 10000 && e.base['Franco||USDT'] === 9700, JSON.stringify(e.base));
+    check('La fila guarda total 10.000 → 9.700, comisión 300, y para el lote: 8.790 USDT con comisión 271,86',
+      f.montoUsd === 10000 && f.montoUsdt === 9700 && f.comisionUsd === 300 && f.usdtLote === 8790 && f.comisionLoteUsd === 271.86, JSON.stringify(f));
+    check('… y el libro cuadra', cuadra(e.base, e.libro).length === 0, cuadra(e.base, e.libro).join(' | '));
+    e.State.lotePagos.push({ id: 99, loteId: 1, tipo: 'pago_proveedor', montoUsd: 8790, montoUsdt: 8790, moneda: 'USDT' });
+    const c = e.mod.Proveedores._cuentaLote(1);
+    check('Con 8.790 pagados al proveedor el lote queda SALDADO y su costo incluye 271,86 de comisión (no 300)', c.restante === 0 && c.excedenteBruto === 0 && c.comision === 271.86 && c.costoAdquisicion === 9061.86, JSON.stringify(c));
+    const cap = e.mod.Capital.calcular();
+    check('Capital en tránsito: 8.790 pagados + 271,86 de comisión del lote = 9.061,86 (el sobrante queda en la caja USDT)', Math.abs(cap.pedidosEnTransito - 9061.86) < 0.005, String(cap.pedidosEnTransito));
+  }
+  // Vacío = todos
+  {
+    const e = mk({ 'conv-usdt-lote': '', 'conv-monto': '1000', 'conv-pct': '2' });
+    await e.mod.Proveedores._confirmarConversion(1);
+    const f = e.filas[0] || {};
+    check('USDT del lote vacío = usa todos: usdtLote 980 y comisión del lote = la total (20)', f.usdtLote === 980 && f.comisionLoteUsd === 20, JSON.stringify(f));
+  }
+  // Validaciones: no se mueve plata
+  for (const [txt, v] of [['más de lo recibido', '9700.01'], ['cero', '0'], ['negativo', '-5'], ['no numérico', 'abc']]) {
+    const e = mk({ 'conv-usdt-lote': v });
+    await e.mod.Proveedores._confirmarConversion(1);
+    check(`USDT del lote ${txt}: NO se mueve plata ni se anota nada`, e.base['Franco||USD cash'] === 20000 && e.base['Franco||USDT'] === 0 && e.filas.length === 0 && e.toasts.length > 0, JSON.stringify([e.base, e.toasts]));
+  }
+  {
+    const e = mk({ 'conv-pct': '100' });
+    await e.mod.Proveedores._confirmarConversion(1);
+    check('Comisión del 100 %: rechazada antes de mover nada', e.filas.length === 0 && e.base['Franco||USD cash'] === 20000);
+  }
+  // Columnas del script 14
+  {
+    const e = mk({}, {}, { columnasConversion: false });
+    await e.mod.Proveedores._confirmarConversion(1);
+    check('Con sobrante y SIN el script 14 corrido: bloquea ANTES de mover plata y nombra el script', e.filas.length === 0 && e.base['Franco||USD cash'] === 20000 && e.toasts.some(t => t.includes('script 14')), JSON.stringify(e.toasts));
+    const u = mk({}, {}, { columnasConversion: null });
+    await u.mod.Proveedores._confirmarConversion(1);
+    check('Con sobrante y sin poder comprobar la base: tampoco mueve plata', u.filas.length === 0 && u.base['Franco||USD cash'] === 20000 && u.toasts.some(t => t.includes('No se pudo comprobar')));
+    const n = mk({ 'conv-usdt-lote': '' }, {}, { columnasConversion: false });
+    await n.mod.Proveedores._confirmarConversion(1);
+    check('SIN sobrante y sin las columnas: sigue como siempre (se mueve y se anota SIN columnas nuevas)', n.base['Franco||USDT'] === 9700 && n.filas.length === 1 && n.filas[0].usdtLote == null && n.filas[0].comisionLoteUsd == null, JSON.stringify(n.filas));
+  }
+  // Hallazgos de Codex: doble clic, centavos, comisión negativa, excepción al registrar, sugerencia con otras monedas
+  {
+    const e = mk();
+    await Promise.all([e.mod.Proveedores._confirmarConversion(1), e.mod.Proveedores._confirmarConversion(1)]);
+    check('Doble clic en Confirmar: UNA sola conversión (un traspaso y un registro)', e.filas.length === 1 && e.base['Franco||USDT'] === 9700 && e.base['Franco||USD cash'] === 10000, JSON.stringify([e.filas.length, e.base]));
+    await e.mod.Proveedores._confirmarConversion(1);
+    check('Después de terminar, se puede volver a convertir (la guarda se libera)', e.filas.length === 2);
+  }
+  {
+    const e = mk({ 'conv-monto': '12.43', 'conv-pct': '9.1', 'conv-usdt-lote': '9.95' });
+    const r = e.mod.Proveedores._leerConversion();
+    check('Prorrateo en centavos enteros: 12,43 USD a 9,1 % → comisión 1,13, recibe 11,30, el lote usa 9,95 → comisión del lote 1,00 (la mitad sube)', r.comisionUsd === 1.13 && r.montoUsdt === 11.3 && r.comisionLote === 1 && r.sobrante === 1.35, JSON.stringify(r));
+    const real = mk().mod.Proveedores._leerConversion();
+    check('El caso real sigue dando 271,86', real.comisionLote === 271.86 && real.sobrante === 910);
+  }
+  for (const pct of ['-3', 'abc', '100', '150']) {
+    const e = mk({ 'conv-pct': pct });
+    await e.mod.Proveedores._confirmarConversion(1);
+    check(`Comisión «${pct}»: se rechaza ANTES de mover plata`, e.filas.length === 0 && e.base['Franco||USD cash'] === 20000 && e.toasts.some(t => t.includes('comisión')), JSON.stringify(e.toasts));
+  }
+  {
+    const e = mk();
+    e.ctx.DB.guardarLotePago = async () => { throw new Error('se cortó'); };
+    await e.mod.Proveedores._confirmarConversion(1);
+    check('Si registrar la conversión TIRA una excepción: la plata queda movida, NO se devuelve sola y se avisa que no se sabe si quedó anotada',
+      e.base['Franco||USDT'] === 9700 && e.base['Franco||USD cash'] === 10000 && e.toasts.some(t => t.includes('no se sabe si quedó anotada')), JSON.stringify([e.base, e.toasts]));
+    check('… y la guarda se libera para poder reintentar', e.mod.Proveedores._convEnCurso === false);
+  }
+  {
+    const e = mk();
+    let html = '';
+    e.ctx.document.createElement = () => ({ id: '', style: {}, set innerHTML(v) { html = v; }, get innerHTML() { return html; }, remove() {} });
+    const sug = () => { e.mod.Proveedores.modalPago(1); const m = html.match(/id="pago-monto"[^>]*?value="([^"]*)"/s); return m ? m[1] : null; };
+    e.State.loteItems = [{ loteId: 1, precioUsd: 1000, cantidad: 1 }];
+    e.State.lotePagos = [{ id: 1, loteId: 1, tipo: 'conversion', montoUsd: 520, montoUsdt: 500, comisionUsd: 20, usdtLote: 500, comisionLoteUsd: 20 },
+                         { id: 2, loteId: 1, tipo: 'pago_proveedor', montoUsd: 300, montoUsdt: 300, moneda: 'USD' }];
+    check('Un pago directo en USD NO gasta los USDT del lote: debe 700, sugiere 500 (no 200)', sug() === '500.00', String(sug()));
+    e.State.lotePagos.push({ id: 3, loteId: 1, tipo: 'pago_proveedor', montoUsd: 500, montoUsdt: 500, moneda: 'USDT' });
+    check('Agotados los USDT del lote (aunque aún se deba plata): NO sugiere nada, para no gastar el sobrante', sug() === '', String(sug()));
+  }
+  // Vista previa
+  {
+    const e = mk();
+    const reg = {}; const orig = e.ctx.document.getElementById;
+    e.ctx.document.getElementById = id => (id === 'conv-resumen' ? (reg[id] = reg[id] || { innerHTML: '' }) : orig(id));
+    e.mod.Proveedores._calcConv();
+    const t = reg['conv-resumen'].innerHTML.replace(/\s+/g, ' ');
+    check('Vista previa: USDT del lote 8.790, comisión del lote 271,86, «Sobran 910.00 USDT» a 1,0309 y comisión de esa parte 28,14', t.includes('8790.00 USDT') && t.includes('271,86') && t.includes('910.00 USDT') && t.includes('1.0309') && t.includes('28,14'), t);
+  }
+  // Compatibilidad con lo ya cargado
+  {
+    const e = mk();
+    const P = e.mod.Proveedores;
+    const vieja = (extra = {}) => ({ tipo: 'conversion', montoUsd: 9000, montoUsdt: 8730, comisionUsd: 270, comisionPct: 3, ...extra });
+    check('Dos conversiones VIEJAS (columnas NULL): cuenta solo la primera, como hoy', P._comisionDelLote([vieja(), vieja({ comisionUsd: 50 })]) === 270 && P._usdtDelLote([vieja(), vieja({ montoUsdt: 400 })]) === 8730);
+    const nueva = (u, c, extra = {}) => ({ tipo: 'conversion', montoUsd: 10000, montoUsdt: 9700, comisionUsd: 300, usdtLote: u, comisionLoteUsd: c, ...extra });
+    check('Una vieja + una nueva: la vieja entera + la parte de la nueva', P._comisionDelLote([vieja(), nueva(5000, 154.64)]) === 424.64 && P._usdtDelLote([vieja(), nueva(5000, 154.64)]) === 13730);
+    check('Dos conversiones NUEVAS en un lote: se suman las dos', P._comisionDelLote([nueva(5000, 154.64), nueva(3790, 118.95)]) === 273.59 && P._usdtDelLote([nueva(5000, 154.64), nueva(3790, 118.95)]) === 8790);
+    check('Un 0 explícito de comisión del lote es un valor: NO cae a la comisión total', P._comisionDelLote([nueva(5000, 0)]) === 0);
+    check('Sin conversiones: 0 y 0', P._comisionDelLote([]) === 0 && P._usdtDelLote([]) === 0 && P._comisionDelLote(undefined) === 0);
+    check('Un pago que no es conversión no cuenta', P._comisionDelLote([{ tipo: 'pago_proveedor', comisionUsd: 99, comisionLoteUsd: 5 }]) === 0);
+    check('Resumen de la tarjeta: una conversión con sobrante dice cuánto usa el lote; varias lo suman',
+      P._resumenConversion([nueva(8790, 271.86)]).includes('este lote usa 8790.00 USDT') && P._resumenConversion([nueva(5000, 154.64), nueva(3790, 118.95)]).includes('2 conversiones') && P._resumenConversion([]) === '');
+  }
+  // Pago sugerido: lo que usa el lote, no todo lo convertido
+  {
+    const e = mk();
+    let html = '';
+    e.ctx.document.createElement = () => ({ id: '', style: {}, set innerHTML(v) { html = v; }, get innerHTML() { return html; }, remove() {} });
+    const sug = () => { e.mod.Proveedores.modalPago(1); const m = html.match(/id="pago-monto"[^>]*?value="([^"]*)"/s); return m ? m[1] : null; };
+    e.State.lotePagos = [{ id: 1, loteId: 1, tipo: 'conversion', montoUsd: 10000, montoUsdt: 9700, comisionUsd: 300, usdtLote: 8790, comisionLoteUsd: 271.86 }];
+    check('Pago sugerido tras convertir de más: 8.790 (lo que usa el lote), no los 9.700 convertidos', sug() === '8790.00', String(sug()));
+    check('El aviso del modal dice cuántos USDT son para este lote y cuántos se convirtieron en total', /8790\.00 USDT<\/b> para este lote[^<]*\(convertidos en total: 9700\.00\)/.test(html), html.replace(/\s+/g, ' ').slice(html.indexOf('Conversión registrada') - 20, html.indexOf('Conversión registrada') + 260));
+    e.State.lotePagos.push({ id: 2, loteId: 1, tipo: 'pago_proveedor', montoUsd: 5000, montoUsdt: 5000, moneda: 'USDT' });
+    check('Tras pagar 5.000: sugiere lo que falta (3.790)', sug() === '3790.00', String(sug()));
+    e.State.lotePagos.push({ id: 3, loteId: 1, tipo: 'pago_proveedor', montoUsd: 3790, montoUsdt: 3790, moneda: 'USDT' });
+    check('Saldado: no sugiere nada', sug() === '', String(sug()));
+  }
+  // Recepción: la logística por unidad usa la comisión DEL LOTE
+  {
+    const e = mk();
+    e.State.lotePagos = [{ id: 1, loteId: 1, tipo: 'conversion', montoUsd: 10000, montoUsdt: 9700, comisionUsd: 300, usdtLote: 8790, comisionLoteUsd: 271.86 }];
+    let html = '';
+    e.ctx.document.createElement = () => ({ id: '', style: {}, set innerHTML(v) { html = v; }, get innerHTML() { return html; }, remove() {} });
+    e.mod.Proveedores.modalRecepcion(1);
+    check('Recepción: la logística usa la comisión del lote (271,86), no la total (300)', html.includes('271,86') && !html.includes('300,00'), html.replace(/\s+/g, ' ').slice(0, 10));
+  }
+}
+
+// 43. DB REAL (supabase-config.js) · conversión con sobrante: lectura, escritura y detección de las columnas
+{
+  const fuente = fs.readFileSync('/Users/francovelas/crm-complete/iphonemood-crm/src/modules/supabase-config.js', 'utf8');
+  const mkDB = (supa, state = {}) => {
+    const ctxDB = { window: { __APP_CONFIG__: { SUPABASE_URL: 'x', SUPABASE_ANON_KEY: 'y' } }, supabase: { createClient: () => supa },
+      console: { log() {}, warn() {}, error() {} }, Auth: {}, State: state, toast() {}, Date, Math, Number, JSON, String, Promise, Error };
+    vm.createContext(ctxDB);
+    vm.runInContext(fuente + '\nthis.__DB = DB;', ctxDB, { filename: 'supabase-config.js' });
+    return ctxDB.__DB;
+  };
+  const insertado = [];
+  const supaOk = { from: t => ({ insert: r => { insertado.push({ t, r }); return { select: () => ({ single: async () => ({ data: { id: 7 }, error: null }) }) }; },
+    select: () => ({ limit: async () => ({ error: null }) }) }) };
+  const st = { lotePagos: [] };
+  const D1 = mkDB(supaOk, st);
+  check('Columnas presentes: columnasConversionListas() = true (y se recuerda)', (await D1.columnasConversionListas()) === true && D1._colsConversion === true);
+  const supaSin = { from: () => ({ select: () => ({ limit: async () => ({ error: { code: '42703', message: 'column lote_pagos.usdt_lote does not exist' } }) }) }) };
+  const D2 = mkDB(supaSin);
+  check('Columnas ausentes (42703): false, y NO se recuerda (se vuelve a mirar si Franco corre el script)', (await D2.columnasConversionListas()) === false && D2._colsConversion !== true);
+  const supaRed = { from: () => ({ select: () => ({ limit: async () => ({ error: { code: '', message: 'Failed to fetch' } }) }) }) };
+  check('Error de red/permisos: null (no se sabe), nunca false', (await mkDB(supaRed).columnasConversionListas()) === null);
+  const supaTira = { from: () => ({ select: () => ({ limit: async () => { throw new Error('boom'); } }) }) };
+  check('Si la consulta tira: null', (await mkDB(supaTira).columnasConversionListas()) === null);
+
+  await D1.guardarLotePago(1, { tipo: 'conversion', montoUsd: 10000, montoUsdt: 9700, comisionPct: 3, comisionUsd: 300, usdtLote: 8790, comisionLoteUsd: 271.86 });
+  check('Guardar con sobrante: manda usdt_lote y comision_lote_usd y la pantalla queda con los mismos valores',
+    insertado[0].r.usdt_lote === 8790 && insertado[0].r.comision_lote_usd === 271.86 && st.lotePagos[0].usdtLote === 8790 && st.lotePagos[0].comisionLoteUsd === 271.86, JSON.stringify([insertado[0], st.lotePagos[0]]));
+  await D1.guardarLotePago(1, { tipo: 'conversion', montoUsd: 1000, montoUsdt: 980, comisionPct: 2, comisionUsd: 20, usdtLote: null, comisionLoteUsd: null });
+  check('Guardar como siempre (sin los dos datos): NO manda las columnas nuevas (funciona sin el script 14)', !('usdt_lote' in insertado[1].r) && !('comision_lote_usd' in insertado[1].r) && st.lotePagos[1].usdtLote === null);
+  await D1.guardarLotePago(1, { tipo: 'conversion', montoUsd: 1000, montoUsdt: 980, comisionPct: 2, comisionUsd: 20, usdtLote: 500, comisionLoteUsd: 0 });
+  check('Comisión del lote 0 explícita: se manda (no se confunde con «sin dato»)', insertado[2].r.comision_lote_usd === 0 && st.lotePagos[2].comisionLoteUsd === 0);
+  await D1.guardarLotePago(1, { tipo: 'conversion', montoUsd: 1000, montoUsdt: 980, comisionUsd: 20, usdtLote: 500 });
+  check('Solo uno de los dos datos: no se manda ninguno (la base exige las dos o ninguna)', !('usdt_lote' in insertado[3].r));
 }
 
 // 30. Altas: si el registro no se puede crear, NO se toca la caja (o se deshace)

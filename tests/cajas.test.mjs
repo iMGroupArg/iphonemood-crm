@@ -1962,6 +1962,89 @@ const entornoVenta = (extra = {}, cfg = {}) => {
   check('Cerrar con la instancia actual sí lo cierra', e.cerrado === true);
 }
 
+// 41. DETALLE DE VENTA de Mercado Libre: el desglose no inventa nada
+{
+  const e = nuevoEntorno({ modulos: ['meli-ordenes.js'], dbExtra: { async cargarTodo() {}, async cargarMeliOrdenes() {} } });
+  const M = e.mod.MeliOrdenes;
+  const lattafa = { id: 1, orderId: '2000018883051330', bruto: 65990, neto: 37757.26, financieraCompleta: true, comprador: 'USUARIO<b>x</b>', fechaOrden: '2026-10-08T15:00:00Z',
+    procesada: false, acreditado: false, revisar: false, fechaLiberacion: '2099-01-01T00:00:00Z',
+    items: [{ titulo: 'Khamrah <img src=x>', cantidad: 1, stock_id: 's1', precio_unitario: 65990 }] };
+  const todas = { cargoVenta: 18952.89, envio: 8290, impuestos: 989.85 };
+  let d = M._desglose(lattafa, todas);
+  check('Caso real Lattafa con las tres partes: retenido 28.232,74 y CUADRA (65.990 − 18.952,89 − 8.290 − 989,85 = 37.757,26)', d.confirmado && d.retenido === 28232.74 && d.estado === 'cuadra', JSON.stringify(d));
+  d = M._desglose(lattafa, { ...todas, impuestos: 900 });
+  check('Si las tres partes no suman el retenido: «no_cuadra» con la diferencia (89,85)', d.estado === 'no_cuadra' && Math.abs(d.diferencia - 89.85) < 0.005, JSON.stringify(d));
+  d = M._desglose(lattafa, { cargoVenta: 18952.89, envio: 8290 });
+  check('Con dos de tres partes: «parcial», NUNCA «cuadra»; el resto queda como «sin desglosar» (no se le asigna a nadie)', d.estado === 'parcial' && Math.abs(d.restoSinDesglosar - 989.85) < 0.005, JSON.stringify(d));
+  d = M._desglose(lattafa, {});
+  check('Hoy (sin partes guardadas): «sin_desglose», solo el total retenido', d.estado === 'sin_desglose' && d.retenido === 28232.74 && d.partes.every(x => x.monto === null));
+  d = M._desglose({ ...lattafa, financieraCompleta: false }, todas);
+  check('Pagos sin confirmar (financieraCompleta falso): «incompleto», sin retenido ni «cuadra» aunque lleguen las partes', d.estado === 'incompleto' && d.retenido === null);
+  d = M._desglose({ ...lattafa, neto: null }, todas);
+  check('Neto nulo: «incompleto» (nunca se trata como 0)', d.estado === 'incompleto' && d.retenido === null);
+  d = M._desglose({ ...lattafa, bruto: 1000, neto: 500, financieraCompleta: false }, {});
+  check('Neto parcial de un pago aprobado con otro pendiente: no se presenta como cargos', d.estado === 'incompleto' && d.retenido === null);
+  d = M._desglose(lattafa, { cargoVenta: '', envio: 'abc', impuestos: NaN });
+  check('Partes vacías o no numéricas cuentan como desconocidas', d.estado === 'sin_desglose');
+
+  // La pantalla
+  let html = ''; const reg = {};
+  const original = e.ctx.document.getElementById;
+  e.ctx.document.getElementById = id => reg[id] || original(id);
+  e.ctx.document.createElement = () => ({ id: '', style: {}, set innerHTML(v) { html = v; }, get innerHTML() { return html; }, remove() { html = ''; } });
+  e.ctx.document.body.appendChild = () => {};
+  e.State.stock = [{ id: 's1', nombre: 'Lattafa Khamrah' }];
+  e.State.meliOrdenes = [lattafa];
+  M.abrirDetalle(1);
+  const txt = html.replace(/\s+/g, ' ');
+  check('Detalle HOY: venta, «sin desglose todavía» ×3, total que se queda MELI 28.232,74 y te llega 37.757,26; no dice «Cuadra»',
+    txt.includes('$65.990,00') && (txt.match(/sin desglose todavía/g) || []).length === 3 && txt.includes('−$28.232,74') && txt.includes('$37.757,26') && !txt.includes('✓ Cuadra'), txt.slice(0, 1500));
+  check('Detalle: comprador y títulos ESCAPADOS, sin nombre/DNI/dirección y localidad «—»', !html.includes('<b>x</b>') && !html.includes('<img src=x>') && html.includes('localidad —'));
+  check('Detalle: muestra precio unitario y el vínculo de stock', txt.includes('$65.990,00 c/u') && txt.includes('→ Stock: Lattafa Khamrah'));
+  check('Detalle: liberación con cuánto falta', /se libera .* \(en \d+ días?\)/.test(txt));
+  check('Detalle: sin venta, no aparece el bloque «Venta en el CRM»', !txt.includes('Venta en el CRM'));
+  e.State.meliOrdenes = [{ ...lattafa, ...{ cargoVenta: 18952.89, envioVendedor: 8290, impuestos: 989.85 } }];
+  M.abrirDetalle(1);
+  check('Detalle con las tres partes guardadas: muestra cada una y «✓ Cuadra»', html.includes('−$18.952,89') && html.includes('−$8.290,00') && html.includes('−$989,85') && html.includes('✓ Cuadra'));
+  e.State.meliOrdenes = [{ ...lattafa, financieraCompleta: false }];
+  M.abrirDetalle(1);
+  check('Detalle con datos de pago incompletos: lo dice y no calcula retenido', html.includes('Datos de pago incompletos') && !html.includes('Total que se queda'));
+
+  // Orden procesada con su venta
+  e.mod.Ventas = { resultadoVenta: () => ({ costoCanal: 0, margenComercial: 12.5 }) };
+  e.State.ventas = [{ id: 9, meliCotizacion: 1540, items: [{ precio: 40 }] }];
+  e.State.meliOrdenes = [{ ...lattafa, procesada: true, ventaId: 9 }];
+  M.abrirDetalle(1);
+  let t2 = html.replace(/\s+/g, ' ');
+  check('Procesada y SIN acreditar: venta #9, cotización 1.540, costo «se fija al acreditar» y margen rotulado PROVISORIO', t2.includes('#9') && t2.includes('$1.540') && t2.includes('se fija al acreditar') && t2.includes('Margen provisorio'));
+  e.mod.Ventas = { resultadoVenta: () => ({ costoCanal: 18.3, margenComercial: 9.1 }) };
+  e.State.meliOrdenes = [{ ...lattafa, procesada: true, ventaId: 9, acreditado: true }];
+  M.abrirDetalle(1);
+  t2 = html.replace(/\s+/g, ' ');
+  check('Acreditada: muestra el costo de comisión y envío real y «Margen comercial» (ya no provisorio)', t2.includes('USD 18,3') && t2.includes('Margen comercial') && !t2.includes('provisorio'));
+  e.State.ventas = [];
+  M.abrirDetalle(1);
+  check('Procesada pero sin la venta en memoria: «datos no disponibles» (no inventa)', html.includes('datos no disponibles'));
+
+  // «Ver cómo se calculó»
+  e.State.meliOrdenes = [lattafa];
+  M.abrirDetalle(1);
+  reg['meliord-calc-1'] = { innerHTML: '' };
+  e.cfg.supaFrom = () => consultaFalsa({ data: { payload_pago: { pagos: [{ id: 123, status: 'approved<script>', transaction_amount: 65990, net_received_amount: 37757.26, email: 'secreto@x.com', fee_details: [] }], conciliacion: { declarada: 0, diferencia_sin_explicar: 28232.74, cobrado_aprobado: 65990, cubierto: true } } }, error: null });
+  await M.verComoSeCalculo(1, null);
+  const c = reg['meliord-calc-1'].innerHTML;
+  check('«Ver cómo se calculó»: muestra importes del pago y aclara que los cargos informados NO son el desglose; escapa y no vuelca campos personales', c.includes('$37.757,26') && c.includes('NO es el desglose') && c.includes('$28.232,74') && !c.includes('<script>') && !c.includes('secreto@x.com'), c);
+  e.cfg.supaFrom = () => consultaFalsa({ data: null, error: { message: 'x' } });
+  await M.verComoSeCalculo(1, null);
+  check('Si falla la lectura del pago: lo dice', reg['meliord-calc-1'].innerHTML.includes('No se pudo leer el detalle del pago'));
+  e.cfg.supaFrom = () => consultaFalsa({ data: { payload_pago: null }, error: null });
+  await M.verComoSeCalculo(1, null);
+  check('Sin payload de pago: dice que todavía no hay datos', reg['meliord-calc-1'].innerHTML.includes('Todavía no hay datos del pago'));
+  // La tarjeta tiene el botón
+  e.State.meliOrdenes = [lattafa]; M._filtro = 'todas';
+  check('La tarjeta de cada orden tiene el botón «Detalle»', /MeliOrdenes\.abrirDetalle\(1\)/.test(M._vista()));
+}
+
 // 30. Altas: si el registro no se puede crear, NO se toca la caja (o se deshace)
 {
   const e = nuevoEntorno({ modulos: ['gastos.js'], dom: { 'gf-motivo': 'Alquiler', 'gf-monto': '50', 'gf-caja-persona': 'Franco', 'gf-caja-bolsillo': 'USD cash', 'gf-moneda': 'USD', 'gf-cat': 'x', 'gf-resp': 'Franco' },

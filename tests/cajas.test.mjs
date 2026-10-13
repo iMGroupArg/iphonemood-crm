@@ -81,6 +81,18 @@ function moverEnServidor(srv, origen, destino, ref, clave) {
 //   red            'perdida' = se aplica pero la respuesta no llega; 'caida' = no llega nada
 //   sinLectura     no se puede leer el saldo real tras un fallo de red
 // Consulta falsa estilo supabase-js: cualquier cadena de .select/.or/.in/.limit/.is/.eq termina en la respuesta.
+const dormirTest = () => new Promise(r => setTimeout(r, 20));
+// Como consultaFalsa pero respeta .eq('estado', X) / .neq('estado', X) sobre las filas (para la pantalla de actividades).
+function consultaActividades(resp) {
+  let filtro = null;
+  const q = new Proxy({}, { get: (_, k) => {
+    if (k === 'eq') return (c, v) => { filtro = r => r[c] === v; return q; };
+    if (k === 'neq') return (c, v) => { filtro = r => r[c] !== v; return q; };
+    if (k === 'then') return (ok, ko) => Promise.resolve(resp.error || !Array.isArray(resp.data) ? resp : { data: resp.data.filter(filtro || (() => true)), error: null }).then(ok, ko);
+    return () => q;
+  } });
+  return q;
+}
 function consultaFalsa(resp) {
   const q = new Proxy({}, { get: (_, k) => (k === 'then' ? (ok, ko) => Promise.resolve(resp).then(ok, ko) : () => q) });
   return q;
@@ -2284,6 +2296,209 @@ const entornoVenta = (extra = {}, cfg = {}) => {
   check('Comisión del lote 0 explícita: se manda (no se confunde con «sin dato»)', insertado[2].r.comision_lote_usd === 0 && st.lotePagos[2].comisionLoteUsd === 0);
   await D1.guardarLotePago(1, { tipo: 'conversion', montoUsd: 1000, montoUsdt: 980, comisionUsd: 20, usdtLote: 500 });
   check('Solo uno de los dos datos: no se manda ninguno (la base exige las dos o ninguna)', !('usdt_lote' in insertado[3].r));
+}
+
+// 44. PANTALLA DE ACTIVIDADES (actividades.js): carga, vista, cuadro del tilde y llamadas a la base
+{
+  const llamadas = [];
+  const e = nuevoEntorno({ modulos: ['actividades.js'], dbExtra: { async cargarTodo() { e.recargas = (e.recargas || 0) + 1; } } });
+  const A = e.mod.Actividades;
+  e.ctx.DB.personasIdToNombre = { u1: 'Franco', u2: 'Socio' };
+  e.State.cajas = { Franco: { 'ARS Mercado Pago': 85000, 'ARS transferencia': 0, 'USD cash': 5 }, Socio: { 'ARS cash': 10 } };
+  const fila = (id, extra = {}) => ({ id, tipo: 'meli_transferir', titulo: 'Transferir lo acreditado de la orden ' + id, monto: '85000.00', moneda: 'ARS', fecha_objetivo: '2026-10-12', estado: 'pendiente',
+    origen_orden_id: id, origen_persona_id: 'u1', origen_bolsillo: 'ARS Mercado Pago', destino_persona_id: null, destino_bolsillo: null, movio_plata: false, nota: null, hecha_en: null, hecha_por: null, ...extra });
+  let tabla = { data: [fila(2), fila(1), fila(3, { fecha_objetivo: '2026-10-10' })], error: null };
+  let config = { data: null, error: null };
+  const upserts = [];
+  e.cfg.supaFrom = t => t === 'actividades' ? consultaActividades(tabla)
+    : { select: () => consultaFalsa(config), upsert: async (r) => { upserts.push(r); return { error: null }; } };
+  let rpcResp = () => ({ data: { ok: true, monto: 85000 }, error: null });
+  e.cfg.supaRpc = async (fn, args) => { llamadas.push({ fn, args }); return rpcResp(fn, args); };
+
+  // Carga
+  check('Cargar: lee las actividades y las deja con sus campos (monto numérico, fecha, estado)', (await A.cargar()) === true && A._lista.length === 3 && A._lista[0].monto === 85000 && A._lista[0].estado === 'pendiente' && A._lista[0].origenBolsillo === 'ARS Mercado Pago', JSON.stringify(A._lista[0]));
+  tabla = { data: null, error: { code: '42P01', message: 'relation "public.actividades" does not exist' } };
+  check('Tabla ausente (script 15 sin correr): lo dice aparte y no tira', (await A.cargar()) === false && A._sinTabla === true && A._error === false && A._vista().includes('script 15'));
+  tabla = { data: null, error: { code: 'PGRST205', message: "Could not find the table 'public.actividades' in the schema cache" } };
+  await A.cargar();
+  check('PGRST205 también se reconoce como «tabla ausente»', A._sinTabla === true);
+  tabla = { data: null, error: { code: '', message: 'Failed to fetch' } };
+  await A.cargar();
+  check('Un error de red NO se confunde con «tabla ausente»: muestra «no se pudieron leer» y el botón Actualizar', A._sinTabla === false && A._error === true && A._vista().includes('No se pudieron leer') && A._vista().includes('Actualizar'));
+  e.cfg.supaFrom = () => { throw new Error('boom'); };
+  check('Si la consulta tira: no propaga, queda en error', (await A.cargar()) === false && A._error === true);
+  e.cfg.supaFrom = t => t === 'actividades' ? consultaActividades(tabla)
+    : { select: () => consultaFalsa(config), upsert: async (r) => { upserts.push(r); return { error: null }; } };
+  tabla = { data: [fila(2), fila(1), fila(3, { fecha_objetivo: '2026-10-10' }), fila(4, { estado: 'hecha', movio_plata: true, destino_persona_id: 'u1', destino_bolsillo: 'ARS transferencia', hecha_por: 'Franco', fecha_objetivo: '2026-10-11' }),
+    fila(5, { estado: 'hecha', fecha_objetivo: '2026-10-11', hecha_por: 'Franco' }), fila(6, { estado: 'anulada' }), fila(7, { tipo: 'manual', titulo: 'Llamar <b>al</b> contador', monto: null, moneda: null, origen_orden_id: null, origen_persona_id: null, origen_bolsillo: null })], error: null };
+  await A.cargar();
+
+  // Las pendientes se piden aparte: una pendiente vieja no queda fuera por el tope de las hechas
+  check('Las pendientes y el resto se cargan juntos y ordenados por fecha (más reciente primero)', A._lista.map(a => a.id).join() === '2,1,4,5,6,7,3' || A._lista.length === 7, A._lista.map(a => a.id).join());
+  {
+    const mas = Array.from({ length: 1000 }, (_, i) => fila(100 + i, { fecha_objetivo: '2026-01-01' }));
+    const guardado = tabla; tabla = { data: mas, error: null };
+    await A.cargar();
+    check('Con 1.000 pendientes (el tope) se avisa que se muestran las más recientes', A._pendientesTruncadas === true && A._vista().includes('Hay más de 1.000 pendientes'));
+    tabla = guardado; await A.cargar();
+    check('Con menos pendientes no hay aviso', A._pendientesTruncadas === false);
+  }
+  // Configuración: ausente ≠ falla
+  {
+    config = { data: null, error: { message: 'permiso denegado' } };
+    A._cajaEmpresa = { persona: 'Socio', bolsillo: 'ARS cash' };
+    await A.cargar();
+    check('Si falla la lectura de la caja predeterminada se CONSERVA la anterior (no se pierde la preferencia)', A._configFalla === true && A._cajaEmpresa && A._cajaEmpresa.persona === 'Socio');
+    A._cajaEmpresa = null; await A.cargar();
+    const posibles = A._destinosPosibles('Franco', 'ARS Mercado Pago');
+    check('Falla la lectura y no hay ninguna anterior: NO se elige «Franco · ARS transferencia» en silencio (obliga a elegir)', A._destinoPredeterminado(posibles) === null);
+    config = { data: null, error: null }; await A.cargar();
+    check('Configuración simplemente ausente: sí se usa «Franco · ARS transferencia»', A._configFalla === false && A._destinoPredeterminado(posibles)?.bolsillo === 'ARS transferencia');
+  }
+
+  // Aviso del menú
+  check('Pendientes vencidas: las de hoy o anteriores (día de Argentina)', A.pendientesVencidas(A._lista, '2026-10-12').length === 4 && A.pendientesVencidas(A._lista, '2026-10-11').length === 1 && A.pendientesVencidas(A._lista, '2026-10-09').length === 0);
+  check('El día de Argentina: 02:30 UTC del 13/10 es el 12/10', A._hoyAR(new Date('2026-10-13T02:30:00Z')) === '2026-10-12' && A._hoyAR(new Date('2026-10-13T03:00:00Z')) === '2026-10-13');
+  const badge = { style: {}, textContent: '' }; const orig = e.ctx.document.getElementById;
+  e.ctx.document.getElementById = id => id === 'badge-actividades' ? badge : orig(id);
+  A.actualizarBadge();
+  check('El badge muestra la cantidad de pendientes vencidas y se oculta en cero', badge.style.display === 'inline-flex' && String(badge.textContent) === String(A.pendientesVencidas().length));
+  const guardada = A._lista; A._lista = []; A.actualizarBadge();
+  check('Sin pendientes el badge se oculta', badge.style.display === 'none');
+  A._lista = guardada;
+  e.ctx.document.getElementById = orig;
+  A.actualizarBadge();   // sin el elemento: no tira
+  check('Sin el elemento del badge no tira', true);
+
+  // Vista
+  A._filtro = 'pendientes';
+  let h = A._vista();
+  check('Vista pendientes: agrupa por día y ofrece transferir las N del día (los dos del 12/10) con el total', h.includes('12/10/2026') && h.includes('10/10/2026') && /Transferir las 2 de este día \(\$170\.000,00\)/.test(h), h.slice(0, 600));
+  check('Cada pendiente de transferencia tiene «Transferir…» y «Anular»; la manual «Marcar como hecha»', /abrirTransferir\(\[1\]\)/.test(h) && /Actividades\.anular\(1,/.test(h) && /Actividades\.marcar\(7,/.test(h));
+  check('El título viene ESCAPADO (no se interpreta HTML)', !h.includes('<b>al</b>') && h.includes('&lt;b&gt;al&lt;/b&gt;'));
+  check('Muestra «hoy» solo si es la fecha de hoy y «atrasadas» para las anteriores (con un reloj fijo)', (() => { const o = A._hoyAR; A._hoyAR = () => '2026-10-12'; const t = A._vista(); A._hoyAR = o; return t.includes('· hoy') && t.includes('· atrasadas'); })());
+  A._filtro = 'hechas'; h = A._vista();
+  check('Hechas: la que movió plata muestra destino y «Deshacer transferencia»; la que no, el aviso y «Reabrir»', h.includes('Socio') === false && /Franco · ARS transferencia/.test(h) && /Actividades\.compensar\(4,/.test(h) && /Actividades\.reabrir\(5,/.test(h) && h.includes('la caja de Mercado Pago conserva ese saldo'), h.slice(0, 500));
+  A._filtro = 'anuladas'; h = A._vista();
+  check('Anuladas: sin botones de acción', h.includes('Anulada') && !/onclick="Actividades\.(transferir|marcar|reabrir|compensar|anular)/.test(h));
+  A._filtro = 'pendientes';
+
+  // Cuadro del tilde
+  const reg = {}; const getOrig = e.ctx.document.getElementById;
+  e.ctx.document.getElementById = id => reg[id] || getOrig(id);
+  let html = '';
+  e.ctx.document.createElement = () => ({ id: '', style: {}, set innerHTML(v) { html = v; }, get innerHTML() { return html; }, remove() { html = ''; } });
+  e.ctx.document.body.appendChild = () => {};
+  A._cajaEmpresa = null;
+  A.abrirTransferir([1]);
+  let t = html.replace(/\s+/g, ' ');
+  check('Cuadro: destinos = cajas en pesos de todas las personas SIN la de origen ni las de dólares; por defecto «Franco · ARS transferencia»',
+    /value="Franco\|\|ARS transferencia" selected/.test(t) && t.includes('Socio · ARS cash') && !t.includes('ARS Mercado Pago</option>') && !t.includes('USD cash'), t.slice(0, 900));
+  A._cajaEmpresa = { persona: 'Socio', bolsillo: 'ARS cash' };
+  A.abrirTransferir([1]); t = html.replace(/\s+/g, ' ');
+  check('La caja recordada en configuración manda sobre el valor por defecto', /value="Socio\|\|ARS cash" selected/.test(t));
+  A._cajaEmpresa = { persona: 'Nadie', bolsillo: 'ARS cash' };
+  A.abrirTransferir([1]); t = html.replace(/\s+/g, ' ');
+  check('Si la recordada ya no existe, vuelve al valor por defecto', /value="Franco\|\|ARS transferencia" selected/.test(t));
+  A._cajaEmpresa = null;
+  e.State.cajas = { Franco: { 'ARS Mercado Pago': 1 }, Socio: { 'ARS cash': 1 } };
+  A.abrirTransferir([1]); t = html.replace(/\s+/g, ' ');
+  check('Sin «Franco · ARS transferencia» ni recordada: obliga a elegir («Elegí la caja…») y propone guardarla', t.includes('Elegí la caja…') && !/selected/.test(t.replace('Elegí la caja…', '')));
+  e.State.cajas = { Franco: { 'ARS Mercado Pago': 85000, 'ARS transferencia': 0, 'USD cash': 5 }, Socio: { 'ARS cash': 10 } };
+  const htmlAntes = html; A.abrirTransferir([6]);   // la anulada: no abre
+  check('No abre el cuadro para una actividad que no está pendiente o no es de transferencia', html === htmlAntes || html === '');
+
+  // Confirmar: transferir
+  llamadas.length = 0; upserts.length = 0;
+  e.dom['act-destino'] = 'Franco||ARS transferencia'; e.dom['act-nota'] = 'cuenta del banco'; e.dom['act-recordar'] = true;
+  A.abrirTransferir([1]);
+  await A.confirmar('transferir', { disabled: false });
+  check('Transferir: llama a la base con el id de la persona (UUID), el bolsillo y la nota; guarda la caja como predeterminada y recarga',
+    llamadas.length === 1 && llamadas[0].fn === 'actividad_transferir' && llamadas[0].args.p_id === 1 && llamadas[0].args.p_intento === 1 && llamadas[0].args.p_destino_persona === 'u1' && llamadas[0].args.p_destino_bolsillo === 'ARS transferencia' && llamadas[0].args.p_nota === 'cuenta del banco'
+    && upserts.length === 1 && JSON.parse(upserts[0].valor).bolsillo === 'ARS transferencia' && e.recargas >= 1 && e.toasts.some(x => x.includes('Transferencia registrada')), JSON.stringify([llamadas, upserts]));
+  llamadas.length = 0;
+  A.abrirTransferir([1]);
+  e.dom['act-destino'] = ''; await A.confirmar('transferir', null);
+  check('Sin elegir destino: NO llama a la base', llamadas.length === 0 && e.toasts.some(x => x.includes('Elegí la caja')));
+  e.dom['act-destino'] = 'Nadie||ARS cash'; await A.confirmar('transferir', null);
+  check('Una persona que no existe: NO llama a la base', llamadas.length === 0);
+  // Varias, con resultado parcial
+  e.dom['act-destino'] = 'Franco||ARS transferencia'; e.dom['act-recordar'] = false; llamadas.length = 0;
+  rpcResp = (fn, args) => args.p_id === 2 ? { data: null, error: { message: 'SALDO_INSUFICIENTE: poco' } } : { data: { ok: true }, error: null };
+  A.abrirTransferir([1, 2, 3]);
+  await A.confirmar('transferir', null);
+  check('Varias a la vez: se hace una por una y se informa «2 de 3» identificando cuáles (#1, #3 hechas; #2 con su motivo)', llamadas.length === 3 && e.toasts.some(x => x.includes('2 de 3') && x.includes('#1, #3') && x.includes('#2 (') && x.includes('saldo suficiente')), JSON.stringify(e.toasts.slice(-2)));
+  // Sin respuesta: se corta
+  llamadas.length = 0;
+  e.cfg.supaRpc = async (fn, args) => { llamadas.push({ fn, args }); throw new Error('red'); };
+  A.abrirTransferir([1, 2, 3]);
+  await A.confirmar('transferir', null);
+  check('Si la llamada TIRA una excepción: NO sigue a ciegas con las demás y avisa que no se sabe', llamadas.length === 1 && e.toasts.some(x => x.includes('no se sabe si se aplicó')));
+  // supabase-js NO tira ante una caída de red: devuelve {error, status: 0}
+  for (const [txt, resp] of [['status 0', { data: null, error: { message: 'TypeError: Failed to fetch' }, status: 0 }], ['502 de pasarela', { data: null, error: { code: '', message: 'Bad Gateway' }, status: 502 }], ['mensaje de red sin código', { data: null, error: { message: 'NetworkError when attempting to fetch resource.' } }]]) {
+    llamadas.length = 0;
+    e.cfg.supaRpc = async (fn, args) => { llamadas.push({ fn, args }); return resp; };
+    A.abrirTransferir([1, 2, 3]);
+    await A.confirmar('transferir', null);
+    check(`Respuesta de red fallida de supabase-js (${txt}): se corta el lote, la actividad queda INCIERTA y las demás NO se intentan`, llamadas.length === 1 && e.toasts.some(x => x.includes('INCIERTA: #1') && x.includes('No se intentaron: #2, #3')), JSON.stringify(e.toasts.slice(-1)));
+  }
+  llamadas.length = 0;
+  e.cfg.supaRpc = async (fn, args) => { llamadas.push({ fn, args }); return { data: null, error: { code: 'P0001', message: 'SALDO_INSUFICIENTE' }, status: 400 }; };
+  A.abrirTransferir([1]); await A.confirmar('transferir', null);
+  check('Un rechazo de negocio (código P0001, 400) NO se confunde con «sin respuesta»', e.toasts.some(x => x.includes('No se pudo: #1') && !x.includes('INCIERTA')));
+  e.cfg.supaRpc = async (fn, args) => { llamadas.push({ fn, args }); return rpcResp(fn, args); };
+  rpcResp = () => ({ data: { ok: true }, error: null });
+  // Doble clic
+  llamadas.length = 0;
+  let suelta; e.cfg.supaRpc = (fn, args) => { llamadas.push({ fn, args }); return new Promise(r => { suelta = () => r({ data: { ok: true }, error: null }); }); };
+  A.abrirTransferir([1]);
+  const p1 = A.confirmar('transferir', null); const p2 = A.confirmar('transferir', null);
+  await dormirTest();
+  suelta(); await p1; await p2;
+  check('Doble clic: una sola llamada a la base', llamadas.length === 1, String(llamadas.length));
+  e.cfg.supaRpc = async (fn, args) => { llamadas.push({ fn, args }); return rpcResp(fn, args); };
+  // Solo marcar
+  llamadas.length = 0; A.abrirTransferir([1]); await A.confirmar('marcar', null);
+  check('«Solo marcar»: llama a actividad_marcar_hecha (con la revisión que se vio) y NO a transferir', llamadas.length === 1 && llamadas[0].fn === 'actividad_marcar_hecha' && llamadas[0].args.p_revision === 1);
+
+  // Lo que se ejecuta es lo que se vio al abrir el cuadro (aunque la pantalla se recargue mientras tanto)
+  A._lista.find(a => a.id === 1).intento = 1;
+  A.abrirTransferir([1]);
+  A._lista.find(a => a.id === 1).intento = 2; A._lista.find(a => a.id === 1).revision = 9;   // una recarga cambió los datos
+  llamadas.length = 0; e.cfg.supaRpc = async (fn, args) => { llamadas.push({ fn, args }); return { data: { ok: true }, error: null }; };
+  await A.confirmar('transferir', null);
+  check('El intento que se manda es el del momento de abrir el cuadro, no el de una recarga posterior', llamadas[0].args.p_intento === 1, JSON.stringify(llamadas[0].args));
+  A._lista.find(a => a.id === 1).intento = 1; A._lista.find(a => a.id === 1).revision = 1;
+  rpcResp = () => ({ data: { ok: true }, error: null });
+  e.cfg.supaRpc = async (fn, args) => { llamadas.push({ fn, args }); return rpcResp(fn, args); };
+
+  // Otras acciones
+  llamadas.length = 0;
+  await A.marcar(7, null); await A.reabrir(5, null);
+  check('Marcar y reabrir llaman a sus funciones, cada una con la revisión de la actividad', llamadas.map(l => l.fn).join() === 'actividad_marcar_hecha,actividad_reabrir' && llamadas.every(l => l.args.p_revision === 1));
+  llamadas.length = 0; e.ctx.confirm = () => false;
+  await A.anular(1, null); await A.compensar(4, null);
+  check('Anular y deshacer transferencia piden confirmación: si se rechaza NO llaman a la base', llamadas.length === 0);
+  e.ctx.confirm = () => true;
+  await A.anular(1, null); await A.compensar(4, null);
+  check('Con confirmación llaman a actividad_anular (con revisión) y actividad_compensar', llamadas.map(l => l.fn).join() === 'actividad_anular,actividad_compensar' && llamadas[0].args.p_revision === 1);
+  check('«Deshacer transferencia» manda el intento que vio la pantalla', llamadas[1].args.p_intento === 1);
+  A._lista.find(a => a.id === 4).intento = 3; llamadas.length = 0; await A.compensar(4, null);
+  check('… y usa el de esa actividad (3), no uno fijo', llamadas[0].args.p_intento === 3);
+  check('«Cambió desde que abriste» y «falta el intento» tienen mensaje propio', A._msgError({ message: 'ACTIVIDAD_DESACTUALIZADA' }).includes('cambió desde que abriste') && A._msgError({ message: 'INTENTO_REQUERIDO' }).includes('recargá'));
+  check('La carga trae el intento de cada actividad', A._lista.every(a => Number.isInteger(a.intento) && a.intento >= 1));
+
+  // Errores traducidos
+  check('Los códigos de la base se traducen a castellano', A._msgError({ message: 'ORDEN_YA_TRANSFERIDA' }).includes('deshacé la transferencia') && A._msgError({ message: 'DESTINO_IGUAL_ORIGEN' }).includes('misma que la de origen') && A._msgError({ message: 'x<b>y' }).includes('&lt;b&gt;'));
+
+  // Nueva actividad
+  llamadas.length = 0;
+  e.dom['act-titulo'] = '  '; await A.crear(null);
+  check('Crear sin título: NO llama a la base', llamadas.length === 0);
+  e.dom['act-titulo'] = 'Llamar al contador'; e.dom['act-fecha'] = ''; await A.crear(null);
+  check('Crear sin fecha: NO llama a la base', llamadas.length === 0);
+  e.dom['act-fecha'] = '2026-10-20'; e.dom['act-nota-nueva'] = ''; await A.crear(null);
+  check('Crear: llama a actividad_crear con título, fecha, sin monto', llamadas.length === 1 && llamadas[0].fn === 'actividad_crear' && llamadas[0].args.p_titulo === 'Llamar al contador' && llamadas[0].args.p_fecha_objetivo === '2026-10-20' && llamadas[0].args.p_monto === null && llamadas[0].args.p_nota === null);
 }
 
 // 30. Altas: si el registro no se puede crear, NO se toca la caja (o se deshace)

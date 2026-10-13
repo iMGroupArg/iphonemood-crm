@@ -181,6 +181,20 @@ console.log('\n══ Cerrar a mano una orden de Mercado Libre (Postgres en WebA
   check('… y se procesa sin ORDEN_EN_REVISION', p.ok === true && await qty(db, s) === 4, JSON.stringify(p));
 }
 
+// ── 7c · Descartar una orden en revisión y reabrirla SIN resolver nada: vuelve a revisión ──
+{
+  const ctx = await nueva(); const { db } = ctx;
+  const id = await nuevaOrden(ctx, [{ item: 'MLA000000888', cant: 1, precio: 5000 }]);        // sin vínculo
+  await db.query(`SELECT public.meli__revalidar_orden($1)`, [id]);
+  await cerrar(db, id, 'descartada');
+  const cerrada = await orden(db, id);
+  await reabrir(db, id);
+  const o = await orden(db, id);
+  check('Descartar una orden en revisión y reabrirla sin vincular nada: vuelve a "En revisión" con su motivo (no se escapa a "Para procesar")', cerrada.revisar === false && o.revisar === true && /sin publicación vinculada/i.test(o.motivo_revisar || ''), JSON.stringify([cerrada.revisar, o.revisar, o.motivo_revisar]));
+  const e = await falla(() => procesar(db, id));
+  check('… y no se puede procesar mientras siga sin vincular', e?.includes('ORDEN_EN_REVISION') || /sin_vincular|revisar/i.test(String(e)), e);
+}
+
 // ── 8 · Permisos ───────────────────────────────────────────────────────────
 {
   const ctx = await nueva(); const { db } = ctx;

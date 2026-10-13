@@ -17,6 +17,7 @@ const PAQUETE = [
   ['4_meli_ventas_migration', 'meli_ventas_migration'], ['5_stock_ajustar_rpc', 'stock_ajustar_rpc'],
   ['6_catalogo_modelos_publico', 'catalogo_modelos_publico'], ['7_meli_vincular', 'meli_vincular'],
   ['8_canje_ultimo_precio_publico', 'canje_ultimo_precio_publico'], ['10_meli_barrido', 'meli_barrido'], ['11_presupuesto_por_token_lista', 'presupuesto_por_token_lista'],
+  ['12_meli_cerrar_manual', 'meli_cerrar_manual'],
 ];
 const leer = (f) => (fs.existsSync(f) ? fs.readFileSync(f, 'utf8') : null);
 

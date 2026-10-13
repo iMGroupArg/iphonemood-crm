@@ -2925,8 +2925,9 @@ function renderPresupuesto(d) {
 
   // ── aviso legal + validez ──
   const avisoCanje = ti ? `<div class="pres-aviso">
-      ⚠️ <strong>Sobre la cotización de tu equipo:</strong> está sujeta al estado estético y al
-      funcionamiento. Trabajamos solo con usados en excelente estado, así que si al revisarlo
+      ⚠️ <strong>Sobre la cotización de tu equipo:</strong> Es un valor estimado: se confirma,
+      o se ajusta, cuando nuestro equipo revisa tu equipo en persona. Está sujeta al estado
+      estético y al funcionamiento. Trabajamos solo con usados en excelente estado, así que si al revisarlo
       aparecen fallas, golpes o rayaduras, el equipo se recotiza o se indica que no se puede
       tomar como parte de pago.
     </div>` : '';

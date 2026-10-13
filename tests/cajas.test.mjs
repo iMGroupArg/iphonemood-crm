@@ -1535,6 +1535,10 @@ const entornoVenta = (extra = {}, cfg = {}) => {
   check('Una orden CERRADA a mano: etiqueta, quién y cuándo, la nota y la venta enlazada; sin Procesar, sin Revalidar y sin cerrar de nuevo; con «Reabrir»',
     tarjeta(2).includes('Ya cargada a mano') && tarjeta(2).includes('venta #55') && tarjeta(2).includes('ya estaba') && !/MeliOrdenes\.(abrirProcesar|revalidar|abrirCierre)\(2/.test(tarjeta(2)) && /MeliOrdenes\.reabrirCierre\(2/.test(tarjeta(2)), tarjeta(2).slice(-500));
   check('Una cerrada que Mercado Libre volvió a marcar para revisar muestra el aviso en rojo, y sigue sin poder procesarse', tarjeta(4).includes('Descartada') && tarjeta(4).includes('la canceló') && !/MeliOrdenes\.(abrirProcesar|revalidar)\(4/.test(tarjeta(4)));
+  e.State.meliCierre = false;
+  const vSin = M._vista();
+  check('Si el script 12 no está corrido (sin las columnas del cierre), la pantalla NO ofrece «Ya la cargué a mano» ni «Descartar»', !/abrirCierre\(/.test(vSin) && /abrirDetalle\(1\)/.test(vSin));
+  e.State.meliCierre = true;
   const cuenta = k => e.State.meliOrdenes.filter(o => M._estadoDe(o).clave === k).length;
   check('Las cerradas a mano van a la solapa «Cerradas»; no cuentan en «Para procesar» ni en «En revisión»', cuenta('cerradas') === 2 && cuenta('pendientes') === 1 && cuenta('revision') === 1 && M._estadoDe(e.State.meliOrdenes[1]).clave === 'cerradas');
   check('La solapa «a liberar» solo cuenta lo procesado y sin acreditar: las cerradas a mano no suman', e.State.meliPendienteLiberar().ordenes === 1);

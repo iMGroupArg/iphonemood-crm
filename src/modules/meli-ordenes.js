@@ -190,7 +190,7 @@ const MeliOrdenes = {
           <button class="btn btn-primary btn-sm" onclick="MeliOrdenes.acreditar(${o.id}, this)"><i class="ti ti-check"></i> Confirmar acreditación</button>`;
       }
       acciones += `<button class="btn btn-sm" onclick="MeliOrdenes.abrirDetalle(${o.id})"><i class="ti ti-list-details"></i> Detalle</button>`;
-      if (!o.revertidaEn && !o.procesada && !o.cerradaManual) {
+      if (State.meliCierre !== false && !o.revertidaEn && !o.procesada && !o.cerradaManual) {
         acciones += `<button class="btn btn-sm" onclick="MeliOrdenes.abrirCierre(${o.id}, 'ya_cargada')" title="La venta ya está cargada en Ventas: cierra la orden sin descontar stock ni mover plata"><i class="ti ti-check"></i> Ya la cargué a mano</button>
           <button class="btn btn-sm" onclick="MeliOrdenes.abrirCierre(${o.id}, 'descartada')" title="No tomar en cuenta esta orden"><i class="ti ti-ban"></i> Descartar</button>`;
       }

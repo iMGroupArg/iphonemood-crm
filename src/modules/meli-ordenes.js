@@ -168,9 +168,7 @@ const MeliOrdenes = {
           ? `<span style="font-size:11.5px;color:var(--text-secondary)">Falta vincular una publicación para poder procesarla.</span>
              <button class="btn btn-primary btn-sm" disabled title="Falta vincular una publicación"><i class="ti ti-player-play"></i> Procesar</button>`
           : `
-          <input type="number" id="meliord-cot-${o.id}" value="${Math.round(State.refBlue || 0)}" min="1" step="1" title="Cotización ARS por USD, se congela en la venta"
-            style="width:90px;font-size:12px;padding:6px 8px;border:1px solid var(--border-strong);border-radius:8px">
-          <button class="btn btn-primary btn-sm" onclick="MeliOrdenes.procesar(${o.id}, this)"><i class="ti ti-player-play"></i> Procesar</button>`;
+          <button class="btn btn-primary btn-sm" onclick="MeliOrdenes.abrirProcesar(${o.id})" title="Revisá stock y cotización antes de procesar"><i class="ti ti-player-play"></i> Procesar…</button>`;
       } else if (!o.revertidaEn && !o.revisar && o.procesada && !o.acreditado && o.financieraCompleta && o.neto !== null
                  && o.fechaLiberacion && new Date(o.fechaLiberacion) <= new Date()) {
         acciones = `
@@ -255,9 +253,13 @@ const MeliOrdenes = {
 
   async procesar(id, btn) {
     const cot = parseFloat(document.getElementById(`meliord-cot-${id}`)?.value);
-    if (!(cot > 0)) { toast('Ingresá la cotización (ARS por dólar).'); return; }
-    if (!confirm(`¿Procesar esta orden?\n\nSe descuenta el stock y se crea la venta con la cotización $${cot.toLocaleString('es-AR')} (queda fija).`)) return;
+    if (!(cot > 0) || !Number.isFinite(cot)) { toast('Ingresá la cotización (ARS por dólar).'); return; }
+    // El cuadro de verificación reemplaza al confirm(): sin la casilla tildada no se procesa.
+    if (!document.getElementById(`meliord-ok-${id}`)?.checked) { toast('Tildá la casilla de verificación antes de procesar.'); return; }
     // El botón queda deshabilitado durante las DOS llamadas (revisión previa + procesar).
+    const tok = this._cuadroTok;
+    const firmaVerificada = this._firmas[id];   // la del cuadro que el usuario vio, capturada ANTES de esperar nada
+    if (firmaVerificada === undefined) { toast('Abrí «Procesar» desde la tarjeta de la orden para verificar antes de procesar.'); return; }
     if (btn) btn.disabled = true;
     try {
       // Revisión previa: es solo una comodidad (avisa antes de intentar). La garantía real está en
@@ -274,9 +276,170 @@ const MeliOrdenes = {
         this.pintar();
         return;
       }
+      // Lo que se verificó en el cuadro tiene que ser lo que se va a procesar: si otra pestaña
+      // cambió el vínculo de algún producto (o la cantidad) mientras el cuadro estaba abierto, se
+      // vuelve a empezar con los datos nuevos.
+      await DB.cargarMeliOrdenes();
+      const actual = State.meliError ? null : (State.meliOrdenes || []).find(x => x.id === id);
+      if (!actual) {
+        toast('No se pudo confirmar el estado actual de la orden. Actualizá la pantalla y probá de nuevo.');
+        this.pintar();
+        return;
+      }
+      if (this._firma(actual) !== firmaVerificada) {
+        toast('Cambió el producto vinculado de esta orden mientras revisabas. Volvé a abrir «Procesar» para verificar con los datos nuevos.');
+        this.pintar();
+        this.cerrarCuadro(tok);
+        return;
+      }
       await this._llamar(btn, 'meli_procesar_orden', { p_orden_id: id, p_cotizacion: cot },
         d => d.ya_procesada ? 'La orden ya estaba procesada.' : `Orden procesada: venta #${d.venta_id} creada y stock descontado.`);
-    } finally { if (btn) btn.disabled = false; }
+    } finally { if (btn) btn.disabled = false; this.cerrarCuadro(tok); }
+  },
+
+  // ── Cuadro de verificación previa a «Procesar» ──────────────────────────────
+  // Procesar SIEMPRE crea una venta nueva y baja el stock: si Franco ya cargó esa venta a mano
+  // o ya bajó el stock por otro lado, se cuenta doble. El cuadro muestra stock actual y
+  // resultante, busca ventas parecidas EN LA BASE (no en la copia de pantalla) y pide elegir la
+  // cotización a conciencia. Avisa; no garantiza: la base solo impide procesar DOS VECES LA MISMA
+  // orden, no cruzarla con una venta manual.
+  MERCADO_VIGENTE_MS: 30 * 60 * 1000,
+  _blueMercado() {
+    const m = State.mercadoBlue;
+    return (m && Number.isFinite(m.valor) && m.valor > 0 && Date.now() - m.en < this.MERCADO_VIGENTE_MS) ? m : null;
+  },
+  // Cada vez que se abre el cuadro cambia la «instancia»: una operación o búsqueda de un cuadro
+  // anterior no puede cerrar ni escribir sobre uno nuevo. La «firma» es lo que el usuario vio y
+  // verificó (producto vinculado y cantidad); si cambia antes de procesar, se vuelve a pedir.
+  _cuadroTok: 0,
+  _firmas: {},
+  _firma(o) { return JSON.stringify((o?.items || []).map(i => [i.stock_id || null, i.cantidad || 0]).sort()); },
+  cerrarCuadro(tok) {
+    if (tok !== undefined && tok !== this._cuadroTok) return;   // ese cuadro ya no es el que está abierto
+    document.getElementById('meliord-overlay')?.remove();
+  },
+
+  async abrirProcesar(id) {
+    const o = (State.meliOrdenes || []).find(x => x.id === id);
+    if (!o || o.procesada || o.revertidaEn) return;
+    this.cerrarCuadro();
+    const tok = ++this._cuadroTok;
+    this._firmas[id] = this._firma(o);
+    const e = s => State.esc(s == null ? '' : String(s));
+    const ov = document.createElement('div');
+    ov.id = 'meliord-overlay';
+    ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.6);backdrop-filter:blur(4px);z-index:800;display:flex;align-items:center;justify-content:center;padding:20px';
+    const mercado = this._blueMercado();
+    // Se agrupa por fila de stock: dos publicaciones vinculadas a la MISMA fila bajan juntas.
+    const baja = new Map();
+    (o.items || []).filter(i => i.stock_id).forEach(i => baja.set(i.stock_id, (baja.get(i.stock_id) || 0) + (i.cantidad || 0)));
+    const filasStock = [...baja.entries()].map(([sid, cant]) => {
+      const r = (State.stock || []).find(x => x.id === sid);
+      const hay = r ? Number(r.cantidad) : null;
+      const queda = hay === null || !Number.isFinite(hay) ? null : hay - cant;
+      return `<tr><td style="padding:3px 8px 3px 0">${e(r?.nombre || 'producto')}</td>
+        <td style="padding:3px 8px">${hay === null ? '—' : hay}</td><td style="padding:3px 8px">−${e(cant)}</td>
+        <td style="padding:3px 0 3px 8px;font-weight:600;${queda !== null && queda < 0 ? 'color:var(--red)' : ''}">${queda === null ? '—' : queda}${queda !== null && queda < 0 ? ' ⚠ quedaría negativo' : ''}</td></tr>`;
+    }).join('');
+    ov.innerHTML = `
+      <div style="background:var(--bg-elevated);border:1px solid var(--border-strong);border-radius:var(--radius-xl);width:min(560px,96vw);max-height:90dvh;overflow:auto;padding:18px">
+        <div style="font-size:15px;font-weight:700;margin-bottom:2px">Procesar orden ${e(o.orderId)}</div>
+        <div style="font-size:12px;color:var(--text-secondary);margin-bottom:12px">${this._dia(o.fechaOrden)} · Venta ${this._ars(o.bruto)} · Llega ${this._ars(o.neto)}.
+          Procesar descuenta el stock y crea la venta. No se puede editar después.</div>
+        <div style="font-size:12px;font-weight:600;margin-bottom:4px">1 · Stock</div>
+        <table style="font-size:12px;border-collapse:collapse;margin-bottom:12px"><tr style="color:var(--text-secondary)"><td style="padding:0 8px 3px 0">Producto</td><td style="padding:0 8px 3px">Hay ahora</td><td style="padding:0 8px 3px">Baja</td><td style="padding:0 0 3px 8px">Quedaría</td></tr>${filasStock || '<tr><td colspan="4">Sin productos vinculados.</td></tr>'}</table>
+        <div style="font-size:12px;font-weight:600;margin-bottom:4px">2 · ¿Ya está cargada a mano?</div>
+        <div id="meliord-cand-${id}" style="font-size:12px;margin-bottom:12px;color:var(--text-secondary)">Buscando ventas parecidas en la base…</div>
+        <div style="font-size:12px;font-weight:600;margin-bottom:4px">3 · Cotización (pesos por dólar, queda fija en la venta)</div>
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:12px">
+          <input type="number" id="meliord-cot-${id}" value="" placeholder="Elegí o escribí" min="1" step="1" oninput="MeliOrdenes._cuadroCambio(${id})"
+            style="width:120px;font-size:13px;padding:7px 9px;border:1px solid var(--border-strong);border-radius:8px">
+          ${mercado ? `<button class="btn btn-sm" onclick="MeliOrdenes._ponerCot(${id}, ${Math.round(mercado.valor)})">Blue de mercado hoy: $${Math.round(mercado.valor).toLocaleString('es-AR')}</button>` : ''}
+          ${State.refBlue > 0 ? `<button class="btn btn-sm" onclick="MeliOrdenes._ponerCot(${id}, ${Math.round(State.refBlue)})" title="Es la cotización de referencia que cargaste en Panel; puede estar desactualizada">Mi referencia: $${Math.round(State.refBlue).toLocaleString('es-AR')}</button>` : ''}
+        </div>
+        <label style="display:flex;gap:8px;align-items:flex-start;font-size:12.5px;margin-bottom:14px;cursor:pointer">
+          <input type="checkbox" id="meliord-ok-${id}" onchange="MeliOrdenes._cuadroCambio(${id})" style="margin-top:2px">
+          <span>Verifiqué que esta venta no está cargada a mano en Ventas y que el stock no se bajó por otro lado.</span></label>
+        <div style="display:flex;gap:8px;justify-content:flex-end">
+          <button class="btn btn-sm" onclick="MeliOrdenes.cerrarCuadro()">Cancelar</button>
+          <button class="btn btn-primary btn-sm" id="meliord-go-${id}" disabled onclick="MeliOrdenes.procesar(${id}, this)"><i class="ti ti-player-play"></i> Procesar</button>
+        </div>
+      </div>`;
+    document.body.appendChild(ov);
+    const res = await this._buscarCandidatas(o);
+    if (tok !== this._cuadroTok) return;   // se abrió otro cuadro mientras buscaba
+    const caja = document.getElementById(`meliord-cand-${id}`);
+    if (!caja) return;
+    if (!res.ok) {
+      caja.innerHTML = '<span style="color:var(--amber)">No se pudo revisar si ya está cargada. Fijate en Ventas antes de tildar la casilla.</span>';
+    } else if (!res.lista.length) {
+      caja.textContent = 'Sin coincidencias en lo consultado (ventas con el mismo producto, 3 días antes y después de la orden). Esto no garantiza que no esté cargada: revisalo igual.';
+    } else {
+      caja.innerHTML = `<div style="color:var(--amber);margin-bottom:4px"><i class="ti ti-alert-triangle"></i> Puede estar cargada ya. Ventas con el mismo producto en fechas cercanas:</div>`
+        + res.lista.map(v => `<div style="color:var(--text)">Venta #${e(v.ventaId)} · ${this._dia(v.fecha)} · ${e(v.cliente || 'sin cliente')} · ${e(v.tipo)} · ${v.items.map(i => `${e(i.nombre)} (USD ${e(i.precio)})`).join(', ')}</div>`).join('');
+    }
+  },
+  // 'YYYY-MM-DD' del día en Argentina. Una fecha sin hora ya es el día; un instante se convierte.
+  _diaAR(v) {
+    if (typeof v === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(v)) return v;
+    const t = Date.parse(v);
+    if (!Number.isFinite(t)) return null;
+    return new Date(t - 3 * 3600 * 1000).toISOString().slice(0, 10);   // Argentina = UTC−3 todo el año
+  },
+  _ponerCot(id, valor) {
+    const el = document.getElementById(`meliord-cot-${id}`);
+    if (el) el.value = valor;
+    this._cuadroCambio(id);
+  },
+  // «Procesar» del cuadro solo se habilita con cotización válida Y la casilla tildada.
+  _cuadroCambio(id) {
+    const cot = parseFloat(document.getElementById(`meliord-cot-${id}`)?.value);
+    const ok = !!document.getElementById(`meliord-ok-${id}`)?.checked;
+    const go = document.getElementById(`meliord-go-${id}`);
+    if (go) go.disabled = !(Number.isFinite(cot) && cot > 0 && ok);
+  },
+  // Ventas cargadas a mano (no de Mercado Libre, no anuladas) con algún producto de la orden en
+  // ±3 días. Se consulta la base al abrir el cuadro: la copia en pantalla puede estar
+  // desactualizada o truncada. → { ok, lista } ; ok:false si no se pudo (o si se truncó).
+  async _buscarCandidatas(o) {
+    const stockIds = [...new Set((o.items || []).map(i => i.stock_id).filter(Boolean))];
+    if (!stockIds.length) return { ok: true, lista: [] };
+    const t = Date.parse(o.fechaOrden);
+    if (!Number.isFinite(t)) return { ok: false, lista: [] };
+    const DIA = 86400000, TOPE = 500;
+    // ±4 días en la consulta (colchón por zona horaria) y se filtra a ±3 al mostrar.
+    const desde = new Date(t - 4 * DIA).toISOString(), hasta = new Date(t + 4 * DIA).toISOString();
+    try {
+      const v = await supa.from('ventas').select('id,cliente,tipo_venta,fecha_venta,creado_en,estado,meli_orden_id')
+        .or(`and(fecha_venta.gte.${desde.slice(0, 10)},fecha_venta.lte.${hasta.slice(0, 10)}),and(creado_en.gte.${desde},creado_en.lte.${hasta})`)
+        .limit(TOPE);
+      if (v.error || !Array.isArray(v.data) || v.data.length >= TOPE) return { ok: false, lista: [] };
+      const ventas = v.data.filter(x => x.estado !== 'anulada' && (x.meli_orden_id === null || x.meli_orden_id === undefined));
+      const porId = new Map(ventas.map(x => [x.id, x]));
+      const ids = [...porId.keys()];
+      const lista = [];
+      for (let k = 0; k < ids.length; k += 100) {
+        const r = await supa.from('venta_items').select('venta_id,stock_id,nombre,precio_usd')
+          .in('venta_id', ids.slice(k, k + 100)).in('stock_id', stockIds).limit(1000);
+        if (r.error || !Array.isArray(r.data) || r.data.length >= 1000) return { ok: false, lista: [] };
+        const porVenta = {};
+        r.data.forEach(i => { (porVenta[i.venta_id] = porVenta[i.venta_id] || []).push({ nombre: i.nombre, precio: Number(i.precio_usd) }); });
+        for (const [vid, its] of Object.entries(porVenta)) {
+          const x = porId.get(Number(vid)) || porId.get(vid);
+          if (!x) continue;
+          const cuando = x.fecha_venta || (DB._utc ? DB._utc(x.creado_en) : x.creado_en);
+          // Días calendario de Argentina (una fecha sin hora es de ese día): ±3 días inclusivos.
+          const d1 = this._diaAR(cuando), d0 = this._diaAR(o.fechaOrden);
+          if (!d1 || !d0) continue;
+          if (Math.abs(Date.parse(d1 + 'T00:00:00Z') - Date.parse(d0 + 'T00:00:00Z')) > 3 * DIA) continue;
+          lista.push({ ventaId: x.id, fecha: cuando, cliente: x.cliente, tipo: x.tipo_venta || 'minorista', items: its });
+        }
+      }
+      return { ok: true, lista };
+    } catch (err) {
+      console.warn('No se pudo buscar ventas parecidas:', err);
+      return { ok: false, lista: [] };
+    }
   },
 
   async acreditar(id, btn) {

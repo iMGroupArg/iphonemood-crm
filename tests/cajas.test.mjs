@@ -80,6 +80,11 @@ function moverEnServidor(srv, origen, destino, ref, clave) {
 //   fallaLedger    (solo camino viejo) el libro falla pero el saldo se guarda
 //   red            'perdida' = se aplica pero la respuesta no llega; 'caida' = no llega nada
 //   sinLectura     no se puede leer el saldo real tras un fallo de red
+// Consulta falsa estilo supabase-js: cualquier cadena de .select/.or/.in/.limit/.is/.eq termina en la respuesta.
+function consultaFalsa(resp) {
+  const q = new Proxy({}, { get: (_, k) => (k === 'then' ? (ok, ko) => Promise.resolve(resp).then(ok, ko) : () => q) });
+  return q;
+}
 function nuevoEntorno(opciones = {}) {
   const { servidor = nuevoServidor(), modulos = [], dom = {}, dbExtra = {} } = opciones;
   // `cfg` es mutable a propósito: un test puede "correr la migración" a mitad de camino.
@@ -182,7 +187,8 @@ function nuevoEntorno(opciones = {}) {
                     setItem: (k, v) => { if (cfg.sinAlmacen) throw new Error('QuotaExceeded'); almacen[k] = String(v); } },
     confirm: () => true,
     Sheets: new Proxy({}, { get: () => () => {} }),
-    supa: { rpc: async (...a) => (cfg.supaRpc ? cfg.supaRpc(...a) : { data: null, error: { message: 'sin supa' } }) },
+    supa: { rpc: async (...a) => (cfg.supaRpc ? cfg.supaRpc(...a) : { data: null, error: { message: 'sin supa' } }),
+            from: (...a) => (cfg.supaFrom ? cfg.supaFrom(...a) : consultaFalsa({ data: null, error: { message: 'sin supa' } })) },
     Auth: { usuario: { nombre: 'Test' } },
     Reportes: { NICHOS: [] },
     App: { goTo() {} },
@@ -1485,7 +1491,7 @@ const entornoVenta = (extra = {}, cfg = {}) => {
 {
   // La pantalla: llama a las funciones de la base con los argumentos correctos y traduce los errores
   const llamadas = [];
-  const e = nuevoEntorno({ modulos: ['meli-ordenes.js'], dom: { 'meliord-monto-7': '85000', 'meliord-fin-7': false, 'meliord-cot-3': '1000' },
+  const e = nuevoEntorno({ modulos: ['meli-ordenes.js'], dom: { 'meliord-monto-7': '85000', 'meliord-fin-7': false, 'meliord-cot-3': '1000', 'meliord-ok-3': true },
     dbExtra: { async cargarTodo() {}, async cargarMeliOrdenes() {} } });
   let respuesta = { data: { ok: true, ya_acreditada: false, monto: 85000, costo_canal_usd: 15 }, error: null };
   e.cfg.supaRpc = async (fn, args) => { llamadas.push({ fn, args }); return fn === 'meli_orden_revalidar' ? { data: { ok: true, revisar: false, sin_vincular: false, cerrada: false }, error: null } : respuesta; };
@@ -1500,6 +1506,7 @@ const entornoVenta = (extra = {}, cfg = {}) => {
     llamadas[1].args.p_monto_real === 80000 && e.toasts.some(t => t.includes('liquidación final')), JSON.stringify({ l: llamadas[1], t: e.toasts }));
   respuesta = { data: { ok: false, motivo: 'Producto con IMEI: elegir la unidad a mano' }, error: null };
   e.State.meliOrdenes.push({ id: 3, orderId: 'ORD3', procesada: false, revisar: false });
+  e.mod.MeliOrdenes._firmas[3] = e.mod.MeliOrdenes._firma(e.State.meliOrdenes.find(o => o.id === 3));   // como si se hubiera abierto el cuadro
   await e.mod.MeliOrdenes.procesar(3, null);
   check('Procesar una orden que la base deja en revisión: muestra el motivo (no dice que salió bien)',
     llamadas[3].fn === 'meli_procesar_orden' && llamadas[3].args.p_cotizacion === 1000 && e.toasts.some(t => t.includes('IMEI')), JSON.stringify({ l: llamadas[3], t: e.toasts }));
@@ -1584,7 +1591,7 @@ const entornoVenta = (extra = {}, cfg = {}) => {
 // 36. PANTALLA DE ÓRDENES con vínculos: qué se muestra, cuándo se puede procesar y la revisión previa
 {
   const llamadas = [];
-  const e = nuevoEntorno({ modulos: ['meli-ordenes.js'], dom: { 'meliord-cot-1': '1000', 'meliord-cot-3': '1000' },
+  const e = nuevoEntorno({ modulos: ['meli-ordenes.js'], dom: { 'meliord-cot-1': '1000', 'meliord-cot-3': '1000', 'meliord-ok-1': true },
     dbExtra: { async cargarTodo() {}, async cargarMeliOrdenes() {} } });
   let rev = { data: { ok: true, revisar: false, motivo: null, cerrada: false, sin_vincular: false }, error: null };
   let proc = { data: { ok: true, venta_id: 77 }, error: null };
@@ -1600,9 +1607,9 @@ const entornoVenta = (extra = {}, cfg = {}) => {
   e.mod.MeliOrdenes._filtro = 'todas';
   const sinPantalla = e.mod.MeliOrdenes._vista();
   check('Una orden vinculada muestra «→ Stock: nombre» y tiene Procesar habilitado',
-    sinPantalla.includes('→ Stock: Perfume Armaf 100ml') && /MeliOrdenes\.procesar\(1, this\)/.test(sinPantalla), sinPantalla.slice(0, 400));
+    sinPantalla.includes('→ Stock: Perfume Armaf 100ml') && /MeliOrdenes\.abrirProcesar\(1\)/.test(sinPantalla), sinPantalla.slice(0, 400));
   check('Una orden sin vincular dice «Sin vincular» y su Procesar está DESHABILITADO (no se puede llamar)',
-    sinPantalla.includes('Sin vincular') && sinPantalla.includes('disabled title="Falta vincular una publicación"') && !/MeliOrdenes\.procesar\(2,/.test(sinPantalla));
+    sinPantalla.includes('Sin vincular') && sinPantalla.includes('disabled title="Falta vincular una publicación"') && !/MeliOrdenes\.abrirProcesar\(2\)/.test(sinPantalla));
   check('Sin la pantalla de vínculos cargada no se ofrece el botón «Vincular»', !sinPantalla.includes('MeliOrdenes.vincular('));
   check('Una orden en revisión (aún no procesada) ofrece «Revalidar»', /MeliOrdenes\.revalidar\(3, this\)/.test(sinPantalla));
   e.mod.MeliVincular = { abrir: (...a) => { e.abierto = a; } };
@@ -1625,7 +1632,7 @@ const entornoVenta = (extra = {}, cfg = {}) => {
   e.State.meliOrdenes = ordenesOriginales;
 
   // Procesar: la revisión previa nunca deja pasar a procesar si algo falla
-  const intentar = async (r) => { llamadas.length = 0; rev = r; await e.mod.MeliOrdenes.procesar(1, { disabled: false }); return llamadas.map(l => l.fn).join(','); };
+  const intentar = async (r) => { llamadas.length = 0; rev = r; e.mod.MeliOrdenes._firmas[1] = e.mod.MeliOrdenes._firma(e.State.meliOrdenes.find(o => o.id === 1)); await e.mod.MeliOrdenes.procesar(1, { disabled: false }); return llamadas.map(l => l.fn).join(','); };
   check('Procesar con la revisión previa que falla (error de red): NO llama a procesar y avisa',
     (await intentar({ data: null, error: { message: 'x' } })) === 'meli_orden_revalidar' && e.toasts.some(t => t.includes('No se pudo revisar')));
   check('Con la orden ocupada por otra operación: NO procesa y pide reintentar',
@@ -1808,6 +1815,151 @@ const entornoVenta = (extra = {}, cfg = {}) => {
     const r = armar(lote('recibido'), item(1000), [pg('pago_proveedor', 1000)]);
     check('Un lote RECIBIDO tampoco', r.mod.Capital.calcular().pedidosEnTransito === 0);
   }
+}
+
+// 40. CUADRO PREVIO A PROCESAR (MELI): cotización sin precarga, stock actual/resultante, ventas parecidas, casilla obligatoria
+{
+  const llamadas = [];
+  const e = nuevoEntorno({ modulos: ['meli-ordenes.js'], dbExtra: { async cargarTodo() {}, async cargarMeliOrdenes() {}, _utc: x => x } });
+  e.cfg.supaRpc = async (fn, args) => { llamadas.push({ fn, args }); return fn === 'meli_orden_revalidar' ? { data: { ok: true, revisar: false, sin_vincular: false, cerrada: false }, error: null } : { data: { ok: true, venta_id: 5 }, error: null }; };
+  e.State.refBlue = 1570;
+  e.State.stock = [{ id: 's1', nombre: 'Lattafa Khamrah', cantidad: 3 }, { id: 's2', nombre: 'Armaf CDNIM', cantidad: 0 }];
+  const orden = (id, items, extra = {}) => ({ id, orderId: '2000' + id, procesada: false, acreditado: false, revisar: false, items, bruto: 65990, neto: 37757.26, financieraCompleta: true, fechaOrden: '2026-10-08T15:00:00.000Z', ...extra });
+  e.State.meliOrdenes = [orden(1, [{ meli_item_id: 'M1', titulo: 'Khamrah', cantidad: 1, stock_id: 's1' }]),
+                         orden(2, [{ meli_item_id: 'M2', titulo: 'Armaf', cantidad: 1, stock_id: 's2' }])];
+  // elementos persistentes para poder mirar lo que el cuadro escribe después de buscar
+  const reg = {}; const original = e.ctx.document.getElementById;
+  e.ctx.document.getElementById = id => reg[id] || original(id);
+  let html = '';
+  e.ctx.document.createElement = () => ({ id: '', style: {}, set innerHTML(v) { html = v; }, get innerHTML() { return html; }, remove() { delete reg['meliord-overlay']; } });
+  e.ctx.document.body.appendChild = el => { reg['meliord-overlay'] = el; };
+  reg['meliord-cand-1'] = { innerHTML: '', textContent: '' };
+
+  // La tarjeta ya no trae casilla de cotización con valor
+  e.mod.MeliOrdenes._filtro = 'todas';
+  const tarjeta = e.mod.MeliOrdenes._vista();
+  check('La tarjeta ya NO trae cotización precargada: solo el botón «Procesar…» que abre el cuadro', !tarjeta.includes('meliord-cot-') && /abrirProcesar\(1\)/.test(tarjeta));
+
+  // Sin consulta a la base posible: el cuadro igual abre y lo dice
+  e.cfg.supaFrom = () => consultaFalsa({ data: null, error: { message: 'caída' } });
+  await e.mod.MeliOrdenes.abrirProcesar(1);
+  check('Cuadro: casilla de cotización VACÍA (sin value) y botón Procesar deshabilitado', /id="meliord-cot-1" value=""/.test(html) && /id="meliord-go-1" disabled/.test(html), html.slice(0, 300));
+  check('Cuadro: muestra stock actual (3), lo que baja (−1) y lo que quedaría (2)', /Lattafa Khamrah[\s\S]*?<td[^>]*>3<\/td>[\s\S]*?−1[\s\S]*?>2</.test(html), html.replace(/\s+/g, ' ').slice(300, 900));
+  check('Cuadro: atajo «Mi referencia» con la de Franco; sin dato de mercado NO ofrece «Blue de mercado hoy»', html.includes('Mi referencia: $1.570') && !html.includes('Blue de mercado hoy'));
+  check('Si no se pudo consultar la base: lo dice, no afirma que no hay duplicado', reg['meliord-cand-1'].innerHTML.includes('No se pudo revisar si ya está cargada'), reg['meliord-cand-1'].innerHTML);
+
+  e.State.mercadoBlue = { valor: 1540, en: Date.now() };
+  await e.mod.MeliOrdenes.abrirProcesar(1);
+  check('Con el blue de mercado reciente aparece el atajo «Blue de mercado hoy: $1.540»', html.includes('Blue de mercado hoy: $1.540'));
+  e.State.mercadoBlue = { valor: 1540, en: Date.now() - 31 * 60 * 1000 };
+  await e.mod.MeliOrdenes.abrirProcesar(1);
+  check('Un dato de mercado de hace más de 30 minutos NO se ofrece', !html.includes('Blue de mercado hoy'));
+  e.State.mercadoBlue = { valor: NaN, en: Date.now() };
+  await e.mod.MeliOrdenes.abrirProcesar(1);
+  check('Un dato de mercado inválido NO se ofrece', !html.includes('Blue de mercado hoy'));
+
+  // Stock que quedaría negativo
+  reg['meliord-cand-2'] = { innerHTML: '', textContent: '' };
+  await e.mod.MeliOrdenes.abrirProcesar(2);
+  check('Stock que quedaría en −1: aviso rojo «quedaría negativo»', html.includes('quedaría negativo'));
+
+  // Habilitación del botón: cotización válida Y casilla
+  const btn = { disabled: true }; reg['meliord-go-1'] = btn;
+  const cambiar = (cot, ok) => { e.dom['meliord-cot-1'] = cot; e.dom['meliord-ok-1'] = ok; e.mod.MeliOrdenes._cuadroCambio(1); return btn.disabled; };
+  check('Botón Procesar: deshabilitado sin cotización, sin casilla, con cotización 0 o NaN', cambiar('', true) && cambiar('1540', false) && cambiar('0', true) && cambiar('abc', true));
+  check('Botón Procesar: habilitado con cotización válida y la casilla tildada', cambiar('1540', true) === false);
+  e.mod.MeliOrdenes._ponerCot(1, 1500);
+  check('Un atajo escribe la cotización en la casilla', e.dom['meliord-cot-1'] === 1500);
+
+  // procesar() exige la casilla aunque alguien llame directo
+  llamadas.length = 0; e.dom['meliord-cot-1'] = '1540'; e.dom['meliord-ok-1'] = false;
+  await e.mod.MeliOrdenes.procesar(1, { disabled: false });
+  check('Procesar sin la casilla tildada NO llama a la base', llamadas.length === 0 && e.toasts.some(t => t.includes('casilla')));
+  llamadas.length = 0; delete e.mod.MeliOrdenes._firmas[1]; e.dom['meliord-cot-1'] = '1540'; e.dom['meliord-ok-1'] = true;
+  await e.mod.MeliOrdenes.procesar(1, { disabled: false });
+  check('Procesar llamado directo, sin haber abierto el cuadro: NO procesa', !llamadas.some(l => l.fn === 'meli_procesar_orden') && e.toasts.some(t => t.includes('Abrí «Procesar»')));
+  e.mod.MeliOrdenes._firmas[1] = e.mod.MeliOrdenes._firma(e.State.meliOrdenes.find(o => o.id === 1));
+  e.dom['meliord-ok-1'] = true; e.dom['meliord-cot-1'] = '';
+  await e.mod.MeliOrdenes.procesar(1, { disabled: false });
+  check('Procesar sin cotización NO llama a la base', llamadas.length === 0);
+  e.dom['meliord-cot-1'] = '1540';
+  await e.mod.MeliOrdenes.procesar(1, { disabled: false });
+  check('Con cotización y casilla: revisa y procesa con ESA cotización', llamadas.map(l => l.fn).join(',') === 'meli_orden_revalidar,meli_procesar_orden' && llamadas[1].args.p_cotizacion === 1540);
+
+  // Búsqueda de ventas parecidas
+  const o1 = e.State.meliOrdenes[0];
+  const ventasBase = [
+    { id: 10, cliente: 'Ana', tipo_venta: 'minorista', fecha_venta: '2026-10-07T12:00:00.000Z', creado_en: '2026-10-07T12:00:00.000Z', estado: null, meli_orden_id: null },
+    { id: 11, cliente: 'Anulada', tipo_venta: 'minorista', fecha_venta: '2026-10-08T12:00:00.000Z', creado_en: '2026-10-08T12:00:00.000Z', estado: 'anulada', meli_orden_id: null },
+    { id: 12, cliente: 'Otra orden MELI', tipo_venta: 'mercadolibre', fecha_venta: '2026-10-08T12:00:00.000Z', creado_en: '2026-10-08T12:00:00.000Z', estado: null, meli_orden_id: 9 },
+    { id: 13, cliente: 'Lejos', tipo_venta: 'minorista', fecha_venta: '2026-10-12T20:00:00.000Z', creado_en: '2026-10-12T20:00:00.000Z', estado: null, meli_orden_id: null },
+  ];
+  const itemsBase = [{ venta_id: 10, stock_id: 's1', nombre: 'Khamrah', precio_usd: 40 }, { venta_id: 13, stock_id: 's1', nombre: 'Khamrah', precio_usd: 40 }, { venta_id: 11, stock_id: 's1', nombre: 'x', precio_usd: 1 }];
+  e.cfg.supaFrom = t => consultaFalsa(t === 'ventas' ? { data: ventasBase, error: null } : { data: itemsBase.filter(i => ventasBase.some(v => v.id === i.venta_id)), error: null });
+  const r1 = await e.mod.MeliOrdenes._buscarCandidatas(o1);
+  check('Candidatas: solo la venta manual cercana con el mismo producto (excluye anulada, de MELI y la de 4 días después)', r1.ok && r1.lista.length === 1 && r1.lista[0].ventaId === 10, JSON.stringify(r1));
+  reg['meliord-cand-1'] = { innerHTML: '', textContent: '' };
+  await e.mod.MeliOrdenes.abrirProcesar(1);
+  check('El cuadro avisa «Puede estar cargada ya» con la venta #10', reg['meliord-cand-1'].innerHTML.includes('Puede estar cargada ya') && reg['meliord-cand-1'].innerHTML.includes('#10'), reg['meliord-cand-1'].innerHTML);
+  e.cfg.supaFrom = t => consultaFalsa({ data: [], error: null });
+  reg['meliord-cand-1'] = { innerHTML: '', textContent: '' };
+  await e.mod.MeliOrdenes.abrirProcesar(1);
+  check('Sin candidatas: dice «Sin coincidencias en lo consultado» y aclara que no garantiza', reg['meliord-cand-1'].textContent.includes('Sin coincidencias en lo consultado') && reg['meliord-cand-1'].textContent.includes('no garantiza'));
+  e.cfg.supaFrom = t => consultaFalsa({ data: new Array(500).fill(ventasBase[0]), error: null });
+  const r2 = await e.mod.MeliOrdenes._buscarCandidatas(o1);
+  check('Si la consulta devuelve el tope (puede estar truncada): NO se afirma nada (ok:false)', r2.ok === false);
+  const r3 = await e.mod.MeliOrdenes._buscarCandidatas({ ...o1, fechaOrden: 'no es fecha' });
+  check('Fecha de orden inválida: ok:false', r3.ok === false);
+  const r4 = await e.mod.MeliOrdenes._buscarCandidatas({ ...o1, items: [] });
+  check('Orden sin productos vinculados: sin candidatas y sin consultar', r4.ok && r4.lista.length === 0);
+
+  // Fecha sin hora: días calendario de Argentina, ±3 inclusivos (orden del 8/10 20:00 AR = 23:00Z)
+  const oTarde = { ...o1, fechaOrden: '2026-10-08T23:00:00.000Z' };
+  e.cfg.supaFrom = t => consultaFalsa(t === 'ventas'
+    ? { data: [{ id: 20, cliente: 'Borde', tipo_venta: 'minorista', fecha_venta: '2026-10-05', creado_en: '2026-10-05T12:00:00Z', estado: null, meli_orden_id: null },
+               { id: 21, cliente: 'Fuera', tipo_venta: 'minorista', fecha_venta: '2026-10-04', creado_en: '2026-10-04T12:00:00Z', estado: null, meli_orden_id: null }], error: null }
+    : { data: [{ venta_id: 20, stock_id: 's1', nombre: 'K', precio_usd: 1 }, { venta_id: 21, stock_id: 's1', nombre: 'K', precio_usd: 1 }], error: null });
+  const r5 = await e.mod.MeliOrdenes._buscarCandidatas(oTarde);
+  check('Una venta del 5/10 (fecha sin hora) SÍ es candidata de una orden del 8/10 a las 20:00 (3 días, inclusivo); la del 4/10 no', r5.ok && r5.lista.map(x => x.ventaId).join() === '20', JSON.stringify(r5));
+
+  // Dos publicaciones vinculadas a la MISMA fila de stock bajan juntas
+  e.State.stock = [{ id: 's1', nombre: 'Khamrah', cantidad: 1 }];
+  e.State.meliOrdenes.push(orden(5, [{ meli_item_id: 'A', titulo: 'a', cantidad: 1, stock_id: 's1' }, { meli_item_id: 'B', titulo: 'b', cantidad: 1, stock_id: 's1' }]));
+  e.cfg.supaFrom = () => consultaFalsa({ data: [], error: null });
+  reg['meliord-cand-5'] = { innerHTML: '', textContent: '' };
+  await e.mod.MeliOrdenes.abrirProcesar(5);
+  check('Dos ítems de la misma fila de stock: UNA fila con baja −2 y «quedaría negativo» (no dos filas con 0)', (html.match(/<tr><td/g) || []).length === 1 && html.includes('−2') && html.includes('quedaría negativo'), html.replace(/\s+/g, ' ').slice(400, 900));
+
+  // Si el vínculo cambia mientras el cuadro está abierto, NO se procesa lo viejo
+  e.State.stock = [{ id: 's1', nombre: 'Khamrah', cantidad: 3 }, { id: 's2', nombre: 'Armaf', cantidad: 3 }];
+  e.cfg.supaFrom = () => consultaFalsa({ data: [], error: null });
+  await e.mod.MeliOrdenes.abrirProcesar(1);
+  e.State.meliOrdenes.find(x => x.id === 1).items = [{ meli_item_id: 'M1', titulo: 'Khamrah', cantidad: 1, stock_id: 's2' }];   // otra pestaña lo revinculó
+  llamadas.length = 0; e.dom['meliord-cot-1'] = '1540'; e.dom['meliord-ok-1'] = true;
+  await e.mod.MeliOrdenes.procesar(1, { disabled: false });
+  check('Vínculo cambiado con el cuadro abierto: NO llama a procesar y pide volver a verificar', !llamadas.some(l => l.fn === 'meli_procesar_orden') && e.toasts.some(t => t.includes('Cambió el producto vinculado')));
+  e.State.meliOrdenes.find(x => x.id === 1).items = [{ meli_item_id: 'M1', titulo: 'Khamrah', cantidad: 1, stock_id: 's1' }];
+
+  // Si no se puede releer la orden antes de procesar: NO se procesa
+  await e.mod.MeliOrdenes.abrirProcesar(1);
+  const dbCargar = e.ctx.DB.cargarMeliOrdenes;
+  e.ctx.DB.cargarMeliOrdenes = async () => { e.State.meliError = true; e.State.meliOrdenes = []; };
+  llamadas.length = 0; e.dom['meliord-cot-1'] = '1540'; e.dom['meliord-ok-1'] = true;
+  await e.mod.MeliOrdenes.procesar(1, { disabled: false });
+  check('Si falla la relectura de la orden: NO llama a procesar y avisa', !llamadas.some(l => l.fn === 'meli_procesar_orden') && e.toasts.some(t => t.includes('No se pudo confirmar el estado actual')));
+  e.ctx.DB.cargarMeliOrdenes = dbCargar; e.State.meliError = false;
+  e.State.meliOrdenes = [orden(1, [{ meli_item_id: 'M1', titulo: 'Khamrah', cantidad: 1, stock_id: 's1' }]), orden(2, [{ meli_item_id: 'M2', titulo: 'Armaf', cantidad: 1, stock_id: 's2' }]), orden(5, [{ meli_item_id: 'A', titulo: 'a', cantidad: 1, stock_id: 's1' }, { meli_item_id: 'B', titulo: 'b', cantidad: 1, stock_id: 's1' }])];
+
+  // Un cuadro viejo no cierra al nuevo
+  await e.mod.MeliOrdenes.abrirProcesar(1);
+  const tokViejo = e.mod.MeliOrdenes._cuadroTok;
+  await e.mod.MeliOrdenes.abrirProcesar(5);
+  reg['meliord-overlay'] = { remove() { e.cerrado = true; } };
+  e.cerrado = false;
+  e.mod.MeliOrdenes.cerrarCuadro(tokViejo);
+  check('Cerrar con la instancia vieja NO cierra el cuadro nuevo', e.cerrado === false);
+  e.mod.MeliOrdenes.cerrarCuadro(e.mod.MeliOrdenes._cuadroTok);
+  check('Cerrar con la instancia actual sí lo cierra', e.cerrado === true);
 }
 
 // 30. Altas: si el registro no se puede crear, NO se toca la caja (o se deshace)

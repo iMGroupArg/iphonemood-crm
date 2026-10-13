@@ -147,10 +147,13 @@ const App = {
         fetch('https://dolarapi.com/v1/dolares/blue'),
         fetch('https://dolarapi.com/v1/dolares/cripto'),
       ]);
+      if (!blueRes.ok) State.mercadoBlue = null;   // respuesta fallida: no se conserva el valor anterior
       if (blueRes.ok) {
         const blue = await blueRes.json();
         const compra = Math.round(blue.compra);
         const venta  = Math.round(blue.venta);
+        // Para el cuadro «Procesar» de Mercado Libre: solo un valor válido y con su hora.
+        State.mercadoBlue = (Number.isFinite(venta) && venta > 0) ? { valor: venta, en: Date.now() } : null;
         if (elBlue) {
           elBlue.textContent = `$ ${venta.toLocaleString('es-AR')}`;
           elBlue.title = `Comprá $${compra.toLocaleString('es-AR')} · Vendé $${venta.toLocaleString('es-AR')} · Tu ref: $${State.refBlue.toLocaleString('es-AR')}`;
@@ -168,6 +171,7 @@ const App = {
       }
     } catch (e) {
       // silencioso — queda con los valores manuales
+      State.mercadoBlue = null;   // sin dato fiable, el atajo «Blue de mercado hoy» no se ofrece
     }
   },
 

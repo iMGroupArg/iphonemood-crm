@@ -178,6 +178,7 @@ const MeliOrdenes = {
             <input type="checkbox" id="meliord-fin-${o.id}"> liquidación final</label>
           <button class="btn btn-primary btn-sm" onclick="MeliOrdenes.acreditar(${o.id}, this)"><i class="ti ti-check"></i> Confirmar acreditación</button>`;
       }
+      acciones += `<button class="btn btn-sm" onclick="MeliOrdenes.abrirDetalle(${o.id})"><i class="ti ti-list-details"></i> Detalle</button>`;
       if (o.procesada && !o.revertidaEn) {
         acciones += `<button class="btn btn-sm" style="color:var(--red)" onclick="MeliOrdenes.revertir(${o.id}, this)"><i class="ti ti-arrow-back-up"></i> Revertir</button>`;
       }
@@ -440,6 +441,144 @@ const MeliOrdenes = {
       console.warn('No se pudo buscar ventas parecidas:', err);
       return { ok: false, lista: [] };
     }
+  },
+
+  // ── Detalle de venta (solo lectura) ─────────────────────────────────────────
+  _ars2(n) { return n === null || n === undefined ? '—' : '$' + Number(n).toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }); },
+  // Qué parte de lo retenido se conoce. Los tres componentes (cargo por venta, envío, impuestos)
+  // vienen de `extras` y HOY la base no los guarda, así que normalmente llegan en null: se
+  // muestran «sin desglose todavía». NUNCA se reparte ni se infiere un componente a partir del
+  // total retenido, y «Cuadra» solo se dice con los tres presentes y la suma exacta (±1 centavo).
+  //   → { bruto, neto, confirmado, retenido, partes:[{clave,nombre,monto}], estado, diferencia?, restoSinDesglosar? }
+  //     estado: 'incompleto' | 'sin_desglose' | 'parcial' | 'cuadra' | 'no_cuadra'
+  _desglose(o, extras = {}) {
+    const num = x => (x === null || x === undefined || x === '' || !Number.isFinite(Number(x))) ? null : Number(x);
+    const c = x => Math.round(x * 100) / 100;
+    const bruto = num(o?.bruto), neto = num(o?.neto);
+    const r = { bruto, neto, confirmado: false, retenido: null, partes: [], estado: 'incompleto' };
+    // Sin importes confirmados (pagos pendientes, neto parcial, consulta fallida) no se calcula nada:
+    // «bruto − neto» sería un número engañoso.
+    if (!o?.financieraCompleta || bruto === null || neto === null) return r;
+    r.confirmado = true;
+    r.retenido = c(bruto - neto);
+    r.partes = [['cargoVenta', 'Cargo por venta'], ['envio', 'Envíos'], ['impuestos', 'Impuestos']]
+      .map(([clave, nombre]) => ({ clave, nombre, monto: num(extras?.[clave]) }));
+    const conocidas = r.partes.filter(x => x.monto !== null);
+    if (conocidas.length === 3) {
+      r.diferencia = c(r.retenido - conocidas.reduce((a, x) => a + x.monto, 0));
+      r.estado = Math.abs(r.diferencia) <= 0.01 ? 'cuadra' : 'no_cuadra';
+    } else if (conocidas.length) {
+      r.estado = 'parcial';
+      r.restoSinDesglosar = c(r.retenido - conocidas.reduce((a, x) => a + x.monto, 0));
+    } else {
+      r.estado = 'sin_desglose';
+    }
+    return r;
+  },
+  // Cuando la base guarde los tres componentes se leen de acá; hoy no existen.
+  _extrasDe(o) { return { cargoVenta: o?.cargoVenta ?? null, envio: o?.envioVendedor ?? null, impuestos: o?.impuestos ?? null }; },
+  _faltaLiberar(iso) {
+    const t = Date.parse(iso);
+    if (!Number.isFinite(t)) return '—';
+    const dias = Math.ceil((t - Date.now()) / 86400000);
+    return dias > 0 ? `se libera ${this._dia(iso)} (en ${dias} día${dias === 1 ? '' : 's'})` : `liberada el ${this._dia(iso)}`;
+  },
+  cerrarDetalle() { document.getElementById('meliord-detalle')?.remove(); },
+  abrirDetalle(id) {
+    const o = (State.meliOrdenes || []).find(x => x.id === id);
+    if (!o) return;
+    this.cerrarDetalle();
+    const e = s => State.esc(s == null ? '' : String(s));
+    const est = this._estadoDe(o);
+    const d = this._desglose(o, this._extrasDe(o));
+    const fila = (t, v, extra = '') => `<tr><td style="padding:3px 12px 3px 0;color:var(--text-secondary)">${t}</td><td style="padding:3px 0;text-align:right;font-weight:600;${extra}">${v}</td></tr>`;
+    const items = (o.items || []).map(i => {
+      const nom = i.stock_id ? (State.stock || []).find(x => x.id === i.stock_id)?.nombre : null;
+      return `<div style="padding:4px 0;border-bottom:1px solid var(--border)">${e(i.cantidad || 1)}× ${e(i.titulo || 'producto')}
+        <span style="color:var(--text-secondary)">· ${i.precio_unitario === null || i.precio_unitario === undefined ? 'precio —' : this._ars2(Number(i.precio_unitario)) + ' c/u'}</span>
+        ${nom ? `<span style="color:var(--green)">→ Stock: ${e(nom)}</span>` : '<span style="color:var(--amber)">sin vincular</span>'}</div>`;
+    }).join('') || '<div style="color:var(--text-secondary)">Sin productos.</div>';
+
+    let dinero;
+    if (!d.confirmado) {
+      dinero = `<div style="color:var(--amber);font-size:12.5px">Datos de pago incompletos: todavía no se puede confirmar cuánto se queda Mercado Libre.${o.bruto !== null && o.bruto !== undefined ? ` Venta informada: ${this._ars2(o.bruto)}.` : ''}</div>`;
+    } else {
+      const parteTxt = x => x.monto === null ? '<span style="color:var(--text-secondary);font-weight:400">sin desglose todavía</span>' : '−' + this._ars2(x.monto);
+      dinero = `<table style="font-size:13px;border-collapse:collapse;width:100%">
+        ${fila('Venta (lo que pagó el comprador)', this._ars2(d.bruto))}
+        ${d.partes.map(x => fila(x.nombre, parteTxt(x))).join('')}
+        ${d.estado === 'parcial' ? fila('Resto sin desglosar', '−' + this._ars2(d.restoSinDesglosar)) : ''}
+        ${fila('Total que se queda Mercado Libre', '−' + this._ars2(d.retenido), 'border-top:1px solid var(--border)')}
+        ${fila('Te llega', this._ars2(d.neto), 'color:var(--green)')}
+      </table>
+      <div style="font-size:11.5px;margin-top:6px;color:${d.estado === 'no_cuadra' ? 'var(--red)' : 'var(--text-secondary)'}">${
+        d.estado === 'cuadra' ? '✓ Cuadra: venta − cargos = lo que te llega.'
+        : d.estado === 'no_cuadra' ? `⚠ No cuadra: la suma de los tres conceptos difiere del total retenido por ${this._ars2(Math.abs(d.diferencia))}.`
+        : d.estado === 'parcial' ? 'Desglose parcial: faltan conceptos, no se afirma que cuadre.'
+        : 'Todavía no hay cargo por venta, envío ni impuestos guardados por separado: solo se conoce el total retenido.'}</div>`;
+    }
+
+    let venta = '';
+    if (o.ventaId) {
+      const v = (State.ventas || []).find(x => x.id === o.ventaId);
+      const R = window.Ventas && typeof window.Ventas.resultadoVenta === 'function' ? window.Ventas : null;
+      if (!v || !R || !(v.items || []).length) {
+        venta = `<div style="font-size:12.5px;color:var(--text-secondary)">Venta #${e(o.ventaId)}: datos no disponibles en pantalla.</div>`;
+      } else {
+        const r = R.resultadoVenta(v);
+        venta = `<table style="font-size:13px;border-collapse:collapse;width:100%">
+          ${fila('Venta', '#' + e(o.ventaId))}
+          ${fila('Cotización congelada', v.meliCotizacion ? '$' + Number(v.meliCotizacion).toLocaleString('es-AR') : '—')}
+          ${fila('Costo de comisión y envío', o.acreditado ? State.fmtUSD(r.costoCanal) : 'se fija al acreditar')}
+          ${fila(o.acreditado ? 'Margen comercial' : 'Margen provisorio (todavía sin descontar comisión y envío)', State.fmtUSD(r.margenComercial))}
+        </table>`;
+      }
+    }
+
+    const ov = document.createElement('div');
+    ov.id = 'meliord-detalle';
+    ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.6);backdrop-filter:blur(4px);z-index:800;display:flex;align-items:center;justify-content:center;padding:20px';
+    ov.innerHTML = `
+      <div style="background:var(--bg-elevated);border:1px solid var(--border-strong);border-radius:var(--radius-xl);width:min(560px,96vw);max-height:90dvh;overflow:auto;padding:18px">
+        <div style="display:flex;gap:10px;align-items:flex-start">
+          <div style="flex:1"><div style="font-size:15px;font-weight:700">Orden ${e(o.orderId)}</div>
+            <div style="font-size:12px;color:var(--text-secondary)">${this._dia(o.fechaOrden)} · comprador ${e(o.comprador || '—')} · localidad —</div></div>
+          <span class="badge ${est.clase}">${est.txt}</span>
+        </div>
+        <div style="font-size:12px;font-weight:600;margin:12px 0 4px">Productos</div>
+        <div style="font-size:12.5px">${items}</div>
+        <div style="font-size:12px;font-weight:600;margin:12px 0 4px">Dinero</div>
+        ${dinero}
+        <div style="font-size:12.5px;margin-top:8px">Liberación: <b>${o.fechaLiberacion ? this._faltaLiberar(o.fechaLiberacion) : '—'}</b></div>
+        ${venta ? `<div style="font-size:12px;font-weight:600;margin:12px 0 4px">Venta en el CRM</div>${venta}` : ''}
+        <div id="meliord-calc-${id}" style="font-size:12px;margin-top:12px"></div>
+        <div style="display:flex;gap:8px;justify-content:space-between;margin-top:14px;flex-wrap:wrap">
+          <button class="btn btn-sm" onclick="MeliOrdenes.verComoSeCalculo(${id}, this)">Ver cómo se calculó</button>
+          <button class="btn btn-sm" onclick="MeliOrdenes.cerrarDetalle()">Cerrar</button>
+        </div>
+      </div>`;
+    document.body.appendChild(ov);
+  },
+  // Bajo demanda: lee SOLO el resumen del pago de esta orden (campos de importes, sin datos del comprador).
+  async verComoSeCalculo(id, btn) {
+    const caja = document.getElementById(`meliord-calc-${id}`);
+    if (!caja) return;
+    if (btn) btn.disabled = true;
+    try {
+      const r = await supa.from('meli_ordenes').select('payload_pago').eq('id', id).maybeSingle();
+      if (r.error || !r.data) { caja.innerHTML = '<span style="color:var(--amber)">No se pudo leer el detalle del pago.</span>'; return; }
+      const pp = r.data.payload_pago;
+      const pagos = Array.isArray(pp?.pagos) ? pp.pagos : [];
+      if (!pagos.length) { caja.innerHTML = '<span style="color:var(--text-secondary)">Todavía no hay datos del pago guardados.</span>'; return; }
+      const n = x => (x === null || x === undefined || !Number.isFinite(Number(x))) ? '—' : this._ars2(Number(x));
+      const co = pp.conciliacion || {};
+      caja.innerHTML = `<div style="font-weight:600;margin-bottom:4px">Pago(s) informado(s) por Mercado Pago</div>`
+        + pagos.map(p => `<div style="padding:3px 0;border-bottom:1px solid var(--border)">Pago ${State.esc(String(p.id ?? ''))} · ${State.esc(String(p.status ?? '—'))} · importe ${n(p.transaction_amount)} · te llega ${n(p.net_received_amount)}</div>`).join('')
+        + `<div style="margin-top:6px;color:var(--text-secondary)">Cargos informados por Mercado Pago: <b>${n(co.declarada)}</b> (esto NO es el desglose de comisión, envío e impuestos). Diferencia sin explicar: <b>${n(co.diferencia_sin_explicar)}</b>. Cobrado aprobado: ${n(co.cobrado_aprobado)} · ${co.cubierto === true ? 'cubre el total de la orden' : co.cubierto === false ? 'NO cubre el total de la orden' : '—'}.</div>`;
+    } catch (err) {
+      console.warn('No se pudo leer el detalle del pago:', err);
+      caja.innerHTML = '<span style="color:var(--amber)">No se pudo leer el detalle del pago.</span>';
+    } finally { if (btn) btn.disabled = false; }
   },
 
   async acreditar(id, btn) {

@@ -6,8 +6,8 @@
 --
 --  QUÉ HACE: reemplaza solamente la función presupuesto_bot_crear (mismo nombre, mismos argumentos, mismos permisos). La única
 --  diferencia: la disponibilidad suma las filas idénticas del stock, con la misma clave y los mismos filtros que el CRM
---  (Presupuestos.equiposDisponibles): nombre | modelo | capacidad | color | precio en USD redondeado, sin distinguir mayúsculas.
---  Cada fila aporta lo que tenga cargado (IMEI o cantidad, el mayor). Lo demás queda igual.
+--  (Presupuestos.equiposDisponibles): nombre, modelo, capacidad, color y precio en USD redondeado, sin distinguir mayúsculas, comparados
+--  campo por campo. Cada fila aporta sus `unidades` del catálogo (IMEI o cantidad, el mayor). Lo demás queda igual.
 --
 --  REQUISITOS: script 13 corrido (si no, frena con un mensaje). Idempotente. No cambia ningún dato.
 -- ============================================================================
@@ -165,19 +165,23 @@ BEGIN
   v_unit := ROUND(u.precio_ars::numeric / u.cotizacion::numeric)::int;
   IF v_unit < 1 THEN RAISE EXCEPTION 'UNIDAD_NO_DISPONIBLE'; END IF;
   -- Cuántas unidades hay DEL MISMO EQUIPO: se suman todas las filas idénticas del stock (típico: un iPhone con IMEI es una
-  -- fila por unidad). Es la misma clave y los mismos filtros con los que el CRM arma su lista (Presupuestos.equiposDisponibles):
-  -- nombre | modelo | capacidad | color | precio en USD (redondeado), sin distinguir mayúsculas; vacío y NULL son lo mismo.
-  -- Cada fila aporta lo que tenga cargado (IMEI o cantidad, el mayor).
+  -- fila por unidad). Mismo criterio que el CRM al armar su lista (Presupuestos.equiposDisponibles): nombre, modelo, capacidad, color
+  -- y precio en USD redondeado, sin distinguir mayúsculas; vacío y NULL son lo mismo. Los campos se comparan UNO POR UNO (no pegados
+  -- con un separador): un nombre con "|" nunca se confunde con otro equipo. Cada fila aporta sus `unidades` tal como las publica el
+  -- catálogo (stock_publico): el mayor entre sus IMEI y su cantidad. Así, lo que suma el bot es la suma del campo `stock` del
+  -- catálogo de las filas idénticas. (El CRM cuenta 1 por fila: para filas sueltas con IMEI es lo mismo; en un lote con cantidad,
+  -- el bot cuenta la cantidad real.) Si lower() de la base no convierte una mayúscula con acento, el equipo cuenta menos, nunca más.
   SELECT COALESCE(sum(GREATEST(COALESCE(array_length(s.imeis, 1), 0), COALESCE(s.cantidad, 0))), 0)::int INTO v_disp
     FROM public.stock s
    WHERE s.estado_inventario IS NOT DISTINCT FROM 'disponible'
      AND COALESCE(s.categoria, '') IN ('iphone', 'android', 'mac', 'ipad')
      AND NOT COALESCE(s.a_pedido, FALSE)
      AND COALESCE(s.precio_ars, 0) > 0 AND COALESCE(s.cotizacion, 0) > 0
-     AND lower(COALESCE(s.nombre, '') || '|' || COALESCE(s.modelo, '') || '|' || COALESCE(s.storage, '') || '|' || COALESCE(s.color, '')
-               || '|' || ROUND(s.precio_ars::numeric / s.cotizacion::numeric)::int)
-       = lower(COALESCE(u.nombre, '') || '|' || COALESCE(u.modelo, '') || '|' || COALESCE(u.storage, '') || '|' || COALESCE(u.color, '')
-               || '|' || v_unit);
+     AND lower(COALESCE(s.nombre, ''))  = lower(COALESCE(u.nombre, ''))
+     AND lower(COALESCE(s.modelo, ''))  = lower(COALESCE(u.modelo, ''))
+     AND lower(COALESCE(s.storage, '')) = lower(COALESCE(u.storage, ''))
+     AND lower(COALESCE(s.color, ''))   = lower(COALESCE(u.color, ''))
+     AND ROUND(s.precio_ars::numeric / s.cotizacion::numeric)::int = v_unit;
   IF v_disp < v_cant THEN RAISE EXCEPTION 'UNIDAD_NO_DISPONIBLE'; END IF;
 
   -- ── Dólar y financiación: las MISMAS fuentes que usa el CRM al guardar ─────
@@ -286,7 +290,7 @@ COMMIT;
 SELECT id, control, CASE WHEN ok THEN '✅' ELSE '❌' END AS resultado
 FROM (
   SELECT '18.1' AS id, 'presupuesto_bot_crear ahora cuenta las filas idénticas del stock' AS control,
-         position('v_disp' IN pg_get_functiondef(to_regprocedure('public.presupuesto_bot_crear(text,uuid,integer,jsonb,text,text,text,text,text,text)'))) > 0 AS ok
+         position('IF v_disp < v_cant' IN pg_get_functiondef(to_regprocedure('public.presupuesto_bot_crear(text,uuid,integer,jsonb,text,text,text,text,text,text)'))) > 0 AS ok
   UNION ALL SELECT '18.2', 'Sigue habiendo UNA sola versión de la función',
          (SELECT count(*) = 1 FROM pg_proc WHERE pronamespace = 'public'::regnamespace AND proname = 'presupuesto_bot_crear')
   UNION ALL SELECT '18.3', 'Los permisos siguen igual: anon y authenticated la ejecutan, PUBLIC no',
@@ -295,5 +299,8 @@ FROM (
          AND NOT EXISTS (SELECT 1 FROM pg_proc p, aclexplode(COALESCE(p.proacl, acldefault('f', p.proowner))) a
                           WHERE p.oid = 'public.presupuesto_bot_crear(text,uuid,integer,jsonb,text,text,text,text,text,text)'::regprocedure
                             AND a.grantee = 0 AND a.privilege_type = 'EXECUTE')
+  UNION ALL SELECT '18.4', 'Sigue siendo SECURITY DEFINER y con su search_path fijo',
+         (SELECT prosecdef AND COALESCE(proconfig::text, '') LIKE '%search_path=public, extensions, pg_temp%'
+            FROM pg_proc WHERE oid = 'public.presupuesto_bot_crear(text,uuid,integer,jsonb,text,text,text,text,text,text)'::regprocedure)
 ) t
 ORDER BY id;

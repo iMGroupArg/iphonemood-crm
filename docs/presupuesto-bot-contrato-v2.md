@@ -85,7 +85,8 @@ Durante el cambio valen **dos claves a la vez**: así no se corta el bot.
 
 ## 8. Disponibilidad: se cuentan todas las unidades idénticas (cambio del script 18)
 `UNIDAD_NO_DISPONIBLE` por falta de unidades se decide sobre **todo el equipo**, no sobre la fila que mandás en `unidad`. Un iPhone con IMEI es una fila de stock por unidad: dos iguales en stock + `cantidad: 2` **sí** se presupuesta (el CRM los ofrece como "2 u."). "Idénticas" = mismo `nombre`, `modelo`, capacidad, color y **precio en USD redondeado**, sin distinguir mayúsculas, y vacío = sin dato (la misma clave que usa el CRM). Solo suman las filas **disponibles**, de categoría iphone/android/mac/ipad, con precio y cotización cargados. Cada fila aporta el mayor entre sus IMEI y su `cantidad`.
-* `stock` del catálogo es **por fila**: si ves dos filas iguales con `stock: 1`, hay 2 unidades del equipo; podés pedir `cantidad: 2` con el `id` de cualquiera de las dos.
+* `stock` del catálogo es **por fila**: si ves dos filas iguales con `stock: 1`, hay 2 unidades del equipo; podés pedir `cantidad: 2` con el `id` de cualquiera de las dos. Lo que suma el bot es **exactamente la suma del campo `stock` de las filas idénticas** (cada fila aporta el mayor entre sus IMEI y su cantidad). El CRM, al armar su lista a mano, cuenta 1 por fila: para un iPhone con IMEI es lo mismo; para un lote con cantidad el bot cuenta la cantidad real.
+* Los campos se comparan uno por uno. Si la base no convierte a minúscula una letra con acento, el equipo cuenta **menos** unidades, nunca más.
 * Un presupuesto **no reserva** el equipo: es una oferta con vencimiento. La página no vuelve a mirar el stock.
 * Hasta que Franco corra el script 18 rige la regla vieja (una sola fila): usá `cantidad: 1`.
 
@@ -94,9 +95,9 @@ La clave de prueba solo cambia: vencimiento (30 minutos), origen (`bot_prueba`),
 
 ## 10. Redondeos exactos (para comparar al peso)
 **Lo que redondea el CRM al crear el presupuesto (SQL): una sola cosa.**
-* `precio_unitario_usd = ROUND(precio_ars / cotizacion)` con la `precio_ars` y la `cotizacion` **de la propia unidad del stock** (aritmética decimal exacta; en positivos el .5 sube). El CRM usa la misma cuenta (`Math.round(precioARS / cotiz)`), así que dan igual.
+* `precio_unitario_usd = ROUND(precio_ars / cotizacion)` con la `precio_ars` y la `cotizacion` **de la propia unidad del stock** (aritmética decimal exacta; en positivos el .5 sube). Es la misma cuenta que publica el catálogo en `precio_usd`. El CRM, cuando se arma un presupuesto a mano, calcula en JavaScript (`Math.round(precioARS / cotiz)` con números de 64 bits): con precios y cotizaciones enteros da igual; en un caso límite con decimales (un empate exacto en .5) podría haber **1 USD de diferencia** entre las dos cuentas.
 * `precio_usd = precio_unitario_usd × cantidad` (entero, sin más redondeo).
-* El canje se guarda con los `valor_usd` **enteros** que mandás; el total del canje es su suma.
+* El canje se guarda con los `valor_usd` **enteros** que mandás (el bot no acepta decimales; el CRM manual sí); el total del canje es su suma.
 * `cotizacion` del presupuesto = `ref_blue` de la configuración, **sin redondear**. Es el mismo valor que ves en `tipoCambio` del catálogo, pero el presupuesto guarda el que regía **al crearlo**.
 
 **Lo que calcula la página al mostrar el link (JavaScript, números de 64 bits), en este orden:**
@@ -107,6 +108,6 @@ La clave de prueba solo cambia: vencimiento (30 minutos), origen (`bot_prueba`),
 
 **Cómo compararlo sin errores de medio peso:**
 * Multiplicá **en ese orden** (de izquierda a derecha) y con doubles; no uses decimales de precisión distinta ni cambies el orden de los factores.
-* `Math.round` redondea el .5 **hacia arriba**. El `round()` de Python (y otras librerías) redondea el .5 al par ("redondeo bancario"): da un peso de diferencia en los empates. En Python usá `math.floor(x + 0.5)`.
+* `Math.round` redondea el .5 **hacia arriba**. El `round()` de Python (y otras librerías) redondea el .5 al par ("redondeo bancario"): da un peso de diferencia en los empates. Si no usás JavaScript, `floor(x + 0.5)` se comporta igual salvo en casos límite de la coma flotante; **la única referencia exacta es el `Math.round` de la página**.
 * Redondeá **solo al final de cada paso** descrito arriba (no antes). `total` se redondea y **después** se divide por `n`.
 * Para que tu mensaje y la página nunca discrepen, lo más seguro es **no calcular cuotas vos**: mostrá el link (la página calcula todo) y, si querés citar un número, tomalo de la misma cuenta.

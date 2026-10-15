@@ -10,6 +10,7 @@ import { PGlite } from '@electric-sql/pglite';
 import { pgcrypto } from '@electric-sql/pglite/contrib/pgcrypto';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
+import { execSync } from 'node:child_process';
 import path from 'node:path';
 import assert from 'node:assert';
 import { AQUI, SQL, ESQUEMA_MINIMO, comoRol } from './lib/base_meli.mjs';
@@ -513,7 +514,7 @@ console.log('\n══ Presupuestos creados por el bot (Postgres en WebAssembly) 
 // ── 12 · Disponibilidad: se cuentan TODAS las filas idénticas del stock (como el CRM) ───────────────────────────
 {
   const un = (db, o = {}) => unidad(db, { nombre: 'iPhone 16 128GB', modelo: 'iPhone 16', storage: '128GB', color: 'Negro', cantidad: 1, imeis: ['35' + String(++n).padStart(13, '0')], ...o });
-  const db = await base();
+  const db = await base(); await cfg(db, 'tope_por_minuto', 1000); await cfg(db, 'tope_diario', 1000);
   const a = await un(db), b = await un(db);
   const r2 = await crear(db, { unidad: a, cantidad: 2 });
   const f2 = await fila(db, r2.token);
@@ -544,9 +545,21 @@ console.log('\n══ Presupuestos creados por el bot (Postgres en WebAssembly) 
   const ez = await falla(() => crear(db, { unidad: z, cantidad: 3 }));
   check('Cada fila aporta lo que tenga cargado: dos IMEI con cantidad 0 valen 2 (3 no entra, 2 sí)', codigo(ez) === 'UNIDAD_NO_DISPONIBLE' && (await crear(db, { unidad: z, cantidad: 2 })).ok === true, ez);
 
+  // Los campos se comparan uno por uno: un nombre con "|" no se confunde con otro equipo.
+  const p1 = await un(db, { nombre: 'A|B', modelo: 'C', storage: '64GB', color: 'Gris' });
+  await un(db, { nombre: 'A', modelo: 'B|C', storage: '64GB', color: 'Gris' });
+  const ep = await falla(() => crear(db, { unidad: p1, cantidad: 2 }));
+  check('Dos equipos distintos cuyos campos pegados con "|" darían lo mismo ("A|B"+"C" y "A"+"B|C") NO se suman', codigo(ep) === 'UNIDAD_NO_DISPONIBLE', ep);
+  // Un lote (una fila con cantidad y sin IMEI) aporta su cantidad, como la publica el catálogo en `stock`.
+  const lote = await un(db, { nombre: 'Xiaomi 14', categoria: 'android', modelo: 'Xiaomi 14', storage: '256GB', color: 'Negro', imeis: [], cantidad: 4 });
+  check('Una fila-lote con cantidad 4 aporta 4 (igual que el campo `stock` del catálogo): cantidad 4 entra y 5 no', (await crear(db, { unidad: lote, cantidad: 4 })).ok === true && codigo(await falla(() => crear(db, { unidad: lote, cantidad: 5 }))) === 'UNIDAD_NO_DISPONIBLE');
+  // Coherencia con el catálogo público: la suma de `unidades` de las filas idénticas es lo que el bot puede presupuestar.
+  const sumaCat = (await db.query(`SELECT sum(unidades)::int n FROM public.stock_publico WHERE nombre = 'iPhone 16 128GB' AND color = 'Negro'`)).rows[0].n;
+  check('Lo que suma el bot coincide con la suma del campo `unidades` de stock_publico (lo que ve el bot en el catálogo)', sumaCat === 3, String(sumaCat));
+
   // La mutación: con la regla vieja (una sola fila) el escenario de Angel falla.
   const viejo = SQL('presupuesto_bot.sql').replace('IF v_disp < v_cant THEN RAISE EXCEPTION', "IF GREATEST(COALESCE(array_length(u.imeis, 1), 0), COALESCE(u.cantidad, 0)) < v_cant THEN RAISE EXCEPTION");
-  const dbm = await base({ scriptBot: viejo });
+  const dbm = await base({ scriptBot: viejo }); await cfg(dbm, 'tope_por_minuto', 1000);
   const m1 = await un(dbm); await un(dbm);
   const em = await falla(() => crear(dbm, { unidad: m1, cantidad: 2 }));
   check('Mutación: con la regla vieja (mirar una sola fila) el escenario de Angel falla con UNIDAD_NO_DISPONIBLE (la prueba de arriba lo detecta)', viejo !== SQL('presupuesto_bot.sql') && codigo(em) === 'UNIDAD_NO_DISPONIBLE', em);
@@ -554,8 +567,9 @@ console.log('\n══ Presupuestos creados por el bot (Postgres en WebAssembly) 
 
 // ── 12b · El modo prueba aplica EXACTAMENTE las mismas reglas de canje que el real ─────────────────────────────
 {
-  const db = await base();
+  const db = await base(); await cfg(db, 'tope_por_minuto', 1000); await cfg(db, 'tope_diario', 1000); await cfg(db, 'tope_prueba_diario', 1000);
   const u = await unidad(db, { nombre: 'iPhone 14 aislado', color: 'Verde único', cantidad: 5 }); const m = await modeloCanje(db);
+  const m2 = (await db.query(`SELECT modelo, capacidades[1] AS storage FROM public.catalogo_modelos_publico WHERE array_length(capacidades,1) > 0 AND modelo <> $1 ORDER BY orden DESC, modelo DESC LIMIT 1`, [m.modelo])).rows[0];
   await vender(db, m.modelo, m.storage, 400);
   const canje1 = (o = {}) => [{ modelo: m.modelo, storage: m.storage, estado: 'Excelente', bateria_pct: 90, valor_usd: 200, ...o }];
   const casos = {
@@ -563,29 +577,46 @@ console.log('\n══ Presupuestos creados por el bot (Postgres en WebAssembly) 
     'estado inventado': [canje1({ estado: 'Roto' }), 'CANJE_ESTADO_INVALIDO'], 'valor 49 (debajo del rango)': [canje1({ valor_usd: 49 }), 'CANJE_VALOR_FUERA_DE_RANGO'],
     'valor 2501 (arriba del rango)': [canje1({ valor_usd: 2501 }), 'CANJE_VALOR_FUERA_DE_RANGO'], 'batería 101': [canje1({ bateria_pct: 101 }), 'CANJE_BATERIA_INVALIDA'],
     'valor 0': [canje1({ valor_usd: 0 }), 'CANJE_VALOR_INVALIDO'], 'valor sobre el tope (referencia 400, pide 401)': [canje1({ valor_usd: 401 }), 'CANJE_SOBRE_EL_TOPE'],
+    'modelo sin ventas de referencia': [canje1({ modelo: m2.modelo, storage: m2.storage }), 'CANJE_SIN_REFERENCIA'],
+    'canje igual o mayor al precio del equipo': [[...canje1({ valor_usd: 400 }), ...canje1({ valor_usd: 400 })].map((e, i) => (i === 0 ? e : e)), null],
   };
+  delete casos['canje igual o mayor al precio del equipo'];
+  const barato = await unidad(db, { nombre: 'iPhone 14 barato', color: 'Plata único', precio_ars: 450000, cotizacion: 1500, cantidad: 1 });   // 300 USD
   const dif = [];
   for (const [que, [canje, esperado]] of Object.entries(casos)) {
     const real = codigo(await falla(() => crear(db, { unidad: u, canje, modo: 'real' })));
     const prueba = codigo(await falla(() => crear(db, { unidad: u, canje, modo: 'prueba' })));
     if (real !== esperado || prueba !== esperado) dif.push(`${que}: real=${real} prueba=${prueba} esperado=${esperado}`);
   }
-  check(`Las ${Object.keys(casos).length} reglas del canje (rango 50–2500, tope por referencia, batería, estado, modelo, capacidad) rechazan IGUAL en modo prueba y en modo real`, dif.length === 0, dif.join(' | '));
+  const mayor = canje1({ valor_usd: 400 });
+  for (const modo of ['real', 'prueba']) {
+    const c = codigo(await falla(() => crear(db, { unidad: barato, canje: mayor, modo })));
+    if (c !== 'CANJE_MAYOR_AL_PRECIO') dif.push(`canje mayor al precio (${modo}): ${c}`);
+  }
+  check(`Las reglas del canje (rango 50–2500, tope por referencia, sin referencia, mayor al precio, batería, estado, modelo, capacidad: ${Object.keys(casos).length + 1} casos) rechazan IGUAL en modo prueba y en modo real`, dif.length === 0, dif.join(' | '));
   const rr = await crear(db, { unidad: u, canje: canje1({ valor_usd: 200 }), modo: 'real' }), rp = await crear(db, { unidad: u, canje: canje1({ valor_usd: 200 }), modo: 'prueba' });
   const fr = await fila(db, rr.token), fp = await fila(db, rp.token);
   check('Y un canje válido da el MISMO producto, el mismo canje y la misma cotización en prueba y en real (cambia solo el vencimiento, el origen y que la prueba no guarda nombre ni contacto)',
     JSON.stringify(fr.producto) === JSON.stringify(fp.producto) && JSON.stringify(fr.trade_in) === JSON.stringify(fp.trade_in) && Number(fr.cotizacion) === Number(fp.cotizacion) && fp.origen === 'bot_prueba' && fr.origen === 'bot', JSON.stringify([fr.trade_in, fp.trade_in]));
+  const dur = (f) => (new Date(f.vence_en) - new Date(f.creado_en)) / 60000;
+  check('… y lo que SÍ cambia en prueba: dura 30 minutos (el real, 2 días) y no guarda nombre ni contacto (el real guarda los dos)',
+    Math.round(dur(fp)) === 30 && Math.round(dur(fr)) === 2880 && fp.contacto === null && fp.cliente !== 'Juan' && fr.contacto !== null && fr.cliente === 'Juan', JSON.stringify([fp.cliente, fp.contacto, dur(fp), dur(fr)]));
 }
 
 // ── 13 · Script 18: el arreglo para quien ya corrió el 13 ──────────────────────────────────────
 {
   // La versión del script 13 que se corrió en producción (la anterior al arreglo): se reconstruye quitando el arreglo del actual.
   const SQL13 = SQL('presupuesto_bot.sql');
-  const sinArreglo = SQL13.replace(/  -- Cuántas unidades hay DEL MISMO EQUIPO[\s\S]*?IF v_disp < v_cant THEN RAISE EXCEPTION 'UNIDAD_NO_DISPONIBLE'; END IF;\n/, '')
+  let historica = null;   // el archivo REAL anterior al arreglo (el que corrió Franco), si hay historia de git a mano
+  try { historica = execSync('git show 67f5d3a~1:db/pendientes/presupuesto_bot.sql', { cwd: path.join(AQUI, '../..'), encoding: 'utf8', maxBuffer: 1e8, stdio: ['ignore', 'pipe', 'ignore'] }); } catch { /* sin historia */ }
+  const reconstruida = SQL13.replace(/  v_disp      integer;[^\n]*\n/, '').replace(/  -- Cuántas unidades hay DEL MISMO EQUIPO[\s\S]*?IF v_disp < v_cant THEN RAISE EXCEPTION 'UNIDAD_NO_DISPONIBLE'; END IF;\n/, '')
     .replace("     OR COALESCE(u.precio_ars, 0) <= 0 OR COALESCE(u.cotizacion, 0) <= 0 THEN\n    RAISE EXCEPTION 'UNIDAD_NO_DISPONIBLE';\n  END IF;\n  v_unit :=",
              "     OR COALESCE(u.precio_ars, 0) <= 0 OR COALESCE(u.cotizacion, 0) <= 0\n     OR GREATEST(COALESCE(array_length(u.imeis, 1), 0), COALESCE(u.cantidad, 0)) < v_cant THEN\n    RAISE EXCEPTION 'UNIDAD_NO_DISPONIBLE';\n  END IF;\n  v_unit :=");
-  check('Se reconstruyó bien la versión anterior (sin el arreglo) para probar la actualización', sinArreglo !== SQL13 && !sinArreglo.includes('v_disp <') && sinArreglo.includes('< v_cant THEN'));
-  const db = await base({ scriptBot: sinArreglo });
+  check('Se reconstruyó bien la versión anterior (sin el arreglo) para probar la actualización', reconstruida !== SQL13 && !reconstruida.includes('v_disp <') && reconstruida.includes('< v_cant THEN'));
+  if (historica) check('… y la reconstrucción es IDÉNTICA al archivo histórico de git anterior al arreglo (se prueba la actualización desde lo que realmente corrió Franco)', historica === reconstruida);
+  else console.log('  (sin historia de git: se usa la versión reconstruida)');
+  const sinArreglo = historica ?? reconstruida;
+  const db = await base({ scriptBot: sinArreglo }); await cfg(db, 'tope_por_minuto', 1000);
   const un = (o = {}) => unidad(db, { nombre: 'iPhone 16 128GB', modelo: 'iPhone 16', storage: '128GB', color: 'Negro', cantidad: 1, imeis: ['35' + String(++n).padStart(13, '0')], ...o });
   const a = await un(), b = await un();
   const antes = await falla(() => crear(db, { unidad: a, cantidad: 2 }));
@@ -593,7 +624,7 @@ console.log('\n══ Presupuestos creados por el bot (Postgres en WebAssembly) 
   const S18 = SQL('presupuesto_bot_disponibilidad.sql');
   const e1 = await falla(() => db.exec(S18)), e2 = await falla(() => db.exec(S18));
   const res = await db.exec(S18); const tabla = res[res.length - 1].rows;
-  check('El script 18 corre (y dos veces más sin romper); su tabla de verificación sale toda en ✅ (3 controles)', !e1 && !e2 && tabla.length === 3 && tabla.every((t) => t.resultado === '✅'), `${e1} | ${e2} | ${JSON.stringify(tabla)}`);
+  check('El script 18 corre (y dos veces más sin romper); su tabla de verificación sale toda en ✅ (4 controles)', !e1 && !e2 && tabla.length === 4 && tabla.every((t) => t.resultado === '✅'), `${e1} | ${e2} | ${JSON.stringify(tabla)}`);
   const despues = await crear(db, { unidad: a, cantidad: 2 });
   check('Con el script 18 aplicado, el mismo pedido funciona', despues.ok === true);
   const e3 = await falla(() => crear(db, { unidad: b, cantidad: 3 }));

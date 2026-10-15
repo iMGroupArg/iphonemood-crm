@@ -343,19 +343,23 @@ BEGIN
   v_unit := ROUND(u.precio_ars::numeric / u.cotizacion::numeric)::int;
   IF v_unit < 1 THEN RAISE EXCEPTION 'UNIDAD_NO_DISPONIBLE'; END IF;
   -- Cuántas unidades hay DEL MISMO EQUIPO: se suman todas las filas idénticas del stock (típico: un iPhone con IMEI es una
-  -- fila por unidad). Es la misma clave y los mismos filtros con los que el CRM arma su lista (Presupuestos.equiposDisponibles):
-  -- nombre | modelo | capacidad | color | precio en USD (redondeado), sin distinguir mayúsculas; vacío y NULL son lo mismo.
-  -- Cada fila aporta lo que tenga cargado (IMEI o cantidad, el mayor).
+  -- fila por unidad). Mismo criterio que el CRM al armar su lista (Presupuestos.equiposDisponibles): nombre, modelo, capacidad, color
+  -- y precio en USD redondeado, sin distinguir mayúsculas; vacío y NULL son lo mismo. Los campos se comparan UNO POR UNO (no pegados
+  -- con un separador): un nombre con "|" nunca se confunde con otro equipo. Cada fila aporta sus `unidades` tal como las publica el
+  -- catálogo (stock_publico): el mayor entre sus IMEI y su cantidad. Así, lo que suma el bot es la suma del campo `stock` del
+  -- catálogo de las filas idénticas. (El CRM cuenta 1 por fila: para filas sueltas con IMEI es lo mismo; en un lote con cantidad,
+  -- el bot cuenta la cantidad real.) Si lower() de la base no convierte una mayúscula con acento, el equipo cuenta menos, nunca más.
   SELECT COALESCE(sum(GREATEST(COALESCE(array_length(s.imeis, 1), 0), COALESCE(s.cantidad, 0))), 0)::int INTO v_disp
     FROM public.stock s
    WHERE s.estado_inventario IS NOT DISTINCT FROM 'disponible'
      AND COALESCE(s.categoria, '') IN ('iphone', 'android', 'mac', 'ipad')
      AND NOT COALESCE(s.a_pedido, FALSE)
      AND COALESCE(s.precio_ars, 0) > 0 AND COALESCE(s.cotizacion, 0) > 0
-     AND lower(COALESCE(s.nombre, '') || '|' || COALESCE(s.modelo, '') || '|' || COALESCE(s.storage, '') || '|' || COALESCE(s.color, '')
-               || '|' || ROUND(s.precio_ars::numeric / s.cotizacion::numeric)::int)
-       = lower(COALESCE(u.nombre, '') || '|' || COALESCE(u.modelo, '') || '|' || COALESCE(u.storage, '') || '|' || COALESCE(u.color, '')
-               || '|' || v_unit);
+     AND lower(COALESCE(s.nombre, ''))  = lower(COALESCE(u.nombre, ''))
+     AND lower(COALESCE(s.modelo, ''))  = lower(COALESCE(u.modelo, ''))
+     AND lower(COALESCE(s.storage, '')) = lower(COALESCE(u.storage, ''))
+     AND lower(COALESCE(s.color, ''))   = lower(COALESCE(u.color, ''))
+     AND ROUND(s.precio_ars::numeric / s.cotizacion::numeric)::int = v_unit;
   IF v_disp < v_cant THEN RAISE EXCEPTION 'UNIDAD_NO_DISPONIBLE'; END IF;
 
   -- ── Dólar y financiación: las MISMAS fuentes que usa el CRM al guardar ─────

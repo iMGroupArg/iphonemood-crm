@@ -2523,6 +2523,36 @@ const entornoVenta = (extra = {}, cfg = {}) => {
     /import '\.\/actividades\.js'/.test(appJs) && /actividades: \{ title: 'Actividades', module: Actividades \}/.test(appJs) && /data-page="actividades"/.test(crmHtml) && /id="badge-actividades"/.test(crmHtml) && /id="badge-meli"/.test(crmHtml));
   check('Cableado: el aviso de apertura espera a las actividades y el badge se actualiza con el resto', /Actividades\?\.cargar\?\.\(\)/.test(appJs) && /Actividades\?\.actualizarBadge\?\.\(\)/.test(appJs));
 
+  // Email diario: botones
+  {
+    const pedidos = []; let respuesta = { status: 200, json: { enviado: true, motivo: null } };
+    e.ctx.fetch = async (url, opts) => { pedidos.push({ url, opts }); return { status: respuesta.status, ok: respuesta.status < 300, json: async () => respuesta.json }; };
+    e.ctx.supa.auth = { getSession: async () => ({ data: { session: { access_token: 'tok-sesion' } } }) };
+    const btn = { disabled: false };
+    await A.enviarEmail('aviso_prueba', btn);
+    check('«Email de prueba»: POST al worker con el token de la sesión y la acción aviso_prueba', pedidos.length === 1 && pedidos[0].url === '/api/meli/worker' && pedidos[0].opts.headers['x-crm-token'] === 'tok-sesion' && JSON.parse(pedidos[0].opts.body).accion === 'aviso_prueba' && e.toasts.some(t => t.includes('prueba aceptado por Resend')) && btn.disabled === false);
+    await A.enviarEmail('aviso', null);
+    check('«Enviar aviso ahora» manda la acción aviso', JSON.parse(pedidos[1].opts.body).accion === 'aviso' && e.toasts.some(t => t.includes('Aviso aceptado por Resend')));
+    const antes = pedidos.length; await A.enviarEmail('otra', null);
+    check('Una acción desconocida no llama al servidor', pedidos.length === antes);
+    for (const [motivo, status, texto] of [['SIN_CONFIG', 200, 'Falta configurar'], ['CUOTA', 429, 'máximo de intentos'], ['TIMEOUT', 200, 'no se sabe si salió'], ['HTTP_500', 200, 'HTTP_500'], ['YA_ENVIADO', 200, 'ya se había enviado']]) {
+      respuesta = { status, json: { enviado: false, motivo } };
+      await A.enviarEmail('aviso', null);
+      check(`El motivo ${motivo} se explica en castellano`, e.toasts.some(t => t.includes(texto)), JSON.stringify(e.toasts.slice(-1)));
+    }
+    respuesta = { status: 200, json: { enviado: true, motivo: 'ACEPTADO_SIN_CONFIRMAR' } }; await A.enviarEmail('aviso', null);
+    check('«Aceptado pero sin confirmar» se avisa tal cual (no como un éxito común)', e.toasts.slice(-1)[0].includes('no se pudo anotar en la base'), JSON.stringify(e.toasts.slice(-1)));
+    respuesta = { status: 200, json: { enviado: true, motivo: null } }; await A.enviarEmail('aviso', null);
+    check('El éxito común dice «aceptado por Resend» (no promete la bandeja)', e.toasts.slice(-1)[0].includes('aceptado por Resend'));
+    for (const m of ['SOBRE_CAMBIO', 'VENTANA_VENCIDA']) { respuesta = { status: 200, json: { enviado: false, motivo: m } }; await A.enviarEmail('aviso', null); }
+    check('Los motivos nuevos tienen mensaje propio', e.toasts.some(t => t.includes('Cambió la dirección')) && e.toasts.some(t => t.includes('más de 23 horas')));
+    respuesta = { status: 401, json: {} }; await A.enviarEmail('aviso', null);
+    check('Sin sesión autorizada (401) lo dice', e.toasts.some(t => t.includes('sesión no está autorizada')));
+    e.ctx.fetch = async () => { throw new Error('red'); };
+    check('Si el servidor no responde: avisa y el botón se rehabilita', (await A.enviarEmail('aviso', btn), btn.disabled === false && e.toasts.some(t => t.includes('No se pudo conectar'))));
+    check('La pantalla trae los botones de email', A._vista().includes("enviarEmail('aviso_prueba'") && A._vista().includes("enviarEmail('aviso'"));
+  }
+
   // Nueva actividad
   llamadas.length = 0;
   e.dom['act-titulo'] = '  '; await A.crear(null);

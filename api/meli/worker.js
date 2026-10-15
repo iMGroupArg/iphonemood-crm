@@ -17,6 +17,7 @@ const M = require('../_meli.js');
 const { procesarNotificacion } = require('../_meli_ingesta.js');
 const { sonda, conciliar } = require('../_meli_sonda.js');
 const { barrer, barrerTodas } = require('../_meli_barrido.js');
+const { enviarAvisoDiario } = require('../_aviso_diario.js');
 
 // Debe coincidir con `functions` en vercel.json.
 const MAX_DURATION_S = 30;
@@ -139,6 +140,16 @@ module.exports = async function handler(req, res) {
     return;
   }
 
+  // Email diario: la acción manual («Enviar aviso ahora» / «Enviar email de prueba»). Solo por POST con sesión. Intenta el aviso
+  // REAL de hoy (idempotente: si ya se envió no manda nada) o uno de prueba. Las cuotas están en la base (no dependen de la
+  // instancia): excedidas responde 429. El destinatario sale SOLO de la configuración del servidor.
+  if (req.method === 'POST' && req.body && typeof req.body === 'object' && (req.body.accion === 'aviso' || req.body.accion === 'aviso_prueba')) {
+    const r = await enviarAvisoDiario({ ahora: Date.now(), limite: t0 + 20_000, tipo: req.body.accion === 'aviso' ? 'diario' : 'prueba' });
+    const limitado = r.motivo === 'CUOTA' || r.motivo === 'ESPERAR';
+    res.status(limitado ? 429 : 200).json({ enviado: !!r.enviado, motivo: r.motivo || null });
+    return;
+  }
+
   // Barrido de ventas recientes (botón "Buscar ventas recientes"): le pregunta a Mercado Libre qué órdenes se
   // actualizaron y ENCOLA las que faltan o están atrasadas. No procesa nada: eso lo hace el drenaje de siempre.
   if (req.method === 'POST' && req.body && typeof req.body === 'object' && req.body.accion === 'barrido') {
@@ -188,7 +199,14 @@ module.exports = async function handler(req, res) {
       }
     }
     const r = await drenar(t0);
-    res.status(200).json(barrido ? { ...r, barrido } : r);
+    // El email diario va DESPUÉS del drenaje, en el tramo final que el drenaje no usa (su presupuesto es del 80 %), con un
+    // plazo absoluto desde `t0`. Nunca tira: un fallo del aviso no afecta al barrido ni al drenaje.
+    let aviso = null;
+    if (req.method === 'GET') {
+      const a = await enviarAvisoDiario({ ahora: Date.now(), limite: t0 + MAX_DURATION_S * 1000 - 2000, tipo: 'diario' });
+      aviso = { enviado: !!a.enviado, motivo: a.motivo || null };
+    }
+    res.status(200).json({ ...(barrido ? { ...r, barrido } : r), ...(aviso ? { aviso } : {}) });
   } catch (e) {
     console.error('meli/worker:', e.codigo || '', e.message);
     res.status(502).json({ error: 'No se pudo procesar la cola' });

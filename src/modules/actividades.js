@@ -180,6 +180,8 @@ const Actividades = {
     return `
       <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;flex-wrap:wrap">
         <h3 style="font-size:13px;font-weight:600;color:var(--text-secondary);text-transform:uppercase;letter-spacing:.4px;flex:1">Actividades</h3>
+        <button class="btn btn-sm" onclick="Actividades.enviarEmail('aviso_prueba', this)" title="Manda un email de prueba para comprobar la configuración"><i class="ti ti-mail"></i> Email de prueba</button>
+        <button class="btn btn-sm" onclick="Actividades.enviarEmail('aviso', this)" title="Manda ahora el aviso de hoy (si ya se envió, no repite)"><i class="ti ti-send"></i> Enviar aviso ahora</button>
         <button class="btn btn-sm" onclick="Actividades.abrirNueva()"><i class="ti ti-plus"></i> Nueva actividad</button>
         <button class="btn btn-sm" onclick="Actividades.recargar()"><i class="ti ti-refresh"></i> Actualizar</button>
       </div>
@@ -378,6 +380,46 @@ const Actividades = {
       const { error } = await supa.from('configuracion').upsert({ clave: this.CLAVE_CONFIG, valor: JSON.stringify({ persona: destino.persona, bolsillo: destino.bolsillo }) });
       if (!error) this._cajaEmpresa = { persona: destino.persona, bolsillo: destino.bolsillo };
     } catch (e) { console.warn('No se pudo guardar la caja predeterminada:', e); }
+  },
+
+  // ── Email diario (lo envía el servidor; acá solo se pide «ahora» o «de prueba») ──────────────────────────
+  MOTIVOS_EMAIL: {
+    SIN_CONFIG: 'Falta configurar el email: cargá RESEND_API_KEY y AVISO_EMAIL_DESTINO en Vercel.',
+    DIRECCION_INVALIDA: 'La dirección de email configurada no es válida.',
+    CONFIG_INVALIDA: 'Resend rechazó la configuración (clave o remitente): revisá RESEND_API_KEY y el remitente.',
+    SOBRE_CAMBIO: 'Cambió la dirección de envío o de destino después de un intento que pudo haber salido: no se reenvía. Revisá tu correo.',
+    VENTANA_VENCIDA: 'El aviso de hoy ya no se puede reenviar (pasaron más de 23 horas desde el intento anterior).',
+    NADA_QUE_AVISAR: 'Hoy no hay nada que avisar (sin liberaciones ni transferencias pendientes).',
+    YA_ENVIADO: 'El aviso de hoy ya se había enviado.',
+    EN_CURSO: 'Hay un envío en curso: esperá un momento.',
+    ESPERAR: 'Hay que esperar 2 minutos entre intentos.',
+    CUOTA: 'Se alcanzó el máximo de intentos de hoy.',
+    SIN_TIEMPO: 'No alcanzó el tiempo: probá de nuevo.',
+    RESUMEN_NO_DISPONIBLE: 'No se pudo leer el resumen de la base. ¿Está corrido el script 17?',
+    RECLAMO_NO_DISPONIBLE: 'No se pudo reservar el envío del día. ¿Está corrido el script 17?',
+    TIMEOUT: 'Resend no respondió a tiempo: no se sabe si salió. Esperá unos minutos y mirá tu correo antes de repetir.',
+    RED: 'Se cortó la conexión con Resend: no se sabe si salió. Esperá unos minutos y mirá tu correo antes de repetir.',
+    ACEPTADO_SIN_CONFIRMAR: 'Resend aceptó el email (debería llegar), pero no se pudo anotar en la base.',
+  },
+  async enviarEmail(accion, btn) {
+    if (accion !== 'aviso' && accion !== 'aviso_prueba') return;
+    if (btn) btn.disabled = true;
+    try {
+      let token = '';
+      try { const { data } = await supa.auth.getSession(); token = data?.session?.access_token || ''; } catch { /* sin sesión */ }
+      const r = await fetch('/api/meli/worker', { method: 'POST', headers: { 'x-crm-token': token, 'Content-Type': 'application/json' }, body: JSON.stringify({ accion }) });
+      let j = null; try { j = await r.json(); } catch { /* sin cuerpo */ }
+      if (r.status === 401) { toast('Tu sesión no está autorizada. Volvé a entrar al CRM.'); return; }
+      if (j && j.enviado && j.motivo === 'ACEPTADO_SIN_CONFIRMAR') toast(this.MOTIVOS_EMAIL.ACEPTADO_SIN_CONFIRMAR);
+      else if (j && j.enviado) toast(accion === 'aviso_prueba' ? 'Email de prueba aceptado por Resend: revisá tu correo.' : 'Aviso aceptado por Resend: revisá tu correo.');
+      else {
+        const m = j && typeof j.motivo === 'string' ? j.motivo : '';
+        toast(this.MOTIVOS_EMAIL[m] || (m.startsWith('HTTP_') ? 'Resend respondió con un error (' + State.esc(m) + '). Revisá la configuración.' : r.status === 429 ? 'Demasiados intentos: esperá un momento.' : 'No se pudo enviar el email.'));
+      }
+    } catch (e) {
+      console.warn('No se pudo pedir el email:', e);
+      toast('No se pudo conectar con el servidor.');
+    } finally { if (btn) btn.disabled = false; }
   },
 
   // ── Actividad manual ────────────────────────────────────────────────────────

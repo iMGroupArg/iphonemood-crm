@@ -81,6 +81,18 @@ function moverEnServidor(srv, origen, destino, ref, clave) {
 //   red            'perdida' = se aplica pero la respuesta no llega; 'caida' = no llega nada
 //   sinLectura     no se puede leer el saldo real tras un fallo de red
 // Consulta falsa estilo supabase-js: cualquier cadena de .select/.or/.in/.limit/.is/.eq termina en la respuesta.
+const dormirTest = () => new Promise(r => setTimeout(r, 20));
+// Como consultaFalsa pero respeta .eq('estado', X) / .neq('estado', X) sobre las filas (para la pantalla de actividades).
+function consultaActividades(resp) {
+  let filtro = null;
+  const q = new Proxy({}, { get: (_, k) => {
+    if (k === 'eq') return (c, v) => { filtro = r => r[c] === v; return q; };
+    if (k === 'neq') return (c, v) => { filtro = r => r[c] !== v; return q; };
+    if (k === 'then') return (ok, ko) => Promise.resolve(resp.error || !Array.isArray(resp.data) ? resp : { data: resp.data.filter(filtro || (() => true)), error: null }).then(ok, ko);
+    return () => q;
+  } });
+  return q;
+}
 function consultaFalsa(resp) {
   const q = new Proxy({}, { get: (_, k) => (k === 'then' ? (ok, ko) => Promise.resolve(resp).then(ok, ko) : () => q) });
   return q;
@@ -96,6 +108,8 @@ function nuevoEntorno(opciones = {}) {
   const contadores = { viejo: 0, rpc: 0, rpcMover: 0 };
 
   const DB = {
+    // ¿Están las columnas del script 14 (conversión con sobrante)? Por defecto sí; las pruebas lo cambian con cfg.columnasConversion.
+    async columnasConversionListas() { return cfg.columnasConversion === undefined ? true : cfg.columnasConversion; },
     // Réplica de public.stock_ajustar: resta/suma sobre el valor REAL de la fila en
     // la "base" (servidor.stock), no sobre la copia de la pantalla. La fila se siembra
     // la primera vez con lo que la pantalla tenía (= lo que cargó al abrir).
@@ -1537,7 +1551,7 @@ const entornoVenta = (extra = {}, cfg = {}) => {
   check('Una cerrada que Mercado Libre volvió a marcar para revisar muestra el aviso en rojo, y sigue sin poder procesarse', tarjeta(4).includes('Descartada') && tarjeta(4).includes('la canceló') && !/MeliOrdenes\.(abrirProcesar|revalidar)\(4/.test(tarjeta(4)));
   e.State.meliCierre = false;
   const vSin = M._vista();
-  check('Si el script 12 no está corrido (sin las columnas del cierre), la pantalla NO ofrece «Ya la cargué a mano» ni «Descartar»', !/abrirCierre\(/.test(vSin) && /abrirDetalle\(1\)/.test(vSin));
+  check('Si el script 12 no está corrido (sin las columnas del cierre), la pantalla NO ofrece «Ya la cargué a mano» ni «Descartar»', !/MeliOrdenes\.abrirCierre\(/.test(vSin) && /abrirDetalle\(1\)/.test(vSin));
   e.State.meliCierre = true;
   const cuenta = k => e.State.meliOrdenes.filter(o => M._estadoDe(o).clave === k).length;
   check('Las cerradas a mano van a la solapa «Cerradas»; no cuentan en «Para procesar» ni en «En revisión»', cuenta('cerradas') === 2 && cuenta('pendientes') === 1 && cuenta('revision') === 1 && M._estadoDe(e.State.meliOrdenes[1]).clave === 'cerradas');
@@ -2100,6 +2114,448 @@ const entornoVenta = (extra = {}, cfg = {}) => {
   // La tarjeta tiene el botón
   e.State.meliOrdenes = [lattafa]; M._filtro = 'todas';
   check('La tarjeta de cada orden tiene el botón «Detalle»', /MeliOrdenes\.abrirDetalle\(1\)/.test(M._vista()));
+}
+
+// 42. PLAN CONVERSIONES · FASE A: convertir de más, comisión prorrateada al lote, varias conversiones, filas viejas
+{
+  const filas = [];
+  const mk = (dom, extraDom = {}, cfgx = {}) => {
+    const e = nuevoEntorno({ modulos: ['proveedores.js', 'capital.js'], dom: { 'conv-monto': '10000', 'conv-pct': '3', 'conv-usdt-lote': '8790', 'conv-p-origen': 'Franco', 'conv-b-origen': 'USD cash',
+      'conv-p-dest': 'Franco', 'conv-b-dest': 'USDT', 'conv-fecha': '2026-10-10', 'conv-notas': '', ...dom, ...extraDom },
+      dbExtra: { async guardarLotePago(loteId, p) { e.filas.push(p); e.State.lotePagos.push({ id: Math.random(), loteId, ...p }); return true; } } });
+    Object.assign(e.cfg, cfgx);
+    e.filas = [];
+    e.sembrar({ Franco: { 'USD cash': 20000, 'USDT': 0 } });
+    Object.assign(e.mod.Proveedores, { renderKpis() {}, renderContent() {} });
+    Object.assign(e.State, { lotesCompra: [{ id: 1, proveedorId: 1, estado: 'pagado' }], loteItems: [{ loteId: 1, precioUsd: 8790, cantidad: 1 }], lotePagos: [], proveedorCreditos: [],
+      proveedores: [{ id: 1, nombre: 'P', activo: true }], activosFijos: [], inversores: [], inversorPagos: [], deudas: [], ventas: [] });
+    e.State.refBlue = 1000; e.State.refUsdt = 1000;
+    return e;
+  };
+
+  // Caso real: 10.000 USD, 3 %, el lote usa 8.790
+  {
+    const e = mk();
+    await e.mod.Proveedores._confirmarConversion(1);
+    const f = e.filas[0] || {};
+    check('Caso real: salen 10.000 USD y entran 9.700 USDT (un solo traspaso por el TOTAL)', e.base['Franco||USD cash'] === 10000 && e.base['Franco||USDT'] === 9700, JSON.stringify(e.base));
+    check('La fila guarda total 10.000 → 9.700, comisión 300, y para el lote: 8.790 USDT con comisión 271,86',
+      f.montoUsd === 10000 && f.montoUsdt === 9700 && f.comisionUsd === 300 && f.usdtLote === 8790 && f.comisionLoteUsd === 271.86, JSON.stringify(f));
+    check('… y el libro cuadra', cuadra(e.base, e.libro).length === 0, cuadra(e.base, e.libro).join(' | '));
+    e.State.lotePagos.push({ id: 99, loteId: 1, tipo: 'pago_proveedor', montoUsd: 8790, montoUsdt: 8790, moneda: 'USDT' });
+    const c = e.mod.Proveedores._cuentaLote(1);
+    check('Con 8.790 pagados al proveedor el lote queda SALDADO y su costo incluye 271,86 de comisión (no 300)', c.restante === 0 && c.excedenteBruto === 0 && c.comision === 271.86 && c.costoAdquisicion === 9061.86, JSON.stringify(c));
+    const cap = e.mod.Capital.calcular();
+    check('Capital en tránsito: 8.790 pagados + 271,86 de comisión del lote = 9.061,86 (el sobrante queda en la caja USDT)', Math.abs(cap.pedidosEnTransito - 9061.86) < 0.005, String(cap.pedidosEnTransito));
+  }
+  // Vacío = todos
+  {
+    const e = mk({ 'conv-usdt-lote': '', 'conv-monto': '1000', 'conv-pct': '2' });
+    await e.mod.Proveedores._confirmarConversion(1);
+    const f = e.filas[0] || {};
+    check('USDT del lote vacío = usa todos: usdtLote 980 y comisión del lote = la total (20)', f.usdtLote === 980 && f.comisionLoteUsd === 20, JSON.stringify(f));
+  }
+  // Validaciones: no se mueve plata
+  for (const [txt, v] of [['más de lo recibido', '9700.01'], ['cero', '0'], ['negativo', '-5'], ['no numérico', 'abc']]) {
+    const e = mk({ 'conv-usdt-lote': v });
+    await e.mod.Proveedores._confirmarConversion(1);
+    check(`USDT del lote ${txt}: NO se mueve plata ni se anota nada`, e.base['Franco||USD cash'] === 20000 && e.base['Franco||USDT'] === 0 && e.filas.length === 0 && e.toasts.length > 0, JSON.stringify([e.base, e.toasts]));
+  }
+  {
+    const e = mk({ 'conv-pct': '100' });
+    await e.mod.Proveedores._confirmarConversion(1);
+    check('Comisión del 100 %: rechazada antes de mover nada', e.filas.length === 0 && e.base['Franco||USD cash'] === 20000);
+  }
+  // Columnas del script 14
+  {
+    const e = mk({}, {}, { columnasConversion: false });
+    await e.mod.Proveedores._confirmarConversion(1);
+    check('Con sobrante y SIN el script 14 corrido: bloquea ANTES de mover plata y nombra el script', e.filas.length === 0 && e.base['Franco||USD cash'] === 20000 && e.toasts.some(t => t.includes('script 14')), JSON.stringify(e.toasts));
+    const u = mk({}, {}, { columnasConversion: null });
+    await u.mod.Proveedores._confirmarConversion(1);
+    check('Con sobrante y sin poder comprobar la base: tampoco mueve plata', u.filas.length === 0 && u.base['Franco||USD cash'] === 20000 && u.toasts.some(t => t.includes('No se pudo comprobar')));
+    const n = mk({ 'conv-usdt-lote': '' }, {}, { columnasConversion: false });
+    await n.mod.Proveedores._confirmarConversion(1);
+    check('SIN sobrante y sin las columnas: sigue como siempre (se mueve y se anota SIN columnas nuevas)', n.base['Franco||USDT'] === 9700 && n.filas.length === 1 && n.filas[0].usdtLote == null && n.filas[0].comisionLoteUsd == null, JSON.stringify(n.filas));
+  }
+  // Hallazgos de Codex: doble clic, centavos, comisión negativa, excepción al registrar, sugerencia con otras monedas
+  {
+    const e = mk();
+    await Promise.all([e.mod.Proveedores._confirmarConversion(1), e.mod.Proveedores._confirmarConversion(1)]);
+    check('Doble clic en Confirmar: UNA sola conversión (un traspaso y un registro)', e.filas.length === 1 && e.base['Franco||USDT'] === 9700 && e.base['Franco||USD cash'] === 10000, JSON.stringify([e.filas.length, e.base]));
+    await e.mod.Proveedores._confirmarConversion(1);
+    check('Después de terminar, se puede volver a convertir (la guarda se libera)', e.filas.length === 2);
+  }
+  {
+    const e = mk({ 'conv-monto': '12.43', 'conv-pct': '9.1', 'conv-usdt-lote': '9.95' });
+    const r = e.mod.Proveedores._leerConversion();
+    check('Prorrateo en centavos enteros: 12,43 USD a 9,1 % → comisión 1,13, recibe 11,30, el lote usa 9,95 → comisión del lote 1,00 (la mitad sube)', r.comisionUsd === 1.13 && r.montoUsdt === 11.3 && r.comisionLote === 1 && r.sobrante === 1.35, JSON.stringify(r));
+    const real = mk().mod.Proveedores._leerConversion();
+    check('El caso real sigue dando 271,86', real.comisionLote === 271.86 && real.sobrante === 910);
+  }
+  for (const pct of ['-3', 'abc', '100', '150']) {
+    const e = mk({ 'conv-pct': pct });
+    await e.mod.Proveedores._confirmarConversion(1);
+    check(`Comisión «${pct}»: se rechaza ANTES de mover plata`, e.filas.length === 0 && e.base['Franco||USD cash'] === 20000 && e.toasts.some(t => t.includes('comisión')), JSON.stringify(e.toasts));
+  }
+  {
+    const e = mk();
+    e.ctx.DB.guardarLotePago = async () => { throw new Error('se cortó'); };
+    await e.mod.Proveedores._confirmarConversion(1);
+    check('Si registrar la conversión TIRA una excepción: la plata queda movida, NO se devuelve sola y se avisa que no se sabe si quedó anotada',
+      e.base['Franco||USDT'] === 9700 && e.base['Franco||USD cash'] === 10000 && e.toasts.some(t => t.includes('no se sabe si quedó anotada')), JSON.stringify([e.base, e.toasts]));
+    check('… y la guarda se libera para poder reintentar', e.mod.Proveedores._convEnCurso === false);
+  }
+  {
+    const e = mk();
+    let html = '';
+    e.ctx.document.createElement = () => ({ id: '', style: {}, set innerHTML(v) { html = v; }, get innerHTML() { return html; }, remove() {} });
+    const sug = () => { e.mod.Proveedores.modalPago(1); const m = html.match(/id="pago-monto"[^>]*?value="([^"]*)"/s); return m ? m[1] : null; };
+    e.State.loteItems = [{ loteId: 1, precioUsd: 1000, cantidad: 1 }];
+    e.State.lotePagos = [{ id: 1, loteId: 1, tipo: 'conversion', montoUsd: 520, montoUsdt: 500, comisionUsd: 20, usdtLote: 500, comisionLoteUsd: 20 },
+                         { id: 2, loteId: 1, tipo: 'pago_proveedor', montoUsd: 300, montoUsdt: 300, moneda: 'USD' }];
+    check('Un pago directo en USD NO gasta los USDT del lote: debe 700, sugiere 500 (no 200)', sug() === '500.00', String(sug()));
+    e.State.lotePagos.push({ id: 3, loteId: 1, tipo: 'pago_proveedor', montoUsd: 500, montoUsdt: 500, moneda: 'USDT' });
+    check('Agotados los USDT del lote (aunque aún se deba plata): NO sugiere nada, para no gastar el sobrante', sug() === '', String(sug()));
+  }
+  // Vista previa
+  {
+    const e = mk();
+    const reg = {}; const orig = e.ctx.document.getElementById;
+    e.ctx.document.getElementById = id => (id === 'conv-resumen' ? (reg[id] = reg[id] || { innerHTML: '' }) : orig(id));
+    e.mod.Proveedores._calcConv();
+    const t = reg['conv-resumen'].innerHTML.replace(/\s+/g, ' ');
+    check('Vista previa: USDT del lote 8.790, comisión del lote 271,86, «Sobran 910.00 USDT» a 1,0309 y comisión de esa parte 28,14', t.includes('8790.00 USDT') && t.includes('271,86') && t.includes('910.00 USDT') && t.includes('1.0309') && t.includes('28,14'), t);
+  }
+  // Compatibilidad con lo ya cargado
+  {
+    const e = mk();
+    const P = e.mod.Proveedores;
+    const vieja = (extra = {}) => ({ tipo: 'conversion', montoUsd: 9000, montoUsdt: 8730, comisionUsd: 270, comisionPct: 3, ...extra });
+    check('Dos conversiones VIEJAS (columnas NULL): cuenta solo la primera, como hoy', P._comisionDelLote([vieja(), vieja({ comisionUsd: 50 })]) === 270 && P._usdtDelLote([vieja(), vieja({ montoUsdt: 400 })]) === 8730);
+    const nueva = (u, c, extra = {}) => ({ tipo: 'conversion', montoUsd: 10000, montoUsdt: 9700, comisionUsd: 300, usdtLote: u, comisionLoteUsd: c, ...extra });
+    check('Una vieja + una nueva: la vieja entera + la parte de la nueva', P._comisionDelLote([vieja(), nueva(5000, 154.64)]) === 424.64 && P._usdtDelLote([vieja(), nueva(5000, 154.64)]) === 13730);
+    check('Dos conversiones NUEVAS en un lote: se suman las dos', P._comisionDelLote([nueva(5000, 154.64), nueva(3790, 118.95)]) === 273.59 && P._usdtDelLote([nueva(5000, 154.64), nueva(3790, 118.95)]) === 8790);
+    check('Un 0 explícito de comisión del lote es un valor: NO cae a la comisión total', P._comisionDelLote([nueva(5000, 0)]) === 0);
+    check('Sin conversiones: 0 y 0', P._comisionDelLote([]) === 0 && P._usdtDelLote([]) === 0 && P._comisionDelLote(undefined) === 0);
+    check('Un pago que no es conversión no cuenta', P._comisionDelLote([{ tipo: 'pago_proveedor', comisionUsd: 99, comisionLoteUsd: 5 }]) === 0);
+    check('Resumen de la tarjeta: una conversión con sobrante dice cuánto usa el lote; varias lo suman',
+      P._resumenConversion([nueva(8790, 271.86)]).includes('este lote usa 8790.00 USDT') && P._resumenConversion([nueva(5000, 154.64), nueva(3790, 118.95)]).includes('2 conversiones') && P._resumenConversion([]) === '');
+  }
+  // Pago sugerido: lo que usa el lote, no todo lo convertido
+  {
+    const e = mk();
+    let html = '';
+    e.ctx.document.createElement = () => ({ id: '', style: {}, set innerHTML(v) { html = v; }, get innerHTML() { return html; }, remove() {} });
+    const sug = () => { e.mod.Proveedores.modalPago(1); const m = html.match(/id="pago-monto"[^>]*?value="([^"]*)"/s); return m ? m[1] : null; };
+    e.State.lotePagos = [{ id: 1, loteId: 1, tipo: 'conversion', montoUsd: 10000, montoUsdt: 9700, comisionUsd: 300, usdtLote: 8790, comisionLoteUsd: 271.86 }];
+    check('Pago sugerido tras convertir de más: 8.790 (lo que usa el lote), no los 9.700 convertidos', sug() === '8790.00', String(sug()));
+    check('El aviso del modal dice cuántos USDT son para este lote y cuántos se convirtieron en total', /8790\.00 USDT<\/b> para este lote[^<]*\(convertidos en total: 9700\.00\)/.test(html), html.replace(/\s+/g, ' ').slice(html.indexOf('Conversión registrada') - 20, html.indexOf('Conversión registrada') + 260));
+    e.State.lotePagos.push({ id: 2, loteId: 1, tipo: 'pago_proveedor', montoUsd: 5000, montoUsdt: 5000, moneda: 'USDT' });
+    check('Tras pagar 5.000: sugiere lo que falta (3.790)', sug() === '3790.00', String(sug()));
+    e.State.lotePagos.push({ id: 3, loteId: 1, tipo: 'pago_proveedor', montoUsd: 3790, montoUsdt: 3790, moneda: 'USDT' });
+    check('Saldado: no sugiere nada', sug() === '', String(sug()));
+  }
+  // Recepción: la logística por unidad usa la comisión DEL LOTE
+  {
+    const e = mk();
+    e.State.lotePagos = [{ id: 1, loteId: 1, tipo: 'conversion', montoUsd: 10000, montoUsdt: 9700, comisionUsd: 300, usdtLote: 8790, comisionLoteUsd: 271.86 }];
+    let html = '';
+    e.ctx.document.createElement = () => ({ id: '', style: {}, set innerHTML(v) { html = v; }, get innerHTML() { return html; }, remove() {} });
+    e.mod.Proveedores.modalRecepcion(1);
+    check('Recepción: la logística usa la comisión del lote (271,86), no la total (300)', html.includes('271,86') && !html.includes('300,00'), html.replace(/\s+/g, ' ').slice(0, 10));
+  }
+}
+
+// 43. DB REAL (supabase-config.js) · conversión con sobrante: lectura, escritura y detección de las columnas
+{
+  const fuente = fs.readFileSync('/Users/francovelas/crm-complete/iphonemood-crm/src/modules/supabase-config.js', 'utf8');
+  const mkDB = (supa, state = {}) => {
+    const ctxDB = { window: { __APP_CONFIG__: { SUPABASE_URL: 'x', SUPABASE_ANON_KEY: 'y' } }, supabase: { createClient: () => supa },
+      console: { log() {}, warn() {}, error() {} }, Auth: {}, State: state, toast() {}, Date, Math, Number, JSON, String, Promise, Error };
+    vm.createContext(ctxDB);
+    vm.runInContext(fuente + '\nthis.__DB = DB;', ctxDB, { filename: 'supabase-config.js' });
+    return ctxDB.__DB;
+  };
+  const insertado = [];
+  const supaOk = { from: t => ({ insert: r => { insertado.push({ t, r }); return { select: () => ({ single: async () => ({ data: { id: 7 }, error: null }) }) }; },
+    select: () => ({ limit: async () => ({ error: null }) }) }) };
+  const st = { lotePagos: [] };
+  const D1 = mkDB(supaOk, st);
+  check('Columnas presentes: columnasConversionListas() = true (y se recuerda)', (await D1.columnasConversionListas()) === true && D1._colsConversion === true);
+  const supaSin = { from: () => ({ select: () => ({ limit: async () => ({ error: { code: '42703', message: 'column lote_pagos.usdt_lote does not exist' } }) }) }) };
+  const D2 = mkDB(supaSin);
+  check('Columnas ausentes (42703): false, y NO se recuerda (se vuelve a mirar si Franco corre el script)', (await D2.columnasConversionListas()) === false && D2._colsConversion !== true);
+  const supaRed = { from: () => ({ select: () => ({ limit: async () => ({ error: { code: '', message: 'Failed to fetch' } }) }) }) };
+  check('Error de red/permisos: null (no se sabe), nunca false', (await mkDB(supaRed).columnasConversionListas()) === null);
+  const supaTira = { from: () => ({ select: () => ({ limit: async () => { throw new Error('boom'); } }) }) };
+  check('Si la consulta tira: null', (await mkDB(supaTira).columnasConversionListas()) === null);
+
+  await D1.guardarLotePago(1, { tipo: 'conversion', montoUsd: 10000, montoUsdt: 9700, comisionPct: 3, comisionUsd: 300, usdtLote: 8790, comisionLoteUsd: 271.86 });
+  check('Guardar con sobrante: manda usdt_lote y comision_lote_usd y la pantalla queda con los mismos valores',
+    insertado[0].r.usdt_lote === 8790 && insertado[0].r.comision_lote_usd === 271.86 && st.lotePagos[0].usdtLote === 8790 && st.lotePagos[0].comisionLoteUsd === 271.86, JSON.stringify([insertado[0], st.lotePagos[0]]));
+  await D1.guardarLotePago(1, { tipo: 'conversion', montoUsd: 1000, montoUsdt: 980, comisionPct: 2, comisionUsd: 20, usdtLote: null, comisionLoteUsd: null });
+  check('Guardar como siempre (sin los dos datos): NO manda las columnas nuevas (funciona sin el script 14)', !('usdt_lote' in insertado[1].r) && !('comision_lote_usd' in insertado[1].r) && st.lotePagos[1].usdtLote === null);
+  await D1.guardarLotePago(1, { tipo: 'conversion', montoUsd: 1000, montoUsdt: 980, comisionPct: 2, comisionUsd: 20, usdtLote: 500, comisionLoteUsd: 0 });
+  check('Comisión del lote 0 explícita: se manda (no se confunde con «sin dato»)', insertado[2].r.comision_lote_usd === 0 && st.lotePagos[2].comisionLoteUsd === 0);
+  await D1.guardarLotePago(1, { tipo: 'conversion', montoUsd: 1000, montoUsdt: 980, comisionUsd: 20, usdtLote: 500 });
+  check('Solo uno de los dos datos: no se manda ninguno (la base exige las dos o ninguna)', !('usdt_lote' in insertado[3].r));
+}
+
+// 44. PANTALLA DE ACTIVIDADES (actividades.js): carga, vista, cuadro del tilde y llamadas a la base
+{
+  const llamadas = [];
+  const e = nuevoEntorno({ modulos: ['actividades.js'], dbExtra: { async cargarTodo() { e.recargas = (e.recargas || 0) + 1; } } });
+  const A = e.mod.Actividades;
+  e.ctx.DB.personasIdToNombre = { u1: 'Franco', u2: 'Socio' };
+  e.State.cajas = { Franco: { 'ARS Mercado Pago': 85000, 'ARS transferencia': 0, 'USD cash': 5 }, Socio: { 'ARS cash': 10 } };
+  const fila = (id, extra = {}) => ({ id, tipo: 'meli_transferir', titulo: 'Transferir lo acreditado de la orden ' + id, monto: '85000.00', moneda: 'ARS', fecha_objetivo: '2026-10-12', estado: 'pendiente',
+    origen_orden_id: id, origen_persona_id: 'u1', origen_bolsillo: 'ARS Mercado Pago', destino_persona_id: null, destino_bolsillo: null, movio_plata: false, nota: null, hecha_en: null, hecha_por: null, ...extra });
+  let tabla = { data: [fila(2), fila(1), fila(3, { fecha_objetivo: '2026-10-10' })], error: null };
+  let config = { data: null, error: null };
+  const upserts = [];
+  e.cfg.supaFrom = t => t === 'actividades' ? consultaActividades(tabla)
+    : { select: () => consultaFalsa(config), upsert: async (r) => { upserts.push(r); return { error: null }; } };
+  let rpcResp = () => ({ data: { ok: true, monto: 85000 }, error: null });
+  e.cfg.supaRpc = async (fn, args) => { llamadas.push({ fn, args }); return rpcResp(fn, args); };
+
+  // Carga
+  check('Cargar: lee las actividades y las deja con sus campos (monto numérico, fecha, estado)', (await A.cargar()) === true && A._lista.length === 3 && A._lista[0].monto === 85000 && A._lista[0].estado === 'pendiente' && A._lista[0].origenBolsillo === 'ARS Mercado Pago', JSON.stringify(A._lista[0]));
+  tabla = { data: null, error: { code: '42P01', message: 'relation "public.actividades" does not exist' } };
+  check('Tabla ausente (script 15 sin correr): lo dice aparte y no tira', (await A.cargar()) === false && A._sinTabla === true && A._error === false && A._vista().includes('script 15'));
+  tabla = { data: null, error: { code: 'PGRST205', message: "Could not find the table 'public.actividades' in the schema cache" } };
+  await A.cargar();
+  check('PGRST205 también se reconoce como «tabla ausente»', A._sinTabla === true);
+  tabla = { data: null, error: { code: '', message: 'Failed to fetch' } };
+  await A.cargar();
+  check('Un error de red NO se confunde con «tabla ausente»: muestra «no se pudieron leer» y el botón Actualizar', A._sinTabla === false && A._error === true && A._vista().includes('No se pudieron leer') && A._vista().includes('Actualizar'));
+  e.cfg.supaFrom = () => { throw new Error('boom'); };
+  check('Si la consulta tira: no propaga, queda en error', (await A.cargar()) === false && A._error === true);
+  e.cfg.supaFrom = t => t === 'actividades' ? consultaActividades(tabla)
+    : { select: () => consultaFalsa(config), upsert: async (r) => { upserts.push(r); return { error: null }; } };
+  tabla = { data: [fila(2), fila(1), fila(3, { fecha_objetivo: '2026-10-10' }), fila(4, { estado: 'hecha', movio_plata: true, destino_persona_id: 'u1', destino_bolsillo: 'ARS transferencia', hecha_por: 'Franco', fecha_objetivo: '2026-10-11' }),
+    fila(5, { estado: 'hecha', fecha_objetivo: '2026-10-11', hecha_por: 'Franco' }), fila(6, { estado: 'anulada' }), fila(7, { tipo: 'manual', titulo: 'Llamar <b>al</b> contador', monto: null, moneda: null, origen_orden_id: null, origen_persona_id: null, origen_bolsillo: null })], error: null };
+  await A.cargar();
+
+  // Las pendientes se piden aparte: una pendiente vieja no queda fuera por el tope de las hechas
+  check('Las pendientes y el resto se cargan juntos y ordenados por fecha (más reciente primero)', A._lista.map(a => a.id).join() === '2,1,4,5,6,7,3' || A._lista.length === 7, A._lista.map(a => a.id).join());
+  {
+    const mas = Array.from({ length: 1000 }, (_, i) => fila(100 + i, { fecha_objetivo: '2026-01-01' }));
+    const guardado = tabla; tabla = { data: mas, error: null };
+    await A.cargar();
+    check('Con 1.000 pendientes (el tope) se avisa que se muestran las más recientes', A._pendientesTruncadas === true && A._vista().includes('Hay más de 1.000 pendientes'));
+    tabla = guardado; await A.cargar();
+    check('Con menos pendientes no hay aviso', A._pendientesTruncadas === false);
+  }
+  // Configuración: ausente ≠ falla
+  {
+    config = { data: null, error: { message: 'permiso denegado' } };
+    A._cajaEmpresa = { persona: 'Socio', bolsillo: 'ARS cash' };
+    await A.cargar();
+    check('Si falla la lectura de la caja predeterminada se CONSERVA la anterior (no se pierde la preferencia)', A._configFalla === true && A._cajaEmpresa && A._cajaEmpresa.persona === 'Socio');
+    A._cajaEmpresa = null; await A.cargar();
+    const posibles = A._destinosPosibles('Franco', 'ARS Mercado Pago');
+    check('Falla la lectura y no hay ninguna anterior: NO se elige «Franco · ARS transferencia» en silencio (obliga a elegir)', A._destinoPredeterminado(posibles) === null);
+    config = { data: null, error: null }; await A.cargar();
+    check('Configuración simplemente ausente: sí se usa «Franco · ARS transferencia»', A._configFalla === false && A._destinoPredeterminado(posibles)?.bolsillo === 'ARS transferencia');
+  }
+
+  // Aviso del menú
+  check('Pendientes vencidas: las de hoy o anteriores (día de Argentina)', A.pendientesVencidas(A._lista, '2026-10-12').length === 4 && A.pendientesVencidas(A._lista, '2026-10-11').length === 1 && A.pendientesVencidas(A._lista, '2026-10-09').length === 0);
+  check('El día de Argentina: 02:30 UTC del 13/10 es el 12/10', A._hoyAR(new Date('2026-10-13T02:30:00Z')) === '2026-10-12' && A._hoyAR(new Date('2026-10-13T03:00:00Z')) === '2026-10-13');
+  const badge = { style: {}, textContent: '' }; const orig = e.ctx.document.getElementById;
+  e.ctx.document.getElementById = id => id === 'badge-actividades' ? badge : orig(id);
+  A.actualizarBadge();
+  check('El badge muestra la cantidad de pendientes vencidas y se oculta en cero', badge.style.display === 'inline-flex' && String(badge.textContent) === String(A.pendientesVencidas().length));
+  const guardada = A._lista; A._lista = []; A.actualizarBadge();
+  check('Sin pendientes el badge se oculta', badge.style.display === 'none');
+  A._lista = guardada;
+  e.ctx.document.getElementById = orig;
+  A.actualizarBadge();   // sin el elemento: no tira
+  check('Sin el elemento del badge no tira', true);
+
+  // Vista
+  A._filtro = 'pendientes';
+  let h = A._vista();
+  check('Vista pendientes: agrupa por día y ofrece transferir las N del día (los dos del 12/10) con el total', h.includes('12/10/2026') && h.includes('10/10/2026') && /Transferir las 2 de este día \(\$170\.000,00\)/.test(h), h.slice(0, 600));
+  check('Cada pendiente de transferencia tiene «Transferir…» y «Anular»; la manual «Marcar como hecha»', /abrirTransferir\(\[1\]\)/.test(h) && /Actividades\.anular\(1,/.test(h) && /Actividades\.marcar\(7,/.test(h));
+  check('El título viene ESCAPADO (no se interpreta HTML)', !h.includes('<b>al</b>') && h.includes('&lt;b&gt;al&lt;/b&gt;'));
+  check('Muestra «hoy» solo si es la fecha de hoy y «atrasadas» para las anteriores (con un reloj fijo)', (() => { const o = A._hoyAR; A._hoyAR = () => '2026-10-12'; const t = A._vista(); A._hoyAR = o; return t.includes('· hoy') && t.includes('· atrasadas'); })());
+  A._filtro = 'hechas'; h = A._vista();
+  check('Hechas: la que movió plata muestra destino y «Deshacer transferencia»; la que no, el aviso y «Reabrir»', h.includes('Socio') === false && /Franco · ARS transferencia/.test(h) && /Actividades\.compensar\(4,/.test(h) && /Actividades\.reabrir\(5,/.test(h) && h.includes('la caja de Mercado Pago conserva ese saldo'), h.slice(0, 500));
+  A._filtro = 'anuladas'; h = A._vista();
+  check('Anuladas: sin botones de acción', h.includes('Anulada') && !/onclick="Actividades\.(transferir|marcar|reabrir|compensar|anular)/.test(h));
+  A._filtro = 'pendientes';
+
+  // Cuadro del tilde
+  const reg = {}; const getOrig = e.ctx.document.getElementById;
+  e.ctx.document.getElementById = id => reg[id] || getOrig(id);
+  let html = '';
+  e.ctx.document.createElement = () => ({ id: '', style: {}, set innerHTML(v) { html = v; }, get innerHTML() { return html; }, remove() { html = ''; } });
+  e.ctx.document.body.appendChild = () => {};
+  A._cajaEmpresa = null;
+  A.abrirTransferir([1]);
+  let t = html.replace(/\s+/g, ' ');
+  check('Cuadro: destinos = cajas en pesos de todas las personas SIN la de origen ni las de dólares; por defecto «Franco · ARS transferencia»',
+    /value="Franco\|\|ARS transferencia" selected/.test(t) && t.includes('Socio · ARS cash') && !t.includes('ARS Mercado Pago</option>') && !t.includes('USD cash'), t.slice(0, 900));
+  A._cajaEmpresa = { persona: 'Socio', bolsillo: 'ARS cash' };
+  A.abrirTransferir([1]); t = html.replace(/\s+/g, ' ');
+  check('La caja recordada en configuración manda sobre el valor por defecto', /value="Socio\|\|ARS cash" selected/.test(t));
+  A._cajaEmpresa = { persona: 'Nadie', bolsillo: 'ARS cash' };
+  A.abrirTransferir([1]); t = html.replace(/\s+/g, ' ');
+  check('Si la recordada ya no existe, vuelve al valor por defecto', /value="Franco\|\|ARS transferencia" selected/.test(t));
+  A._cajaEmpresa = null;
+  e.State.cajas = { Franco: { 'ARS Mercado Pago': 1 }, Socio: { 'ARS cash': 1 } };
+  A.abrirTransferir([1]); t = html.replace(/\s+/g, ' ');
+  check('Sin «Franco · ARS transferencia» ni recordada: obliga a elegir («Elegí la caja…») y propone guardarla', t.includes('Elegí la caja…') && !/selected/.test(t.replace('Elegí la caja…', '')));
+  e.State.cajas = { Franco: { 'ARS Mercado Pago': 85000, 'ARS transferencia': 0, 'USD cash': 5 }, Socio: { 'ARS cash': 10 } };
+  const htmlAntes = html; A.abrirTransferir([6]);   // la anulada: no abre
+  check('No abre el cuadro para una actividad que no está pendiente o no es de transferencia', html === htmlAntes || html === '');
+
+  // Confirmar: transferir
+  llamadas.length = 0; upserts.length = 0;
+  e.dom['act-destino'] = 'Franco||ARS transferencia'; e.dom['act-nota'] = 'cuenta del banco'; e.dom['act-recordar'] = true;
+  A.abrirTransferir([1]);
+  await A.confirmar('transferir', { disabled: false });
+  check('Transferir: llama a la base con el id de la persona (UUID), el bolsillo y la nota; guarda la caja como predeterminada y recarga',
+    llamadas.length === 1 && llamadas[0].fn === 'actividad_transferir' && llamadas[0].args.p_id === 1 && llamadas[0].args.p_intento === 1 && llamadas[0].args.p_destino_persona === 'u1' && llamadas[0].args.p_destino_bolsillo === 'ARS transferencia' && llamadas[0].args.p_nota === 'cuenta del banco'
+    && upserts.length === 1 && JSON.parse(upserts[0].valor).bolsillo === 'ARS transferencia' && e.recargas >= 1 && e.toasts.some(x => x.includes('Transferencia registrada')), JSON.stringify([llamadas, upserts]));
+  llamadas.length = 0;
+  A.abrirTransferir([1]);
+  e.dom['act-destino'] = ''; await A.confirmar('transferir', null);
+  check('Sin elegir destino: NO llama a la base', llamadas.length === 0 && e.toasts.some(x => x.includes('Elegí la caja')));
+  e.dom['act-destino'] = 'Nadie||ARS cash'; await A.confirmar('transferir', null);
+  check('Una persona que no existe: NO llama a la base', llamadas.length === 0);
+  // Varias, con resultado parcial
+  e.dom['act-destino'] = 'Franco||ARS transferencia'; e.dom['act-recordar'] = false; llamadas.length = 0;
+  rpcResp = (fn, args) => args.p_id === 2 ? { data: null, error: { message: 'SALDO_INSUFICIENTE: poco' } } : { data: { ok: true }, error: null };
+  A.abrirTransferir([1, 2, 3]);
+  await A.confirmar('transferir', null);
+  check('Varias a la vez: se hace una por una y se informa «2 de 3» identificando cuáles (#1, #3 hechas; #2 con su motivo)', llamadas.length === 3 && e.toasts.some(x => x.includes('2 de 3') && x.includes('#1, #3') && x.includes('#2 (') && x.includes('saldo suficiente')), JSON.stringify(e.toasts.slice(-2)));
+  // Sin respuesta: se corta
+  llamadas.length = 0;
+  e.cfg.supaRpc = async (fn, args) => { llamadas.push({ fn, args }); throw new Error('red'); };
+  A.abrirTransferir([1, 2, 3]);
+  await A.confirmar('transferir', null);
+  check('Si la llamada TIRA una excepción: NO sigue a ciegas con las demás y avisa que no se sabe', llamadas.length === 1 && e.toasts.some(x => x.includes('no se sabe si se aplicó')));
+  // supabase-js NO tira ante una caída de red: devuelve {error, status: 0}
+  for (const [txt, resp] of [['status 0', { data: null, error: { message: 'TypeError: Failed to fetch' }, status: 0 }], ['502 de pasarela', { data: null, error: { code: '', message: 'Bad Gateway' }, status: 502 }], ['mensaje de red sin código', { data: null, error: { message: 'NetworkError when attempting to fetch resource.' } }]]) {
+    llamadas.length = 0;
+    e.cfg.supaRpc = async (fn, args) => { llamadas.push({ fn, args }); return resp; };
+    A.abrirTransferir([1, 2, 3]);
+    await A.confirmar('transferir', null);
+    check(`Respuesta de red fallida de supabase-js (${txt}): se corta el lote, la actividad queda INCIERTA y las demás NO se intentan`, llamadas.length === 1 && e.toasts.some(x => x.includes('INCIERTA: #1') && x.includes('No se intentaron: #2, #3')), JSON.stringify(e.toasts.slice(-1)));
+  }
+  llamadas.length = 0;
+  e.cfg.supaRpc = async (fn, args) => { llamadas.push({ fn, args }); return { data: null, error: { code: 'P0001', message: 'SALDO_INSUFICIENTE' }, status: 400 }; };
+  A.abrirTransferir([1]); await A.confirmar('transferir', null);
+  check('Un rechazo de negocio (código P0001, 400) NO se confunde con «sin respuesta»', e.toasts.some(x => x.includes('No se pudo: #1') && !x.includes('INCIERTA')));
+  e.cfg.supaRpc = async (fn, args) => { llamadas.push({ fn, args }); return rpcResp(fn, args); };
+  rpcResp = () => ({ data: { ok: true }, error: null });
+  // Doble clic
+  llamadas.length = 0;
+  let suelta; e.cfg.supaRpc = (fn, args) => { llamadas.push({ fn, args }); return new Promise(r => { suelta = () => r({ data: { ok: true }, error: null }); }); };
+  A.abrirTransferir([1]);
+  const p1 = A.confirmar('transferir', null); const p2 = A.confirmar('transferir', null);
+  await dormirTest();
+  suelta(); await p1; await p2;
+  check('Doble clic: una sola llamada a la base', llamadas.length === 1, String(llamadas.length));
+  e.cfg.supaRpc = async (fn, args) => { llamadas.push({ fn, args }); return rpcResp(fn, args); };
+  // Solo marcar
+  llamadas.length = 0; A.abrirTransferir([1]); await A.confirmar('marcar', null);
+  check('«Solo marcar»: llama a actividad_marcar_hecha (con la revisión que se vio) y NO a transferir', llamadas.length === 1 && llamadas[0].fn === 'actividad_marcar_hecha' && llamadas[0].args.p_revision === 1);
+
+  // Lo que se ejecuta es lo que se vio al abrir el cuadro (aunque la pantalla se recargue mientras tanto)
+  A._lista.find(a => a.id === 1).intento = 1;
+  A.abrirTransferir([1]);
+  A._lista.find(a => a.id === 1).intento = 2; A._lista.find(a => a.id === 1).revision = 9;   // una recarga cambió los datos
+  llamadas.length = 0; e.cfg.supaRpc = async (fn, args) => { llamadas.push({ fn, args }); return { data: { ok: true }, error: null }; };
+  await A.confirmar('transferir', null);
+  check('El intento que se manda es el del momento de abrir el cuadro, no el de una recarga posterior', llamadas[0].args.p_intento === 1, JSON.stringify(llamadas[0].args));
+  A._lista.find(a => a.id === 1).intento = 1; A._lista.find(a => a.id === 1).revision = 1;
+  rpcResp = () => ({ data: { ok: true }, error: null });
+  e.cfg.supaRpc = async (fn, args) => { llamadas.push({ fn, args }); return rpcResp(fn, args); };
+
+  // Otras acciones
+  llamadas.length = 0;
+  await A.marcar(7, null); await A.reabrir(5, null);
+  check('Marcar y reabrir llaman a sus funciones, cada una con la revisión de la actividad', llamadas.map(l => l.fn).join() === 'actividad_marcar_hecha,actividad_reabrir' && llamadas.every(l => l.args.p_revision === 1));
+  llamadas.length = 0; e.ctx.confirm = () => false;
+  await A.anular(1, null); await A.compensar(4, null);
+  check('Anular y deshacer transferencia piden confirmación: si se rechaza NO llaman a la base', llamadas.length === 0);
+  e.ctx.confirm = () => true;
+  await A.anular(1, null); await A.compensar(4, null);
+  check('Con confirmación llaman a actividad_anular (con revisión) y actividad_compensar', llamadas.map(l => l.fn).join() === 'actividad_anular,actividad_compensar' && llamadas[0].args.p_revision === 1);
+  check('«Deshacer transferencia» manda el intento que vio la pantalla', llamadas[1].args.p_intento === 1);
+  A._lista.find(a => a.id === 4).intento = 3; llamadas.length = 0; await A.compensar(4, null);
+  check('… y usa el de esa actividad (3), no uno fijo', llamadas[0].args.p_intento === 3);
+  check('«Cambió desde que abriste» y «falta el intento» tienen mensaje propio', A._msgError({ message: 'ACTIVIDAD_DESACTUALIZADA' }).includes('cambió desde que abriste') && A._msgError({ message: 'INTENTO_REQUERIDO' }).includes('recargá'));
+  check('La carga trae el intento de cada actividad', A._lista.every(a => Number.isInteger(a.intento) && a.intento >= 1));
+
+  // Errores traducidos
+  check('Los códigos de la base se traducen a castellano', A._msgError({ message: 'ORDEN_YA_TRANSFERIDA' }).includes('deshacé la transferencia') && A._msgError({ message: 'DESTINO_IGUAL_ORIGEN' }).includes('misma que la de origen') && A._msgError({ message: 'x<b>y' }).includes('&lt;b&gt;'));
+
+  // Cargas simultáneas: la ÚLTIMA gana (una respuesta vieja que llega tarde no pisa la nueva)
+  {
+    const respuestas = [];
+    const lenta = (rows) => new Proxy({}, { get: (_, k) => k === 'then' ? (ok, ko) => new Promise(r => respuestas.push(() => r({ data: rows, error: null }))).then(ok, ko) : () => lenta(rows) });
+    const guardadoFrom = e.cfg.supaFrom, guardadaLista = A._lista;
+    e.cfg.supaFrom = t => t === 'actividades' ? lenta([fila(500, { estado: 'pendiente' })].filter(() => true)) : { select: () => consultaFalsa({ data: null, error: null }) };
+    const c1 = A.cargar();                       // la primera queda esperando
+    e.cfg.supaFrom = t => t === 'actividades' ? lenta([fila(600, { estado: 'pendiente' })]) : { select: () => consultaFalsa({ data: null, error: null }) };
+    const c2 = A.cargar();                       // la segunda es más nueva
+    await dormirTest();
+    respuestas.slice(2).forEach(f => f());       // se resuelve primero la NUEVA (sus dos consultas)…
+    await c2;
+    respuestas.slice(0, 2).forEach(f => f());    // …y recién después llega la vieja
+    await c1;
+    check('Dos cargas a la vez: queda la lista de la ÚLTIMA aunque la vieja llegue tarde', A._lista.some(a => a.id === 600) && !A._lista.some(a => a.id === 500), JSON.stringify(A._lista.map(a => a.id)));
+    e.cfg.supaFrom = guardadoFrom; A._lista = guardadaLista;
+  }
+
+  // Aviso al abrir: transferencias pendientes
+  A._lista = [{ id: 1, tipo: 'meli_transferir', estado: 'pendiente', monto: 85000 }, { id: 2, tipo: 'meli_transferir', estado: 'pendiente', monto: 85000 }, { id: 3, tipo: 'manual', estado: 'pendiente', monto: null }, { id: 4, tipo: 'meli_transferir', estado: 'hecha', monto: 1 }];
+  check('textoPendientes: cuenta SOLO transferencias pendientes (no manuales ni hechas) con su total', A.textoPendientes() === 'Tenés 2 transferencias pendientes por $170.000.', A.textoPendientes());
+  check('… en singular con una, y vacío sin ninguna', A.textoPendientes([{ tipo: 'meli_transferir', estado: 'pendiente', monto: 5 }]) === 'Tenés 1 transferencia pendiente por $5.' && A.textoPendientes([]) === '');
+  // Cableado: la pantalla está conectada al menú y a la app
+  const appJs = fs.readFileSync('/Users/francovelas/crm-complete/iphonemood-crm/src/modules/app.js', 'utf8'), crmHtml = fs.readFileSync('/Users/francovelas/crm-complete/iphonemood-crm/crm.html', 'utf8');
+  check('Cableado: app.js importa actividades.js y la registra en PAGES; crm.html tiene el ítem del menú y su badge propio (distinto del de Mercado Libre)',
+    /import '\.\/actividades\.js'/.test(appJs) && /actividades: \{ title: 'Actividades', module: Actividades \}/.test(appJs) && /data-page="actividades"/.test(crmHtml) && /id="badge-actividades"/.test(crmHtml) && /id="badge-meli"/.test(crmHtml));
+  check('Cableado: el aviso de apertura espera a las actividades y el badge se actualiza con el resto', /Actividades\?\.cargar\?\.\(\)/.test(appJs) && /Actividades\?\.actualizarBadge\?\.\(\)/.test(appJs));
+
+  // Nueva actividad
+  llamadas.length = 0;
+  e.dom['act-titulo'] = '  '; await A.crear(null);
+  check('Crear sin título: NO llama a la base', llamadas.length === 0);
+  e.dom['act-titulo'] = 'Llamar al contador'; e.dom['act-fecha'] = ''; await A.crear(null);
+  check('Crear sin fecha: NO llama a la base', llamadas.length === 0);
+  e.dom['act-fecha'] = '2026-10-20'; e.dom['act-nota-nueva'] = ''; await A.crear(null);
+  check('Crear: llama a actividad_crear con título, fecha, sin monto', llamadas.length === 1 && llamadas[0].fn === 'actividad_crear' && llamadas[0].args.p_titulo === 'Llamar al contador' && llamadas[0].args.p_fecha_objetivo === '2026-10-20' && llamadas[0].args.p_monto === null && llamadas[0].args.p_nota === null);
+}
+
+// 45. DETALLE DE UNA VENTA DE MERCADO LIBRE (ventas.js): cotización usada y comisión estimada hasta acreditar
+{
+  const e = nuevoEntorno({ modulos: ['ventas.js'] });
+  const V = e.mod.Ventas;
+  const venta = (extra = {}) => ({ id: 125, estado: 'abierta', tipoVenta: 'mercadolibre', meliOrdenId: 7, meliCotizacion: 1620, costoCanal: 0, items: [{ precio: 38.27, costo: 24 }], pagos: [], ...extra });
+  const orden = (extra = {}) => ({ ventaId: 125, acreditado: false, revertidaEn: null, financieraCompleta: true, bruto: 61990, neto: 43187, ...extra });
+  e.State.meliOrdenes = [orden()];
+  const r = V.resultadoVenta(venta());
+  const d = V._detalleMeli(venta(), r);
+  check('Caso real #125: cotización 1.620 y Mercado Libre se queda ≈ (61.990 − 43.187) ÷ 1.620 = USD 11,61', d && d.cot === 1620 && d.estimado === 11.61, JSON.stringify(d));
+  check('Trae el precio de Mercado Libre en pesos ($61.990), de donde sale el total en dólares', d.ars === 61990, JSON.stringify(d));
+  check('El profit que se muestra (14,27) es ANTES de Mercado Libre; después queda ≈ 2,66 (provisorio)', Math.abs(r.margenReal - 14.27) < 0.005 && d.profitDespues === 2.66, JSON.stringify([r.margenReal, d]));
+  check('Ya acreditada: no hay estimado (el costo real ya está en la venta)', V._detalleMeli(venta({ costoCanal: 11.6 }), r) !== null && (e.State.meliOrdenes = [orden({ acreditado: true })], V._detalleMeli(venta(), r).estimado === null));
+  e.State.meliOrdenes = [orden({ financieraCompleta: false })];
+  check('Datos de pago incompletos: no se estima (nunca se inventa)', V._detalleMeli(venta(), r).estimado === null);
+  e.State.meliOrdenes = [orden({ neto: null })];
+  check('Neto nulo: no se estima', V._detalleMeli(venta(), r).estimado === null);
+  e.State.meliOrdenes = [orden({ revertidaEn: '2026-10-10T00:00:00Z' })];
+  check('Orden revertida: no se estima', V._detalleMeli(venta(), r).estimado === null);
+  e.State.meliOrdenes = [];
+  check('Sin la orden en memoria: muestra la cotización pero no estima', V._detalleMeli(venta(), r).estimado === null && V._detalleMeli(venta(), r).cot === 1620);
+  e.State.meliOrdenes = [orden()];
+  check('Venta sin cotización guardada o que no es de Mercado Libre: no agrega nada', V._detalleMeli(venta({ meliCotizacion: null }), r) === null && V._detalleMeli({ id: 1, tipoVenta: 'minorista', items: [], pagos: [] }, r) === null);
 }
 
 // 30. Altas: si el registro no se puede crear, NO se toca la caja (o se deshace)

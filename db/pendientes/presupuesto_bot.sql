@@ -210,6 +210,7 @@ SET search_path = public, extensions, pg_temp
 AS $$
 DECLARE
   v_cant      integer;
+  v_disp      integer;      -- unidades disponibles del MISMO equipo (todas las filas idénticas del stock)
   v_canje     jsonb := '[]'::jsonb;
   v_el        jsonb;
   v_clave     text;
@@ -336,12 +337,26 @@ BEGIN
   IF u.estado_inventario IS DISTINCT FROM 'disponible'
      OR COALESCE(u.categoria, '') NOT IN ('iphone', 'android', 'mac', 'ipad')               -- igual que el CRM: la categoría exacta
      OR COALESCE(u.a_pedido, FALSE)
-     OR COALESCE(u.precio_ars, 0) <= 0 OR COALESCE(u.cotizacion, 0) <= 0
-     OR GREATEST(COALESCE(array_length(u.imeis, 1), 0), COALESCE(u.cantidad, 0)) < v_cant THEN
+     OR COALESCE(u.precio_ars, 0) <= 0 OR COALESCE(u.cotizacion, 0) <= 0 THEN
     RAISE EXCEPTION 'UNIDAD_NO_DISPONIBLE';
   END IF;
   v_unit := ROUND(u.precio_ars::numeric / u.cotizacion::numeric)::int;
   IF v_unit < 1 THEN RAISE EXCEPTION 'UNIDAD_NO_DISPONIBLE'; END IF;
+  -- Cuántas unidades hay DEL MISMO EQUIPO: se suman todas las filas idénticas del stock (típico: un iPhone con IMEI es una
+  -- fila por unidad). Es la misma clave y los mismos filtros con los que el CRM arma su lista (Presupuestos.equiposDisponibles):
+  -- nombre | modelo | capacidad | color | precio en USD (redondeado), sin distinguir mayúsculas; vacío y NULL son lo mismo.
+  -- Cada fila aporta lo que tenga cargado (IMEI o cantidad, el mayor).
+  SELECT COALESCE(sum(GREATEST(COALESCE(array_length(s.imeis, 1), 0), COALESCE(s.cantidad, 0))), 0)::int INTO v_disp
+    FROM public.stock s
+   WHERE s.estado_inventario IS NOT DISTINCT FROM 'disponible'
+     AND COALESCE(s.categoria, '') IN ('iphone', 'android', 'mac', 'ipad')
+     AND NOT COALESCE(s.a_pedido, FALSE)
+     AND COALESCE(s.precio_ars, 0) > 0 AND COALESCE(s.cotizacion, 0) > 0
+     AND lower(COALESCE(s.nombre, '') || '|' || COALESCE(s.modelo, '') || '|' || COALESCE(s.storage, '') || '|' || COALESCE(s.color, '')
+               || '|' || ROUND(s.precio_ars::numeric / s.cotizacion::numeric)::int)
+       = lower(COALESCE(u.nombre, '') || '|' || COALESCE(u.modelo, '') || '|' || COALESCE(u.storage, '') || '|' || COALESCE(u.color, '')
+               || '|' || v_unit);
+  IF v_disp < v_cant THEN RAISE EXCEPTION 'UNIDAD_NO_DISPONIBLE'; END IF;
 
   -- ── Dólar y financiación: las MISMAS fuentes que usa el CRM al guardar ─────
   SELECT CASE WHEN valor ~ '^[0-9]+(\.[0-9]+)?$' THEN valor::numeric END INTO v_cot FROM public.configuracion WHERE clave = 'ref_blue';

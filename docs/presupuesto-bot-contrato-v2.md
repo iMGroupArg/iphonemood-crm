@@ -82,3 +82,31 @@ Durante el cambio valen **dos claves a la vez**: así no se corta el bot.
 
 ## 7. Topes y valores (se cambian con un UPDATE, sin desplegar)
 60 presupuestos por día · 5 por minuto · vencimiento 2 días · cantidad 1 a 5 · canje: 3 equipos, 50–2.500 USD, ≤ 100 % del último precio vendido · contacto 180 días · pruebas: 30 minutos, 100 por día, 24 h de retención.
+
+## 8. Disponibilidad: se cuentan todas las unidades idénticas (cambio del script 18)
+`UNIDAD_NO_DISPONIBLE` por falta de unidades se decide sobre **todo el equipo**, no sobre la fila que mandás en `unidad`. Un iPhone con IMEI es una fila de stock por unidad: dos iguales en stock + `cantidad: 2` **sí** se presupuesta (el CRM los ofrece como "2 u."). "Idénticas" = mismo `nombre`, `modelo`, capacidad, color y **precio en USD redondeado**, sin distinguir mayúsculas, y vacío = sin dato (la misma clave que usa el CRM). Solo suman las filas **disponibles**, de categoría iphone/android/mac/ipad, con precio y cotización cargados. Cada fila aporta el mayor entre sus IMEI y su `cantidad`.
+* `stock` del catálogo es **por fila**: si ves dos filas iguales con `stock: 1`, hay 2 unidades del equipo; podés pedir `cantidad: 2` con el `id` de cualquiera de las dos.
+* Un presupuesto **no reserva** el equipo: es una oferta con vencimiento. La página no vuelve a mirar el stock.
+* Hasta que Franco corra el script 18 rige la regla vieja (una sola fila): usá `cantidad: 1`.
+
+## 9. Modo prueba = mismas reglas que el real
+La clave de prueba solo cambia: vencimiento (30 minutos), origen (`bot_prueba`), que no guarda nombre ni contacto, el cupo (propio) y el borrado a las 24 h. **Las reglas del canje son las mismas** (rango 50–2.500 USD, tope contra el último precio vendido, batería, estado, modelo y capacidad) y devuelven los mismos códigos; un canje válido produce el mismo producto, canje y cotización. Está probado en `tests/sql/presupuesto_bot.sql.test.mjs`.
+
+## 10. Redondeos exactos (para comparar al peso)
+**Lo que redondea el CRM al crear el presupuesto (SQL): una sola cosa.**
+* `precio_unitario_usd = ROUND(precio_ars / cotizacion)` con la `precio_ars` y la `cotizacion` **de la propia unidad del stock** (aritmética decimal exacta; en positivos el .5 sube). El CRM usa la misma cuenta (`Math.round(precioARS / cotiz)`), así que dan igual.
+* `precio_usd = precio_unitario_usd × cantidad` (entero, sin más redondeo).
+* El canje se guarda con los `valor_usd` **enteros** que mandás; el total del canje es su suma.
+* `cotizacion` del presupuesto = `ref_blue` de la configuración, **sin redondear**. Es el mismo valor que ves en `tipoCambio` del catálogo, pero el presupuesto guarda el que regía **al crearlo**.
+
+**Lo que calcula la página al mostrar el link (JavaScript, números de 64 bits), en este orden:**
+1. `saldoUSD = max(0, precio_usd − valor_usd_del_canje − efectivo)`
+2. `contadoARS = Math.round(saldoUSD × cotizacion × contado_factor)` (factor por defecto 1)
+3. `listaARS = Math.round(saldoUSD × cotizacion × lista_factor)` (por defecto 1,45)
+4. Por cada cuota: `total = Math.round(listaARS × coef)` y `mes = Math.round(total / n)`.
+
+**Cómo compararlo sin errores de medio peso:**
+* Multiplicá **en ese orden** (de izquierda a derecha) y con doubles; no uses decimales de precisión distinta ni cambies el orden de los factores.
+* `Math.round` redondea el .5 **hacia arriba**. El `round()` de Python (y otras librerías) redondea el .5 al par ("redondeo bancario"): da un peso de diferencia en los empates. En Python usá `math.floor(x + 0.5)`.
+* Redondeá **solo al final de cada paso** descrito arriba (no antes). `total` se redondea y **después** se divide por `n`.
+* Para que tu mensaje y la página nunca discrepen, lo más seguro es **no calcular cuotas vos**: mostrá el link (la página calcula todo) y, si querés citar un número, tomalo de la misma cuenta.

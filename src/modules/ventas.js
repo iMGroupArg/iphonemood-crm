@@ -2211,7 +2211,7 @@ const Ventas = {
             ${itemsAccesorios.length ? `
             <div class="card" style="margin-bottom:14px">
               <div class="card-title"><i class="ti ti-box"></i> Accesorios Vendidos</div>
-              <table><thead><tr><th>Accesorio</th><th>SKU</th><th>Cantidad</th><th>Precio Total</th><th>Profit</th><th>Comisión</th></tr></thead>
+              <table><thead><tr><th>Accesorio</th><th>SKU</th><th>Cantidad</th><th>Costo</th><th>Precio Total</th><th>Profit</th><th>Comisión</th></tr></thead>
               <tbody>${itemsAccesorios.map(i => {
                 const p = State.stock.find(s => s.id === i.stockId);
                 const profit = i.precio - (i.costo||0);
@@ -2219,6 +2219,7 @@ const Ventas = {
                   <td>${i.nombre}${i.regalo?` <span style="font-size:10px;color:var(--green)">🎁 regalo</span>`:''}</td>
                   <td style="font-size:11px;color:var(--text-secondary)">${p?.storage||p?.notas||'N/A'}</td>
                   <td>1</td>
+                  <td>${State.fmtUSD(i.costo||0)}</td>
                   <td>${i.regalo?`<span style="color:var(--green)">Gratis</span>`:State.fmtUSD(i.precio)}</td>
                   <td style="color:${profit>=0?'var(--green)':'var(--red)'}">${profit>=0?'+':''}${State.fmtUSD(profit)}</td>
                   <td>$0</td>
@@ -2256,7 +2257,16 @@ const Ventas = {
                   if (r.quebranto > 0.005) extra = `<div style="font-size:10.5px;color:var(--red)">− ${State.fmtUSD(r.quebranto)} que no se cobraron</div>`;
                   else if (r.diferencial > 0.005) extra = `<div style="font-size:10.5px;color:var(--purple)">incluye +${State.fmtUSD(r.diferencial)} de recargo</div>`;
                   else if (r.pendiente > 0.005) extra = `<div style="font-size:10.5px;color:var(--amber)">${State.fmtUSD(r.pendiente)} pendiente de cobro</div>`;
-                  return `<div style="font-size:12px;color:${c}">Profit: ${r.margenReal>=0?'+':''}${State.fmtUSD(r.margenReal)}</div>${extra}`;
+                  // Venta de Mercado Libre: se muestra con qué cotización se convirtió y, mientras no se acredite, cuánto
+                  // se va a quedar Mercado Libre (estimado) y el profit que quedaría DESPUÉS de esa comisión.
+                  const m = Ventas._detalleMeli(v, r);
+                  if (m) {
+                    extra += `<div style="font-size:10.5px;color:var(--text-secondary)">${m.ars !== null ? `Precio en Mercado Libre: ${State.fmtARS(m.ars)} · ` : ''}pesos a USD con cotización $${m.cot.toLocaleString('es-AR')} (la que se eligió al procesar; queda fija)</div>`;
+                    if (m.estimado !== null) extra += `<div style="font-size:10.5px;color:var(--amber)">Mercado Libre se queda ≈ ${State.fmtUSD(m.estimado)} (comisión + envío, estimado hasta acreditar)</div>`
+                      + `<div style="font-size:12px;font-weight:600;color:${m.profitDespues>=0?'var(--green)':'var(--red)'}">Profit después de Mercado Libre: ${m.profitDespues>=0?'+':''}${State.fmtUSD(m.profitDespues)} (provisorio)</div>`;
+                    else if (r.costoCanal > 0.005) extra += `<div style="font-size:10.5px;color:var(--text-secondary)">Mercado Libre se quedó ${State.fmtUSD(r.costoCanal)} (comisión + envío)</div>`;
+                  }
+                  return `<div style="font-size:12px;color:${c}">Profit: ${r.margenReal>=0?'+':''}${State.fmtUSD(r.margenReal)}${m && m.estimado !== null ? ' <span style="font-size:10.5px;color:var(--text-secondary)">(antes de Mercado Libre)</span>' : ''}</div>${extra}`;
                 })()}
               </div>
             </div>
@@ -2824,6 +2834,22 @@ const Ventas = {
   },
 
   _esMeli(v) { return v?.tipoVenta === 'mercadolibre' || v?.meliOrdenId != null; },
+  // Datos de Mercado Libre para el detalle de una venta: la cotización congelada y, si la orden todavía no se acreditó y
+  // sus importes están confirmados, lo que se va a quedar Mercado Libre (retenido en pesos ÷ cotización).
+  //   → null si no es de Mercado Libre; { cot, estimado: número | null, profitDespues }
+  _detalleMeli(v, r) {
+    if (!this._esMeli(v)) return null;
+    const cot = Number(v.meliCotizacion);
+    if (!(cot > 0)) return null;
+    const o = (State.meliOrdenes || []).find(x => x.ventaId === v.id);
+    let estimado = null;
+    if (o && !o.acreditado && !o.revertidaEn && o.financieraCompleta && Number.isFinite(o.bruto) && Number.isFinite(o.neto) && o.bruto >= o.neto) {
+      estimado = State.cent((o.bruto - o.neto) / cot);
+    }
+    // Precio que pagó el comprador en Mercado Libre, en pesos (de donde sale el total en dólares de la venta).
+    const ars = o && Number.isFinite(o.bruto) ? o.bruto : null;
+    return { cot, ars, estimado, profitDespues: estimado === null ? null : State.cent(r.margenReal - estimado) };
+  },
   // Para MOSTRAR el saldo de una venta: { dif: pagado − total (≥ 0 = pagada), aLiberar }.
   // En una venta de Mercado Libre, lo que se quedó el canal (comisión + envío) cuenta
   // como cubierto, y mientras no se acreditó no hay saldo de ningún cliente: está "a liberar".

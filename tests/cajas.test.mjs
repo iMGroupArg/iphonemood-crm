@@ -2533,6 +2533,31 @@ const entornoVenta = (extra = {}, cfg = {}) => {
   check('Crear: llama a actividad_crear con título, fecha, sin monto', llamadas.length === 1 && llamadas[0].fn === 'actividad_crear' && llamadas[0].args.p_titulo === 'Llamar al contador' && llamadas[0].args.p_fecha_objetivo === '2026-10-20' && llamadas[0].args.p_monto === null && llamadas[0].args.p_nota === null);
 }
 
+// 45. DETALLE DE UNA VENTA DE MERCADO LIBRE (ventas.js): cotización usada y comisión estimada hasta acreditar
+{
+  const e = nuevoEntorno({ modulos: ['ventas.js'] });
+  const V = e.mod.Ventas;
+  const venta = (extra = {}) => ({ id: 125, estado: 'abierta', tipoVenta: 'mercadolibre', meliOrdenId: 7, meliCotizacion: 1620, costoCanal: 0, items: [{ precio: 38.27, costo: 24 }], pagos: [], ...extra });
+  const orden = (extra = {}) => ({ ventaId: 125, acreditado: false, revertidaEn: null, financieraCompleta: true, bruto: 61990, neto: 43187, ...extra });
+  e.State.meliOrdenes = [orden()];
+  const r = V.resultadoVenta(venta());
+  const d = V._detalleMeli(venta(), r);
+  check('Caso real #125: cotización 1.620 y Mercado Libre se queda ≈ (61.990 − 43.187) ÷ 1.620 = USD 11,61', d && d.cot === 1620 && d.estimado === 11.61, JSON.stringify(d));
+  check('Trae el precio de Mercado Libre en pesos ($61.990), de donde sale el total en dólares', d.ars === 61990, JSON.stringify(d));
+  check('El profit que se muestra (14,27) es ANTES de Mercado Libre; después queda ≈ 2,66 (provisorio)', Math.abs(r.margenReal - 14.27) < 0.005 && d.profitDespues === 2.66, JSON.stringify([r.margenReal, d]));
+  check('Ya acreditada: no hay estimado (el costo real ya está en la venta)', V._detalleMeli(venta({ costoCanal: 11.6 }), r) !== null && (e.State.meliOrdenes = [orden({ acreditado: true })], V._detalleMeli(venta(), r).estimado === null));
+  e.State.meliOrdenes = [orden({ financieraCompleta: false })];
+  check('Datos de pago incompletos: no se estima (nunca se inventa)', V._detalleMeli(venta(), r).estimado === null);
+  e.State.meliOrdenes = [orden({ neto: null })];
+  check('Neto nulo: no se estima', V._detalleMeli(venta(), r).estimado === null);
+  e.State.meliOrdenes = [orden({ revertidaEn: '2026-10-10T00:00:00Z' })];
+  check('Orden revertida: no se estima', V._detalleMeli(venta(), r).estimado === null);
+  e.State.meliOrdenes = [];
+  check('Sin la orden en memoria: muestra la cotización pero no estima', V._detalleMeli(venta(), r).estimado === null && V._detalleMeli(venta(), r).cot === 1620);
+  e.State.meliOrdenes = [orden()];
+  check('Venta sin cotización guardada o que no es de Mercado Libre: no agrega nada', V._detalleMeli(venta({ meliCotizacion: null }), r) === null && V._detalleMeli({ id: 1, tipoVenta: 'minorista', items: [], pagos: [] }, r) === null);
+}
+
 // 30. Altas: si el registro no se puede crear, NO se toca la caja (o se deshace)
 {
   const e = nuevoEntorno({ modulos: ['gastos.js'], dom: { 'gf-motivo': 'Alquiler', 'gf-monto': '50', 'gf-caja-persona': 'Franco', 'gf-caja-bolsillo': 'USD cash', 'gf-moneda': 'USD', 'gf-cat': 'x', 'gf-resp': 'Franco' },

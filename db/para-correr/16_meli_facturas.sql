@@ -33,19 +33,32 @@ BEGIN
   END IF;
 END $$;
 
--- Si alguna de las dos tablas ya existe (por una corrida anterior de ESTE script), tiene que tener la estructura
--- esperada: `CREATE TABLE IF NOT EXISTS` no corrige una tabla distinta.
+-- Si alguna de las dos tablas ya existe (por una corrida anterior de ESTE script), tiene que tener EXACTAMENTE la
+-- estructura esperada (columnas, tipos y restricciones): `CREATE TABLE IF NOT EXISTS` no corrige una tabla distinta.
 DO $$
+DECLARE
+  v_fact TEXT := 'emitida_el:date,estado:text,marcada_en:timestamp with time zone,marcada_por:text,marcada_uid:text,motivo:text,numero:integer,orden_id:text,pto_venta:integer,tipo:text,version:bigint';
+  v_hist TEXT := 'creado_en:timestamp with time zone,emitida_el_anterior:date,emitida_el_nuevo:date,estado_anterior:text,estado_nuevo:text,id:bigint,marcada_por:text,marcada_uid:text,motivo_anterior:text,motivo_nuevo:text,numero_anterior:integer,numero_nuevo:integer,orden_id:text,pto_venta_anterior:integer,pto_venta_nuevo:integer,tipo_anterior:text,tipo_nuevo:text,version:bigint';
+  v_act  TEXT;
 BEGIN
-  IF to_regclass('public.meli_facturas') IS NOT NULL AND (
-       SELECT count(*) FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'meli_facturas'
-          AND column_name IN ('orden_id', 'estado', 'tipo', 'pto_venta', 'numero', 'emitida_el', 'motivo', 'version', 'marcada_por', 'marcada_uid', 'marcada_en')) <> 11 THEN
-    RAISE EXCEPTION 'public.meli_facturas ya existe con otra estructura: no se toca. Revisar a mano antes de seguir.';
+  IF to_regclass('public.meli_facturas') IS NOT NULL THEN
+    SELECT string_agg(column_name || ':' || data_type, ',' ORDER BY column_name COLLATE "C") INTO v_act
+      FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'meli_facturas';
+    -- (las listas esperadas están en orden alfabético por nombre de columna, con la colación C)
+    IF v_act IS DISTINCT FROM v_fact
+       OR NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid = 'public.meli_facturas'::regclass AND contype = 'p')
+       OR NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid = 'public.meli_facturas'::regclass AND contype = 'f')
+       OR (SELECT count(*) FROM pg_constraint WHERE conrelid = 'public.meli_facturas'::regclass AND conname IN ('meli_facturas_estado_ck', 'meli_facturas_coherente_ck')) <> 2 THEN
+      RAISE EXCEPTION 'public.meli_facturas ya existe con otra estructura: no se toca. Revisar a mano antes de seguir.';
+    END IF;
   END IF;
-  IF to_regclass('public.meli_facturas_historial') IS NOT NULL AND (
-       SELECT count(*) FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'meli_facturas_historial'
-          AND column_name IN ('id', 'orden_id', 'version', 'estado_anterior', 'estado_nuevo', 'numero_anterior', 'numero_nuevo', 'marcada_por', 'marcada_uid', 'creado_en')) <> 10 THEN
-    RAISE EXCEPTION 'public.meli_facturas_historial ya existe con otra estructura: no se toca. Revisar a mano antes de seguir.';
+  IF to_regclass('public.meli_facturas_historial') IS NOT NULL THEN
+    SELECT string_agg(column_name || ':' || data_type, ',' ORDER BY column_name COLLATE "C") INTO v_act
+      FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'meli_facturas_historial';
+    IF v_act IS DISTINCT FROM v_hist
+       OR NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid = 'public.meli_facturas_historial'::regclass AND contype = 'p') THEN
+      RAISE EXCEPTION 'public.meli_facturas_historial ya existe con otra estructura: no se toca. Revisar a mano antes de seguir.';
+    END IF;
   END IF;
 END $$;
 

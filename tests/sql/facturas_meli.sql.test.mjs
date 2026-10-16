@@ -417,5 +417,12 @@ console.log('\n══ Facturas de Mercado Libre — control (Postgres en WebAsse
   }
 }
 
+// ── 16 · El paquete: lo que se corre es lo que se probó ────────────────────────────────────────
+{
+  const fs = await import('node:fs'); const path = await import('node:path'); const { AQUI } = await import('./lib/base_meli.mjs');
+  const p16 = fs.readFileSync(path.join(AQUI, '../../db/para-correr/16_meli_facturas.sql'), 'utf8');
+  check('db/para-correr/16_… es IDÉNTICO a db/pendientes/meli_facturas.sql (lo que se corre es lo que se probó)', p16 === SCRIPT);
+}
+
 console.log(`\n${ok} bien, ${fail} mal`);
 process.exit(fail ? 1 : 0);

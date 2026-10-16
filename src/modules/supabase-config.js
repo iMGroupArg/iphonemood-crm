@@ -1216,15 +1216,18 @@ const DB = {
     await supa.from('ventas').update({ estado }).eq('id', ventaId);
   },
 
+  // Devuelve el link de seguimiento que la base genera al crear la reparación (o null si no se pudo leer): la pantalla lo
+  // necesita ya, sin esperar a recargar.
   async crearReparacion(o) {
-    await supa.from('reparaciones').insert({
+    const { data } = await supa.from('reparaciones').insert({
       id: o.id, cliente: o.cliente, telefono: o.tel, equipo: o.equipo, falla: o.falla,
       clave_desbloqueo: o.clave, estado: o.estado, diagnostico: o.diagnostico,
       presupuesto_aprobado: o.presupuestoAprobado, tecnico: o.tecnico,
       custodio_id: this.personaId(o.custodio) || null, costo_mano_obra: o.costoMO,
       precio_final: o.precioFinal, notas: o.notas, equipo_devuelto: o.equipoDevuelto,
       condicion_ingreso: o.condicionIngreso || {},
-    });
+    }).select('token_seguimiento').single();
+    return data?.token_seguimiento || null;
   },
   async actualizarReparacion(o) {
     const { error } = await supa.from('reparaciones').update({

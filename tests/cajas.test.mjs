@@ -2619,6 +2619,26 @@ const entornoVenta = (extra = {}, cfg = {}) => {
     e.base['Franco||USD cash'] === 100 && e.State.adelantos[0].estado === 'pendiente', JSON.stringify(e.base));
 }
 
+// 99. Reparaciones · una reparación recién creada trae su link de seguimiento (antes la tarjeta decía «aún no tiene link» hasta recargar)
+{
+  const fuente = fs.readFileSync('/Users/francovelas/crm-complete/iphonemood-crm/src/modules/supabase-config.js', 'utf8');
+  const mkDB = (supa) => {
+    const ctxDB = { window: { __APP_CONFIG__: { SUPABASE_URL: 'x', SUPABASE_ANON_KEY: 'y' } }, supabase: { createClient: () => supa },
+      console: { log() {}, warn() {}, error() {} }, Auth: {}, State: {}, toast() {}, Date, Math, Number, JSON, String, Promise, Error };
+    vm.createContext(ctxDB);
+    vm.runInContext(fuente + '\nthis.__DB = DB;', ctxDB, { filename: 'supabase-config.js' });
+    return ctxDB.__DB;
+  };
+  const pedido = [];
+  const supaOk = { from: t => ({ insert: r => { pedido.push({ t, r }); return { select: c => { pedido.push({ cols: c }); return { single: async () => ({ data: { token_seguimiento: 'abc123' }, error: null }) }; } }; } }) };
+  const tk = await mkDB(supaOk).crearReparacion({ id: 'R001', cliente: 'Ana', estado: 'ingresado' });
+  check('Crear una reparación devuelve el link que generó la base y lo pide con select (sin leer otras columnas)', tk === 'abc123' && pedido.some(x => x.cols === 'token_seguimiento') && pedido[0].t === 'reparaciones');
+  const supaFalla = { from: () => ({ insert: () => ({ select: () => ({ single: async () => ({ data: null, error: { message: 'x' } }) }) }) }) };
+  check('Si no se pudo leer el link, devuelve null (la pantalla sigue como antes y se arregla al recargar)', (await mkDB(supaFalla).crearReparacion({ id: 'R002' })) === null);
+  const rep = fs.readFileSync('/Users/francovelas/crm-complete/iphonemood-crm/src/modules/reparaciones.js', 'utf8');
+  check('La pantalla guarda ese link en la reparación nueva antes de mostrarla', /o\.tokenSeguimiento\s*=\s*await DB\.crearReparacion\(o\)/.test(rep));
+}
+
 // ── Salida ───────────────────────────────────────────────────────────────
 const w = Math.max(...casos.map(c => c[1].length));
 casos.forEach(([est, n, d]) => {

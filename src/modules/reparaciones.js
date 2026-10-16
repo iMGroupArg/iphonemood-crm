@@ -820,7 +820,7 @@ const Reparaciones = {
       notas: '',
       equipoDevuelto: false
     };
-    await DB.crearReparacion(o);
+    o.tokenSeguimiento = await DB.crearReparacion(o) || null;   // el link nace con la reparación: sin esto la tarjeta decía «aún no tiene link» hasta recargar
     Sheets.reparacion(o);
     State.reparaciones.unshift(o);
     this.currentId = id;

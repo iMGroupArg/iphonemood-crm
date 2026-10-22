@@ -2558,6 +2558,88 @@ const entornoVenta = (extra = {}, cfg = {}) => {
   check('Venta sin cotización guardada o que no es de Mercado Libre: no agrega nada', V._detalleMeli(venta({ meliCotizacion: null }), r) === null && V._detalleMeli({ id: 1, tipoVenta: 'minorista', items: [], pagos: [] }, r) === null);
 }
 
+// 46. COMISIÓN DE MERCADO LIBRE POR ÍTEM, EN DÓLARES (ventas.js): reparto exacto y detalle de la venta
+{
+  const e = nuevoEntorno({ modulos: ['ventas.js'] });
+  const V = e.mod.Ventas;
+  const suma = a => a.reduce((x, y) => x + y, 0);
+  // Reparto: suma exacta, sin centavos perdidos ni inventados
+  check('Reparto: 1.161 centavos entre 3 ítems iguales = 387 + 387 + 387 (suma exacta)', JSON.stringify(V._repartirCentavos(1161, [100, 100, 100])) === '[387,387,387]');
+  check('Reparto: 1.000 centavos entre 3 ítems iguales: 334 + 333 + 333 (el centavo sobrante al primero) y la suma da 1.000', JSON.stringify(V._repartirCentavos(1000, [1, 1, 1])) === '[334,333,333]');
+  check('Reparto proporcional: 1.161 centavos entre precios 3.827 y 4.073 → parte mayor al ítem más caro, suma exacta', (() => { const r = V._repartirCentavos(1161, [3827, 4073]); return suma(r) === 1161 && r[1] > r[0]; })());
+  check('Sin pesos (todos en cero, p. ej. regalos): se reparte en partes iguales y la suma es exacta', JSON.stringify(V._repartirCentavos(101, [0, 0])) === '[51,50]');
+  check('Un ítem recibe todo; total 0 da ceros; sin ítems da vacío', JSON.stringify(V._repartirCentavos(1161, [500])) === '[1161]' && JSON.stringify(V._repartirCentavos(0, [3, 4])) === '[0,0]' && V._repartirCentavos(50, []).length === 0);
+  check('Un ítem con peso 0 (regalo) no recibe nada si hay otros con peso', JSON.stringify(V._repartirCentavos(777, [0, 5000, 5000])) === '[0,389,388]');
+  // Propiedad: 3.000 casos al azar, la suma SIEMPRE es el total, nunca negativos y cada parte difiere del reparto ideal en menos de 1 centavo
+  let malos = 0; const azar = (n) => Math.floor(Math.random() * n);
+  for (let k = 0; k < 3000; k++) {
+    const n = 1 + azar(6), pesos = Array.from({ length: n }, () => (azar(5) === 0 ? 0 : azar(2000000))), total = azar(5000000);
+    const r = V._repartirCentavos(total, pesos), W = suma(pesos);
+    if (suma(r) !== total || r.some(x => !Number.isInteger(x) || x < 0) || (W > 0 && r.some((x, i) => Math.abs(x - total * pesos[i] / W) >= 1))) malos++;
+  }
+  check('Propiedad (3.000 casos al azar): suma exacta, enteros no negativos y cada parte a menos de 1 centavo de lo ideal', malos === 0, String(malos));
+
+  check('Números enormes (enteros seguros): la suma sigue siendo EXACTA, sin inventar un centavo (caso hallado por Codex)', (() => { const r = V._repartirCentavos(8084569317819639, [426256299594303, 277520753359598, 57451384435899]); return r.reduce((a, b) => a + BigInt(b), 0n) === 8084569317819639n; })());
+  check('Pesos no válidos (Infinity, NaN, texto, negativos) cuentan como 0: nunca producen NaN', V._repartirCentavos(1000, [Infinity, 500, NaN, -3, 'x']).every(Number.isInteger) && V._repartirCentavos(1000, [Infinity, 500, NaN, -3, 'x']).reduce((a, b) => a + b, 0) === 1000);
+  // Comisión por ítem
+  const venta = (extra = {}) => ({ id: 125, estado: 'abierta', tipoVenta: 'mercadolibre', meliOrdenId: 7, meliCotizacion: 1620, costoCanal: 0,
+    items: [{ nombre: 'A', precio: 38.27, costo: 24 }], pagos: [], ...extra });
+  const orden = (extra = {}) => ({ ventaId: 125, acreditado: false, revertidaEn: null, financieraCompleta: true, bruto: 61990, neto: 43187, ...extra });
+  e.State.meliOrdenes = [orden()];
+  let v = venta(), r = V.resultadoVenta(v), c = V._comisionPorItem(v, r);
+  check('Estimada (orden sin acreditar): toda la comisión (11,61) cae en el único ítem y se marca estimada', c && c.conocida && c.estimada && c.total === 11.61 && JSON.stringify(c.porItem) === '[11.61]', JSON.stringify(c));
+  v = venta({ items: [{ nombre: 'A', precio: 38.27, costo: 24 }, { nombre: 'B', precio: 40.73, costo: 17.78 }, { nombre: 'Regalo', precio: 0, costo: 2, regalo: true }] });
+  r = V.resultadoVenta(v); c = V._comisionPorItem(v, r);
+  const sumaC = Math.round(suma(c.porItem) * 100);
+  check('Varios ítems: la suma de las comisiones por ítem = la comisión total, SIN perder centavos; el regalo no paga comisión', sumaC === Math.round(c.total * 100) && c.porItem[2] === 0 && c.porItem[0] > 0 && c.porItem[1] > c.porItem[0], JSON.stringify(c));
+  v = venta({ costoCanal: 11.5 }); r = V.resultadoVenta(v); e.State.meliOrdenes = [orden({ acreditado: true })];
+  c = V._comisionPorItem(v, r);
+  check('Acreditada: usa el costo REAL guardado en la venta (11,50), no estimado', c.conocida && !c.estimada && c.total === 11.5 && c.porItem[0] === 11.5, JSON.stringify(c));
+  e.State.meliOrdenes = [orden({ financieraCompleta: false })];
+  v = venta(); r = V.resultadoVenta(v); c = V._comisionPorItem(v, r);
+  check('Sin importes confirmados: comisión DESCONOCIDA (no se inventa un cero) y las partes en 0', c && !c.conocida && c.total === 0 && c.porItem[0] === 0);
+  check('Una venta que no es de Mercado Libre: null (sin comisión del canal)', V._comisionPorItem({ id: 9, tipoVenta: 'minorista', items: [{ precio: 10 }], pagos: [] }, V.resultadoVenta({ id: 9, tipoVenta: 'minorista', items: [{ precio: 10 }], pagos: [] })) === null);
+  // Centavos: ítems con precios que no dividen parejo
+  e.State.meliOrdenes = [orden({ bruto: 99990, neto: 70001.37 })];
+  v = venta({ items: [{ nombre: 'A', precio: 10.01, costo: 1 }, { nombre: 'B', precio: 20.02, costo: 1 }, { nombre: 'C', precio: 30.03, costo: 1 }] }); r = V.resultadoVenta(v); c = V._comisionPorItem(v, r);
+  check('Con precios que no dividen parejo la suma sigue siendo exacta', Math.round(suma(c.porItem) * 100) === Math.round(c.total * 100) && c.porItem.every(x => Math.round(x * 100) === x * 100), JSON.stringify(c));
+
+  e.State.meliOrdenes = [orden({ bruto: 100.01 * 0 + 1000, neto: 999.99 })];
+  const dup = { nombre: 'Khamrah', precio: 40.73, costo: 17.78, stockId: 's1' };
+  const vDup = venta({ items: [dup, dup] }); const cDup = V._comisionPorItem(vDup, V.resultadoVenta(vDup));
+  check('Un mismo ítem repetido (dos unidades iguales): las partes suman la comisión total una sola vez', Math.round(suma(cDup.porItem) * 100) === Math.round(cDup.total * 100), JSON.stringify(cDup));
+  const vInf = venta({ items: [{ nombre: 'A', precio: 'Infinity', costo: 1 }, { nombre: 'B', precio: 40, costo: 1 }] }); e.State.meliOrdenes = [orden()];
+  const cInf = V._comisionPorItem(vInf, V.resultadoVenta(vInf));
+  check('Un precio infinito no anula la comisión de los demás ítems', Number.isFinite(suma(cInf.porItem)) && Math.round(suma(cInf.porItem) * 100) === Math.round(cInf.total * 100) && cInf.porItem[1] > 0, JSON.stringify(cInf));
+
+  // El detalle en pantalla
+  const reg = {}; const orig = e.ctx.document.getElementById;
+  e.ctx.document.getElementById = id => reg[id] || orig(id);
+  reg['venta-modal-host'] = { innerHTML: '', classList: { add() {}, remove() {} }, style: {} };
+  e.State.stock = [{ id: 's1', cat: 'perfumeria', nombre: 'Khamrah', notas: '' }, { id: 's2', cat: 'iphone', nombre: 'iPhone', notas: '' }];
+  e.ctx.App.closeSidebar = () => {}; e.ctx.DB.cargarNotasVenta = async () => [];
+  const detalle = (vv) => { e.State.ventas = [vv]; reg['venta-modal-host'].innerHTML = ''; try { V.viewSale(vv.id); } catch (err) { return 'ERROR ' + err.message; } return reg['venta-modal-host'].innerHTML.replace(/\s+/g, ' '); };
+  e.State.meliOrdenes = [orden()];
+  let h = detalle(venta({ items: [{ nombre: 'Khamrah', precio: 40.73, costo: 17.78, stockId: 's1' }], tipoVenta: 'mercadolibre' }));
+  check('Detalle (accesorio de Mercado Libre, estimada): columnas Costo | Comisión plataforma | Precio venta | Profit, comisión en dólares con «≈», profit NETO provisorio y nota explicativa',
+    !h.startsWith('ERROR') && /<th>Costo<\/th><th>Comisión plataforma<\/th><th>Precio venta<\/th><th>Profit<\/th>/.test(h) && /≈ USD 11,61/.test(h) && h.includes('estimada hasta que se acredite') && /\+USD 11,34/.test(h) && !/<td>\$0<\/td>/.test(h), h.startsWith('ERROR') ? h : h.slice(h.indexOf('Accesorios Vendidos'), h.indexOf('Accesorios Vendidos') + 900));
+  e.State.meliOrdenes = [orden({ acreditado: true })];
+  h = detalle(venta({ items: [{ nombre: 'Khamrah', precio: 40.73, costo: 17.78, stockId: 's1' }], costoCanal: 11.5 }));
+  check('Detalle acreditada: comisión real sin «≈» y sin nota de estimada', /<td>USD 11,5<\/td>|USD 11,50/.test(h) && !h.includes('estimada hasta que se acredite') && h.includes('repartida según el precio'));
+  e.State.meliOrdenes = [orden({ financieraCompleta: false })];
+  h = detalle(venta({ items: [{ nombre: 'Khamrah', precio: 40.73, costo: 17.78, stockId: 's1' }] }));
+  check('Detalle sin importes confirmados: la comisión muestra «—» y el profit queda sin descontar nada', h.includes('<span title="Todavía no hay importes confirmados') && /\+USD 22,95/.test(h));
+  h = detalle({ id: 300, estado: 'abierta', tipoVenta: 'minorista', items: [{ nombre: 'Khamrah', precio: 40.73, costo: 17.78, stockId: 's1' }], pagos: [], cliente: 'x' });
+  check('Venta común: la comisión de accesorios sale en DÓLARES («USD 0»), nunca «$0», y el profit no cambia', /<td>USD 0<\/td>/.test(h) && !/<td>\$0<\/td>/.test(h) && /\+USD 22,95/.test(h) && !h.includes('repartida según el precio'));
+  e.State.meliOrdenes = [orden()];
+  h = detalle(venta({ items: [{ nombre: 'Khamrah', precio: 40.73, costo: 17.78, stockId: 's1' }, { nombre: 'iPhone MELI', precio: 100, costo: 90, stockId: 's2' }] }));
+  e.State.meliOrdenes = [orden({ bruto: 61990, neto: 61980 })];
+  const hDup = detalle(venta({ items: [dup, dup] }));
+  check('Detalle con el mismo ítem repetido: la comisión por fila suma la total (USD 0,01 una sola vez: una fila 0,01 y la otra 0)', (hDup.match(/<td>≈ USD 0,01<\/td>/g) || []).length === 1 && (hDup.match(/<td>≈ USD 0<\/td>/g) || []).length === 1, (hDup.match(/<td>≈ USD [^<]*<\/td>/g) || []).join('|'));
+  e.State.meliOrdenes = [orden()];
+  check('Un dispositivo en una venta de Mercado Libre también lleva su parte de la comisión del canal (una celda por ítem)', (h.match(/<td>≈ USD/g) || []).length === 2, String((h.match(/<td>≈ USD/g) || []).length));
+}
+
 // 30. Altas: si el registro no se puede crear, NO se toca la caja (o se deshace)
 {
   const e = nuevoEntorno({ modulos: ['gastos.js'], dom: { 'gf-motivo': 'Alquiler', 'gf-monto': '50', 'gf-caja-persona': 'Franco', 'gf-caja-bolsillo': 'USD cash', 'gf-moneda': 'USD', 'gf-cat': 'x', 'gf-resp': 'Franco' },

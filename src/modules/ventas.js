@@ -2141,6 +2141,22 @@ const Ventas = {
       const p = State.stock.find(s => s.id === i.stockId);
       return !p || !dispositivosCats.includes(p.cat);
     });
+    // Comisión de Mercado Libre por ítem, en dólares (null si no es una venta de Mercado Libre).
+    const comMeli = Ventas._comisionPorItem(v, Ventas.resultadoVenta(v));
+    // La comisión de cada fila de una tabla (alineada con la lista): se cuenta por POSICIÓN en la venta, así un mismo objeto
+    // repetido (dos unidades iguales) no cobra dos veces la parte del primero.
+    const comLista = lista => {
+      const vistos = new Map();
+      return lista.map(it => {
+        const n = vistos.get(it) || 0; vistos.set(it, n + 1);
+        let pos = -1, c = 0;
+        for (let k = 0; k < v.items.length; k++) if (v.items[k] === it && c++ === n) { pos = k; break; }
+        return comMeli ? (comMeli.porItem[pos] || 0) : 0;
+      });
+    };
+    const comDisp = comLista(itemsDispositivos), comAcc = comLista(itemsAccesorios);
+    const comTxt = c => (comMeli ? (comMeli.conocida ? `${comMeli.estimada ? '≈ ' : ''}${State.fmtUSD(c)}` : '<span title="Todavía no hay importes confirmados de Mercado Libre">—</span>') : null);
+    const notaMeli = comMeli ? `<div style="font-size:10.5px;color:var(--text-secondary);margin-top:6px">Comisión de Mercado Libre (cargos + envío) en dólares, repartida según el precio de cada producto${comMeli.estimada ? ' · <b>estimada hasta que se acredite</b>' : comMeli.conocida ? '' : ' · todavía sin importes confirmados'}. El profit de cada fila ya la descuenta.</div>` : '';
 
     const host = document.getElementById('venta-modal-host');
     host.innerHTML = `
@@ -2200,9 +2216,9 @@ const Ventas = {
             <div class="card" style="margin-bottom:14px">
               <div class="card-title"><i class="ti ti-device-mobile"></i> Dispositivos Vendidos</div>
               <table><thead><tr><th>Dispositivo</th><th>Condición</th><th>Identificador</th><th>Garantía</th><th>Precio Compra</th><th>Precio Venta</th><th>Profit</th><th>Comisión</th></tr></thead>
-              <tbody>${itemsDispositivos.map(i => {
+              <tbody>${itemsDispositivos.map((i, k) => {
                 const p = State.stock.find(s => s.id === i.stockId);
-                const profit = i.precio - (i.costo||0);
+                const profit = i.precio - (i.costo||0) - comDisp[k];
                 const diasRestantes = i.garantiaFin ? Math.max(0, Math.round((new Date(i.garantiaFin)-new Date())/86400000)) : null;
                 const progreso = i.garantiaInicio && i.garantiaFin ? Math.min(100, Math.round((new Date()-new Date(i.garantiaInicio))/(new Date(i.garantiaFin)-new Date(i.garantiaInicio))*100)) : 0;
                 return `<tr>
@@ -2217,29 +2233,29 @@ const Ventas = {
                   <td>${State.fmtUSD(i.costo||0)}</td>
                   <td><b>${State.fmtUSD(i.precio)}</b></td>
                   <td style="color:${profit>=0?'var(--green)':'var(--red)'}"><b>${profit>=0?'+':''}${State.fmtUSD(profit)}</b></td>
-                  <td>${State.fmtUSD(v.comisionVendedor||0)}</td>
+                  <td>${comTxt(comDisp[k]) ?? State.fmtUSD(v.comisionVendedor||0)}</td>
                 </tr>`;
-              }).join('')}</tbody></table>
+              }).join('')}</tbody></table>${notaMeli}
             </div>` : ''}
 
             <!-- ACCESORIOS VENDIDOS -->
             ${itemsAccesorios.length ? `
             <div class="card" style="margin-bottom:14px">
               <div class="card-title"><i class="ti ti-box"></i> Accesorios Vendidos</div>
-              <table><thead><tr><th>Accesorio</th><th>SKU</th><th>Cantidad</th><th>Costo</th><th>Precio Total</th><th>Profit</th><th>Comisión</th></tr></thead>
-              <tbody>${itemsAccesorios.map(i => {
+              <table><thead><tr><th>Accesorio</th><th>SKU</th><th>Cantidad</th><th>Costo</th><th>Comisión plataforma</th><th>Precio venta</th><th>Profit</th></tr></thead>
+              <tbody>${itemsAccesorios.map((i, k) => {
                 const p = State.stock.find(s => s.id === i.stockId);
-                const profit = i.precio - (i.costo||0);
+                const profit = i.precio - (i.costo||0) - comAcc[k];
                 return `<tr>
                   <td>${i.nombre}${i.regalo?` <span style="font-size:10px;color:var(--green)">🎁 regalo</span>`:''}</td>
                   <td style="font-size:11px;color:var(--text-secondary)">${p?.storage||p?.notas||'N/A'}</td>
                   <td>1</td>
                   <td>${State.fmtUSD(i.costo||0)}</td>
+                  <td>${comTxt(comAcc[k]) ?? State.fmtUSD(0)}</td>
                   <td>${i.regalo?`<span style="color:var(--green)">Gratis</span>`:State.fmtUSD(i.precio)}</td>
-                  <td style="color:${profit>=0?'var(--green)':'var(--red)'}">${profit>=0?'+':''}${State.fmtUSD(profit)}</td>
-                  <td>$0</td>
+                  <td style="color:${profit>=0?'var(--green)':'var(--red)'}">${profit>=0?'+':''}${State.fmtUSD(profit)}${comMeli && comMeli.estimada ? ' <span style="font-size:10px;color:var(--text-secondary)" title="Estimado hasta que Mercado Libre acredite">prov.</span>' : ''}</td>
                 </tr>`;
-              }).join('')}</tbody></table>
+              }).join('')}</tbody></table>${notaMeli}
             </div>` : ''}
 
             <!-- TRADE-IN RECIBIDO -->
@@ -2852,6 +2868,38 @@ const Ventas = {
   // Datos de Mercado Libre para el detalle de una venta: la cotización congelada y, si la orden todavía no se acreditó y
   // sus importes están confirmados, lo que se va a quedar Mercado Libre (retenido en pesos ÷ cotización).
   //   → null si no es de Mercado Libre; { cot, estimado: número | null, profitDespues }
+  // Reparte `totalC` centavos (entero) entre ítems en proporción a `pesos` (enteros), SIN perder ni inventar centavos:
+  // método del mayor resto (los restos iguales, al primero). Con pesos todos en cero se reparte en partes iguales.
+  //   → arreglo de enteros que SUMA exactamente totalC.
+  _repartirCentavos(totalC, pesos) {
+    const n = pesos.length;
+    if (!n) return [];
+    // BigInt: el producto total × peso puede salirse de los enteros seguros de JavaScript y ahí se pierden o inventan centavos.
+    const entero = x => (Number.isFinite(Number(x)) && Number(x) > 0 ? BigInt(Math.round(Number(x))) : 0n);
+    const T = entero(totalC), P = pesos.map(entero);
+    const W = P.reduce((a, b) => a + b, 0n);
+    const N = BigInt(n);
+    const base = P.map(w => (W > 0n ? (T * w) / W : T / N));
+    let resto = T - base.reduce((a, b) => a + b, 0n);
+    const orden = P.map((w, i) => ({ i, f: W > 0n ? (T * w) % W : 0n })).sort((a, b) => (b.f > a.f ? 1 : b.f < a.f ? -1 : a.i - b.i));
+    for (let k = 0; resto > 0n; k++, resto--) base[orden[k % n].i] += 1n;
+    return base.map(Number);
+  },
+  // Comisión de Mercado Libre (cargos + envío) en DÓLARES, repartida por ítem según su precio. Real cuando la orden ya se
+  // acreditó (costo del canal guardado en la venta); estimada antes (retenido en pesos ÷ cotización); desconocida si no hay
+  // importes confirmados (nunca se inventa). Devuelve null si la venta no es de Mercado Libre.
+  //   → { total, porItem[] (alineado con v.items), estimada, conocida }
+  _comisionPorItem(v, r) {
+    if (!this._esMeli(v)) return null;
+    const m = this._detalleMeli(v, r);
+    const real = r.costoCanal > 0.005;
+    const conocida = real || (m && m.estimado !== null);
+    const totalC = conocida ? Math.round((real ? r.costoCanal : m.estimado) * 100) : 0;
+    const items = v.items || [];
+    const pesos = items.map(i => (i.regalo || !Number.isFinite(Number(i.precio)) ? 0 : Math.max(0, Math.round(Number(i.precio) * 100))));
+    const parte = this._repartirCentavos(totalC, pesos);
+    return { total: totalC / 100, porItem: parte.map(c => c / 100), estimada: conocida && !real, conocida };
+  },
   _detalleMeli(v, r) {
     if (!this._esMeli(v)) return null;
     const cot = Number(v.meliCotizacion);

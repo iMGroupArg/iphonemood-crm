@@ -184,6 +184,32 @@ try {
     check(`3 Dos productos en orden cruzado, ${RONDAS} rondas: CERO deadlocks y cero errores`, deadlocks === 0 && otros.length === 0, JSON.stringify({ deadlocks, otros: otros.slice(0, 3) }));
     check(`3 …y en todas las rondas el stock cuadra (cada unidad se vendió una sola vez: ${ok3} de ${RONDAS})`, ok3 === RONDAS, String(ok3));
   }
+  // ── 4. Procesar de verdad (revalida el vínculo y después descuenta): dos órdenes cuyos avisos están vinculados a cargas DISTINTAS
+  //       del mismo producto. La revalidación deja un KEY SHARE (clave foránea) en cada carga; el bloqueo del reparto tiene que ser
+  //       compatible con él (FOR NO KEY UPDATE) o las dos órdenes se esperan en círculo.
+  {
+    const cuenta = await nuevaCuenta(admin, p.id);
+    const RONDAS = 25; let deadlocks = 0, otros = [], bien = 0;
+    for (let r = 0; r < RONDAS; r++) {
+      const X = await nuevoStock(admin, { nombre: `Cruce Procesar ${r}`, cantidad: 1, creado: DIA(1) });
+      const Y = await nuevoStock(admin, { nombre: `Cruce Procesar ${r}`, cantidad: 1, creado: DIA(2) });
+      await admin.query(`INSERT INTO public.meli_publicaciones (cuenta_id, meli_item_id, stock_id) VALUES ($1,$2,$3), ($1,$4,$5)`, [cuenta, `MLA4${r}A`, X, `MLA4${r}B`, Y]);
+      const o1 = await nuevaOrden({ db: admin, cuentaId: cuenta }, [{ item: `MLA4${r}A`, cant: 1 }]);
+      const o2 = await nuevaOrden({ db: admin, cuentaId: cuenta }, [{ item: `MLA4${r}B`, cant: 1 }]);
+      const corre = async (c, o) => {
+        for (let i = 0; i < 20; i++) {
+          try { const res = (await c.query(`SELECT public.meli_procesar_orden($1, 1000) AS r`, [o])).rows[0].r; return res.ok === true; }
+          catch (e) { if (e.code === '40P01') { deadlocks++; await dormir(15); continue; } otros.push(e.message); return false; }
+        }
+        return false;
+      };
+      const [a1, a2] = await Promise.all([corre(A, o1), corre(B, o2)]);
+      const q = (await cantidad(admin, X)) + (await cantidad(admin, Y));
+      if (a1 && a2 && q === 0) bien++;
+    }
+    check(`4 Procesar con vínculos a cargas distintas del mismo producto, ${RONDAS} rondas: CERO deadlocks y cero errores`, deadlocks === 0 && otros.length === 0, JSON.stringify({ deadlocks, otros: otros.slice(0, 3) }));
+    check(`4 …y en todas las rondas se procesaron las dos órdenes y el stock cuadra (${bien} de ${RONDAS})`, bien === RONDAS, String(bien));
+  }
   const colgadas = (await admin.query(`SELECT count(*)::int n FROM pg_stat_activity WHERE datname = current_database() AND wait_event_type = 'Lock' AND pid <> pg_backend_pid()`)).rows[0].n;
   check('Al terminar no queda ninguna conexión esperando un candado (nada colgado)', colgadas === 0, String(colgadas));
 } finally {

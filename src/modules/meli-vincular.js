@@ -131,7 +131,8 @@ const MeliVincular = {
     const mapa = new Map();
     for (const s of this._stock) {
       if (!this._esVendible(s) || !filtro(s)) continue;
-      if ((s.estado_inventario || 'disponible') !== 'disponible') { mapa.set(`solo|${s.id}`, [s]); continue; }   // reservada / en reparación: sola
+      // reservada / en reparación / sin nombre: sola (igual que la base)
+      if ((s.estado_inventario || 'disponible') !== 'disponible' || !this._nombreNorm(s.nombre)) { mapa.set(`solo|${s.id}`, [s]); continue; }
       const k = this._claveGrupo(s);
       if (!mapa.has(k)) mapa.set(k, []);
       mapa.get(k).push(s);

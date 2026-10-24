@@ -49,6 +49,10 @@ console.log('\n══ Cuadro Procesar: reparto entre cargas ══\n');
   check('No entran otra categoría, "a pedido", con IMEI ni reservadas', JSON.stringify(reparto(M, [{ stock_id: 'rep', cantidad: 1 }])) === '{"rep":1}');
 }
 {
+  const M = cargar([fila('agotada', 'Perfume G', 0, '2026-01-01T00:00:00Z', { estadoInventario: 'vendido' }), fila('otra', 'Perfume G', 4, '2026-02-01T00:00:00Z')]);
+  check('Un aviso vinculado a una carga agotada ("vendido") se cubre con otra carga', JSON.stringify(reparto(M, [{ stock_id: 'agotada', cantidad: 2 }])) === '{"otra":2}');
+}
+{
   const M = cargar([fila('sin', 'Perfume V', 1, null), fila('con', 'Perfume V', 1, '2026-06-01T00:00:00Z')]);
   check('Una fila sin fecha de carga se usa después de las que sí tienen', JSON.stringify(reparto(M, [{ stock_id: 'sin', cantidad: 1 }])) === '{"con":1}');
 }

@@ -12,6 +12,9 @@
 --      producto (mismo nombre normalizado y misma categoría; sin IMEI, sin "a pedido", disponibles), de la
 --      más vieja a la más nueva, y deja UNA LÍNEA POR FILA CONSUMIDA en meli_orden_items. Descontar, reponer,
 --      revertir y la venta (que toma el costo de cada fila) siguen trabajando por stock_id, sin cambios.
+--    · meli_ingresar_orden: SÓLO cambia cómo compara los ítems cuando Mercado Libre vuelve a informar una orden ya procesada
+--      (ahora por TOTALES por publicación: una orden repartida tiene más líneas que el aviso y se veía "distinta"). Se
+--      reescribe a partir de la función que está en la base y, si su texto no es el esperado, frena sin tocar nada.
 --    · meli__descontar_core: la misma de siempre (copia de la del script 7) + una llamada al reparto, bajo el
 --      bloqueo de la orden y antes del chequeo de faltante.
 --
@@ -45,11 +48,13 @@ $$;
 
 
 -- ─── 2 · Reparto FIFO de una orden ──────────────────────────────────────────
--- Interna (la llama meli__descontar_core, que ya tiene la orden bloqueada). PRIMERO bloquea TODAS las filas de stock que
--- pueden entrar al reparto (de todos los ítems de la orden), en un orden global fijo (por id): así dos órdenes que
--- comparten un producto se ESPERAN en vez de repartir sobre datos que la otra está por cambiar (sin esto, la segunda
--- podía ver "stock insuficiente" aunque entre todas las cargas alcanzara) y no hay ciclos posibles. Recién con las
--- filas bloqueadas lee las cantidades y reparte. El descuento posterior (por stock_id) usa el mismo orden.
+-- Interna (la llama meli__descontar_core, que ya tiene la orden bloqueada). PRIMERO bloquea, en UN solo orden global
+-- (por id), TODAS las filas de stock que la orden va a tocar: las vinculadas y las de su mismo producto. Así dos órdenes
+-- que comparten un producto se ESPERAN en vez de repartir sobre datos que la otra está por cambiar (sin esto, la segunda
+-- podía ver "stock insuficiente" aunque entre todas las cargas alcanzara) y no hay ciclos posibles. El bloqueo es FOR NO KEY
+-- UPDATE (el mismo que toma un UPDATE de cantidad): es COMPATIBLE con el KEY SHARE que dejan las claves foráneas al cambiar
+-- el stock_id de un ítem (revalidación del script 7), así que no puede cruzarse con ella. Recién con las filas bloqueadas se
+-- leen las cantidades y se reparte. El descuento posterior (por stock_id) pide las mismas filas, en el mismo orden.
 CREATE OR REPLACE FUNCTION public.meli__repartir_fifo(p_orden_id BIGINT)
 RETURNS VOID
 LANGUAGE plpgsql
@@ -65,26 +70,34 @@ DECLARE
   v_cants  INTEGER[];
   v_resta  INTEGER;
   v_take   INTEGER;
-  v_total  INTEGER;
-  v_n      INTEGER;
   k        INTEGER;
   v_todas  UUID[];
 BEGIN
-  -- Paso 1: todas las filas candidatas (las vinculadas y las del mismo producto), bloqueadas en orden de id.
-  SELECT COALESCE(array_agg(DISTINCT s2.id), ARRAY[]::UUID[]) INTO v_todas
-    FROM public.meli_orden_items i
-    JOIN public.stock r ON r.id = i.stock_id
-    JOIN public.stock s2 ON s2.id = r.id
-      OR (public.meli__nombre_norm(s2.nombre) = public.meli__nombre_norm(r.nombre)
-          AND s2.categoria IS NOT DISTINCT FROM r.categoria
-          AND NOT COALESCE(s2.a_pedido, FALSE)
-          AND COALESCE(array_length(s2.imeis, 1), 0) = 0
-          AND COALESCE(s2.estado_inventario, 'disponible') = 'disponible')
-   WHERE i.orden_id = p_orden_id AND i.cantidad > 0
-     AND NOT COALESCE(r.a_pedido, FALSE) AND COALESCE(array_length(r.imeis, 1), 0) = 0
-     AND COALESCE(btrim(r.nombre), '') <> '';
+  -- Paso 1: toda fila que la orden toca (las vinculadas, SIEMPRE) más las del mismo producto de cada una, bloqueadas en orden de id.
+  -- Una fila vinculada reservada, en reparación o dada de baja, "a pedido", con IMEI o sin nombre no se agrupa: va sola. Una
+  -- "vendido" (agotada: un descuento anterior la dejó en 0) SÍ: es justamente la que hay que reemplazar por otra carga.
+  SELECT COALESCE(array_agg(DISTINCT x.id), ARRAY[]::UUID[]) INTO v_todas
+    FROM (
+      SELECT i.stock_id AS id
+        FROM public.meli_orden_items i
+       WHERE i.orden_id = p_orden_id AND i.stock_id IS NOT NULL
+      UNION
+      SELECT s2.id
+        FROM public.meli_orden_items i
+        JOIN public.stock r ON r.id = i.stock_id
+        JOIN public.stock s2
+          ON public.meli__nombre_norm(s2.nombre) = public.meli__nombre_norm(r.nombre)
+         AND s2.categoria IS NOT DISTINCT FROM r.categoria
+         AND NOT COALESCE(s2.a_pedido, FALSE)
+         AND COALESCE(array_length(s2.imeis, 1), 0) = 0
+         AND COALESCE(s2.estado_inventario, 'disponible') = 'disponible'
+       WHERE i.orden_id = p_orden_id AND i.cantidad > 0
+         AND NOT COALESCE(r.a_pedido, FALSE) AND COALESCE(array_length(r.imeis, 1), 0) = 0
+         AND COALESCE(r.estado_inventario, 'disponible') IN ('disponible', 'vendido')
+         AND public.meli__nombre_norm(r.nombre) <> ''
+    ) x;
   IF array_length(v_todas, 1) > 1 THEN
-    PERFORM 1 FROM public.stock WHERE id = ANY(v_todas) ORDER BY id FOR UPDATE;
+    PERFORM 1 FROM public.stock WHERE id = ANY(v_todas) ORDER BY id FOR NO KEY UPDATE;
   END IF;
 
   -- Paso 2: con las filas bloqueadas, se leen las cantidades vigentes y se reparte.
@@ -93,18 +106,20 @@ BEGIN
      WHERE orden_id = p_orden_id AND stock_id IS NOT NULL AND cantidad > 0
      ORDER BY id
   LOOP
-    SELECT s.id, s.nombre, s.categoria, COALESCE(s.a_pedido, FALSE) AS a_pedido,
-           COALESCE(array_length(s.imeis, 1), 0) AS n_imei
+    SELECT s.id, s.nombre, s.categoria,
+           (COALESCE(s.a_pedido, FALSE) OR COALESCE(array_length(s.imeis, 1), 0) > 0
+            OR COALESCE(s.estado_inventario, 'disponible') NOT IN ('disponible', 'vendido')
+            OR public.meli__nombre_norm(s.nombre) = '') AS solo
       INTO rep FROM public.stock s WHERE s.id = it.stock_id;
 
-    -- Sin fila, a pedido o con IMEI: no se agrupa (esos casos tienen su propio tratamiento).
-    IF NOT FOUND OR rep.a_pedido OR rep.n_imei > 0 OR COALESCE(btrim(rep.nombre), '') = '' THEN
+    -- Sin fila, "a pedido", con IMEI, no disponible o sin nombre: no se agrupa (cada caso tiene su propio tratamiento).
+    IF NOT FOUND OR rep.solo THEN
       v_usado := jsonb_set(v_usado, ARRAY[it.stock_id::TEXT], to_jsonb(COALESCE((v_usado ->> it.stock_id::TEXT)::INT, 0) + it.cantidad));
       CONTINUE;
     END IF;
 
     v_ids := ARRAY[]::UUID[]; v_cants := ARRAY[]::INTEGER[];
-    v_resta := it.cantidad; v_total := 0; v_n := 0;
+    v_resta := it.cantidad;
 
     FOR g IN
       SELECT s.id,
@@ -114,11 +129,9 @@ BEGIN
          AND s.categoria IS NOT DISTINCT FROM rep.categoria
          AND NOT COALESCE(s.a_pedido, FALSE)
          AND COALESCE(array_length(s.imeis, 1), 0) = 0
-         AND (s.id = it.stock_id OR COALESCE(s.estado_inventario, 'disponible') = 'disponible')
+         AND COALESCE(s.estado_inventario, 'disponible') = 'disponible'
        ORDER BY s.creado_en ASC NULLS LAST, s.id
     LOOP
-      v_n := v_n + 1;
-      v_total := v_total + g.disp;
       IF v_resta > 0 AND g.disp > 0 THEN
         v_take := LEAST(g.disp, v_resta);
         v_ids := v_ids || g.id; v_cants := v_cants || v_take;
@@ -126,8 +139,9 @@ BEGIN
       END IF;
     END LOOP;
 
-    -- Una sola fila, o el grupo entero no alcanza: queda como está (si falta, el chequeo de faltante lo marca).
-    IF v_n <= 1 OR v_resta > 0 OR array_length(v_ids, 1) IS NULL THEN
+    -- El grupo entero no alcanza, o la asignación es la misma que ya tiene el ítem (una sola carga): queda como está
+    -- (si falta, el chequeo de faltante lo marca). Si la fila vinculada está agotada, otra carga la reemplaza.
+    IF v_resta > 0 OR array_length(v_ids, 1) IS NULL OR (array_length(v_ids, 1) = 1 AND v_ids[1] = it.stock_id) THEN
       v_usado := jsonb_set(v_usado, ARRAY[it.stock_id::TEXT], to_jsonb(COALESCE((v_usado ->> it.stock_id::TEXT)::INT, 0) + it.cantidad));
       CONTINUE;
     END IF;
@@ -292,12 +306,53 @@ END;
 $$;
 
 
--- ─── 4 · Permisos ───────────────────────────────────────────────────────────
+-- ─── 4 · Reingesta de una orden ya repartida ───────────────────────────────
+-- Cuando Mercado Libre vuelve a informar una orden ya procesada, meli_ingresar_orden compara los ítems que llegan con los
+-- guardados, línea por línea. Una orden repartida entre cargas tiene MÁS líneas que el aviso original (la misma publicación
+-- en dos líneas de 2 y 1), así que el mismo aviso parecía "ítems distintos" y la orden quedaba en Revisar sin que nada
+-- hubiera cambiado. Se cambia SÓLO esa comparación: ahora se comparan los TOTALES por publicación y variación. Se reescribe
+-- la función que está en la base (pg_get_functiondef), no una copia: si su texto no es el esperado, frena sin tocar nada.
+DO $parche$
+DECLARE
+  v_def   TEXT;
+  v_ini   INTEGER;
+  v_fin   INTEGER;
+  v_nuevo TEXT := $blk$    -- (script 19: totales por publicación) una orden repartida entre cargas tiene más líneas que el aviso
+    IF EXISTS (
+         SELECT it->>'meli_item_id', COALESCE(it->>'meli_variacion_id',''),
+                sum(GREATEST(COALESCE((it->>'cantidad')::INT,0),0))::BIGINT
+           FROM jsonb_array_elements(p_items) AS it GROUP BY 1, 2
+         EXCEPT
+         SELECT meli_item_id, COALESCE(meli_variacion_id,''), sum(cantidad)::BIGINT
+           FROM meli_orden_items WHERE orden_id = v_id GROUP BY 1, 2)
+       OR EXISTS (
+         SELECT meli_item_id, COALESCE(meli_variacion_id,''), sum(cantidad)::BIGINT
+           FROM meli_orden_items WHERE orden_id = v_id GROUP BY 1, 2
+         EXCEPT
+         SELECT it->>'meli_item_id', COALESCE(it->>'meli_variacion_id',''),
+                sum(GREATEST(COALESCE((it->>'cantidad')::INT,0),0))::BIGINT
+           FROM jsonb_array_elements(p_items) AS it GROUP BY 1, 2)
+$blk$;
+BEGIN
+  v_def := pg_get_functiondef('public.meli_ingresar_orden(text,bigint,uuid,jsonb,jsonb)'::regprocedure);
+  IF position('script 19: totales por publicación' IN v_def) > 0 THEN RETURN; END IF;   -- ya aplicado
+  v_ini := position(E'    IF EXISTS (\n         SELECT it->>''meli_item_id''' IN v_def);
+  v_fin := position(E'    THEN\n      UPDATE meli_ordenes SET revisar = TRUE,' IN v_def);
+  IF v_ini = 0 OR v_fin <= v_ini THEN
+    RAISE EXCEPTION 'meli_ingresar_orden no tiene el texto esperado: no se modificó nada. Avisar antes de seguir.';
+  END IF;
+  EXECUTE substr(v_def, 1, v_ini - 1) || v_nuevo || substr(v_def, v_fin);
+END
+$parche$;
+
+
+-- ─── 5 · Permisos ───────────────────────────────────────────────────────────
 REVOKE EXECUTE ON FUNCTION public.meli__nombre_norm(TEXT)    FROM PUBLIC, anon, authenticated;
 REVOKE EXECUTE ON FUNCTION public.meli__repartir_fifo(BIGINT) FROM PUBLIC, anon, authenticated;
 REVOKE EXECUTE ON FUNCTION public.meli__descontar_core(BIGINT) FROM PUBLIC, anon, authenticated;
 
 -- Verificación
 SELECT 'meli__repartir_fifo'  AS objeto, to_regprocedure('public.meli__repartir_fifo(bigint)') IS NOT NULL AS ok
+UNION ALL SELECT 'ingesta compara totales', position('script 19: totales por publicación' IN pg_get_functiondef(to_regprocedure('public.meli_ingresar_orden(text,bigint,uuid,jsonb,jsonb)'))) > 0
 UNION ALL SELECT 'descontar_core llama al reparto',
          position('meli__repartir_fifo' IN pg_get_functiondef(to_regprocedure('public.meli__descontar_core(bigint)'))) > 0;

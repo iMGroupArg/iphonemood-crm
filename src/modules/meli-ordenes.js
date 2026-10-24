@@ -395,23 +395,23 @@ const MeliOrdenes = {
     const stock = State.stock || [];
     const usado = new Map(), baja = new Map();
     const sumar = (m, k, n) => m.set(k, (m.get(k) || 0) + n);
-    const sinGrupo = r => !r || r.aPedido || (r.imeis && r.imeis.length) || !String(r.nombre || '').trim();
+    // Igual que la base: sin fila, a pedido, con IMEI, reservada / en reparación / dada de baja o sin nombre → va sola (una agotada, "vendido", sí se reemplaza por otra carga).
+    const sinGrupo = r => !r || r.aPedido || (r.imeis && r.imeis.length) || !['disponible', 'vendido'].includes(r.estadoInventario || 'disponible') || !nombreNorm(r.nombre);
     for (const i of (o.items || []).filter(x => x.stock_id && (x.cantidad || 0) > 0)) {
       const rep = stock.find(x => x.id === i.stock_id);
       let reparto = null;
       if (!sinGrupo(rep)) {
         const clave = nombreNorm(rep.nombre);
         const grupo = stock.filter(r => !r.aPedido && !(r.imeis && r.imeis.length) && r.cat === rep.cat && nombreNorm(r.nombre) === clave
-          && (r.id === rep.id || (r.estadoInventario || 'disponible') === 'disponible'))
+          && (r.estadoInventario || 'disponible') === 'disponible')
           .sort((a, b) => (a.creadoEn ? Date.parse(a.creadoEn) : Infinity) - (b.creadoEn ? Date.parse(b.creadoEn) : Infinity) || String(a.id).localeCompare(String(b.id)));
-        if (grupo.length > 1) {
-          let resta = i.cantidad; const parte = [];
-          for (const r of grupo) {
-            const disp = Math.max((Number(r.cantidad) || 0) - (usado.get(r.id) || 0), 0);
-            if (resta > 0 && disp > 0) { const t = Math.min(disp, resta); parte.push([r.id, t]); resta -= t; }
-          }
-          if (resta === 0) reparto = parte;   // si no alcanza, queda como está y la base lo marca para revisar
+        let resta = i.cantidad; const parte = [];
+        for (const r of grupo) {
+          const disp = Math.max((Number(r.cantidad) || 0) - (usado.get(r.id) || 0), 0);
+          if (resta > 0 && disp > 0) { const t = Math.min(disp, resta); parte.push([r.id, t]); resta -= t; }
         }
+        // si no alcanza, queda como está y la base lo marca para revisar; si es la misma carga, no hay nada que mostrar
+        if (resta === 0 && !(parte.length === 1 && parte[0][0] === i.stock_id)) reparto = parte;
       }
       for (const [sid, n] of (reparto || [[i.stock_id, i.cantidad]])) { sumar(baja, sid, n); sumar(usado, sid, n); }
     }

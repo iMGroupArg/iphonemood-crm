@@ -134,6 +134,72 @@ console.log('\n══ Agrupar stock del mismo producto (FIFO, margen separado po
   check('Una fila SIN fecha de carga se usa después de las que sí tienen', it.length === 1 && it[0].stock_id === conFecha, JSON.stringify(it));
 }
 
+// ── 8b. hallazgos de la revisión de Codex ───────────────────────────────
+{ // la fila vinculada reservada NO se mezcla con las disponibles
+  const ctx = await baseNueva({ con19: true }); const { db } = ctx;
+  const reservada = await nuevoStock(db, { nombre: 'Perfume R', cantidad: 3, estado: 'reservado', creado: DIA(1) });
+  const libre = await nuevoStock(db, { nombre: 'Perfume R', cantidad: 3, creado: DIA(2) });
+  const o = await nuevaOrden(ctx, [{ item: 'MLA9', stock: reservada, cant: 2 }]);
+  await descontar(db, o);
+  const it = await itemsDe(db, o);
+  check('Una fila vinculada que está reservada va SOLA: no se reparte con las disponibles',
+    it.length === 1 && it[0].stock_id === reservada && (await stockDe(db, libre)).cantidad === 3 && (await stockDe(db, reservada)).cantidad === 1, JSON.stringify(it));
+}
+{ // una carga recién agotada ("vendido") se reemplaza por otra: no deja la orden trabada
+  const ctx = await baseNueva({ con19: true }); const { db } = ctx;
+  const agotada = await nuevoStock(db, { nombre: 'Perfume Agotada', cantidad: 0, estado: 'vendido', creado: DIA(1) });
+  const otra = await nuevoStock(db, { nombre: 'Perfume Agotada', cantidad: 4, creado: DIA(2) });
+  const o = await nuevaOrden(ctx, [{ item: 'MLA12', stock: agotada, cant: 2 }]);
+  await descontar(db, o);
+  const it = await itemsDe(db, o);
+  check('Un aviso vinculado a una carga agotada ("vendido") se cubre con otra carga del mismo producto', it.length === 1 && it[0].stock_id === otra && (await stockDe(db, otra)).cantidad === 2, JSON.stringify(it));
+}
+{ // nombre hecho sólo de tabulaciones / espacios: no se agrupa con otras filas "vacías"
+  const ctx = await baseNueva({ con19: true }); const { db } = ctx;
+  const tab = await nuevoStock(db, { nombre: '\t', cantidad: 1, creado: DIA(1) });
+  const vacio = await nuevoStock(db, { nombre: '   ', cantidad: 5, creado: DIA(2) });
+  const o = await nuevaOrden(ctx, [{ item: 'MLA10', stock: tab, cant: 1 }]);
+  await descontar(db, o);
+  const it = await itemsDe(db, o);
+  check('Un nombre de sólo tabulaciones o espacios no se agrupa con otras filas sin nombre', it.length === 1 && it[0].stock_id === tab && (await stockDe(db, vacio)).cantidad === 5, JSON.stringify(it));
+}
+{ // reingesta de una orden ya repartida: no es "distinta"
+  const ctx = await baseNueva({ con19: true }); const { db, cuentaId } = ctx;
+  const SEC = (await import('./lib/base_meli.mjs')).SECRETO;
+  const vieja = await nuevoStock(db, { nombre: 'Perfume Reingesta', cantidad: 2, creado: DIA(1) });
+  const nueva = await nuevoStock(db, { nombre: 'Perfume Reingesta', cantidad: 2, creado: DIA(2) });
+  await db.query(`INSERT INTO public.meli_publicaciones (cuenta_id, meli_item_id, stock_id) VALUES ($1,'MLA11',$2)`, [cuentaId, nueva]);
+  const ref = 'REING-19'; const hoy = Date.now();
+  const armar = (ms) => ({ meli_order_id: ref, estado: 'paid', estado_envio: 'shipped', comprador: 'c', fecha_orden: new Date(hoy).toISOString(), moneda: 'ARS', bruto: 150000, neto: 120000,
+    comision_envio: 30000, pago_id: 'p1', fecha_liberacion: new Date(hoy - 86400000).toISOString(), diferencia_comision: 0, cobrado_aprobado: 150000, comision_declarada: 30000,
+    financiera_ok: true, financiera_completa: true, revisar: false, meli_last_updated: new Date(hoy + ms).toISOString(), pagos_version: new Date(hoy + ms).toISOString(), envio_version: new Date(hoy + ms).toISOString() });
+  const items = (cant) => JSON.stringify([{ meli_item_id: 'MLA11', titulo: 't', cantidad: cant, precio_unitario: 50000 }]);
+  const ingresar = async (ms, cant) => {
+    const lease = (await db.query(`SELECT public.meli_lease_tomar($1,$2,$3) AS l`, [SEC, cuentaId, ref])).rows[0].l;
+    const id = (await db.query(`SELECT public.meli_ingresar_orden($1,$2,$3,$4::jsonb,$5::jsonb) AS id`, [SEC, cuentaId, lease, JSON.stringify(armar(ms)), items(cant)])).rows[0].id;
+    await db.query(`SELECT public.meli_lease_soltar($1,$2,$3,$4)`, [SEC, cuentaId, ref, lease]);
+    return id;
+  };
+  const id = await ingresar(0, 3);
+  const r = await procesar(db, id);
+  const it = await itemsDe(db, id);
+  check('Se procesa una orden de 3 unidades repartida en 2 líneas (2 de la vieja + 1 de la nueva)', r.ok === true && it.length === 2 && it[0].stock_id === vieja && it[0].cantidad === 2 && it[1].stock_id === nueva, JSON.stringify({ r, it }));
+  await ingresar(5000, 3);
+  const o1 = await ordenDe(db, id);
+  check('Mercado Libre informa LO MISMO otra vez: la orden NO pasa a Revisar y sigue con sus dos líneas', o1.revisar === false && (await itemsDe(db, id)).length === 2, JSON.stringify({ rev: o1.revisar, m: o1.motivo_revisar }));
+  await ingresar(9000, 4);
+  const o2 = await ordenDe(db, id);
+  check('…pero si Mercado Libre informa una cantidad DISTINTA (4), sí pasa a Revisar', o2.revisar === true && /distintos/.test(o2.motivo_revisar || ''), JSON.stringify({ rev: o2.revisar, m: o2.motivo_revisar }));
+  const e = await falla(() => db.exec(SQL('meli_agrupar_stock.sql')));
+  check('Correr el script 19 otra vez (con el parche de la ingesta ya aplicado) no rompe', !e, e);
+}
+{ // si el texto de la ingesta no es el esperado, el script frena y no toca nada
+  const { db } = await baseNueva({ con19: false });
+  await db.exec(`CREATE OR REPLACE FUNCTION public.meli_ingresar_orden(p_secreto TEXT, p_cuenta_id BIGINT, p_lease_id UUID, p_orden JSONB, p_items JSONB) RETURNS BIGINT LANGUAGE sql AS $$ SELECT 1::BIGINT $$`);
+  const e = await falla(() => db.exec(SQL('meli_agrupar_stock.sql')));
+  check('Si meli_ingresar_orden no tiene el texto esperado, el script frena con un mensaje claro', e && /no tiene el texto esperado/.test(e), e);
+}
+
 // ── 9. permisos ──────────────────────────────────────────────────────────
 {
   const { db } = await baseNueva({ con19: true });

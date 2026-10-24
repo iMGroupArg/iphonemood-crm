@@ -244,3 +244,65 @@ body.m-hoja-abierta .m-tabbar { pointer-events: none; }
 .m-stk-filtros b[hidden], .m-stk-activos[hidden], .m-chips[hidden] { display: none; }
 .m-stk-head h2 { display: none; }
 .m-stk-head { justify-content: flex-end; padding-bottom: 0; }
+
+/* ── Mercado Libre: Órdenes · Publicaciones · Cuenta ────────── */
+.m-meli { flex: 1; min-height: 0; overflow-y: auto; -webkit-overflow-scrolling: touch; padding: 10px 14px calc(var(--m-tabbar-h) + var(--m-safe-b) + 24px); }
+.m-meli-seg { position: sticky; top: -10px; z-index: 5; margin: 0 -2px 12px; box-shadow: 0 6px 12px -8px rgba(16,24,40,.25); }
+.m-meli-pane[hidden] { display: none; }
+.m-meli-pane h3 { font-size: 12px !important; }
+.m-meli-pane .card { border-radius: 18px; border: 0; box-shadow: var(--m-shadow-card); }
+.m-meli-pane select, .m-meli-pane input[type="search"], .m-meli-pane input[type="text"], .m-meli-pane input[type="number"] { font-size: 16px !important; min-height: 42px; }
+.m-meli-pane .btn { min-height: 40px; }
+/* a liberar: la plata retenida se destaca y se separa de lo que ya está en caja */
+.mo-liberar { background: var(--m-grad-hero) !important; color: #fff; border: 0 !important; }
+.mo-liberar * { color: inherit !important; }
+.mo-liberar > div:first-child > div:first-child { font-size: 28px !important; font-weight: 800 !important; letter-spacing: -.5px; }
+.mo-liberar > div:last-child { opacity: .85; font-size: 12px !important; }
+/* filtros de estado: una fila con scroll */
+.mo-tabs { flex-wrap: nowrap !important; overflow-x: auto; scrollbar-width: none; margin: 0 -14px 12px !important; padding: 2px 14px; }
+.mo-tabs::-webkit-scrollbar { display: none; }
+.mo-tabs .btn { flex: none; min-height: 38px; border-radius: 19px; padding: 0 14px; white-space: nowrap; }
+/* tarjeta de orden */
+.mo-card { padding: 14px !important; }
+.mo-top { flex-wrap: nowrap !important; }
+.mo-top > div { min-width: 0 !important; }
+.mo-top > div > div:first-child { font-size: 14.5px !important; font-weight: 700 !important; }
+.mo-nums { display: grid !important; grid-template-columns: 1fr 1fr; gap: 10px 14px !important; padding: 10px 12px; border-radius: 12px; background: var(--bg-secondary); }
+.mo-nums > span { display: flex; flex-direction: column; font-size: 11.5px; color: var(--text-secondary); }
+.mo-nums > span b { font-size: 14px; color: var(--text); font-variant-numeric: tabular-nums; }
+.mo-acc { display: grid !important; grid-template-columns: 1fr 1fr; }
+.mo-acc .btn { justify-content: center; min-height: 44px; border-radius: 12px; }
+.mo-acc .btn-primary, .mo-acc input[type="number"], .mo-acc > span, .mo-acc > label { grid-column: 1 / -1; }
+.mo-acc input[type="number"] { width: 100% !important; }
+/* herramientas técnicas plegadas */
+.m-meli-herr { margin-bottom: 10px; }
+.m-meli-herr-cuerpo { padding: 0 12px 12px; }
+.m-meli-herr-cuerpo .card { box-shadow: none; background: var(--bg-secondary); }
+.mo-liberar > .mo-nota { display: none; }
+.mo-liberar::after { content: 'Todavía no está en las cajas: pasa a caja cuando confirmás la acreditación.'; flex-basis: 100%; font-size: 12px; opacity: .85; line-height: 1.4; }
+.mo-liberar { gap: 6px !important; }
+
+/* ── Ventas como app ────────────────────────────────────────── */
+.m-vta-chips { margin: 0; padding: 10px 14px 10px; }
+.m-chip-sel { flex: none; min-height: 38px; padding: 0 30px 0 15px; border-radius: 19px; border: 1px solid var(--border); background: var(--bg) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M1 1l4 4 4-4' fill='none' stroke='%238a94a6' stroke-width='1.6' stroke-linecap='round'/%3E%3C/svg%3E") no-repeat right 12px center; color: var(--text); font: inherit; font-size: 13.5px; font-weight: 600; -webkit-appearance: none; appearance: none; max-width: 190px; }
+.m-chip-sel.activo { background-color: var(--blue); border-color: var(--blue); color: #fff; }
+.m-vta-rango { gap: 8px; align-items: center; padding: 0 14px 10px; flex: none; }
+.m-vta-rango input { flex: 1; min-width: 0; min-height: 42px; font-size: 16px; padding: 0 10px; border: 1px solid var(--border-strong); border-radius: 12px; background: var(--bg); color: var(--text); }
+.m-vta-rango span { color: var(--text-secondary); font-size: 13px; }
+.m-vta-res { margin: 4px 14px 12px; padding: 16px; border-radius: 22px; background: var(--m-grad-hero); color: #fff; flex: none; box-shadow: 0 12px 26px rgba(34,87,204,.28); }
+.m-vta-res-t { font-size: 12.5px; opacity: .85; font-weight: 600; }
+.m-vta-res-v { font-size: 30px; font-weight: 800; letter-spacing: -.8px; margin-top: 2px; font-variant-numeric: tabular-nums; }
+.m-vta-res-s { font-size: 12.5px; opacity: .85; margin-top: 2px; }
+.m-vta-res-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 12px; }
+.m-vta-res-chips span { background: rgba(255,255,255,.18); border-radius: 12px; padding: 5px 10px; font-size: 12px; }
+.m-vta-res-chips b { font-weight: 800; margin-left: 3px; }
+.m-vta-lista { flex: 1; min-height: 0; overflow-y: auto; -webkit-overflow-scrolling: touch; padding: 2px 14px calc(var(--m-tabbar-h) + var(--m-safe-b) + 84px); }
+.m-vta-lista .m-item-s { white-space: nowrap; }
+
+/* ── Ficha de producto (Stock) en el celular ────────────────── */
+.m-cat-toggle { width: 100%; min-height: 48px; display: flex; align-items: center; gap: 10px; padding: 0 14px; border: 1.5px solid var(--border-strong); border-radius: 14px; background: var(--bg); color: var(--text); font: inherit; font-size: 15px; font-weight: 600; cursor: pointer; margin-bottom: 8px; }
+.m-cat-toggle > i:first-child { font-size: 20px; color: var(--blue); }
+.m-cat-toggle > span { flex: 1; text-align: left; }
+.m-cat-chev { color: var(--text-tertiary); transition: transform .2s; }
+.m-cat-toggle.abierto .m-cat-chev { transform: rotate(180deg); }
+.m-cant-sel { width: 100%; min-height: 48px; font-size: 17px; font-weight: 700; padding: 0 12px; border: 1px solid var(--border-strong); border-radius: 14px; background: var(--bg); color: var(--text); }

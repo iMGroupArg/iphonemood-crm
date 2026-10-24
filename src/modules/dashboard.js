@@ -326,7 +326,7 @@ const Dashboard = {
     const ultimas = State.ventas.slice(0, 5).map((v) => {
       const total = v.items.reduce((s, i) => s + i.precio, 0);
       const abierta = v.estado === 'abierta';
-      return `<button type="button" class="m-item" onclick="App.goTo('ventas')">
+      return `<button type="button" class="m-item" onclick="Dashboard.abrirVentaMovil(${v.id})">
         <span class="m-item-ico ${abierta ? 'ambar' : 'verde'}"><i class="ti ti-receipt"></i></span>
         <span class="m-item-cuerpo"><span class="m-item-t">${e(v.cliente)}</span>
           <span class="m-item-s" style="display:block">${e((v.items[0]?.nombre || '—').substring(0, 34))}${v.items.length > 1 ? ` +${v.items.length - 1}` : ''}</span></span>
@@ -403,6 +403,12 @@ const Dashboard = {
     `;
     setTimeout(() => this.renderCharts(), 0);
     return container;
+  },
+
+  // Desde Inicio se abre la venta tocada, ya dentro de la pantalla Ventas (misma estética y botón Atrás coherente).
+  abrirVentaMovil(id) {
+    App.goTo('ventas');
+    setTimeout(() => Ventas.viewSale(id), 80);
   },
 
   tabMovil(k) {

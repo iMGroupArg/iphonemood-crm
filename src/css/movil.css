@@ -244,3 +244,40 @@ body.m-hoja-abierta .m-tabbar { pointer-events: none; }
 .m-stk-filtros b[hidden], .m-stk-activos[hidden], .m-chips[hidden] { display: none; }
 .m-stk-head h2 { display: none; }
 .m-stk-head { justify-content: flex-end; padding-bottom: 0; }
+
+/* ── Mercado Libre: Órdenes · Publicaciones · Cuenta ────────── */
+.m-meli { flex: 1; min-height: 0; overflow-y: auto; -webkit-overflow-scrolling: touch; padding: 10px 14px calc(var(--m-tabbar-h) + var(--m-safe-b) + 24px); }
+.m-meli-seg { position: sticky; top: -10px; z-index: 5; margin: 0 -2px 12px; box-shadow: 0 6px 12px -8px rgba(16,24,40,.25); }
+.m-meli-pane[hidden] { display: none; }
+.m-meli-pane h3 { font-size: 12px !important; }
+.m-meli-pane .card { border-radius: 18px; border: 0; box-shadow: var(--m-shadow-card); }
+.m-meli-pane select, .m-meli-pane input[type="search"], .m-meli-pane input[type="text"], .m-meli-pane input[type="number"] { font-size: 16px !important; min-height: 42px; }
+.m-meli-pane .btn { min-height: 40px; }
+/* a liberar: la plata retenida se destaca y se separa de lo que ya está en caja */
+.mo-liberar { background: var(--m-grad-hero) !important; color: #fff; border: 0 !important; }
+.mo-liberar * { color: inherit !important; }
+.mo-liberar > div:first-child > div:first-child { font-size: 28px !important; font-weight: 800 !important; letter-spacing: -.5px; }
+.mo-liberar > div:last-child { opacity: .85; font-size: 12px !important; }
+/* filtros de estado: una fila con scroll */
+.mo-tabs { flex-wrap: nowrap !important; overflow-x: auto; scrollbar-width: none; margin: 0 -14px 12px !important; padding: 2px 14px; }
+.mo-tabs::-webkit-scrollbar { display: none; }
+.mo-tabs .btn { flex: none; min-height: 38px; border-radius: 19px; padding: 0 14px; white-space: nowrap; }
+/* tarjeta de orden */
+.mo-card { padding: 14px !important; }
+.mo-top { flex-wrap: nowrap !important; }
+.mo-top > div { min-width: 0 !important; }
+.mo-top > div > div:first-child { font-size: 14.5px !important; font-weight: 700 !important; }
+.mo-nums { display: grid !important; grid-template-columns: 1fr 1fr; gap: 10px 14px !important; padding: 10px 12px; border-radius: 12px; background: var(--bg-secondary); }
+.mo-nums > span { display: flex; flex-direction: column; font-size: 11.5px; color: var(--text-secondary); }
+.mo-nums > span b { font-size: 14px; color: var(--text); font-variant-numeric: tabular-nums; }
+.mo-acc { display: grid !important; grid-template-columns: 1fr 1fr; }
+.mo-acc .btn { justify-content: center; min-height: 44px; border-radius: 12px; }
+.mo-acc .btn-primary, .mo-acc input[type="number"], .mo-acc > span, .mo-acc > label { grid-column: 1 / -1; }
+.mo-acc input[type="number"] { width: 100% !important; }
+/* herramientas técnicas plegadas */
+.m-meli-herr { margin-bottom: 10px; }
+.m-meli-herr-cuerpo { padding: 0 12px 12px; }
+.m-meli-herr-cuerpo .card { box-shadow: none; background: var(--bg-secondary); }
+.mo-liberar > .mo-nota { display: none; }
+.mo-liberar::after { content: 'Todavía no está en las cajas: pasa a caja cuando confirmás la acreditación.'; flex-basis: 100%; font-size: 12px; opacity: .85; line-height: 1.4; }
+.mo-liberar { gap: 6px !important; }

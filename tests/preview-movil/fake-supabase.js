@@ -90,6 +90,34 @@
     categorias_gasto: [{ id: 1, nombre: 'Operativo', color: '#0071E3' }],
     garantias: [{ id: 1, nombre: '6 meses', dias: 180, color: '#1D8348', tipo: 'usado' }],
   };
+  // Mercado Libre: una cuenta, órdenes en cada estado y un par de avisos en cola.
+  const futuro = (d) => new Date(Date.now() + d * 864e5).toISOString();
+  const orden = (id, comp, est, extra, items) => Object.assign({ id, meli_order_id: '200000' + (4000 + id), cuenta_id: 1, estado: 'paid', comprador: comp, fecha_orden: ts(id),
+    moneda: 'ARS', bruto: 52000, neto: 41800, comision_envio: 10200, fecha_liberacion: futuro(3), financiera_completa: true, revisar: false, motivo_revisar: null,
+    procesada: false, stock_descontado: false, venta_id: null, acreditado: false, monto_acreditado: null, acreditado_en: null, revertida_en: null,
+    cerrada_manual_en: null, cerrada_manual_por: null, cerrada_manual_motivo: null, cerrada_manual_nota: null, cerrada_manual_venta_id: null }, extra);
+  const meli_ordenes = [
+    orden(1, 'JUAN PEREZ', 'paid', {}, 0),
+    orden(2, 'MARIA GOMEZ', 'paid', { procesada: true, stock_descontado: true, venta_id: 14, fecha_liberacion: futuro(5) }),
+    orden(3, 'LUCAS FERNANDEZ', 'paid', { procesada: true, stock_descontado: true, venta_id: 12, fecha_liberacion: ts(0) }),
+    orden(4, 'ANA RIOS', 'paid', { revisar: true, motivo_revisar: 'Stock insuficiente para uno de los productos' }),
+    orden(5, 'SOFIA LOPEZ', 'paid', { procesada: true, acreditado: true, monto_acreditado: 41800, acreditado_en: ts(2), venta_id: 9 }),
+    orden(6, 'PABLO RUIZ', 'paid', { financiera_completa: false, bruto: null, neto: null, fecha_liberacion: null }),
+  ];
+  const meli_orden_items = [
+    { orden_id: 1, meli_item_id: 'MLA111', meli_variacion_id: null, titulo: 'Perfume Lattafa Khamrah 100ml Eau De Parfum Original', cantidad: 1, stock_id: 5, precio_unitario: 52000 },
+    { orden_id: 2, meli_item_id: 'MLA112', meli_variacion_id: null, titulo: 'Decant Fakhar Gold 10ml', cantidad: 2, stock_id: 7, precio_unitario: 26000 },
+    { orden_id: 3, meli_item_id: 'MLA113', meli_variacion_id: null, titulo: 'Auriculares Bluetooth Inalámbricos', cantidad: 1, stock_id: 9, precio_unitario: 52000 },
+    { orden_id: 4, meli_item_id: 'MLA114', meli_variacion_id: null, titulo: 'Combo Perfumes Árabes x3', cantidad: 1, stock_id: null, precio_unitario: 52000 },
+    { orden_id: 5, meli_item_id: 'MLA115', meli_variacion_id: null, titulo: 'Perfume Asad Lattafa 100ml', cantidad: 1, stock_id: 5, precio_unitario: 52000 },
+    { orden_id: 6, meli_item_id: 'MLA116', meli_variacion_id: null, titulo: 'Funda iPhone 15 Pro Max', cantidad: 3, stock_id: null, precio_unitario: 17000 },
+  ];
+  Object.assign(FIXTURES, {
+    meli_ordenes, meli_orden_items,
+    meli_cuentas_estado: [{ id: 1, meli_user_id: '123456789', nickname: 'IPHONEMOOD.AR', conectada: true, activa: true, requiere_reconexion: false, refresh_ambiguo: false, persona_id: 1, bolsillo: 'ARS transferencia', ultimo_error: null }],
+    meli_notificaciones: [{ id: 1, topico: 'orders_v2', recurso: '/orders/2000004001', estado: 'pendiente', intentos: 1, motivo: null, error: null, recibida_en: ts(0) }],
+    meli_barrido_estado: [],
+  });
   // Los módulos pueden agregar o pisar tablas (p. ej. Mercado Libre) antes de que arranque la app.
   window.__FIXTURES__ = FIXTURES;
 

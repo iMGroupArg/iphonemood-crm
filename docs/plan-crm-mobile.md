@@ -117,3 +117,10 @@ revisión de código por Codex, y recién ahí se le pide a Franco publicar. Nad
 La página de prueba con datos de ejemplo se abre en el navegador a los anchos de arriba. Se compara con las capturas "antes" y con el escritorio.
 Las pruebas existentes (`tests/*.test.mjs`, 18 + 63 + 85 de Mercado Libre y las de cajas) tienen que seguir en verde. Lo que no se puede probar
 acá (teclado abierto, rebote de iOS) se prueba en el celular de Franco con una vista previa y se deja asentado.
+
+## 10. Estado (2026-10-24, sólo local, sin publicar)
+
+- **Fases 1-2** (`62e37e6`): barra inferior Inicio · Ventas · Stock · Mercado Libre · Más, hoja "Más", dashboard con degradado azul, página de prueba sin login (`tests/preview-movil`).
+- **Fase 3** (`a981225`): Stock como app: buscador + chips de grupo + hoja "Filtros (N)" con chips removibles, lista de tarjetas, selección múltiple con barra inferior, botón "+", filtros que sobreviven a cambiar de pantalla. Arreglos de la revisión de Codex (barra bajo los modales, hoja abierta al agrandar la ventana, redibujo al cruzar 1024 px, teclado).
+- **Fase 4**: Mercado Libre en pestañas Órdenes · Publicaciones · Cuenta; "A liberar" destacado y aclarado como plata que aún no está en caja; órdenes con números en grilla y acción principal a todo el ancho; sonda/barrido/diagnóstico plegados bajo "Herramientas". **No se tocó** la lógica de procesar/acreditar/revertir ni sus confirmaciones (se muestran como antes).
+- Pendiente de decisión: pasar el selector de vínculos y la confirmación de "Procesar" a hojas inferiores (hoy funcionan como panel en la tarjeta y modal centrado, ya legibles a 375 px); no se hizo para no tocar el flujo donde hay plata de por medio.

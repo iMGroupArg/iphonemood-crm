@@ -55,9 +55,34 @@ const Meli = {
   render() {
     const c = document.createElement('div');
     c.style.cssText = 'flex:1;overflow-y:auto;padding:16px';
-    c.innerHTML = '<div id="meli-root"></div><div id="meli-vincular-root" style="margin-top:24px"></div><div id="meli-ordenes-root" style="margin-top:24px"></div>';
+    if (window.Movil && Movil.activo()) {
+      // Celular: una sola cosa a la vez. Los tres bloques son los mismos, sólo se muestran de a uno.
+      c.className = 'm-meli';
+      c.style.cssText = '';
+      c.innerHTML = `
+        <div class="m-meli-seg m-seg" role="tablist" aria-label="Mercado Libre">
+          <button type="button" role="tab" data-t="ordenes" onclick="Meli.tabMovil('ordenes')">Órdenes</button>
+          <button type="button" role="tab" data-t="publicaciones" onclick="Meli.tabMovil('publicaciones')">Publicaciones</button>
+          <button type="button" role="tab" data-t="cuenta" onclick="Meli.tabMovil('cuenta')">Cuenta</button>
+        </div>
+        <div id="meli-ordenes-root" class="m-meli-pane" data-p="ordenes"></div>
+        <div id="meli-vincular-root" class="m-meli-pane" data-p="publicaciones"></div>
+        <div id="meli-root" class="m-meli-pane" data-p="cuenta"></div>`;
+      this.tabMovil(this._tabM || 'ordenes', c);
+    } else {
+      c.innerHTML = '<div id="meli-root"></div><div id="meli-vincular-root" style="margin-top:24px"></div><div id="meli-ordenes-root" style="margin-top:24px"></div>';
+    }
     setTimeout(() => { this.cargar(); if (window.MeliVincular) MeliVincular.cargar(); if (window.MeliOrdenes) MeliOrdenes.cargar(); }, 0);
     return c;
+  },
+
+  _tabM: 'ordenes',
+  tabMovil(k, raiz) {
+    this._tabM = k;
+    const r = raiz || document.querySelector('.m-meli');
+    if (!r) return;
+    r.querySelectorAll('.m-meli-seg button').forEach((b) => { const on = b.dataset.t === k; b.classList.toggle('activo', on); b.setAttribute('aria-selected', on ? 'true' : 'false'); });
+    r.querySelectorAll('.m-meli-pane').forEach((p) => { p.hidden = p.dataset.p !== k; });
   },
 
   async cargar() {
@@ -105,6 +130,9 @@ const Meli = {
   _vista() {
     const e = (s) => State.esc(s == null ? '' : String(s));
 
+    // En el celular las herramientas técnicas quedan plegadas: Órdenes es lo que se usa todos los días.
+    const mov = window.Movil && Movil.activo();
+    const herr = (titulo, html) => (mov ? `<details class="m-mas-ind m-meli-herr"><summary>${titulo}</summary><div class="m-meli-herr-cuerpo">${html}</div></details>` : html);
     const aviso = this._msg
       ? `<div class="card" style="margin-bottom:12px;border-left:3px solid ${this._msg.ok ? 'var(--green)' : 'var(--red)'}">
            <div style="font-size:13px">${e(this._msg.texto)}</div></div>`
@@ -170,7 +198,7 @@ const Meli = {
           <i class="ti ti-refresh"></i> Procesar pendientes
         </button>
       </div>
-      ${this._vistaBarrido()}
+      ${herr('Buscar ventas recientes', this._vistaBarrido())}
       <div class="card" style="margin-bottom:8px">
         <div style="display:flex;gap:24px;flex-wrap:wrap">
           <div><div style="font-size:22px;font-weight:600">${cola.pendientes}</div>
@@ -185,7 +213,7 @@ const Meli = {
         Los avisos se procesan mientras el CRM está abierto y una vez por día aunque no lo esté:
         si nadie abre el CRM, una venta puede tardar hasta un día en aparecer.
       </div>
-      <div class="card" style="margin-top:14px">
+${herr('Diagnóstico de datos', `      <div class="card" style="margin-top:14px">
         <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
           <div style="flex:1;min-width:220px;font-size:12px;color:var(--text-secondary);line-height:1.5">
             <b style="color:var(--text)">Diagnóstico de datos (solo lectura).</b> Pregunta a Mercado Libre qué campos
@@ -196,7 +224,7 @@ const Meli = {
           <button class="btn btn-sm" id="meli-btn-conciliar" onclick="Meli.sonda('conciliar')" title="Importes de las últimas 6 ventas y si la cuenta cierra"><i class="ti ti-calculator"></i> Conciliar importes</button>
         </div>
         <div id="meli-sonda-salida" style="margin-top:10px"></div>
-      </div>`;
+      </div>`)}`;
   },
 
   // Diagnóstico de solo lectura: la forma de las respuestas de Mercado Libre, sin valores (api/_meli_sonda.js).

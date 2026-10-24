@@ -1,5 +1,6 @@
 import './supabase-config.js';
 import './state.js';
+import './movil.js';
 import './dashboard.js';
 import './stock.js';
 import './ventas.js';
@@ -99,6 +100,7 @@ const App = {
     document.querySelectorAll('.nav-item').forEach(item => {
       item.addEventListener('click', () => this.goTo(item.dataset.page));
     });
+    window.Movil?.iniciar();   // barra inferior del celular (en escritorio no dibuja nada)
 
     const container = document.getElementById('pages');
     container.innerHTML = `<div class="empty-state" style="margin:auto"><i class="ti ti-loader-2" style="font-size:32px"></i><div style="margin-top:8px">Cargando datos desde la base...</div></div>`;
@@ -246,6 +248,7 @@ const App = {
     container.style.justifyContent = 'flex-start';
     this.closeSidebar();
     document.getElementById('user-menu-dropdown').style.display = 'none';
+    window.Movil?.sincronizar(pageKey);
     this.actualizarBadges();
   },
 

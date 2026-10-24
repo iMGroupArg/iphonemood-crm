@@ -32,7 +32,7 @@
 
 /* ── Barra inferior ─────────────────────────────────────────── */
 .m-tabbar {
-  position: fixed; left: 0; right: 0; bottom: 0; z-index: 200;
+  position: fixed; left: 0; right: 0; bottom: 0; z-index: 90;
   display: flex; align-items: stretch; justify-content: space-around;
   height: calc(var(--m-tabbar-h) + var(--m-safe-b)); padding: 6px 6px var(--m-safe-b);
   background: rgba(255,255,255,.92); backdrop-filter: saturate(180%) blur(18px); -webkit-backdrop-filter: saturate(180%) blur(18px);
@@ -192,7 +192,7 @@ body.m-hoja-abierta .m-tabbar { pointer-events: none; }
 
 /* ── Botón flotante ─────────────────────────────────────────── */
 .m-fab {
-  position: fixed; right: 16px; bottom: calc(var(--m-tabbar-h) + var(--m-safe-b) + 14px); z-index: 190; width: 56px; height: 56px; border-radius: 50%;
+  position: fixed; right: 16px; bottom: calc(var(--m-tabbar-h) + var(--m-safe-b) + 14px); z-index: 80; width: 56px; height: 56px; border-radius: 50%;
   border: 0; background: var(--blue); color: #fff; font-size: 26px; display: flex; align-items: center; justify-content: center; cursor: pointer;
   box-shadow: 0 10px 26px rgba(0,113,227,.4); -webkit-tap-highlight-color: transparent;
 }
@@ -201,3 +201,46 @@ body.m-hoja-abierta .m-tabbar { pointer-events: none; }
 @media (prefers-reduced-motion: reduce) {
   .m-sheet, .m-sheet-bg, .m-tab-ico, .m-seg button { transition: none; }
 }
+
+/* ── Stock como app ─────────────────────────────────────────── */
+.m-stk-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 10px 14px 4px; flex: none; }
+.m-stk-head h2 { font-size: 22px; font-weight: 800; letter-spacing: -.5px; display: flex; align-items: center; gap: 8px; }
+.m-stk-head h2 i { color: var(--blue); }
+.m-stk-acc { display: flex; gap: 6px; }
+.m-stk-ib { width: 40px; height: 40px; border-radius: 50%; border: 1px solid var(--border); background: var(--bg); color: var(--text); font-size: 19px; display: flex; align-items: center; justify-content: center; cursor: pointer; -webkit-tap-highlight-color: transparent; }
+.m-stk-ib.activo { background: var(--blue); border-color: var(--blue); color: #fff; }
+.m-stk-head + #stock-kpis { padding: 0 6px 4px; flex: none; }
+.m-stk-top { display: flex; gap: 8px; padding: 6px 14px 8px; flex: none; }
+.m-stk-buscar { flex: 1; min-width: 0; display: flex; align-items: center; gap: 8px; height: 44px; padding: 0 14px; border-radius: 22px; background: var(--bg-secondary); }
+.m-stk-buscar i { color: var(--text-tertiary); font-size: 18px; }
+.m-stk-buscar input { flex: 1; min-width: 0; border: 0; background: transparent; font: inherit; font-size: 16px; color: var(--text); outline: none; -webkit-appearance: none; }
+.m-stk-filtros { flex: none; height: 44px; padding: 0 14px; border-radius: 22px; border: 1px solid var(--border); background: var(--bg); color: var(--text); font: inherit; font-size: 14px; font-weight: 600; display: flex; align-items: center; gap: 6px; cursor: pointer; }
+.m-stk-filtros i { font-size: 18px; color: var(--blue); }
+.m-stk-filtros b { min-width: 20px; height: 20px; border-radius: 10px; background: var(--blue); color: #fff; font-size: 12px; display: inline-flex; align-items: center; justify-content: center; padding: 0 5px; }
+.m-stk-chips, .m-stk-activos { margin: 0; padding: 2px 14px 8px; }
+.m-stk-activos .m-chip { min-height: 32px; font-size: 12.5px; padding: 0 12px; }
+.m-stk-lista { flex: 1; min-height: 0; overflow-y: auto; -webkit-overflow-scrolling: touch; padding: 4px 14px calc(var(--m-tabbar-h) + var(--m-safe-b) + 84px); }
+.m-stk-item { position: relative; }
+.m-stk-item .m-item-t, .m-stk-item .m-item-s { display: block; }
+.m-stk-item .m-item-s { white-space: nowrap; }
+.m-stk-item .m-stk-nota { color: var(--amber); }
+.m-stk-item .m-item-sub { display: block; }
+.m-stk-uds { font-weight: 600; color: var(--text-secondary); }
+.m-stk-chk { flex: none; width: 46px; height: 46px; display: flex; align-items: center; justify-content: center; }
+.m-stk-chk i { width: 26px; height: 26px; border-radius: 50%; border: 2px solid var(--border-strong); display: flex; align-items: center; justify-content: center; font-size: 15px; color: transparent; }
+.m-stk-item.sel { box-shadow: 0 0 0 2px var(--blue), var(--m-shadow-card); }
+.m-stk-item.sel .m-stk-chk i { background: var(--blue); border-color: var(--blue); color: #fff; }
+.m-selbar { position: fixed; left: 12px; right: 12px; bottom: calc(var(--m-tabbar-h) + var(--m-safe-b) + 12px); z-index: 85; display: flex; align-items: center; gap: 8px; padding: 10px 12px; border-radius: 18px; background: var(--text); color: #fff; box-shadow: 0 10px 28px rgba(0,0,0,.28); }
+.m-selbar span { flex: 1; font-size: 14px; }
+.m-selbar .btn { min-height: 38px; }
+#stock-seleccion-bar { flex: none; }
+/* hoja de filtros */
+.m-f-grupo { margin-bottom: 18px; }
+.m-f-etq { font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: .06em; color: var(--text-secondary); margin-bottom: 8px; }
+.m-f-chips { display: flex; flex-wrap: wrap; gap: 8px; }
+.m-f-sel { display: block; margin-bottom: 10px; }
+.m-f-sel span { display: block; font-size: 12.5px; color: var(--text-secondary); margin-bottom: 4px; }
+.m-f-sel select { width: 100%; min-height: 46px; font-size: 16px; padding: 0 12px; border: 1px solid var(--border-strong); border-radius: 12px; background: var(--bg); color: var(--text); }
+.m-stk-filtros b[hidden], .m-stk-activos[hidden], .m-chips[hidden] { display: none; }
+.m-stk-head h2 { display: none; }
+.m-stk-head { justify-content: flex-end; padding-bottom: 0; }

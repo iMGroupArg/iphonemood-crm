@@ -297,7 +297,7 @@ const Dashboard = {
     const etqPer = e(this._etqPeriodoM());
     const rapido = this.periodo === 'hoy' || this.periodo === 'semana' || this.periodo === 'mes';
     const kpi = (etq, valor, sub, color, onclick) => `
-      <div class="m-kpi${onclick ? ' tap' : ''}" ${onclick ? `onclick="${onclick}"` : ''}>
+      <div class="m-kpi${onclick ? ' tap' : ''}" ${onclick ? `onclick="${onclick}" role="button" tabindex="0" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();this.click()}"` : ''}>
         <label>${etq}</label><div class="v" ${color ? `style="color:${color}"` : ''}>${valor}</div><div class="s">${sub}</div>
       </div>`;
     const ml = State.meliPendienteLiberar();
@@ -390,16 +390,16 @@ const Dashboard = {
         <details class="m-mas-ind"><summary>Ver más indicadores</summary><div class="m-kpis">${masIndicadores}</div></details>
         <div class="m-card"><h3><i class="ti ti-chart-line"></i> Evolución de ventas</h3><div style="position:relative;height:230px"><canvas id="chart-evolucion"></canvas></div></div>`)}
       ${panel('ventas', `
-        <div class="m-sec">Últimas ventas <small onclick="App.goTo('ventas')">Ver todas</small></div>
+        <div class="m-sec">Últimas ventas <small role="button" tabindex="0" onclick="App.goTo('ventas')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();this.click()}">Ver todas</small></div>
         <div class="m-list">${ultimas}</div>
         <div class="m-card"><h3><i class="ti ti-chart-bar"></i> Monto vendido vs beneficio por día</h3><div style="position:relative;height:230px"><canvas id="chart-monto-beneficio"></canvas></div></div>`)}
       ${panel('cajas', `
-        <div class="m-sec">Saldo por persona <small onclick="App.goTo('cajas')">Ver cajas</small></div>
+        <div class="m-sec">Saldo por persona <small role="button" tabindex="0" onclick="App.goTo('cajas')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();this.click()}">Ver cajas</small></div>
         <div class="m-list">${cajas}</div>
         <div class="m-card"><h3><i class="ti ti-chart-pie"></i> Distribución de saldo por persona</h3><div style="position:relative;height:230px"><canvas id="chart-personas"></canvas></div></div>`)}
       ${panel('pendientes', `
         <div class="m-sec">Alertas</div><div class="m-list">${alertas}</div>
-        <div class="m-sec">Reparaciones activas <small onclick="App.goTo('reparaciones')">Ver todas</small></div><div class="m-list">${reps}</div>`)}
+        <div class="m-sec">Reparaciones activas <small role="button" tabindex="0" onclick="App.goTo('reparaciones')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();this.click()}">Ver todas</small></div><div class="m-list">${reps}</div>`)}
     `;
     setTimeout(() => this.renderCharts(), 0);
     return container;

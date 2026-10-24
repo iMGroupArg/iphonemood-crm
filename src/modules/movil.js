@@ -135,7 +135,15 @@ const Movil = {
     this.sincronizar(this._pagina);
   },
 
-  _aplicar() { if (this._barra) this._barra.hidden = !this.activo(); },
+  _aplicar() {
+    if (!this._barra) return;
+    const activo = this.activo();
+    this._barra.hidden = !activo;
+    // Al agrandar la ventana con una hoja abierta (ya sin sus estilos) hay que soltar el bloqueo de la pantalla.
+    if (!activo && Sheet._actual) { const h = Sheet._actual; if (h._historial) { h._historial = false; if (history.state && history.state.movilHoja) history.back(); } Sheet._quitar(h, true); }
+    // Dashboard y Stock arman un DOM distinto según el ancho: se vuelven a dibujar al cruzar el corte.
+    if (['dashboard', 'stock'].includes(this._pagina) && window.App && App._currentPage === this._pagina) App.goTo(this._pagina);
+  },
 
   // Lo llama App.goTo cada vez que cambia la pantalla.
   sincronizar(pagina) {

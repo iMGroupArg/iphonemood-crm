@@ -436,5 +436,43 @@ const resp200 = (json) => ({ ok: true, status: 200, json: async () => json });
   check('Todo dato que viene de afuera pasa por _e() (escape): no hay ${it.titulo} ni ${s.nombre} sin escapar en el HTML', !/\$\{(it\.titulo|it\.id|s\.nombre|v\.etiqueta|st\.nombre)\}/.test(sinCom));
 }
 
+// ── Mismo producto, distinta carga (script 19) ───────────────────────────
+{
+  const K = { vieja: 'k-vieja', nueva: 'k-nueva', vacia: 'k-vacia', otra: 'k-otra-cat', res: 'k-reservada' };
+  const stockK = [
+    { id: K.nueva, nombre: 'KHAMRAH  DUKHAN 100ML', categoria: 'perfumeria', cantidad: 2, estado_inventario: 'disponible', a_pedido: false, imeis: [], creado_en: '2026-02-01T10:00:00Z' },
+    { id: K.vacia, nombre: 'Khamráh Dukhan 100ml', categoria: 'perfumeria', cantidad: 0, estado_inventario: 'disponible', a_pedido: false, imeis: [], creado_en: '2026-01-01T10:00:00Z' },
+    { id: K.vieja, nombre: 'Khamrah Dukhan 100ml', categoria: 'perfumeria', cantidad: 2, estado_inventario: 'disponible', a_pedido: false, imeis: [], creado_en: '2026-01-15T10:00:00Z' },
+    { id: K.otra, nombre: 'Khamrah Dukhan 100ml', categoria: 'decant', cantidad: 9, estado_inventario: 'disponible', a_pedido: false, imeis: [], creado_en: '2026-01-02T10:00:00Z' },
+    { id: K.res, nombre: 'Khamrah Dukhan 100ml', categoria: 'perfumeria', cantidad: 5, estado_inventario: 'reservado', a_pedido: false, imeis: [], creado_en: '2026-01-03T10:00:00Z' },
+  ];
+  const avisoK = item('MLA777777777', 'Lattafa Khamrah Dukhan 100 ml EDP');
+  const e = entorno({ stockLista: stockK, vinculos: [], items: [avisoK] }); await e.M.cargar();
+  e.M.vincular('MLA777777777', '');
+  const c = e.el('meli-vincular-candidatos').innerHTML;
+  const opciones = (c.match(/data-stock="/g) || []).length;
+  check('Dos o más cargas del mismo nombre (sin importar mayúsculas, tildes ni espacios) aparecen como UNA opción con "N cargas" y las unidades sumadas',
+    /Khamrah/i.test(c) && /3 cargas/.test(c) === false && /2 cargas/.test(c) && /4 u\./.test(c), c.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').slice(0, 260));
+  const g = e.M._grupos((x) => x.categoria === 'perfumeria').find((x) => e.M._nombreNorm(x.nombre).startsWith('khamrah') && x.cargas > 1);
+  check('El grupo ordena de la carga más vieja a la más nueva, deja afuera otra categoría y las reservadas, y su representante es la más vieja CON stock',
+    g && g.ids.join() === [K.vacia, K.vieja, K.nueva].join() && g.repId === K.vieja && g.unidades === 4 && !g.ids.includes(K.otra) && !g.ids.includes(K.res), JSON.stringify(g && g.ids));
+  check('La fila reservada aparece sola, no se mezcla con el grupo', e.M._grupos().some((x) => x.ids.length === 1 && x.ids[0] === K.res));
+  e.M.elegir(K.vieja);
+  const panel = e.el('meli-vincular-accion').innerHTML;
+  check('Al elegirla el botón lo dice: Vincular con "…" (2 cargas)', /Vincular con/.test(panel) && /\(2 cargas\)/.test(panel), panel);
+  await e.M.confirmar();
+  const post = e.log.fetch.find((f) => f.opts.method === 'POST');
+  check('Se vincula con la carga más vieja que tiene unidades (el reparto entre cargas lo hace la base al descontar)', post && post.body.stock_id === K.vieja, JSON.stringify(post && post.body));
+}
+{
+  const stockK = [
+    { id: 'a', nombre: 'Perfume Mixto 100ml', categoria: 'perfumeria', cantidad: 1, estado_inventario: 'disponible', a_pedido: false, imeis: [], creado_en: '2026-01-01T10:00:00Z' },
+    { id: 'b', nombre: 'perfume mixto 100ML', categoria: 'perfumeria', cantidad: 3, estado_inventario: 'disponible', a_pedido: false, imeis: [], creado_en: '2026-03-01T10:00:00Z' },
+  ];
+  const e = entorno({ stockLista: stockK, vinculos: [{ meli_item_id: 'MLA111111111', meli_variacion_id: null, stock_id: 'b', version: 1 }] }); await e.M.cargar();
+  check('Un aviso vinculado a una de las cargas muestra "→ Nombre (2 cargas, 4 u.)"', /→ perfume mixto 100ML <span[^>]*>\(2 cargas, 4 u\.\)/.test(html(e)), html(e).replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').slice(0, 300));
+  check('La nota del nombre normalizado es idéntica a la de la base: minúsculas, sin tildes ni espacios de más', e.M._nombreNorm('  Khamráh   DUKHAN 100ML ') === 'khamrah dukhan 100ml' && e.M._nombreNorm(null) === '');
+}
+
 console.log(`\n${ok} pasan, ${fail} fallan de ${ok + fail}`);
 process.exit(fail ? 1 : 0);

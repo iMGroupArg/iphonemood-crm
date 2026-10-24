@@ -117,6 +117,37 @@ const MeliVincular = {
     return (ml !== null && ml <= 20) ? 'decant' : 'perfumeria';
   },
 
+  // ── Mismo producto, distinta carga ─────────────────────────────────────────
+  // Filas de Stock con el mismo nombre (sin importar mayúsculas, tildes ni espacios) y la misma categoría son UN
+  // producto: se eligen juntas y al vender la unidad sale de la carga más vieja (el reparto lo hace la base, script 19:
+  // misma regla de nombre, categoría y estado). Stock sigue en filas separadas: el costo de cada una no se mezcla.
+  _nombreNorm(t) {
+    return String(t || '').toLowerCase().replace(/[áàäâãéèëêíìïîóòöôõúùüûñç]/g, (c) => 'aaaaaeeeeiiiiooooouuuunc'['áàäâãéèëêíìïîóòöôõúùüûñç'.indexOf(c)]).replace(/\s+/g, ' ').trim();
+  },
+  _claveGrupo(s) { return `${this._nombreNorm(s.nombre)}|${s.categoria || ''}`; },
+  // Grupos de lo vendible: { clave, nombre, categoria, filas (de la más vieja a la más nueva), cargas, unidades, repId, ids }.
+  // `repId` es la carga más vieja CON unidades: es la que queda vinculada.
+  _grupos(filtro = () => true) {
+    const mapa = new Map();
+    for (const s of this._stock) {
+      if (!this._esVendible(s) || !filtro(s)) continue;
+      if ((s.estado_inventario || 'disponible') !== 'disponible') { mapa.set(`solo|${s.id}`, [s]); continue; }   // reservada / en reparación: sola
+      const k = this._claveGrupo(s);
+      if (!mapa.has(k)) mapa.set(k, []);
+      mapa.get(k).push(s);
+    }
+    const fecha = (s) => (s.creado_en ? Date.parse(s.creado_en) : Infinity);
+    return [...mapa.entries()].map(([clave, filas]) => {
+      filas.sort((a, b) => (fecha(a) - fecha(b)) || String(a.id).localeCompare(String(b.id)));
+      const conStock = filas.find((f) => (Number(f.cantidad) || 0) > 0);
+      // `cargas` cuenta las filas que todavía tienen unidades (una carga agotada no suma ruido); `ids` las incluye a todas.
+      const nCon = filas.filter((f) => (Number(f.cantidad) || 0) > 0).length;
+      return { clave, nombre: filas[0].nombre, categoria: filas[0].categoria, filas, cargas: nCon || filas.length,
+        unidades: filas.reduce((a, f) => a + (Number(f.cantidad) || 0), 0), repId: (conStock || filas[0]).id, ids: filas.map((f) => f.id) };
+    });
+  },
+  _grupoDeStock(id) { return this._grupos().find((g) => g.ids.includes(id)) || null; },
+
   _clave(item, variacion) { return `${item}|${variacion || ''}`; },
   _vinculo(item, variacion) { return this._vinculos.get(this._clave(item, variacion)) || null; },
   _stockPorId(id) { return this._stock.find((s) => s.id === id) || null; },
@@ -145,7 +176,16 @@ const MeliVincular = {
       for (const w of this._palabras(s.nombre)) if (pal.has(w)) puntos++;
       if (mlAviso !== null) puntos += 1;
       return puntos >= 2 ? { s, puntos } : null;
-    }).filter(Boolean).sort((a, b) => b.puntos - a.puntos || String(a.s.nombre).localeCompare(String(b.s.nombre), 'es')).slice(0, 3).map((x) => x.s);
+    }).filter(Boolean).sort((a, b) => b.puntos - a.puntos || String(a.s.nombre).localeCompare(String(b.s.nombre), 'es')).map((x) => x.s);
+  },
+  // Las sugerencias se ofrecen por producto (no por carga): una sola opción aunque haya varias filas del mismo nombre.
+  _sugerenciasGrupos(texto) {
+    const grupos = this._grupos(), vistos = new Set(), out = [];
+    for (const s of this._sugerencias(texto)) {
+      const g = grupos.find((x) => x.ids.includes(s.id));
+      if (g && !vistos.has(g.clave)) { vistos.add(g.clave); out.push(g); }
+    }
+    return out.slice(0, 3);
   },
 
   // ── Carga ──────────────────────────────────────────────────────────────────
@@ -198,7 +238,7 @@ const MeliVincular = {
 
   async _cargarStock() {
     const { filas, truncado } = await this._leerTodo(() => supa.from('stock')
-      .select('id,nombre,categoria,cantidad,estado_inventario,a_pedido,imeis').neq('estado_inventario', 'eliminado').order('id'));
+      .select('id,nombre,categoria,cantidad,estado_inventario,a_pedido,imeis,creado_en').neq('estado_inventario', 'eliminado').order('id'));
     this._stock = filas;
     this._stockParcial = truncado;
   },
@@ -449,36 +489,36 @@ const MeliVincular = {
 
   _candidatos() {
     const q = this._normalizar(this._busca).trim();
-    return this._stock
-      .filter((s) => this._esVendible(s) && this._enRubro(s, this._rubro))
-      .filter((s) => !q || this._normalizar(s.nombre).includes(q))
+    return this._grupos((s) => this._enRubro(s, this._rubro))
+      .filter((g) => !q || this._normalizar(g.nombre).includes(q))
       .sort((a, b) => String(a.nombre).localeCompare(String(b.nombre), 'es')).slice(0, 40);
   },
 
-  _opcionStock(s) {
+  _opcionStock(g) {
     const e = (x) => this._e(x);
-    const marcado = this._elegido === s.id;
-    const cant = Number(s.cantidad) || 0;
+    const marcado = g.ids.includes(this._elegido);
+    const cant = g.unidades;
     const etiq = cant <= 0 ? '<span class="badge b-amber" style="margin-left:6px">sin stock</span>' : `<span style="color:var(--text-secondary);margin-left:6px">${cant} u.</span>`;
-    const compartido = [...this._vinculos.values()].filter((v) => v.stock_id === s.id).length;
+    const cargas = g.cargas > 1 ? `<span class="badge b-purple" style="margin-left:6px" title="Hay ${g.cargas} filas de Stock con este nombre (distinto costo de carga). Se venden de la más vieja a la más nueva y cada una conserva su costo.">${g.cargas} cargas</span>` : '';
+    const compartido = [...this._vinculos.values()].filter((v) => g.ids.includes(v.stock_id)).length;
     const aviso = compartido ? `<span class="badge b-blue" style="margin-left:6px" title="Ya está vinculado a otro aviso">en ${compartido} aviso(s)</span>` : '';
-    return `<div role="button" tabindex="0" data-stock="${e(s.id)}" onclick="MeliVincular.elegir(this.dataset.stock)"
+    return `<div role="button" tabindex="0" data-stock="${e(g.repId)}" onclick="MeliVincular.elegir(this.dataset.stock)"
       style="padding:7px 10px;border:1px solid ${marcado ? 'var(--accent, #0a84ff)' : 'var(--border)'};border-radius:8px;margin-bottom:5px;cursor:pointer;font-size:12.5px;background:${marcado ? 'var(--bg-hover, #eef5ff)' : 'transparent'}">
-      <b>${e(s.nombre)}</b> <span style="color:var(--text-secondary)">· ${e(s.categoria || '')}</span>${etiq}${aviso}</div>`;
+      <b>${e(g.nombre)}</b> <span style="color:var(--text-secondary)">· ${e(g.categoria || '')}</span>${etiq}${cargas}${aviso}</div>`;
   },
 
   _pintarCandidatos() {
     const el = document.getElementById('meli-vincular-candidatos');
     if (!el || !this._sel) return;
     const f = this._fila(this._sel);
-    const sug = (f ? this._sugerencias(`${f.it.titulo} ${f.etiqueta}`) : []).filter((x) => this._enRubro(x, this._rubro));
+    const sug = (f ? this._sugerenciasGrupos(`${f.it.titulo} ${f.etiqueta}`) : []).filter((x) => x.filas.some((r) => this._enRubro(r, this._rubro)));
     const lista = this._candidatos();
     const filtros = document.getElementById('meli-vincular-filtros');
     if (filtros) {
       const q = this._normalizar(this._busca).trim();
-      const base = this._stock.filter((x) => this._esVendible(x) && (!q || this._normalizar(x.nombre).includes(q)));
+      const base = this._grupos((x) => !q || this._normalizar(x.nombre).includes(q));
       filtros.innerHTML = this.RUBROS.map(([k, etq]) => {
-        const n = base.filter((x) => this._enRubro(x, k)).length;
+        const n = base.filter((g) => this._enRubro(g.filas[0], k)).length;
         const on = this._rubro === k;
         return `<button type="button" class="btn btn-sm${on ? ' btn-primary' : ''}" aria-pressed="${on}" onclick="MeliVincular.rubro('${k}')">${this._e(etq)} <span style="opacity:.7">${n}</span></button>`;
       }).join('');
@@ -493,8 +533,9 @@ const MeliVincular = {
     const el = document.getElementById('meli-vincular-accion');
     if (!el) return;
     const s = this._elegido ? this._stockPorId(this._elegido) : null;
+    const g = s ? this._grupoDeStock(s.id) : null;
     el.innerHTML = s
-      ? `<button class="btn btn-primary btn-sm" onclick="MeliVincular.confirmar()">Vincular con "${this._e(s.nombre)}"</button>`
+      ? `<button class="btn btn-primary btn-sm" onclick="MeliVincular.confirmar()">Vincular con "${this._e(s.nombre)}"${g && g.cargas > 1 ? ` (${g.cargas} cargas)` : ''}</button>`
       : '<span style="font-size:12px;color:var(--text-secondary)">Elegí un producto de la lista.</span>';
     // las opciones marcan la elegida
     this._pintarCandidatos();
@@ -508,8 +549,10 @@ const MeliVincular = {
     }
     const vin = this._vinculo(it.id, v ? v.id : null);
     const st = vin && vin.stock_id ? this._stockPorId(vin.stock_id) : null;
+    const gr = st ? this._grupoDeStock(st.id) : null;
+    const cargasTxt = gr && gr.cargas > 1 ? ` <span style="color:var(--text-secondary)">(${gr.cargas} cargas, ${gr.unidades} u.)</span>` : '';
     const estado = vin && vin.stock_id
-      ? `<span class="badge b-green">Vinculado</span> <span style="font-size:12.5px">→ ${st ? e(st.nombre) : 'producto (no figura en la lista)'}</span>`
+      ? `<span class="badge b-green">Vinculado</span> <span style="font-size:12.5px">→ ${st ? e(st.nombre) : 'producto (no figura en la lista)'}${cargasTxt}</span>`
       : '<span class="badge b-amber">Sin vincular</span>';
     const etiqueta = v ? `<span style="font-size:12px;color:var(--text-secondary)">${e(v.etiqueta)}${v.cantidad !== null ? ` · ${v.cantidad} u. publicadas` : ''}</span> ` : '';
     const dat = `data-item="${e(it.id)}" data-var="${e(v ? v.id : '')}"`;

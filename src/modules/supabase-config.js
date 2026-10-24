@@ -87,7 +87,9 @@ const DB = {
         estadoProducto: s.estado_producto || '', grado: s.grado || 'Sin grado',
         esim: !!s.esim, tieneCaja: !!s.tiene_caja, numeroSerie: s.numero_serie || '',
         destacado: !!s.destacado, estadoInventario: s.estado_inventario || 'disponible',
-        imagenUrl: s.imagen_url || '', comboItems: s.combo_items || ''
+        imagenUrl: s.imagen_url || '', comboItems: s.combo_items || '',
+        creadoEn: s.creado_en || null,   // cuál carga es la más vieja (Mercado Libre reparte del más viejo al más nuevo)
+        aPedido: s.a_pedido === true
       };
     });
 

@@ -388,6 +388,36 @@ const MeliOrdenes = {
     await this._llamar(btn, 'meli_orden_reabrir_cierre', { p_orden_id: id }, () => 'Orden reabierta.');
   },
 
+  // Vista previa del reparto FIFO que hace la base al descontar (script 19, meli__repartir_fifo): mismo criterio de nombre,
+  // categoría y estado. Es sólo informativa: lo que cuenta es lo que decide la base bajo el bloqueo de la orden.
+  _repartoPrevio(o) {
+    const nombreNorm = t => String(t || '').toLowerCase().replace(/[áàäâãéèëêíìïîóòöôõúùüûñç]/g, c => 'aaaaaeeeeiiiiooooouuuunc'['áàäâãéèëêíìïîóòöôõúùüûñç'.indexOf(c)]).replace(/\s+/g, ' ').trim();
+    const stock = State.stock || [];
+    const usado = new Map(), baja = new Map();
+    const sumar = (m, k, n) => m.set(k, (m.get(k) || 0) + n);
+    const sinGrupo = r => !r || r.aPedido || (r.imeis && r.imeis.length) || !String(r.nombre || '').trim();
+    for (const i of (o.items || []).filter(x => x.stock_id && (x.cantidad || 0) > 0)) {
+      const rep = stock.find(x => x.id === i.stock_id);
+      let reparto = null;
+      if (!sinGrupo(rep)) {
+        const clave = nombreNorm(rep.nombre);
+        const grupo = stock.filter(r => !r.aPedido && !(r.imeis && r.imeis.length) && r.cat === rep.cat && nombreNorm(r.nombre) === clave
+          && (r.id === rep.id || (r.estadoInventario || 'disponible') === 'disponible'))
+          .sort((a, b) => (a.creadoEn ? Date.parse(a.creadoEn) : Infinity) - (b.creadoEn ? Date.parse(b.creadoEn) : Infinity) || String(a.id).localeCompare(String(b.id)));
+        if (grupo.length > 1) {
+          let resta = i.cantidad; const parte = [];
+          for (const r of grupo) {
+            const disp = Math.max((Number(r.cantidad) || 0) - (usado.get(r.id) || 0), 0);
+            if (resta > 0 && disp > 0) { const t = Math.min(disp, resta); parte.push([r.id, t]); resta -= t; }
+          }
+          if (resta === 0) reparto = parte;   // si no alcanza, queda como está y la base lo marca para revisar
+        }
+      }
+      for (const [sid, n] of (reparto || [[i.stock_id, i.cantidad]])) { sumar(baja, sid, n); sumar(usado, sid, n); }
+    }
+    return baja;
+  },
+
   async abrirProcesar(id) {
     const o0 = (State.meliOrdenes || []).find(x => x.id === id);
     if (o0 && o0.cerradaManual) { toast('Esta orden está cerrada a mano. Reabrila si hace falta procesarla.'); return; }
@@ -402,8 +432,8 @@ const MeliOrdenes = {
     ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.6);backdrop-filter:blur(4px);z-index:800;display:flex;align-items:center;justify-content:center;padding:20px';
     const mercado = this._blueMercado();
     // Se agrupa por fila de stock: dos publicaciones vinculadas a la MISMA fila bajan juntas.
-    const baja = new Map();
-    (o.items || []).filter(i => i.stock_id).forEach(i => baja.set(i.stock_id, (baja.get(i.stock_id) || 0) + (i.cantidad || 0)));
+    // Con varias cargas del mismo producto (distinto costo) se muestra el reparto de la base: de la más vieja a la más nueva.
+    const baja = this._repartoPrevio(o);
     const filasStock = [...baja.entries()].map(([sid, cant]) => {
       const r = (State.stock || []).find(x => x.id === sid);
       const hay = r ? Number(r.cantidad) : null;

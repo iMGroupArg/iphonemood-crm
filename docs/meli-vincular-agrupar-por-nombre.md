@@ -54,3 +54,9 @@ desempate, p. ej. por ese primer movimiento y, si no hay, por id).
 En el selector, UNA opción por nombre con las unidades sumadas y "N cargas"; al elegirla vincula con la fila
 más vieja con stock. En la lista de vínculos se muestra "→ Nombre (2 cargas, 4 u.)".
 Los filtros por rubro ya están hechos (commit `eb4e7d7`).
+
+## Estado (2026-10-25): construido y probado en local
+- SQL: `db/para-correr/19_meli_agrupar_stock.sql` (copia idéntica en `db/pendientes/`). `stock.creado_en` existe en producción (verificado por la API), así que no hace falta agregar columna. Reparto bajo el bloqueo de la orden, dentro de `meli__descontar_core` (opción b de arriba).
+- Pantalla: "Vincular" ofrece UNA opción por producto ("N cargas", unidades sumadas) y vincula con la carga más vieja que tiene unidades; la lista de vínculos muestra "→ Nombre (2 cargas, 4 u.)". El cuadro "Procesar" muestra el reparto previsto.
+- Pruebas: `tests/sql/agrupar.sql.test.mjs` (18), `tests/meli_vincular_pantalla.test.mjs` (92), `tests/meli_ordenes_reparto.test.mjs` (6).
+- Queda para después (necesita pruebas con dos conexiones, como el 7): un banco de concurrencia del reparto.

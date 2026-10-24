@@ -49,7 +49,8 @@ export const ESQUEMA_MINIMO = `
     CREATE TABLE public.stock (id UUID PRIMARY KEY DEFAULT gen_random_uuid(), nombre TEXT, categoria TEXT,
       modelo TEXT, storage TEXT, color TEXT, estado_producto TEXT, bateria_pct INT, imagen_url TEXT, combo_items JSONB,
       precio_ars NUMERIC, cotizacion NUMERIC, costo_usd NUMERIC(18,2) DEFAULT 0,
-      cantidad INTEGER DEFAULT 0, imeis TEXT[] DEFAULT '{}', estado_inventario TEXT DEFAULT 'disponible');
+      cantidad INTEGER DEFAULT 0, imeis TEXT[] DEFAULT '{}', estado_inventario TEXT DEFAULT 'disponible',
+      creado_en TIMESTAMPTZ DEFAULT now());
     CREATE TABLE public.stock_movimientos (id BIGSERIAL PRIMARY KEY, stock_id UUID, tipo TEXT, detalle TEXT,
       cantidad_antes INT, cantidad_despues INT, usuario_nombre TEXT, datos JSONB, creado_en TIMESTAMPTZ DEFAULT now());
     CREATE TABLE public.reparacion_repuestos (id BIGSERIAL PRIMARY KEY);
@@ -63,13 +64,14 @@ export const ESQUEMA_MINIMO = `
     INSERT INTO public.usuarios_autorizados VALUES ('franco@x.com', true), ('baja@x.com', false);
 `;
 
-export async function baseNueva({ conVentas = true, base3 = null, sin7 = false } = {}) {
+export async function baseNueva({ conVentas = true, base3 = null, sin7 = false, con19 = false } = {}) {
   const db = new PGlite({ extensions: { pgcrypto } });
   await db.exec(ESQUEMA_MINIMO);
   await db.exec(SQL('caja_aplicar_delta.sql'));
   await db.exec(SQL('stock_a_pedido.sql'));
   await db.exec(base3 ?? SQL('meli_esquema_base.sql'));
   if (!sin7) await db.exec(SQL('meli_vincular.sql'));
+  if (con19) await db.exec(SQL('meli_agrupar_stock.sql'));
   // El hash sembrado es el del secreto REAL; para probar se pone el de uno de prueba (nunca se lee el real).
   await db.query(`UPDATE public.meli_config SET valor = $1 WHERE clave = 'rpc_secret_sha256'`,
     [crypto.createHash('sha256').update(SECRETO).digest('hex')]);
@@ -91,9 +93,9 @@ export const comoRol = async (db, rol, email, fn) => {
   }
 };
 
-export const nuevoStock = async (db, { nombre = 'Perfume X 100ml', categoria = 'perfumeria', cantidad = 5, imeis = [], estado = 'disponible', aPedido = false } = {}) =>
-  (await db.query(`INSERT INTO public.stock (nombre, categoria, cantidad, imeis, estado_inventario, a_pedido, costo_usd)
-                   VALUES ($1,$2,$3,$4,$5,$6,30) RETURNING id`, [nombre, categoria, cantidad, imeis, estado, aPedido])).rows[0].id;
+export const nuevoStock = async (db, { nombre = 'Perfume X 100ml', categoria = 'perfumeria', cantidad = 5, imeis = [], estado = 'disponible', aPedido = false, costo = 30, creado = null } = {}) =>
+  (await db.query(`INSERT INTO public.stock (nombre, categoria, cantidad, imeis, estado_inventario, a_pedido, costo_usd, creado_en)
+                   VALUES ($1,$2,$3,$4,$5,$6,$7,COALESCE($8::timestamptz, now())) RETURNING id`, [nombre, categoria, cantidad, imeis, estado, aPedido, costo, creado])).rows[0].id;
 
 // Una orden ya ingresada, con ítems que pueden no tener stock todavía.
 let seq = 0;

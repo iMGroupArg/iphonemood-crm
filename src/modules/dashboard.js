@@ -138,6 +138,17 @@ const Dashboard = {
     });
     const equivalenteTotalARS = totalARSenCajas + totalUSDenCajas * State.refBlue + totalUSDTenCajas * State.refUsdt;
 
+    // En el celular se dibuja otra pantalla (tarjeta de saldo, pestañas, hojas), pero con los MISMOS números:
+    // se calcularon arriba, una sola vez, y acá sólo se pasan.
+    if (window.Movil && Movil.activo()) {
+      return this._renderMovil(container, {
+        ventas, resultComercial, resultFinanciero, totalResultado, adelantosPend, pasivoAdelantos,
+        clientesConDeudaCC, totalPorCobrarCC, totalVentasUSD, ticketPromedio, repActivas, repListas, stockCritico,
+        repPeriodo, ingresosRepPeriodo, diasPromedio, entregadas: entregadasConFecha.length, ventasAbiertas,
+        totalARSenCajas, totalUSDenCajas, totalUSDTenCajas, equivalenteTotalARS,
+      });
+    }
+
     container.innerHTML = `
       <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;margin-bottom:14px">
         <div style="display:flex;gap:6px;flex-wrap:wrap" id="periodo-selector"></div>
@@ -262,6 +273,173 @@ const Dashboard = {
     return container;
   },
 
+  // ═══════════ CELULAR ═══════════
+  _tabM: 'resumen',
+
+  _etqPeriodoM() {
+    if (this.periodo === 'hoy') return 'Hoy';
+    if (this.periodo === 'semana') return 'Esta semana';
+    if (this.periodo === 'mes') return 'Este mes';
+    if (this.periodo === 'mes-especifico' && this.periodoMes) {
+      const [y, m] = this.periodoMes.split('-').map(Number);
+      return new Date(y, m - 1, 1).toLocaleDateString('es-AR', { month: 'long', year: 'numeric' });
+    }
+    if (this.periodo === 'rango' && this.fechaDesde && this.fechaHasta) return `${this.fechaDesde.slice(5)} → ${this.fechaHasta.slice(5)}`;
+    return 'Este mes';
+  },
+
+  _renderMovil(container, d) {
+    container.className = 'm-dash';
+    const e = (x) => State.esc(String(x ?? ''));
+    const fU = (n) => State.fmtUSD(n);
+    const sg = (n) => (n >= 0 ? '+' : '');
+    const nombre = e(((window.Auth && Auth.usuario && Auth.usuario.nombre) || '').split(' ')[0]);
+    const etqPer = e(this._etqPeriodoM());
+    const rapido = this.periodo === 'hoy' || this.periodo === 'semana' || this.periodo === 'mes';
+    const kpi = (etq, valor, sub, color, onclick) => `
+      <div class="m-kpi${onclick ? ' tap' : ''}" ${onclick ? `onclick="${onclick}"` : ''}>
+        <label>${etq}</label><div class="v" ${color ? `style="color:${color}"` : ''}>${valor}</div><div class="s">${sub}</div>
+      </div>`;
+    const ml = State.meliPendienteLiberar();
+
+    const principales = [
+      kpi('Ventas del período', fU(d.totalVentasUSD), `${d.ventas.length} ventas · ticket prom. ${fU(d.ticketPromedio)}`),
+      kpi('Resultado total', `${sg(d.totalResultado)}${fU(d.totalResultado / State.refBlue)}`, 'comercial + financiero', 'var(--blue)'),
+      kpi('Resultado comercial', `${sg(d.resultComercial)}${fU(d.resultComercial / State.refBlue)}`, 'margen sobre ventas del período', d.resultComercial >= 0 ? 'var(--green)' : 'var(--red)'),
+      kpi('Resultado financiero', `${sg(d.resultFinanciero)}${fU(d.resultFinanciero / State.refBlue)}`, 'spread cueva + diferencial tarjeta', d.resultFinanciero >= 0 ? 'var(--green)' : 'var(--red)'),
+    ].join('');
+
+    const masIndicadores = [
+      kpi('Pendiente de cobro', fU(d.totalPorCobrarCC), d.clientesConDeudaCC > 0 ? `${d.clientesConDeudaCC} cliente${d.clientesConDeudaCC > 1 ? 's' : ''} · tocá para ver` : 'Sin cuentas abiertas', d.totalPorCobrarCC > 0 ? 'var(--amber)' : '', "App.goTo('cuentacorriente')"),
+      kpi('Adelantos pendientes', `${d.pasivoAdelantos > 0 ? '-' : ''}${fU(d.pasivoAdelantos)}`, d.adelantosPend.length > 0 ? `${d.adelantosPend.length} pendiente${d.adelantosPend.length > 1 ? 's' : ''} · tocá para ver` : 'Sin deuda con socios', d.pasivoAdelantos > 0 ? 'var(--amber)' : '', "App.goTo('adelantos')"),
+      ml.ordenes ? kpi('A liberar de Mercado Libre', State.fmtARS(ml.ars), `${ml.ordenes} orden${ml.ordenes > 1 ? 'es' : ''}${ml.sinDato ? ` · ${ml.sinDato} sin importe confirmado` : ''} · plata en camino`, 'var(--amber)', "App.goTo('meli')") : '',
+      kpi('Ventas con saldo pendiente', d.ventasAbiertas, 'requieren seguimiento de cobro', d.ventasAbiertas ? 'var(--amber)' : 'var(--green)'),
+      kpi('Stock con alerta', d.stockCritico, 'modelos con la última unidad', d.stockCritico ? 'var(--red)' : 'var(--green)', "App.goTo('stock')"),
+      kpi('Reparaciones del período', d.repPeriodo.length, `${d.repActivas} activa(s) · ${d.repListas} lista(s)`),
+      kpi('Órdenes activas', d.repActivas, 'en proceso ahora', d.repActivas ? 'var(--blue)' : 'var(--text-secondary)', "App.goTo('reparaciones')"),
+      kpi('Listas para entregar', d.repListas, d.repListas ? 'pendientes de retiro' : 'al día', d.repListas ? 'var(--green)' : 'var(--text-secondary)'),
+      kpi('Ingresos reparaciones', fU(d.ingresosRepPeriodo), 'pagos cobrados en el período'),
+      kpi('Días promedio resolución', d.diasPromedio !== null ? d.diasPromedio + ' d' : '—', `${d.entregadas} reparacion(es) entregadas`),
+    ].join('');
+
+    // Últimas ventas
+    const ultimas = State.ventas.slice(0, 5).map((v) => {
+      const total = v.items.reduce((s, i) => s + i.precio, 0);
+      const abierta = v.estado === 'abierta';
+      return `<button type="button" class="m-item" onclick="App.goTo('ventas')">
+        <span class="m-item-ico ${abierta ? 'ambar' : 'verde'}"><i class="ti ti-receipt"></i></span>
+        <span class="m-item-cuerpo"><span class="m-item-t">${e(v.cliente)}</span>
+          <span class="m-item-s" style="display:block">${e((v.items[0]?.nombre || '—').substring(0, 34))}${v.items.length > 1 ? ` +${v.items.length - 1}` : ''}</span></span>
+        <span class="m-item-der"><span class="m-item-precio" style="display:block">${fU(total)}</span>
+          <span class="m-item-sub">${abierta ? 'saldo pendiente' : 'cobrada'}</span></span>
+      </button>`;
+    }).join('') || '<div class="m-vacio">Todavía no hay ventas cargadas</div>';
+
+    // Cajas por persona
+    const cajas = State.personas.map((p) => {
+      const sm = State.saldosPorMoneda(State.cajas[p] || {});
+      return `<div class="m-item" style="cursor:default">
+        <span class="m-item-ico"><b style="font-size:15px">${e(p.substring(0, 2).toUpperCase())}</b></span>
+        <span class="m-item-cuerpo"><span class="m-item-t">${e(p)}</span>
+          <span class="m-item-s" style="display:block">${State.fmtARS(sm.ARS)} · ${sm.USDT.toLocaleString('es-AR')} USDT</span></span>
+        <span class="m-item-der"><span class="m-item-precio" style="display:block">${fU(sm.USD)}</span><span class="m-item-sub">en dólares</span></span>
+      </div>`;
+    }).join('');
+
+    // Pendientes: alertas + reparaciones activas
+    const alerta = (ico, color, titulo, sub, destino) => `<button type="button" class="m-item" onclick="App.goTo('${destino}')">
+      <span class="m-item-ico ${color}"><i class="ti ${ico}"></i></span>
+      <span class="m-item-cuerpo"><span class="m-item-t">${titulo}</span><span class="m-item-s" style="display:block">${sub}</span></span>
+      <i class="ti ti-chevron-right" style="color:var(--text-tertiary)"></i></button>`;
+    const alertas = [
+      d.stockCritico > 0 ? alerta('ti-box', 'rojo', `${d.stockCritico} modelo(s) con la última unidad`, 'Stock', 'stock') : '',
+      d.repListas > 0 ? alerta('ti-circle-check', 'verde', `${d.repListas} equipo(s) listo(s) para entregar`, 'Reparación', 'reparaciones') : '',
+      d.repActivas > 0 ? alerta('ti-tool', 'ambar', `${d.repActivas} orden(es) en curso`, 'Reparación', 'reparaciones') : '',
+      d.ventasAbiertas > 0 ? alerta('ti-receipt', 'ambar', `${d.ventasAbiertas} venta(s) con saldo pendiente`, 'Venta', 'ventas') : '',
+    ].join('') || '<div class="m-vacio">Sin alertas por el momento</div>';
+    const reps = State.reparaciones.filter((r) => !['entregado', 'rechazado', 'no_reparable'].includes(r.estado)).slice(0, 5).map((r) =>
+      `<button type="button" class="m-item" onclick="App.goTo('reparaciones')">
+        <span class="m-item-ico"><i class="ti ti-device-mobile"></i></span>
+        <span class="m-item-cuerpo"><span class="m-item-t">${e(r.equipo)}</span><span class="m-item-s" style="display:block">${e(r.cliente)}</span></span>
+        <span class="badge b-blue">${e(Reparaciones.ESTADO_LABEL[r.estado] || r.estado)}</span></button>`).join('') || '<div class="m-vacio">No hay reparaciones activas</div>';
+
+    const t = this._tabM;
+    const panel = (k, html) => `<div data-panel="${k}" style="display:${t === k ? 'flex' : 'none'};flex-direction:column;gap:14px">${html}</div>`;
+    container.innerHTML = `
+      <section class="m-hero" aria-label="Saldo en cajas">
+        <div class="m-hero-sup"><span>Hola${nombre ? ', ' + nombre : ''} 👋</span>
+          <button type="button" class="m-hero-per" onclick="Dashboard.abrirPeriodoMovil()">${etqPer} ▾</button></div>
+        <div class="m-hero-etq">Equivalente total en caja</div>
+        <div class="m-hero-monto">${fU(d.equivalenteTotalARS / State.refBlue)}</div>
+        <div class="m-hero-sub"><span>${State.fmtARS(d.totalARSenCajas)}</span><span>${fU(d.totalUSDenCajas)}</span><span>${d.totalUSDTenCajas.toLocaleString('es-AR')} USDT</span></div>
+        <div class="m-hero-delta">Resultado ${etqPer.toLowerCase()}: <b>${sg(d.totalResultado)}${fU(d.totalResultado / State.refBlue)}</b></div>
+      </section>
+      <div class="m-acciones">
+        <button type="button" class="m-accion" onclick="App.goTo('ventas');setTimeout(()=>Ventas.openNew(),50)"><i class="ti ti-plus"></i> Nueva venta</button>
+        <button type="button" class="m-accion" onclick="App.goTo('stock')"><i class="ti ti-box"></i> Stock</button>
+      </div>
+      <div class="m-chips" role="group" aria-label="Período">
+        ${[['hoy', 'Hoy'], ['semana', 'Semana'], ['mes', 'Mes']].map(([k, l]) => `<button type="button" class="m-chip azul ${this.periodo === k ? 'activo' : ''}" onclick="Dashboard.setPeriodo('${k}')">${l}</button>`).join('')}
+        <button type="button" class="m-chip azul ${rapido ? '' : 'activo'}" onclick="Dashboard.abrirPeriodoMovil()">${rapido ? 'Otro período…' : etqPer}</button>
+      </div>
+      <div class="m-seg" role="tablist">
+        ${[['resumen', 'Resumen'], ['ventas', 'Ventas'], ['cajas', 'Cajas'], ['pendientes', 'Pendientes']].map(([k, l]) => `<button type="button" role="tab" data-tab="${k}" aria-selected="${t === k}" class="${t === k ? 'activo' : ''}" onclick="Dashboard.tabMovil('${k}')">${l}</button>`).join('')}
+      </div>
+      ${panel('resumen', `
+        <div class="m-kpis">${principales}</div>
+        <details class="m-mas-ind"><summary>Ver más indicadores</summary><div class="m-kpis">${masIndicadores}</div></details>
+        <div class="m-card"><h3><i class="ti ti-chart-line"></i> Evolución de ventas</h3><div style="position:relative;height:230px"><canvas id="chart-evolucion"></canvas></div></div>`)}
+      ${panel('ventas', `
+        <div class="m-sec">Últimas ventas <small onclick="App.goTo('ventas')">Ver todas</small></div>
+        <div class="m-list">${ultimas}</div>
+        <div class="m-card"><h3><i class="ti ti-chart-bar"></i> Monto vendido vs beneficio por día</h3><div style="position:relative;height:230px"><canvas id="chart-monto-beneficio"></canvas></div></div>`)}
+      ${panel('cajas', `
+        <div class="m-sec">Saldo por persona <small onclick="App.goTo('cajas')">Ver cajas</small></div>
+        <div class="m-list">${cajas}</div>
+        <div class="m-card"><h3><i class="ti ti-chart-pie"></i> Distribución de saldo por persona</h3><div style="position:relative;height:230px"><canvas id="chart-personas"></canvas></div></div>`)}
+      ${panel('pendientes', `
+        <div class="m-sec">Alertas</div><div class="m-list">${alertas}</div>
+        <div class="m-sec">Reparaciones activas <small onclick="App.goTo('reparaciones')">Ver todas</small></div><div class="m-list">${reps}</div>`)}
+    `;
+    setTimeout(() => this.renderCharts(), 0);
+    return container;
+  },
+
+  tabMovil(k) {
+    this._tabM = k;
+    document.querySelectorAll('.m-seg button').forEach((b) => { const on = b.dataset.tab === k; b.classList.toggle('activo', on); b.setAttribute('aria-selected', on); });
+    document.querySelectorAll('[data-panel]').forEach((p) => { p.style.display = p.dataset.panel === k ? 'flex' : 'none'; });
+    this.renderCharts();   // el gráfico de esa pestaña se arma ahora que está a la vista
+  },
+
+  // Hoja para elegir un período que no está en los chips: mes puntual o rango de fechas.
+  abrirPeriodoMovil() {
+    const meses = Ventas._mesesDisponibles().map((m) => {
+      const [y, mo] = m.split('-');
+      return [m, new Date(Number(y), Number(mo) - 1, 1).toLocaleDateString('es-AR', { month: 'short', year: '2-digit' })];
+    });
+    const cuerpo = `
+      <div class="m-mas-etq">Mes puntual</div>
+      <div class="m-chips" style="flex-wrap:wrap;overflow:visible;margin:0 0 14px;padding:0">
+        ${meses.map(([m, l]) => `<button type="button" class="m-chip azul ${this.periodo === 'mes-especifico' && this.periodoMes === m ? 'activo' : ''}" data-mes="${m}">${l}</button>`).join('') || '<span class="m-vacio">Sin meses con ventas</span>'}
+      </div>
+      <div class="m-mas-etq">Rango de fechas</div>
+      <div style="display:flex;gap:10px;align-items:center;margin-bottom:14px">
+        <input type="date" id="dash-desde" value="${this.fechaDesde || ''}" style="flex:1"><span style="color:var(--text-secondary)">a</span>
+        <input type="date" id="dash-hasta" value="${this.fechaHasta || ''}" style="flex:1">
+      </div>`;
+    const h = Sheet.abrir({ titulo: 'Período', cuerpo, pie: '<button type="button" class="btn btn-primary" data-aplicar>Aplicar rango</button>' });
+    h.cuerpo.addEventListener('click', (ev) => {
+      const b = ev.target.closest('[data-mes]');
+      if (b) { const m = b.dataset.mes; h.cerrar(); setTimeout(() => this.setPeriodoMes(m), 280); }
+    });
+    h.el.querySelector('[data-aplicar]').addEventListener('click', () => {
+      const desde = document.getElementById('dash-desde').value, hasta = document.getElementById('dash-hasta').value;
+      if (!desde || !hasta) { if (typeof toast === 'function') toast('Elegí las dos fechas antes de aplicar.'); return; }
+      h.cerrar(); setTimeout(() => this.aplicarRango(desde, hasta), 280);
+    });
+  },
+
   renderPeriodoSelector() {
     const opciones = [['hoy', 'Hoy'], ['semana', 'Esta semana'], ['mes', 'Este mes'], ['rango', 'Rango libre']];
     const mostrarRango = this._mostrarRango || this.periodo === 'rango';
@@ -273,7 +451,9 @@ const Dashboard = {
       const label = new Date(Number(y), Number(mo) - 1, 1).toLocaleDateString('es-AR', { month: 'short', year: '2-digit' });
       return `<option value="${m}" ${this.periodoMes === m ? 'selected' : ''}>${label}</option>`;
     }).join('');
-    document.getElementById('periodo-selector').innerHTML = opciones.map(([k, l]) =>
+    const selector = document.getElementById('periodo-selector');
+    if (!selector) return;
+    selector.innerHTML = opciones.map(([k, l]) =>
       `<button class="btn btn-sm ${(k === 'rango' ? mostrarRango : this.periodo === k) ? 'btn-primary' : ''}" onclick="Dashboard.setPeriodo('${k}')">${l}</button>`
     ).join('')
     + `<select id="dash-mes-selector" onchange="Dashboard.setPeriodoMes(this.value)" style="font-size:12px;padding:6px 9px;border:1px solid var(--border-strong);border-radius:8px;background:var(--bg-secondary);color:var(--text);${this.periodo === 'mes-especifico' ? 'border-color:var(--blue);outline:none' : ''}">
@@ -308,9 +488,10 @@ const Dashboard = {
     App.goTo('dashboard');
   },
 
-  aplicarRango() {
-    this.fechaDesde = document.getElementById('dash-desde').value;
-    this.fechaHasta = document.getElementById('dash-hasta').value;
+  aplicarRango(desde, hasta) {
+    // En el celular las fechas vienen de la hoja, que ya se cerró cuando se aplica.
+    this.fechaDesde = desde !== undefined ? desde : document.getElementById('dash-desde').value;
+    this.fechaHasta = hasta !== undefined ? hasta : document.getElementById('dash-hasta').value;
     if (!this.fechaDesde || !this.fechaHasta) {
       if (typeof toast === 'function') toast('Elegí las dos fechas antes de aplicar.');
       return;
@@ -355,7 +536,9 @@ const Dashboard = {
     this.charts = {};
 
     const serie = this.construirSerieDiaria();
-    const ctxEvol = document.getElementById('chart-evolucion');
+    // Un canvas dentro de una pestaña oculta mide 0 y el gráfico queda mal dimensionado: se arma al mostrarse.
+    const visible = (id) => { const e = document.getElementById(id); return e && e.offsetParent !== null ? e : null; };
+    const ctxEvol = visible('chart-evolucion');
     if (ctxEvol) {
       this.charts.evolucion = new Chart(ctxEvol, {
         type: 'line',
@@ -377,7 +560,7 @@ const Dashboard = {
       });
     }
 
-    const ctxMB = document.getElementById('chart-monto-beneficio');
+    const ctxMB = visible('chart-monto-beneficio');
     if (ctxMB) {
       this.charts.montoBeneficio = new Chart(ctxMB, {
         type: 'bar',
@@ -399,7 +582,7 @@ const Dashboard = {
       });
     }
 
-    const ctxP = document.getElementById('chart-personas');
+    const ctxP = visible('chart-personas');
     if (ctxP) {
       const equivPorPersona = State.personas.map(p => {
         const c = State.cajas[p] || {};

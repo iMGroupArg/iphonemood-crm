@@ -106,15 +106,15 @@ const MeliOrdenes = {
         acciones += `<button class="btn btn-sm" style="color:var(--red)" onclick="MeliOrdenes.revertir(${o.id}, this)"><i class="ti ti-arrow-back-up"></i> Revertir</button>`;
       }
       return `
-        <div class="card" style="margin-bottom:8px">
-          <div style="display:flex;gap:10px;align-items:flex-start;flex-wrap:wrap">
+        <div class="card mo-card" style="margin-bottom:8px">
+          <div class="mo-top" style="display:flex;gap:10px;align-items:flex-start;flex-wrap:wrap">
             <div style="flex:1;min-width:220px">
               <div style="font-size:13px;font-weight:600">Orden ${e(o.orderId)} · ${e(o.comprador || 'comprador')}</div>
               <div style="font-size:11.5px;color:var(--text-secondary)">${this._dia(o.fechaOrden)} · ${items || 'sin productos'}</div>
             </div>
             <span class="badge ${est.clase}">${est.txt}</span>
           </div>
-          <div style="display:flex;gap:18px;flex-wrap:wrap;margin-top:8px;font-size:12px">
+          <div class="mo-nums" style="display:flex;gap:18px;flex-wrap:wrap;margin-top:8px;font-size:12px">
             <span>Venta <b>${this._ars(o.bruto)}</b></span>
             <span>Llega <b>${this._ars(o.neto)}</b></span>
             <span title="Comisión + envío de Mercado Libre">Se queda MELI <b>${retenido}</b></span>
@@ -123,7 +123,7 @@ const MeliOrdenes = {
             ${o.ventaId ? `<span>Venta #${o.ventaId}</span>` : ''}
           </div>
           ${o.revisar ? `<div style="font-size:12px;color:var(--red);margin-top:6px"><i class="ti ti-alert-triangle"></i> ${e(o.motivoRevisar || 'Hay que revisar esta orden')}</div>` : ''}
-          ${acciones ? `<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:10px">${acciones}</div>` : ''}
+          ${acciones ? `<div class="mo-acc" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:10px">${acciones}</div>` : ''}
         </div>`;
     }).join('');
 
@@ -132,14 +132,14 @@ const MeliOrdenes = {
         <h3 style="font-size:13px;font-weight:600;color:var(--text-secondary);text-transform:uppercase;letter-spacing:.4px;flex:1">Ventas de Mercado Libre</h3>
         <button class="btn btn-sm" onclick="MeliOrdenes.cargar()"><i class="ti ti-refresh"></i> Actualizar</button>
       </div>
-      <div class="card" style="margin-bottom:10px;display:flex;gap:24px;flex-wrap:wrap">
+      <div class="card mo-liberar" style="margin-bottom:10px;display:flex;gap:24px;flex-wrap:wrap">
         <div><div style="font-size:22px;font-weight:600;color:var(--amber)">${this._ars(pend.ars)}</div>
           <div style="font-size:11.5px;color:var(--text-secondary)">a liberar (${pend.ordenes} orden${pend.ordenes === 1 ? '' : 'es'}${pend.sinDato ? `, ${pend.sinDato} sin importe confirmado` : ''})</div></div>
-        <div style="font-size:11.5px;color:var(--text-secondary);max-width:520px;line-height:1.5">
+        <div class="mo-nota" style="font-size:11.5px;color:var(--text-secondary);max-width:520px;line-height:1.5">
           Plata ya vendida que Mercado Libre todavía no depositó. No está en las cajas hasta que confirmes la acreditación.
           «Procesar» descuenta el stock y crea la venta; «Confirmar acreditación» mueve la plata a la caja cuando Mercado Libre la libera.</div>
       </div>
-      <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px">${tabs}</div>
+      <div class="mo-tabs" style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px">${tabs}</div>
       ${tarjetas || '<div class="card" style="font-size:13px;color:var(--text-secondary)">No hay órdenes en esta vista.</div>'}
       ${lista.length > visibles.length ? `<button class="btn btn-sm" onclick="MeliOrdenes.verMas()">Ver más (${lista.length - visibles.length} más)</button>` : ''}`;
   },

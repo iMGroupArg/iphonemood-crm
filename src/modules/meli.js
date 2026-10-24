@@ -54,9 +54,35 @@ const Meli = {
   render() {
     const c = document.createElement('div');
     c.style.cssText = 'flex:1;overflow-y:auto;padding:16px';
-    c.innerHTML = '<div id="meli-root"></div><div id="meli-ordenes-root" style="margin-top:24px"></div>';
-    setTimeout(() => { this.cargar(); if (window.MeliOrdenes) MeliOrdenes.cargar(); }, 0);
+    if (window.Movil && Movil.activo()) {
+      // Celular: una sola cosa a la vez. Son los mismos bloques de siempre, sólo se muestran de a uno.
+      c.className = 'm-meli';
+      c.style.cssText = '';
+      const conPub = !!window.MeliVincular;
+      c.innerHTML = `
+        <div class="m-meli-seg m-seg" role="tablist" aria-label="Mercado Libre">
+          <button type="button" role="tab" data-t="ordenes" onclick="Meli.tabMovil('ordenes')">Órdenes</button>
+          ${conPub ? '<button type="button" role="tab" data-t="publicaciones" onclick="Meli.tabMovil(\'publicaciones\')">Publicaciones</button>' : ''}
+          <button type="button" role="tab" data-t="cuenta" onclick="Meli.tabMovil('cuenta')">Cuenta</button>
+        </div>
+        <div id="meli-ordenes-root" class="m-meli-pane" data-p="ordenes"></div>
+        ${conPub ? '<div id="meli-vincular-root" class="m-meli-pane" data-p="publicaciones"></div>' : ''}
+        <div id="meli-root" class="m-meli-pane" data-p="cuenta"></div>`;
+      this.tabMovil(this._tabM || 'ordenes', c);
+    } else {
+      c.innerHTML = '<div id="meli-root"></div><div id="meli-ordenes-root" style="margin-top:24px"></div>';
+    }
+    setTimeout(() => { this.cargar(); if (window.MeliVincular && document.getElementById('meli-vincular-root')) MeliVincular.cargar(); if (window.MeliOrdenes) MeliOrdenes.cargar(); }, 0);
     return c;
+  },
+
+  _tabM: 'ordenes',
+  tabMovil(k, raiz) {
+    this._tabM = k;
+    const r = raiz || document.querySelector('.m-meli');
+    if (!r) return;
+    r.querySelectorAll('.m-meli-seg button').forEach((b) => { const on = b.dataset.t === k; b.classList.toggle('activo', on); b.setAttribute('aria-selected', on ? 'true' : 'false'); });
+    r.querySelectorAll('.m-meli-pane').forEach((p) => { p.hidden = p.dataset.p !== k; });
   },
 
   async cargar() {

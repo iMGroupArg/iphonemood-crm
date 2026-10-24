@@ -188,6 +188,25 @@ const Stock = {
     const c = document.createElement('div');
     c.style.cssText = 'display:flex;flex-direction:column;flex:1;overflow:hidden;min-height:0';
     const mobile = this.isMobile();
+    if (mobile) {
+      // Encabezado de app: título + dos acciones; "Agregar" pasa al botón flotante.
+      c.innerHTML = `
+        <div class="m-stk-head">
+          <h2><i class="ti ti-box"></i> Stock</h2>
+          <div class="m-stk-acc">
+            <button type="button" class="m-stk-ib" id="m-stk-selbtn" aria-label="Seleccionar productos" onclick="Stock.toggleSelModo()"><i class="ti ti-checkbox"></i></button>
+            <button type="button" class="m-stk-ib" aria-label="Historial de movimientos" onclick="Stock.setView(Stock.currentView==='historial'?'productos':'historial')"><i class="ti ti-history"></i></button>
+            <button type="button" class="m-stk-ib" aria-label="Exportar a Excel" onclick="Stock.exportarExcel()"><i class="ti ti-file-spreadsheet"></i></button>
+          </div>
+        </div>
+        <div id="stock-kpis"></div>
+        <div id="stock-view-tabs" hidden></div>
+        <div id="stock-view-host" style="flex:1;display:flex;flex-direction:column;overflow:hidden;min-height:0;position:relative"></div>
+        <button type="button" class="m-fab" aria-label="Agregar producto" onclick="Stock.openDrawer('new')"><i class="ti ti-plus"></i></button>
+        <div id="stock-drawer-host"></div>`;
+      setTimeout(() => this.renderView(), 0);
+      return c;
+    }
     c.innerHTML = `
       <div style="padding:${mobile?'10px 14px':'16px 22px'};border-bottom:1px solid var(--border)">
         <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;${mobile?'margin-bottom:8px':'margin-bottom:14px'}">
@@ -208,7 +227,8 @@ const Stock = {
     return c;
   },
 
-  isMobile() { return window.innerWidth <= 900; },
+  // Mismo corte que movil.css (< 1024 px); sin movil.js cargado, el criterio de antes.
+  isMobile() { return window.Movil ? Movil.activo() : window.innerWidth <= 900; },
 
   renderKpis() {
     const grupo = this.productosDelGrupo(this.currentGroup);
@@ -365,58 +385,37 @@ const Stock = {
 
     if (this.currentView === 'productos') {
       if (mobile) {
-        // Mobile: filas apiladas (comportamiento original)
-        host.innerHTML = `
-          <div style="padding:${px};border-bottom:1px solid var(--border);display:flex;gap:4px;overflow-x:auto;-webkit-overflow-scrolling:touch;white-space:nowrap;flex-shrink:0" id="stock-grupo-tabs"></div>
-          <div style="padding:${px};border-bottom:1px solid var(--border);display:flex;gap:6px;overflow-x:auto;-webkit-overflow-scrolling:touch;white-space:nowrap;flex-shrink:0;align-items:center" id="stock-estado-tabs"></div>
-          <div style="padding:${pxS};border-bottom:1px solid var(--border);display:flex;gap:0;overflow-x:auto;-webkit-overflow-scrolling:touch;white-space:nowrap;flex-shrink:0;align-items:center" id="stock-tabs-wrap">
+        this._renderProductosMovil(host, extraSelects);
+        return;
+      }
+      // Desktop: 2 filas compactas aprovechando el espacio horizontal
+      host.innerHTML = `
+        <!-- Fila 1: Grupos (izq) + Estado (der) -->
+        <div style="padding:8px 22px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:0;flex-shrink:0;min-height:0">
+          <div style="display:flex;gap:4px;flex-shrink:0;overflow-x:auto;-webkit-overflow-scrolling:touch" id="stock-grupo-tabs"></div>
+          <div style="width:1px;background:var(--border);height:22px;margin:0 14px;flex-shrink:0"></div>
+          <div style="display:flex;gap:2px;overflow-x:auto;-webkit-overflow-scrolling:touch;flex:1;align-items:center" id="stock-estado-tabs"></div>
+        </div>
+        <!-- Fila 2: Condición + Subcats (izq) + Búsqueda/dropdowns (der) -->
+        <div style="padding:8px 22px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:8px;flex-shrink:0;flex-wrap:nowrap">
+          <div style="display:flex;gap:0;align-items:center;flex-shrink:0" id="stock-tabs-wrap">
             <div style="display:flex;gap:4px;align-items:center" id="stock-condicion-tabs"></div>
             <div style="width:1px;background:var(--border);height:20px;margin:0 8px;flex-shrink:0" id="stock-tabs-divider"></div>
             <div style="display:flex;gap:4px" id="stock-tabs"></div>
           </div>
-          <div style="padding:8px 12px;display:flex;gap:8px;flex-wrap:wrap;align-items:center;flex-shrink:0">
-            <input type="text" id="stock-search" placeholder="Buscar..." oninput="Stock.renderTable()" style="font-size:12px;padding:6px 10px;border:1px solid var(--border-strong);border-radius:8px;flex:1;min-width:120px">
-            ${extraSelects}
-          </div>
-          <div id="stock-seleccion-bar" style="display:none"></div>
-          <div class="body-pad" style="padding:0;overflow-y:auto;-webkit-overflow-scrolling:touch;flex:1;min-height:0">
-            <table class="stock-table-desktop"><thead><tr>
-              <th style="width:34px"><input type="checkbox" id="stock-check-todos" onchange="Stock.toggleTodos(this.checked)" title="Seleccionar todo lo filtrado"></th>
-              <th>Producto</th><th>Color</th><th>Batería</th><th>Costo USD</th><th>Precio venta USD</th><th>Margen</th><th>Stock</th><th>IMEI</th><th>Estado</th><th></th>
-            </tr></thead><tbody id="stock-tbody"></tbody></table>
-            <div class="stock-cards-mobile" id="stock-cards"></div>
-          </div>
-        `;
-      } else {
-        // Desktop: 2 filas compactas aprovechando el espacio horizontal
-        host.innerHTML = `
-          <!-- Fila 1: Grupos (izq) + Estado (der) -->
-          <div style="padding:8px 22px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:0;flex-shrink:0;min-height:0">
-            <div style="display:flex;gap:4px;flex-shrink:0;overflow-x:auto;-webkit-overflow-scrolling:touch" id="stock-grupo-tabs"></div>
-            <div style="width:1px;background:var(--border);height:22px;margin:0 14px;flex-shrink:0"></div>
-            <div style="display:flex;gap:2px;overflow-x:auto;-webkit-overflow-scrolling:touch;flex:1;align-items:center" id="stock-estado-tabs"></div>
-          </div>
-          <!-- Fila 2: Condición + Subcats (izq) + Búsqueda/dropdowns (der) -->
-          <div style="padding:8px 22px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:8px;flex-shrink:0;flex-wrap:nowrap">
-            <div style="display:flex;gap:0;align-items:center;flex-shrink:0" id="stock-tabs-wrap">
-              <div style="display:flex;gap:4px;align-items:center" id="stock-condicion-tabs"></div>
-              <div style="width:1px;background:var(--border);height:20px;margin:0 8px;flex-shrink:0" id="stock-tabs-divider"></div>
-              <div style="display:flex;gap:4px" id="stock-tabs"></div>
-            </div>
-            <div style="flex:1"></div>
-            <input type="text" id="stock-search" placeholder="Buscar..." oninput="Stock.renderTable()" style="font-size:12px;padding:5px 10px;border:1px solid var(--border-strong);border-radius:8px;width:180px;flex-shrink:0">
-            ${extraSelects}
-          </div>
-          <div id="stock-seleccion-bar" style="display:none"></div>
-          <div class="body-pad" style="padding:0;overflow-y:auto;-webkit-overflow-scrolling:touch;flex:1;min-height:0">
-            <table class="stock-table-desktop"><thead><tr>
-              <th style="width:34px"><input type="checkbox" id="stock-check-todos" onchange="Stock.toggleTodos(this.checked)" title="Seleccionar todo lo filtrado"></th>
-              <th>Producto</th><th>Color</th><th>Batería</th><th>Costo USD</th><th>Precio venta USD</th><th>Margen</th><th>Stock</th><th>IMEI</th><th>Estado</th><th></th>
-            </tr></thead><tbody id="stock-tbody"></tbody></table>
-            <div class="stock-cards-mobile" id="stock-cards"></div>
-          </div>
-        `;
-      }
+          <div style="flex:1"></div>
+          <input type="text" id="stock-search" placeholder="Buscar..." oninput="Stock.renderTable()" style="font-size:12px;padding:5px 10px;border:1px solid var(--border-strong);border-radius:8px;width:180px;flex-shrink:0">
+          ${extraSelects}
+        </div>
+        <div id="stock-seleccion-bar" style="display:none"></div>
+        <div class="body-pad" style="padding:0;overflow-y:auto;-webkit-overflow-scrolling:touch;flex:1;min-height:0">
+          <table class="stock-table-desktop"><thead><tr>
+            <th style="width:34px"><input type="checkbox" id="stock-check-todos" onchange="Stock.toggleTodos(this.checked)" title="Seleccionar todo lo filtrado"></th>
+            <th>Producto</th><th>Color</th><th>Batería</th><th>Costo USD</th><th>Precio venta USD</th><th>Margen</th><th>Stock</th><th>IMEI</th><th>Estado</th><th></th>
+          </tr></thead><tbody id="stock-tbody"></tbody></table>
+          <div class="stock-cards-mobile" id="stock-cards"></div>
+        </div>
+      `;
       this.renderGrupoTabs();
       this.renderEstadoTabs();
       this.renderCondicionTabs();
@@ -431,8 +430,179 @@ const Stock = {
 
   setView(v) { this.currentView = v; this.renderView(); },
 
+  // ── Móvil: buscador + chips de grupo + hoja de filtros + lista de tarjetas ──
+  _selModo: false,
+  _filtrosGuardados: null,   // búsqueda y selectores sobreviven a volver a dibujar la pantalla
+
+  _renderProductosMovil(host, extraSelects) {
+    // Los selectores y las pestañas viejas siguen existiendo (ocultos) porque renderTable() y los
+    // setters los leen por id: la hoja de filtros los manipula y la lógica de filtrado queda una sola.
+    host.innerHTML = `
+      <div class="m-stk-top">
+        <label class="m-stk-buscar"><i class="ti ti-search"></i>
+          <input type="search" id="stock-search" placeholder="Buscar producto" autocomplete="off" enterkeyhint="search" oninput="Stock.renderTable()">
+        </label>
+        <button type="button" class="m-stk-filtros" onclick="Stock.abrirFiltrosMovil()" aria-label="Filtros"><i class="ti ti-adjustments-horizontal"></i><span>Filtros</span><b id="m-stk-n" hidden></b></button>
+      </div>
+      <div class="m-chips m-stk-chips" id="stock-grupo-tabs"></div>
+      <div class="m-chips m-stk-activos" id="m-stk-activos" hidden></div>
+      <div id="m-stk-ocultos" hidden>
+        ${extraSelects}
+        <div id="stock-estado-tabs"></div><div id="stock-condicion-tabs"></div><div id="stock-tabs"></div><span id="stock-tabs-divider"></span>
+      </div>
+      <div id="stock-seleccion-bar" style="display:none"></div>
+      <div class="m-stk-lista">
+        <table class="stock-table-desktop" hidden><thead><tr><th><input type="checkbox" id="stock-check-todos"></th></tr></thead><tbody id="stock-tbody"></tbody></table>
+        <div class="stock-cards-mobile m-list" id="stock-cards"></div>
+      </div>`;
+    this.renderGrupoTabs();
+    this.renderEstadoTabs();
+    this.renderCondicionTabs();
+    this.renderTabs();
+    this._actualizarColoresDisponibles();
+    this._restaurarFiltrosMovil();
+    this.renderTable();
+  },
+
+  _restaurarFiltrosMovil() {
+    const f = this._filtrosGuardados;
+    if (!f) return;
+    const set = (id, v) => { const e = document.getElementById(id); if (e && v != null) e.value = v; };
+    set('stock-search', f.q);
+    set('stock-filter-modelo', f.modelo);
+    this._actualizarColoresDisponibles();
+    set('stock-filter-color', f.color);
+    set('pf-ml', f.pfMl); set('pf-conc', f.pfConc); set('pf-marca', f.pfMarca); set('pf-cat', f.pfCat);
+    if (f.pfCat) this.onPerfumeFilterChange();   // acota las marcas a la familia (conserva la elegida)
+  },
+
+  _guardarFiltrosMovil() {
+    const v = (id) => document.getElementById(id)?.value ?? '';
+    this._filtrosGuardados = { q: v('stock-search'), modelo: v('stock-filter-modelo'), color: v('stock-filter-color'),
+      pfCat: v('pf-cat'), pfMarca: v('pf-marca'), pfMl: v('pf-ml'), pfConc: v('pf-conc') };
+  },
+
+  // Filtros activos fuera del grupo (que ya son los chips de arriba), con cómo sacar cada uno.
+  _filtrosActivosMovil() {
+    const out = [];
+    const sel = (id, etq, quitar) => { const e = document.getElementById(id); if (e && e.value) out.push({ etq: etq(e.value), quitar: () => { e.value = ''; e.dispatchEvent(new Event('change')); } }); };
+    if (this.currentEstado !== 'todos') out.push({ etq: this.ESTADO_INV_LABEL[this.currentEstado] || this.currentEstado, quitar: () => this.setEstadoFiltro('todos') });
+    if (this.currentCondicion !== 'todos') out.push({ etq: { nuevo: 'Nuevo / sellado', usado: 'Usado', sindato: 'Sin estado cargado' }[this.currentCondicion] || this.currentCondicion, quitar: () => this.setCondicionFiltro('todos') });
+    if (this.currentTab !== 'all') out.push({ etq: this.CAT_LABELS[this.currentTab] || this.currentTab, quitar: () => this.setTab('all') });
+    sel('stock-filter-modelo', (v) => v);
+    sel('stock-filter-color', (v) => v);
+    sel('pf-cat', (v) => v);
+    sel('pf-marca', (v) => v);
+    sel('pf-ml', (v) => this.fmtMl(parseFloat(v)) + ' ml');
+    sel('pf-conc', (v) => v);
+    return out;
+  },
+
+  _pintarActivosMovil() {
+    const activos = this._filtrosActivosMovil();
+    const fila = document.getElementById('m-stk-activos');
+    const n = document.getElementById('m-stk-n');
+    if (n) { n.hidden = !activos.length; n.textContent = String(activos.length); }
+    if (!fila) return;
+    fila.hidden = !activos.length;
+    fila.innerHTML = activos.map((f, i) => `<button type="button" class="m-chip azul activo" onclick="Stock._quitarFiltroMovil(${i})" aria-label="Quitar filtro ${State.esc(f.etq)}">${State.esc(f.etq)} <i class="ti ti-x"></i></button>`).join('');
+  },
+
+  _quitarFiltroMovil(i) {
+    const f = this._filtrosActivosMovil()[i];
+    if (f) f.quitar();
+  },
+
+  limpiarFiltrosMovil() {
+    this.currentEstado = 'todos'; this.currentCondicion = 'todos'; this.currentTab = 'all';
+    ['stock-filter-modelo', 'stock-filter-color', 'pf-cat', 'pf-marca', 'pf-ml', 'pf-conc'].forEach((id) => { const e = document.getElementById(id); if (e) e.value = ''; });
+    this.renderEstadoTabs(); this.renderCondicionTabs(); this.renderTabs();
+    this._actualizarColoresDisponibles();
+    if (document.getElementById('pf-cat')) this.onPerfumeFilterChange(); else this.renderTable();
+  },
+
+  toggleSelModo(forzar) {
+    this._selModo = typeof forzar === 'boolean' ? forzar : !this._selModo;
+    if (!this._selModo) this.limpiarSeleccion();
+    document.getElementById('m-stk-selbtn')?.classList.toggle('activo', this._selModo);
+    const fab = document.querySelector('.m-fab'); if (fab) fab.style.display = this._selModo ? 'none' : '';
+    this.renderTable();
+  },
+
+  _tocarSelMovil(id) {
+    const on = !this._sel.has(String(id));
+    this.toggleUno(id, on);
+    document.querySelectorAll('.m-stk-item').forEach((el) => { if (el.dataset.id === String(id)) el.classList.toggle('sel', on); });
+  },
+
+  abrirFiltrosMovil() {
+    const pie = '<button type="button" class="btn" data-a="limpiar">Limpiar</button><button type="button" class="btn btn-primary" data-a="ver">Ver productos</button>';
+    const h = Sheet.abrir({ titulo: 'Filtros', cuerpo: '', pie, alta: true });
+    const pintar = () => {
+      h.cuerpo.innerHTML = this._filtrosMovilHTML();
+      const n = this._ultimosFiltrados.length;
+      h.el.querySelector('[data-a="ver"]').textContent = `Ver ${n} producto${n === 1 ? '' : 's'}`;
+    };
+    h.cuerpo.addEventListener('click', (ev) => {
+      const b = ev.target.closest('[data-f]'); if (!b) return;
+      const v = b.dataset.v;
+      if (b.dataset.f === 'estado') this.setEstadoFiltro(v);
+      else if (b.dataset.f === 'condicion') this.setCondicionFiltro(v);
+      else if (b.dataset.f === 'tab') this.setTab(v);
+      pintar();
+    });
+    h.cuerpo.addEventListener('change', (ev) => {
+      const s = ev.target.closest('select[data-sel]'); if (!s) return;
+      const real = document.getElementById(s.dataset.sel); if (!real) return;
+      real.value = s.value; real.dispatchEvent(new Event('change'));
+      pintar();
+    });
+    h.el.querySelector('.m-sheet-pie').addEventListener('click', (ev) => {
+      const a = ev.target.closest('[data-a]')?.dataset.a;
+      if (a === 'limpiar') { this.limpiarFiltrosMovil(); pintar(); }
+      else if (a === 'ver') h.cerrar();
+    });
+    pintar();
+  },
+
+  _filtrosMovilHTML() {
+    const esc = (x) => State.esc(String(x));
+    const grupo = this.productosDelGrupo(this.currentGroup);
+    const chip = (k, v, etq, activo, n) => `<button type="button" class="m-chip azul${activo ? ' activo' : ''}" data-f="${k}" data-v="${esc(v)}">${esc(etq)}${n != null ? ` <span class="n">${n}</span>` : ''}</button>`;
+    const estados = ['todos', 'disponible', 'reservado', 'en_reparacion', 'vendido'];
+    if (grupo.some((p) => p.estadoInventario === 'eliminado')) estados.push('eliminado');
+    const porEstado = estados.map((e) => chip('estado', e, e === 'todos' ? 'Todos' : this.ESTADO_INV_LABEL[e], this.currentEstado === e,
+      e === 'todos' ? grupo.length : grupo.filter((p) => (p.estadoInventario || 'disponible') === e).length)).join('');
+    const cond = { todos: 'Todos', nuevo: 'Nuevo / sellado', usado: 'Usado' };
+    const sinDato = grupo.filter((p) => this.condicionDe(p) === 'sindato').length;
+    if (sinDato) cond.sindato = 'Sin estado cargado';
+    const porCond = Object.entries(cond).map(([k, etq]) => chip('condicion', k, etq, this.currentCondicion === k,
+      k === 'todos' ? grupo.length : grupo.filter((p) => this.condicionDe(p) === k).length)).join('');
+    const cats = ['all', ...(this.GRUPOS[this.currentGroup]?.cats || []).filter((c) => State.stock.some((s) => s.cat === c))];
+    const porCat = cats.length > 2 ? cats.map((c) => chip('tab', c, c === 'all' ? 'Todos' : (this.CAT_LABELS[c] || c), this.currentTab === c,
+      c === 'all' ? grupo.length : State.stock.filter((s) => s.cat === c).length)).join('') : '';
+    const defs = this.currentGroup === 'perfumeria'
+      ? [['pf-cat', 'Familia'], ['pf-marca', 'Marca'], ['pf-ml', 'Tamaño'], ['pf-conc', 'Concentración']]
+      : [['stock-filter-modelo', 'Modelo'], ['stock-filter-color', 'Color']];
+    const selects = defs.map(([id, etq]) => {
+      const real = document.getElementById(id); if (!real) return '';
+      const ops = [...real.options].map((o) => `<option value="${esc(o.value)}"${o.value === real.value ? ' selected' : ''}>${esc(o.value && id === 'pf-ml' ? this.fmtMl(parseFloat(o.value)) + ' ml' : o.textContent)}</option>`).join('');
+      return `<label class="m-f-sel"><span>${etq}</span><select data-sel="${id}">${ops}</select></label>`;
+    }).join('');
+    return `
+      <div class="m-f-grupo"><div class="m-f-etq">Estado</div><div class="m-f-chips">${porEstado}</div></div>
+      <div class="m-f-grupo"><div class="m-f-etq">Condición</div><div class="m-f-chips">${porCond}</div></div>
+      ${porCat ? `<div class="m-f-grupo"><div class="m-f-etq">Categoría</div><div class="m-f-chips">${porCat}</div></div>` : ''}
+      ${selects ? `<div class="m-f-grupo"><div class="m-f-etq">Detalle</div>${selects}</div>` : ''}`;
+  },
+
   renderGrupoTabs() {
     const mobile = this.isMobile();
+    if (mobile) {
+      document.getElementById('stock-grupo-tabs').innerHTML = Object.entries(this.GRUPOS).map(([k, g]) => `
+        <button type="button" class="m-chip${this.currentGroup === k ? ' activo' : ''}" onclick="Stock.setGrupo('${k}')"><i class="ti ${g.icon}"></i> ${g.label} <span class="n">${this.productosDelGrupo(k).length}</span></button>`).join('');
+      return;
+    }
     document.getElementById('stock-grupo-tabs').innerHTML = Object.entries(this.GRUPOS).map(([k,g]) => {
       const count = this.productosDelGrupo(k).length;
       const active = this.currentGroup === k;
@@ -449,6 +619,7 @@ const Stock = {
     // La selección era de productos del grupo anterior: si no se limpia, la barra
     // azul sigue ofreciendo "Editar precio" sobre productos que ya no se ven.
     this._sel.clear();
+    this._filtrosGuardados = null;
     // renderView() rearma toda la barra de filtros. Antes no se llamaba, así que
     // los filtros de Perfumería (categoría/concentración/marca) no aparecían nunca
     // si entrabas por Dispositivos, y un filtro de modelo del grupo anterior
@@ -601,6 +772,7 @@ const Stock = {
     this._sel.clear();
     document.querySelectorAll('.stock-check').forEach(c => { c.checked = false; });
     const t = document.getElementById('stock-check-todos'); if (t) t.checked = false;
+    document.querySelectorAll('.m-stk-item.sel').forEach(e => e.classList.remove('sel'));
     this.pintarBarraSeleccion();
   },
 
@@ -613,6 +785,13 @@ const Stock = {
     if (!bar) return;
     const sel = this._seleccionados();
     if (!sel.length) { bar.style.display = 'none'; bar.innerHTML = ''; return; }
+    if (this.isMobile()) {
+      bar.style.display = 'block';
+      bar.innerHTML = `<div class="m-selbar"><span><b>${sel.length}</b> seleccionado${sel.length === 1 ? '' : 's'}</span>
+        <button type="button" class="btn btn-sm btn-primary" onclick="Stock.abrirPrecioLote()"><i class="ti ti-tag"></i> Editar precio</button>
+        <button type="button" class="btn btn-sm" onclick="Stock.toggleSelModo(false)">Cancelar</button></div>`;
+      return;
+    }
     const nombres = [...new Set(sel.map(p => p.nombre))];
     bar.style.display = 'block';
     bar.innerHTML = `
@@ -753,6 +932,7 @@ const Stock = {
   },
 
   renderTable() {
+    if (this.isMobile()) this._guardarFiltrosMovil();
     const q = (document.getElementById('stock-search')?.value || '').toLowerCase();
     const modeloFiltro = document.getElementById('stock-filter-modelo')?.value || '';
     const colorFiltro = document.getElementById('stock-filter-color')?.value || '';
@@ -784,7 +964,7 @@ const Stock = {
 
     if (!rows.length) {
       tbody.innerHTML = `<tr><td colspan="11"><div class="empty-state"><i class="ti ti-box"></i>Sin productos que coincidan</div></td></tr>`;
-      if (cardsHost) cardsHost.innerHTML = `<div class="empty-state"><i class="ti ti-box"></i>Sin productos que coincidan</div>`;
+      if (cardsHost) cardsHost.innerHTML = this.isMobile() ? '<div class="m-vacio"><i class="ti ti-box-off" style="font-size:28px;display:block;margin-bottom:6px"></i>Sin productos que coincidan</div>' : `<div class="empty-state"><i class="ti ti-box"></i>Sin productos que coincidan</div>`
       // Igual hay que repintar: si no, la barra de selección queda colgada con
       // productos que el filtro actual ya no muestra.
       this.pintarBarraSeleccion();
@@ -831,7 +1011,9 @@ const Stock = {
       </tr>`;
     }).join('');
 
-    if (cardsHost) {
+    if (cardsHost && this.isMobile()) {
+      cardsHost.innerHTML = rows.map(p => this._tarjetaMovil(p, filaTabla(p))).join('');
+    } else if (cardsHost) {
       cardsHost.innerHTML = rows.map(p => {
         const { margin, precioUSD, detalleStock, statusBadge } = filaTabla(p);
         return `<div class="stock-card" onclick="Stock.openDrawer('edit','${p.id}')">
@@ -862,7 +1044,40 @@ const Stock = {
     this.pintarBarraSeleccion();
     const todos = document.getElementById('stock-check-todos');
     if (todos) todos.checked = rows.length > 0 && rows.every(p => this._sel.has(String(p.id)));
+    if (this.isMobile()) this._pintarActivosMovil();
   },
+
+  // Una fila de la lista móvil: lo que decide la compra a la vista (nombre, detalle, precio, disponibilidad).
+  // Costo, margen, IMEI, proveedor y custodio quedan en el detalle (se abre al tocar).
+  _tarjetaMovil(p, f) {
+    const esc = (x) => State.esc(String(x));
+    const estado = p.estadoInventario || 'disponible';
+    const stock = f.stock;
+    const enPesos = this.esPrecioEnPesos(p.cat);
+    const precio = enPesos ? (p.precioARS ? State.fmtARS(p.precioARS) : 'Sin precio') : (f.precioUSD ? State.fmtUSD(f.precioUSD) : 'Sin precio');
+    const bat = p.bateriaPct != null && ['iphone','android'].includes(p.cat) ? `Batería ${p.bateriaPct}%` : '';
+    const partes = this.esPerfume(p.cat) ? [this.CAT_LABELS[p.cat], p.modelo, p.storage] :
+      p.cat === 'repuesto' ? [p.modelo ? 'Para ' + p.modelo : '', p.color] : [(this.GRUPOS[this.currentGroup]?.cats.length > 1 ? this.CAT_LABELS[p.cat] : ''), p.color, bat];
+    const sub = partes.filter(Boolean).join(' · ');
+    let tono = 'verde', der;
+    if (estado !== 'disponible') { tono = estado === 'vendido' ? '' : 'ambar'; der = `<span class="badge ${this.ESTADO_INV_CLASS[estado]}">${this.ESTADO_INV_LABEL[estado]}</span>`; if (estado === 'eliminado') tono = 'rojo'; }
+    else if (stock <= 0) { tono = 'rojo'; der = '<span class="badge b-red">Sin stock</span>'; }
+    else der = `<span class="m-stk-uds">${stock} u.</span>`;
+    const marcado = this._sel.has(String(p.id));
+    const ico = this._selModo
+      ? `<span class="m-stk-chk"><i class="ti ti-check"></i></span>`
+      : `<span class="m-item-ico ${tono}"><i class="ti ${this.GRUPOS[this.currentGroup]?.icon || 'ti-box'}"></i></span>`;
+    return `<button type="button" class="m-item m-stk-item${marcado ? ' sel' : ''}${this._selModo ? ' modo-sel' : ''}" data-id="${esc(p.id)}" onclick="${this._selModo ? `Stock._tocarSelMovil('${p.id}')` : `Stock.openDrawer('edit','${p.id}')`}">
+      ${ico}
+      <span class="m-item-cuerpo">
+        <span class="m-item-t">${esc(p.nombre)}</span>
+        ${sub ? `<span class="m-item-s">${esc(sub)}</span>` : ''}
+        ${p.notas ? `<span class="m-item-s m-stk-nota"><i class="ti ti-note"></i> ${esc(p.notas)}</span>` : ''}
+      </span>
+      <span class="m-item-der"><span class="m-item-precio">${precio}</span><span class="m-item-sub">${der}</span></span>
+    </button>`;
+  },
+
 
   // ===== HISTORIAL =====
 

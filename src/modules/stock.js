@@ -1408,7 +1408,9 @@ const Stock = {
               <div id="sec-id" style="padding:14px">
 
                 <div style="margin-bottom:12px"><label style="font-size:11px;color:var(--text-secondary);font-weight:600;display:block;margin-bottom:6px">Categoría *</label>
-                  <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:6px" id="cat-grid">
+                  ${this.isMobile() ? `<button type="button" class="m-cat-toggle" id="cat-toggle" aria-expanded="false" aria-controls="cat-grid" onclick="Stock.toggleCatGrid()">
+                    <i class="ti ${this.CAT_ICONS[p.cat]||'ti-box'}" id="cat-toggle-ico"></i><span id="cat-toggle-etq">${this.CAT_LABELS[p.cat]||p.cat}</span><i class="ti ti-chevron-down m-cat-chev"></i></button>` : ''}
+                  <div style="display:${this.isMobile()?'none':'grid'};grid-template-columns:repeat(${this.isMobile()?3:5},1fr);gap:6px" id="cat-grid">
                     ${Object.entries(this.CAT_LABELS).map(([k,v]) => `
                       <div onclick="Stock.selectCat('${k}')" data-cat="${k}" class="cat-opt" style="border:1.5px solid ${p.cat===k?'var(--blue)':'var(--border)'};background:${p.cat===k?'var(--blue-light)':'var(--bg)'};border-radius:8px;padding:8px 4px;text-align:center;cursor:pointer">
                         <i class="ti ${this.CAT_ICONS[k]}" style="font-size:18px;color:${p.cat===k?'var(--blue)':'var(--text-secondary)'};display:block;margin-bottom:3px"></i>
@@ -1421,11 +1423,11 @@ const Stock = {
 
                 <div style="margin-bottom:12px;background:var(--bg-secondary);border-radius:8px;padding:12px">
                   <label style="font-size:11px;color:var(--text-secondary);font-weight:600;display:block;margin-bottom:4px">Cantidad de Unidades *</label>
-                  <div style="display:flex;align-items:center;gap:8px">
+                  ${this.isMobile() ? `<select id="f-cantidad" class="m-cant-sel" aria-label="Cantidad de unidades">${this._opcionesCantidad(cantidadDeclarada)}</select>` : `<div style="display:flex;align-items:center;gap:8px">
                     <button type="button" onclick="Stock.bumpQty(-1)" style="width:32px;height:32px;border:1px solid var(--border-strong);border-radius:8px;background:var(--bg);cursor:pointer;font-size:16px">−</button>
                     <input type="number" id="f-cantidad" value="${cantidadDeclarada}" min="0" style="width:100%;text-align:center;font-size:13px;font-weight:600;padding:7px 10px;border:1px solid var(--border-strong);border-radius:8px">
                     <button type="button" onclick="Stock.bumpQty(1)" style="width:32px;height:32px;border:1px solid var(--border-strong);border-radius:8px;background:var(--bg);cursor:pointer;font-size:16px">+</button>
-                  </div>
+                  </div>`}
                   <div class="hint" style="font-size:10px;color:var(--text-secondary);margin-top:4px" id="cantidad-hint">${esIMEI ? 'Para dispositivos con IMEI, la cantidad se determina por los IMEIs cargados (1 IMEI = 1 dispositivo).' : 'Cantidad de unidades que tenés.'}</div>
                 </div>
 
@@ -1859,8 +1861,20 @@ const Stock = {
     if (sel.value !== '__otro__') input.value = '';
   },
 
+  // Móvil: la grilla de categorías está plegada detrás de un botón con la categoría actual.
+  toggleCatGrid(abrir) {
+    const g = document.getElementById('cat-grid'), b = document.getElementById('cat-toggle');
+    if (!g || !b) return;
+    const on = typeof abrir === 'boolean' ? abrir : g.style.display === 'none';
+    g.style.display = on ? 'grid' : 'none';
+    b.setAttribute('aria-expanded', on ? 'true' : 'false');
+    b.classList.toggle('abierto', on);
+  },
+
   selectCat(cat) {
     document.getElementById('f-cat').value = cat;
+    const te = document.getElementById('cat-toggle-etq');
+    if (te) { te.textContent = this.CAT_LABELS[cat] || cat; document.getElementById('cat-toggle-ico').className = `ti ${this.CAT_ICONS[cat] || 'ti-box'}`; this.toggleCatGrid(false); }
     document.querySelectorAll('.cat-opt').forEach(el => {
       const isSel = el.dataset.cat === cat;
       el.style.border = `1.5px solid ${isSel ? 'var(--blue)' : 'var(--border)'}`;
@@ -1934,7 +1948,7 @@ const Stock = {
     const cantEl = document.getElementById('f-cantidad');
     if (cantEl) {
       const declarada = parseInt(cantEl.value, 10) || 0;
-      if (this.pendingImeis.length > declarada) cantEl.value = this.pendingImeis.length;
+      if (this.pendingImeis.length > declarada) this._setCantidad(this.pendingImeis.length);
     }
   },
 
@@ -2079,7 +2093,27 @@ const Stock = {
     const inp = document.getElementById('f-cantidad');
     if (!inp) return;
     const current = parseInt(inp.value, 10) || 0;
-    inp.value = Math.max(0, current + delta);
+    this._setCantidad(Math.max(0, current + delta));
+  },
+
+  // En el celular la cantidad es un desplegable (0 a 100 y las que ya estén cargadas).
+  _opcionesCantidad(actual) {
+    const a = Math.max(0, parseInt(actual, 10) || 0);
+    const vals = new Set(Array.from({ length: 101 }, (_, i) => i));
+    vals.add(a);
+    return [...vals].sort((x, y) => x - y).map(v => `<option value="${v}"${v === a ? ' selected' : ''}>${v}</option>`).join('');
+  },
+
+  // Funciona igual con el campo numérico (escritorio) y con el desplegable (celular).
+  _setCantidad(n) {
+    const el = document.getElementById('f-cantidad');
+    if (!el) return;
+    if (el.tagName === 'SELECT' && ![...el.options].some(o => o.value === String(n))) {
+      const op = new Option(String(n), String(n));
+      const sig = [...el.options].find(o => Number(o.value) > n);
+      el.add(op, sig || null);
+    }
+    el.value = n;
   },
 
   updatePricePreview() {

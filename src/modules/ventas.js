@@ -17,12 +17,28 @@ const Ventas = {
   periodoVentas: 'mes',
   periodoDesde: '', periodoHasta: '',
   periodoMes: '',
-  isMobile() { return window.innerWidth <= 768; },
+  // Mismo corte que movil.css (< 1024 px); sin movil.js cargado, el criterio de antes.
+  isMobile() { return window.Movil ? Movil.activo() : window.innerWidth <= 768; },
 
   render() {
     const c = document.createElement('div');
     c.style.cssText = 'display:flex;flex-direction:column;flex:1;overflow:hidden;min-height:0';
     const mobile = this.isMobile();
+    if (mobile) {
+      // Misma estética que Inicio y Stock: chips de período, resumen azul, lista de tarjetas y botón "+".
+      c.innerHTML = `
+        <div class="m-chips m-vta-chips" id="ventas-periodo-tabs"></div>
+        <div id="ventas-rango-libre" class="m-vta-rango" style="display:none">
+          <input type="date" id="ventas-desde" aria-label="Desde"><span>a</span><input type="date" id="ventas-hasta" aria-label="Hasta">
+          <button type="button" class="btn btn-primary" onclick="Ventas.aplicarRangoLibre()">Aplicar</button>
+        </div>
+        <div id="ventas-metricas" style="flex-shrink:0"></div>
+        <div class="m-vta-lista" id="ventas-list-host"></div>
+        <button type="button" class="m-fab" aria-label="Nueva venta" onclick="Ventas.openNew()"><i class="ti ti-plus"></i></button>
+        <div id="venta-modal-host"></div>`;
+      setTimeout(() => { this.renderPeriodoTabs(); this.renderMetricas(); this.renderList(); }, 0);
+      return c;
+    }
     c.innerHTML = `
       <div style="padding:${mobile?'8px 12px':'12px 22px'};border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;gap:8px;flex-shrink:0">
         <div style="display:flex;gap:4px;overflow-x:auto;-webkit-overflow-scrolling:touch;white-space:nowrap;flex:1 1 auto;min-width:0" id="ventas-periodo-tabs"></div>
@@ -112,6 +128,16 @@ const Ventas = {
       const label = new Date(Number(y), Number(mo)-1, 1).toLocaleDateString('es-AR', { month: 'short', year: '2-digit' });
       return `<option value="${m}" ${this.periodoMes===m?'selected':''}>${label}</option>`;
     }).join('');
+    if (this.isMobile()) {
+      const sel = (id, on, cambio, vacio, opts) => `<select id="${id}" class="m-chip-sel${on ? ' activo' : ''}" onchange="${cambio}" aria-label="${vacio}"><option value="">${vacio}</option>${opts}</select>`;
+      el.innerHTML = tabs.map(([k, l]) => `<button type="button" class="m-chip${this.periodoVentas === k ? ' activo' : ''}" onclick="Ventas.setPeriodo('${k}')">${l}</button>`).join('')
+        + sel('ventas-mes-selector', this.periodoVentas === 'mes-especifico', 'Ventas.setPeriodoMes(this.value)', 'Mes…', mesesOpts)
+        + sel('ventas-nicho', !!this._nicho, 'Ventas.setNicho(this.value)', 'Todos los rubros', Reportes.NICHOS.map(n => `<option value="${n.id}" ${this._nicho === n.id ? 'selected' : ''}>${n.emoji} ${n.label}</option>`).join(''))
+        + `<button type="button" class="m-chip" aria-label="Exportar a Excel" onclick="Ventas.exportarDetalleExcel()"><i class="ti ti-file-spreadsheet"></i></button>`;
+      const rg = document.getElementById('ventas-rango-libre');
+      if (rg) rg.style.display = this.periodoVentas === 'libre' ? 'flex' : 'none';
+      return;
+    }
     el.innerHTML = tabs.map(([k,l])=>`<button class="btn btn-sm ${this.periodoVentas===k&&k!=='mes-especifico'?'btn-primary':''}" onclick="Ventas.setPeriodo('${k}')">${l}</button>`).join('')
       + `<select id="ventas-mes-selector" onchange="Ventas.setPeriodoMes(this.value)" style="font-size:12px;padding:4px 8px;border:1px solid var(--border-strong);border-radius:8px;margin-left:4px;background:var(--bg-secondary);color:var(--text);${this.periodoVentas==='mes-especifico'?'border-color:var(--blue);outline:none':''}">
           <option value="">Mes específico…</option>
@@ -371,22 +397,18 @@ const Ventas = {
     const margenTotal = margenReal + diferencial + difCambio;  // diferencial no está dentro de margenReal: no se duplica
 
     if (this.isMobile()) {
+      el.style.cssText = '';
       el.innerHTML = `
-        <div style="display:flex;border-bottom:1px solid var(--border);overflow-x:auto;-webkit-overflow-scrolling:touch">
-          <div style="flex:1;min-width:100px;padding:10px 12px;border-right:1px solid var(--border)">
-            <div style="font-size:10px;color:var(--text-secondary);margin-bottom:2px">${ventas.length} venta(s) · ${unidades} uds</div>
-            <div style="font-size:15px;font-weight:700;color:var(--blue)">${State.fmtUSD(volumen)}</div>
-            <div style="font-size:9px;color:var(--text-secondary)">Volumen</div>
-          </div>
-          <div style="flex:1;min-width:100px;padding:10px 12px;border-right:1px solid var(--border)">
-            <div style="font-size:10px;color:var(--text-secondary);margin-bottom:2px">Margen total</div>
-            <div style="font-size:15px;font-weight:700;color:${margenTotal>=0?'var(--green)':'var(--red)'}">${State.fmtUSD(margenTotal)}</div>
-            <div style="font-size:9px;color:var(--text-secondary)">${rentabilidad.toFixed(1)}% rentabilidad</div>
-          </div>
-          <div style="flex:1;min-width:90px;padding:10px 12px">
-            <div style="font-size:10px;color:var(--text-secondary);margin-bottom:2px">Ticket prom.</div>
-            <div style="font-size:15px;font-weight:700;color:var(--text)">${State.fmtUSD(ticketProm)}</div>
-            ${diferencial>0?`<div style="font-size:9px;color:var(--purple)">+${State.fmtUSD(diferencial)} tarjeta</div>`:'<div style="font-size:9px;color:var(--text-secondary)"> </div>'}
+        <div class="m-vta-res">
+          <div class="m-vta-res-t">Volumen vendido</div>
+          <div class="m-vta-res-v">${State.fmtUSD(volumen)}</div>
+          <div class="m-vta-res-s">${ventas.length} venta${ventas.length === 1 ? '' : 's'} · ${unidades} unidad${unidades === 1 ? '' : 'es'}</div>
+          <div class="m-vta-res-chips">
+            <span>Margen <b style="color:${margenTotal >= 0 ? '#9BF0B8' : '#FFB4B4'}">${State.fmtUSD(margenTotal)}</b></span>
+            <span>Rentab. <b>${rentabilidad.toFixed(1)}%</b></span>
+            <span>Ticket <b>${State.fmtUSD(ticketProm)}</b></span>
+            ${diferencial > 0 ? `<span>Tarjeta <b>+${State.fmtUSD(diferencial)}</b></span>` : ''}
+            ${porCobrar > 0 ? `<span>Por cobrar <b>${State.fmtUSD(porCobrar)}</b></span>` : ''}
           </div>
         </div>`;
       return;
@@ -426,38 +448,31 @@ const Ventas = {
     const ventas=this.ventasDelPeriodo();
     const TIPO={minorista:'Minorista',mayorista:'Mayorista',revendedor:'Revendedor',mercadolibre:'Mercado Libre'};
     if (!ventas.length) {
-      host.innerHTML=`<div class="empty-state"><i class="ti ti-receipt-off"></i>Sin ventas en este período</div>`;
+      host.innerHTML=this.isMobile() ? `<div class="m-vacio"><i class="ti ti-receipt-off" style="font-size:28px;display:block;margin-bottom:6px"></i>Sin ventas en este período</div>` : `<div class="empty-state"><i class="ti ti-receipt-off"></i>Sin ventas en este período</div>`;
       return;
     }
     if (this.isMobile()) {
-      host.innerHTML = `<div style="display:flex;flex-direction:column;gap:8px;padding:10px 12px">` +
-        ventas.map(v => {
-          const total=v.items.reduce((s,i)=>s+i.precio,0);
-          const pagado=v.pagos.reduce((s,p)=>s+p.monto,0)+(v.tradeIn?.valor||0);
-          const cobroV=this._cobroVisible(v,total,pagado);
-          const saldo=-cobroV.dif;
-          const cerrada=v.estado==='cerrada';
-          const itemsStr=v.items.map(i=>i.nombre+(i.imei?` · ${i.imei}`:'')).join(', ');
-          return `<div class="card" style="margin-bottom:0;padding:12px 14px" onclick="Ventas.viewSale(${v.id})">
-            <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;margin-bottom:6px">
-              <div style="min-width:0">
-                <div style="font-size:13px;font-weight:700">${State.esc(v.cliente)}</div>
-                <div style="font-size:11px;color:var(--text-secondary);font-family:monospace;margin-top:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${itemsStr}</div>
-              </div>
-              <div style="text-align:right;flex-shrink:0">
-                <div style="font-size:15px;font-weight:700;color:var(--blue)">${State.fmtUSD(total)}</div>
-                <div style="font-size:10px;color:var(--text-secondary)">${v.fecha}</div>
-              </div>
-            </div>
-            <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
-              <span class="badge b-blue" style="font-size:10px">${TIPO[v.tipoVenta]||'Minorista'}</span>
-              <span class="badge ${cerrada?'b-green':'b-amber'}" style="font-size:10px">${cerrada?'✓ Cerrada':'Abierta'}</span>
-              ${saldo>0.5?`<span style="font-size:10px;color:var(--red);font-weight:600">Pendiente: ${State.fmtUSD(saldo)}</span>`:''}
-              ${cobroV.aLiberar?`<span style="font-size:10px;color:var(--amber);font-weight:600">A liberar por Mercado Libre</span>`:''}
-              <span style="font-size:10px;color:var(--text-secondary);margin-left:auto">#${v.id}</span>
-            </div>
-          </div>`;
-        }).join('') + `</div>`;
+      const esc = (x) => State.esc(String(x ?? ''));
+      host.innerHTML = `<div class="m-list">` + ventas.map(v => {
+        const total = v.items.reduce((s, i) => s + i.precio, 0);
+        const pagado = v.pagos.reduce((s, p) => s + p.monto, 0) + (v.tradeIn?.valor || 0);
+        const cobroV = this._cobroVisible(v, total, pagado);
+        const saldo = -cobroV.dif;
+        const cerrada = v.estado === 'cerrada';
+        const primero = v.items[0]?.nombre || 'Sin productos';
+        const resumen = esc(primero.substring(0, 38)) + (v.items.length > 1 ? ` +${v.items.length - 1}` : '');
+        let sub = cerrada ? 'Cobrada' : 'Abierta', color = '';
+        if (saldo > 0.5) { sub = 'Pendiente ' + State.fmtUSD(saldo); color = 'var(--red)'; }
+        else if (cobroV.aLiberar) { sub = 'A liberar por ML'; color = 'var(--amber)'; }
+        return `<button type="button" class="m-item" onclick="Ventas.viewSale(${v.id})">
+          <span class="m-item-ico ${cerrada ? 'verde' : 'ambar'}"><i class="ti ti-receipt"></i></span>
+          <span class="m-item-cuerpo"><span class="m-item-t">${esc(v.cliente)}</span>
+            <span class="m-item-s" style="display:block">${resumen}</span>
+            <span class="m-item-s" style="display:block">${esc(v.fecha)} · ${esc(TIPO[v.tipoVenta] || 'Minorista')} · #${v.id}</span></span>
+          <span class="m-item-der"><span class="m-item-precio" style="display:block">${State.fmtUSD(total)}</span>
+            <span class="m-item-sub" ${color ? `style="color:${color};font-weight:600"` : ''}>${sub}</span></span>
+        </button>`;
+      }).join('') + `</div>`;
       return;
     }
     host.innerHTML = `<div style="overflow-x:auto;-webkit-overflow-scrolling:touch;padding:0 16px 12px">

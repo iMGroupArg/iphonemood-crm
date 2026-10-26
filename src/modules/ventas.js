@@ -39,24 +39,19 @@ const Ventas = {
       setTimeout(() => { this.renderPeriodoTabs(); this.renderMetricas(); this.renderList(); }, 0);
       return c;
     }
+    c.className = 'e-pagina';
     c.innerHTML = `
-      <div style="padding:${mobile?'8px 12px':'12px 22px'};border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;gap:8px;flex-shrink:0">
-        <div style="display:flex;gap:4px;overflow-x:auto;-webkit-overflow-scrolling:touch;white-space:nowrap;flex:1 1 auto;min-width:0" id="ventas-periodo-tabs"></div>
-        <select id="ventas-nicho" onchange="Ventas.setNicho(this.value)" title="Filtrar por tipo de negocio" style="flex-shrink:0;font-size:12px;padding:5px 8px;border:1px solid var(--border-strong);border-radius:8px;background:var(--bg-secondary);color:var(--text);${this._nicho?'border-color:var(--blue)':''}">
-          <option value="">Todos los rubros</option>
-          ${Reportes.NICHOS.map(n=>`<option value="${n.id}" ${this._nicho===n.id?'selected':''}>${n.emoji} ${n.label}</option>`).join('')}
-        </select>
-        <button class="btn" style="flex-shrink:0" onclick="Ventas.exportarDetalleExcel()" title="Exportar el detalle de las ventas del período"><i class="ti ti-file-spreadsheet"></i>${mobile?'':' Exportar'}</button>
-        <button class="btn btn-primary" style="flex-shrink:0" onclick="Ventas.openNew()" title="Nueva venta (${Ventas.atajoNuevaVenta()})"><i class="ti ti-plus"></i>${mobile?' Nueva':' Nueva venta'}</button>
+      <div class="e-head">
+        <h2><i class="ti ti-receipt"></i> Ventas</h2>
+        <button class="btn btn-primary" onclick="Ventas.openNew()" title="Nueva venta (${Ventas.atajoNuevaVenta()})"><i class="ti ti-plus"></i> Nueva venta</button>
       </div>
-      <div id="ventas-rango-libre" style="display:none;padding:8px ${mobile?'12':'22'}px;border-bottom:1px solid var(--border);gap:8px;align-items:center;flex-wrap:wrap">
-        <input type="date" id="ventas-desde" style="font-size:12px;padding:5px 8px;border:1px solid var(--border-strong);border-radius:8px;flex:1">
-        <span style="font-size:12px;color:var(--text-secondary)">hasta</span>
-        <input type="date" id="ventas-hasta" style="font-size:12px;padding:5px 8px;border:1px solid var(--border-strong);border-radius:8px;flex:1">
-        <button class="btn btn-sm btn-primary" onclick="Ventas.aplicarRangoLibre()">Aplicar</button>
+      <div class="m-chips m-vta-chips" id="ventas-periodo-tabs"></div>
+      <div id="ventas-rango-libre" class="m-vta-rango" style="display:none">
+        <input type="date" id="ventas-desde" aria-label="Desde"><span>a</span><input type="date" id="ventas-hasta" aria-label="Hasta">
+        <button type="button" class="btn btn-primary" onclick="Ventas.aplicarRangoLibre()">Aplicar</button>
       </div>
       <div id="ventas-metricas" style="flex-shrink:0"></div>
-      <div class="body-pad" style="padding:0;overflow-y:auto;-webkit-overflow-scrolling:touch;flex:1;min-height:0" id="ventas-list-host"></div>
+      <div class="e-tabla" id="ventas-list-host"></div>
       <div id="venta-modal-host"></div>
     `;
     setTimeout(() => { this.renderPeriodoTabs(); this.renderMetricas(); this.renderList(); }, 0);
@@ -128,7 +123,7 @@ const Ventas = {
       const label = new Date(Number(y), Number(mo)-1, 1).toLocaleDateString('es-AR', { month: 'short', year: '2-digit' });
       return `<option value="${m}" ${this.periodoMes===m?'selected':''}>${label}</option>`;
     }).join('');
-    if (this.isMobile()) {
+    if (window.Movil) {
       const sel = (id, on, cambio, vacio, opts) => `<select id="${id}" class="m-chip-sel${on ? ' activo' : ''}" onchange="${cambio}" aria-label="${vacio}"><option value="">${vacio}</option>${opts}</select>`;
       el.innerHTML = tabs.map(([k, l]) => `<button type="button" class="m-chip${this.periodoVentas === k ? ' activo' : ''}" onclick="Ventas.setPeriodo('${k}')">${l}</button>`).join('')
         + sel('ventas-mes-selector', this.periodoVentas === 'mes-especifico', 'Ventas.setPeriodoMes(this.value)', 'Mes…', mesesOpts)
@@ -414,32 +409,32 @@ const Ventas = {
       return;
     }
 
+    // Escritorio: resumen azul (volumen, margen total, rentabilidad, ticket) y, al lado, el resto de los indicadores.
     const kpis = [
-      { label:'Volumen vendido',          val:State.fmtUSD(volumen),       sub:`${ventas.length} venta(s) en el período`,          emoji:'💰', color:'var(--blue)' },
-      { label:'Unidades vendidas',         val:String(unidades),            sub:`${ventas.length} transacciones`,                   emoji:'📦', color:'var(--blue)' },
-      { label:'Regalado en el período',    val:State.fmtUSD(valorRegalado), sub:itemsRegalo.length ? `${itemsRegalo.length} ítem(s) regalado(s)` : 'Sin regalos en el período', emoji:'🎁', color:valorRegalado>0?'var(--purple)':'var(--text-secondary)' },
-      { label:'Rentabilidad',              val:`${rentabilidad.toFixed(1)}%`,sub:'Margen real ÷ volumen vendido',                   emoji:'📊', color:rentabilidad>=0?'var(--green)':'var(--red)' },
-      { label:'Margen por venta',          val:State.fmtUSD(margenXEquipo), sub:'Margen real ÷ cantidad de ventas',                emoji:margenXEquipo>=0?'📈':'📉', color:margenXEquipo>=0?'var(--green)':'var(--red)' },
-      { label:'MARGEN TOTAL',              val:State.fmtUSD(margenTotal),   sub:'Ventas + tarjeta + tipo de cambio',               emoji:'🏆', color:margenTotal>=0?'var(--green)':'var(--red)' },
-      { label:'Margen real (ventas)',       val:State.fmtUSD(margenReal),    sub:quebranto>0?`Precio − costo − ${State.fmtUSD(quebranto)} sin cobrar`:'Precio venta − costo',emoji:margenReal>=0?'✅':'⚠️', color:margenReal>=0?'var(--green)':'var(--red)' },
-      { label:'Diferencial tarjeta',        val:State.fmtUSD(diferencial),  sub:'Ganancia por recargo posnet',                     emoji:'💳', color:'var(--purple)' },
-      { label:'Sin cobrar (cerradas)',      val:State.fmtUSD(quebranto),    sub:'Ya descontado del margen real',                   emoji:'🔻', color:quebranto>0?'var(--red)':'var(--text-secondary)' },
-      { label:'Por cobrar (abiertas)',      val:State.fmtUSD(porCobrar),    sub:'Financiado — todavía no descontado',              emoji:'⏳', color:porCobrar>0?'var(--amber)':'var(--text-secondary)' },
-      { label:'Dif. tipo de cambio',        val:State.fmtUSD(difCambio),    sub:`${cambiosPeriodo.length} op. ARS→USD en el período`,emoji:'💱', color:difCambio>=0?'var(--green)':'var(--red)' },
-      { label:'Ticket promedio',            val:State.fmtUSD(ticketProm),   sub:'Volumen ÷ cantidad de ventas',                    emoji:'🧾', color:'var(--text)' },
+      { label:'Unidades vendidas',         val:String(unidades),            sub:`${ventas.length} transacciones`,                   color:'var(--blue)' },
+      { label:'Regalado en el período',    val:State.fmtUSD(valorRegalado), sub:itemsRegalo.length ? `${itemsRegalo.length} ítem(s) regalado(s)` : 'Sin regalos en el período', color:valorRegalado>0?'var(--purple)':'var(--text-secondary)' },
+      { label:'Margen por venta',          val:State.fmtUSD(margenXEquipo), sub:'Margen real ÷ cantidad de ventas',                color:margenXEquipo>=0?'var(--green)':'var(--red)' },
+      { label:'Margen real (ventas)',       val:State.fmtUSD(margenReal),    sub:quebranto>0?`Precio − costo − ${State.fmtUSD(quebranto)} sin cobrar`:'Precio venta − costo', color:margenReal>=0?'var(--green)':'var(--red)' },
+      { label:'Diferencial tarjeta',        val:State.fmtUSD(diferencial),  sub:'Ganancia por recargo posnet',                     color:'var(--purple)' },
+      { label:'Sin cobrar (cerradas)',      val:State.fmtUSD(quebranto),    sub:'Ya descontado del margen real',                   color:quebranto>0?'var(--red)':'var(--text-secondary)' },
+      { label:'Por cobrar (abiertas)',      val:State.fmtUSD(porCobrar),    sub:'Financiado — todavía no descontado',              color:porCobrar>0?'var(--amber)':'var(--text-secondary)' },
+      { label:'Dif. tipo de cambio',        val:State.fmtUSD(difCambio),    sub:`${cambiosPeriodo.length} op. ARS→USD en el período`, color:difCambio>=0?'var(--green)':'var(--red)' },
     ];
-    el.style.cssText = `padding:14px 22px;border-bottom:1px solid var(--border);display:grid;grid-template-columns:repeat(${kpis.length},1fr);gap:8px`;
-    el.innerHTML = kpis.map((k)=>{
-      // Destacar la tarjeta por nombre, no por posición: un KPI nuevo en el
-      // medio del array (como "Regalado") no debe desplazar el resaltado.
-      const dest = k.label === 'MARGEN TOTAL';
-      return `
-      <div class="card" style="padding:10px 12px;margin-bottom:0;display:flex;flex-direction:column;gap:4px;min-height:90px${dest?';border:1px solid var(--green);box-shadow:0 0 0 1px var(--green)20':''}">
-        <label style="font-size:9.5px;color:var(--text-secondary);display:block;line-height:1.2;${dest?'font-weight:700;color:var(--green)':''}">${k.label}</label>
-        <div style="font-size:${dest?'15':'14'}px;font-weight:700;color:${k.color};word-break:break-word;line-height:1.2">${k.val}</div>
-        <div style="font-size:9px;color:var(--text-secondary);line-height:1.2;margin-top:auto">${k.sub}</div>
+    el.style.cssText = '';
+    el.innerHTML = `
+      <div class="e-resumen">
+        <div class="m-vta-res">
+          <div class="m-vta-res-t">Volumen vendido</div>
+          <div class="m-vta-res-v">${State.fmtUSD(volumen)}</div>
+          <div class="m-vta-res-s">${ventas.length} venta${ventas.length === 1 ? '' : 's'} en el período</div>
+          <div class="m-vta-res-chips">
+            <span>Margen total <b style="color:${margenTotal >= 0 ? '#9BF0B8' : '#FFB4B4'}">${State.fmtUSD(margenTotal)}</b></span>
+            <span>Rentabilidad <b>${rentabilidad.toFixed(1)}%</b></span>
+            <span>Ticket <b>${State.fmtUSD(ticketProm)}</b></span>
+          </div>
+        </div>
+        <div class="m-kpis">${kpis.map((k) => `<div class="m-kpi"><label>${k.label}</label><div class="v" style="color:${k.color}">${k.val}</div><div class="s">${k.sub}</div></div>`).join('')}</div>
       </div>`;
-    }).join('');
   },
 
   renderList() {
@@ -475,8 +470,8 @@ const Ventas = {
       }).join('') + `</div>`;
       return;
     }
-    host.innerHTML = `<div style="overflow-x:auto;-webkit-overflow-scrolling:touch;padding:0 16px 12px">
-      <table><thead><tr>
+    host.innerHTML = `<div class="e-tabla-card">
+      <table class="e-table"><thead><tr>
         <th>#</th><th>Fecha</th><th>Cliente</th><th>Tipo</th><th>Ítems</th><th>Total</th><th>Pagos</th><th>Estado</th><th></th>
       </tr></thead><tbody>` +
       ventas.map(v=>{

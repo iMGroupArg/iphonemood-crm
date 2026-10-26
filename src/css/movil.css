@@ -1,7 +1,8 @@
 /* ═════════════════════════════════════════════════════════════
    iPhoneMood CRM — experiencia de APP en el celular
-   Se carga con media="(max-width: 1023px)" desde crm.html: el escritorio (≥ 1024 px) ni siquiera
-   descarga ni aplica nada de este archivo, así que no puede cambiarle una sola línea.
+   Se carga en TODOS los anchos desde crm.html. Los componentes (.m-hero, .m-chip, .m-kpi, .m-item…) valen igual en
+   celular y en escritorio; lo propio del celular (barra inferior, menú lateral oculto, botón flotante) está dentro de
+   @media (max-width: 1023px), y lo propio del escritorio dentro de @media (min-width: 1024px) al final del archivo.
 
    Componentes (los usan dashboard, stock y Mercado Libre):
      .m-tabbar      barra inferior fija         .m-sheet       hoja inferior (ver movil.js → Sheet)
@@ -19,6 +20,8 @@
   --m-safe-b: env(safe-area-inset-bottom, 0px);
 }
 
+/* ═══ Sólo celular (< 1024 px): barra inferior, menú lateral oculto, lugar para la barra ═══ */
+@media (max-width: 1023px) {
 /* ── El menú lateral deja de ser el camino en celular: lo reemplaza la barra inferior + "Más" ── */
 .mobile-menu-btn { display: none !important; }
 /* Con la barra inferior el menú lateral sobra (también entre 768 y 1023 px, donde main.css lo deja fijo). Sigue en el DOM: "Más" lo lee. */
@@ -59,6 +62,7 @@
 }
 /* con una hoja abierta la barra queda debajo y sin interacción */
 body.m-hoja-abierta .m-tabbar { pointer-events: none; }
+}
 
 /* ── Hoja inferior ──────────────────────────────────────────── */
 .m-sheet-bg {
@@ -190,13 +194,15 @@ body.m-hoja-abierta .m-tabbar { pointer-events: none; }
 .m-item-sub { font-size: 11.5px; color: var(--text-tertiary); margin-top: 2px; }
 .m-vacio { text-align: center; color: var(--text-secondary); font-size: 13.5px; padding: 22px 10px; }
 
-/* ── Botón flotante ─────────────────────────────────────────── */
+/* ── Botón flotante (sólo celular: en escritorio hay botones normales) ── */
+@media (max-width: 1023px) {
 .m-fab {
   position: fixed; right: 16px; bottom: calc(var(--m-tabbar-h) + var(--m-safe-b) + 14px); z-index: 80; width: 56px; height: 56px; border-radius: 50%;
   border: 0; background: var(--blue); color: #fff; font-size: 26px; display: flex; align-items: center; justify-content: center; cursor: pointer;
   box-shadow: 0 10px 26px rgba(0,113,227,.4); -webkit-tap-highlight-color: transparent;
 }
 .m-fab:active { transform: scale(.94); }
+}
 
 @media (prefers-reduced-motion: reduce) {
   .m-sheet, .m-sheet-bg, .m-tab-ico, .m-seg button { transition: none; }
@@ -306,3 +312,101 @@ body.m-hoja-abierta .m-tabbar { pointer-events: none; }
 .m-cat-chev { color: var(--text-tertiary); transition: transform .2s; }
 .m-cat-toggle.abierto .m-cat-chev { transform: rotate(180deg); }
 .m-cant-sel { width: 100%; min-height: 48px; font-size: 17px; font-weight: 700; padding: 0 12px; border: 1px solid var(--border-strong); border-radius: 14px; background: var(--bg); color: var(--text); }
+
+
+/* ═══ Escritorio (≥ 1024 px): mismo estilo, adaptado al ancho ═══ */
+@media (min-width: 1024px) {
+  /* Las hojas (Filtros, Período…) pasan de hoja inferior a ventana centrada */
+  .m-sheet { left: 50%; right: auto; bottom: auto; top: 50%; width: min(560px, 92vw); max-height: 84vh; border-radius: 22px;
+    transform: translate(-50%, -46%) scale(.98); opacity: 0; transition: transform .22s ease, opacity .22s ease; }
+  .m-sheet.visible { transform: translate(-50%, -50%); opacity: 1; }
+  .m-sheet-grab { display: none; }
+}
+
+/* ── Inicio en escritorio ───────────────────────────────────── */
+@media (min-width: 1024px) {
+  .m-dash.escritorio { display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); gap: 18px; padding: 22px 28px 36px; align-content: start; align-items: start; background: var(--bg-secondary); }
+  .m-dash.escritorio > * { grid-column: 1 / -1; }
+  .m-dash.escritorio .m-hero { grid-column: 1 / 9; padding: 26px 30px 28px; align-self: stretch; height: max-content; }
+  .m-dash.escritorio .m-hero-monto { font-size: clamp(32px, 3.6vw, 52px); }
+  .m-dash.escritorio .m-hero-sub span { font-size: 13px; padding: 5px 11px; }
+  .m-dash.escritorio .m-acciones { grid-column: 9 / -1; margin: 0; flex-direction: column; align-self: stretch; }
+  .m-dash.escritorio .m-accion { min-height: 64px; font-size: 16px; }
+  .m-dash.escritorio .m-accion:hover { box-shadow: 0 10px 28px rgba(16,24,40,.14); }
+  .m-dash.escritorio .m-chips { margin: 0; padding: 0; flex-wrap: wrap; overflow: visible; }
+  .m-dash.escritorio .m-seg { display: none; }
+  .m-dash.escritorio [data-panel] { gap: 18px !important; }
+  .m-dash.escritorio [data-panel="ventas"] { grid-column: 1 / 7; }
+  .m-dash.escritorio [data-panel="cajas"] { grid-column: 7 / -1; }
+  .m-dash.escritorio .m-kpis { grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; }
+  .m-dash.escritorio .m-mas-ind .m-kpis { grid-template-columns: repeat(5, minmax(0, 1fr)); padding: 0 16px 16px; }
+  .m-dash.escritorio .m-mas-ind > summary { cursor: default; pointer-events: none; }
+  .m-dash.escritorio .m-mas-ind > summary::after { display: none; }
+  .m-dash.escritorio .m-kpi { padding: 18px; }
+  .m-dash.escritorio .m-kpi .v { font-size: 24px; }
+  .m-dash.escritorio .m-kpi.tap:hover, .m-dash.escritorio .m-item:hover { box-shadow: 0 10px 28px rgba(16,24,40,.12); }
+  .m-dash.escritorio .m-card { padding: 20px; }
+  .m-dash.escritorio .m-card > div[style*="height:230px"] { height: 300px !important; }
+  .m-dash.escritorio .m-sec { font-size: 19px; }
+  .m-chip:hover { border-color: var(--blue); }
+}
+
+/* ── Páginas de escritorio con el estilo nuevo (Ventas, Stock, Mercado Libre) ── */
+@media (min-width: 1024px) {
+  .e-pagina { background: var(--bg-secondary); }
+  .e-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 22px 28px 6px; flex: none; }
+  .e-head h2 { font-size: 26px; font-weight: 800; letter-spacing: -.6px; display: flex; align-items: center; gap: 10px; }
+  .e-head h2 i { color: var(--blue); }
+  .e-head .e-acc { display: flex; gap: 8px; align-items: center; }
+  .e-pagina .m-vta-chips, .e-pagina .e-chips { padding: 12px 28px; margin: 0; flex-wrap: wrap; overflow: visible; flex: none; }
+  .e-pagina .m-vta-rango { padding: 0 28px 12px; max-width: 540px; }
+  .e-resumen { display: grid; grid-template-columns: minmax(280px, 4fr) 8fr; gap: 18px; padding: 4px 28px 18px; align-items: stretch; }
+  .e-resumen .m-vta-res { margin: 0; padding: 22px 24px; }
+  .e-resumen .m-vta-res-v { font-size: clamp(28px, 3vw, 40px); }
+  .e-resumen .m-kpis { grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
+  .e-resumen .m-kpi { padding: 14px 16px; }
+  .e-resumen .m-kpi .v { font-size: clamp(15px, 1.5vw, 19px); }
+  .e-tabla { flex: 1; min-height: 0; overflow: auto; padding: 0 28px 28px; }
+  .e-tabla-card { background: var(--bg); border-radius: 20px; box-shadow: var(--m-shadow-card); overflow: auto; }
+  .e-table { width: 100%; border-collapse: separate; border-spacing: 0; }
+  .e-table th { position: sticky; top: 0; z-index: 1; background: var(--bg); text-transform: uppercase; font-size: 11px; letter-spacing: .06em; color: var(--text-secondary); font-weight: 700; padding: 14px; border-bottom: 1px solid var(--border); text-align: left; white-space: nowrap; }
+  .e-table td { padding: 13px 14px; border-bottom: 1px solid var(--border); vertical-align: middle; }
+  .e-table tbody tr { transition: background .12s ease; }
+  .e-table tbody tr:hover td { background: var(--blue-light); }
+  .e-table tbody tr:last-child td { border-bottom: 0; }
+  .e-pagina .m-chip-sel:hover, .e-pagina .m-chip:hover { border-color: var(--blue); }
+}
+
+/* ── Stock en escritorio ────────────────────────────────────── */
+.m-chip.sm { min-height: 32px; padding: 0 12px; font-size: 12.5px; gap: 5px; border-radius: 16px; }
+@media (min-width: 1024px) {
+  .e-chips { padding: 8px 28px 4px; margin: 0; flex-wrap: wrap; overflow: visible; flex: none; }
+  .e-barra { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; padding: 6px 28px; flex: none; }
+  .e-buscar { flex: 0 1 300px; min-width: 200px; height: 40px; background: var(--bg); box-shadow: var(--m-shadow-card); }
+  .e-sels { display: flex; gap: 8px; flex-wrap: wrap; }
+  .e-sels select { height: 40px; padding: 0 12px !important; border-radius: 20px !important; border: 1px solid var(--border) !important; background: var(--bg); font-size: 13px !important; font-weight: 600; color: var(--text); max-width: 190px !important; }
+  .e-estados { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+  .e-barra > .e-estados:last-child { margin-left: auto; }
+  .e-sep { width: 1px; height: 22px; background: var(--border); }
+  #stock-seleccion-bar > div { margin: 6px 28px; border-radius: 14px; border: 0 !important; padding: 10px 16px !important; }
+  .e-seg { min-width: 250px; }
+  .e-seg button { display: inline-flex; align-items: center; justify-content: center; gap: 6px; }
+  .e-pagina .e-tabla .stock-cards-mobile { display: none !important; }
+  .e-table td b { font-weight: 700; }
+}
+
+/* ── Mercado Libre en escritorio ────────────────────────────── */
+@media (min-width: 1024px) {
+  .m-meli.escritorio { padding: 22px 28px 40px; background: var(--bg-secondary); }
+  .m-meli.escritorio .m-meli-seg { position: static; max-width: 520px; margin: 0 0 18px; box-shadow: none; }
+  .m-meli.escritorio .m-meli-pane { max-width: 1180px; }
+  .m-meli.escritorio .mo-nums { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+  .m-meli.escritorio .mo-acc { display: flex !important; flex-wrap: wrap; }
+  .m-meli.escritorio .mo-acc .btn { flex: 0 0 auto; padding: 0 16px; }
+  .m-meli.escritorio .mo-acc .btn-primary { flex: 0 0 auto; }
+  .m-meli.escritorio .mo-acc input[type="number"] { width: 150px !important; }
+  .m-meli.escritorio .mo-card { padding: 18px 20px !important; }
+  .m-meli.escritorio .mo-liberar > div:first-child > div:first-child { font-size: 34px !important; }
+  .m-meli.escritorio .mo-tabs { margin: 0 0 14px !important; padding: 2px 0; flex-wrap: wrap !important; overflow: visible; }
+  .m-meli.escritorio .mo-card:hover { box-shadow: 0 10px 28px rgba(16,24,40,.12); }
+}

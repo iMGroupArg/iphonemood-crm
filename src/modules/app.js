@@ -254,6 +254,7 @@ const App = {
     this.closeSidebar();
     document.getElementById('user-menu-dropdown').style.display = 'none';
     window.Movil?.sincronizar(pageKey);
+    document.body.dataset.pagina = pageKey;   // permite darle a cada pantalla su estilo de escritorio (movil.css)
     this.actualizarBadges();
   },
 

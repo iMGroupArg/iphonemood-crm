@@ -207,19 +207,17 @@ const Stock = {
       setTimeout(() => this.renderView(), 0);
       return c;
     }
+    c.className = 'e-pagina';
     c.innerHTML = `
-      <div style="padding:${mobile?'10px 14px':'16px 22px'};border-bottom:1px solid var(--border)">
-        <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;${mobile?'margin-bottom:8px':'margin-bottom:14px'}">
-          <h2 style="font-size:${mobile?'16px':'19px'};font-weight:700;display:flex;align-items:center;gap:6px"><i class="ti ti-box" style="color:var(--blue)"></i> Stock</h2>
-          <div style="display:flex;gap:6px">
-            ${mobile ? '' : `<button class="btn" onclick="Stock.exportarExcel()"><i class="ti ti-file-spreadsheet"></i> Exportar</button>`}
-            <button class="btn btn-primary" onclick="Stock.openDrawer('new')"><i class="ti ti-plus"></i> ${mobile?'Agregar':'Agregar producto'}</button>
-          </div>
+      <div class="e-head">
+        <h2><i class="ti ti-box"></i> Stock</h2>
+        <div class="e-acc">
+          <div class="m-seg e-seg" id="stock-view-tabs" role="tablist"></div>
+          <button class="btn" onclick="Stock.exportarExcel()"><i class="ti ti-file-spreadsheet"></i> Exportar</button>
+          <button class="btn btn-primary" onclick="Stock.openDrawer('new')"><i class="ti ti-plus"></i> Agregar producto</button>
         </div>
-        <div id="stock-kpis"></div>
       </div>
-
-      <div style="padding:${mobile?'8px 12px':'10px 22px'};border-bottom:1px solid var(--border);display:flex;gap:4px" id="stock-view-tabs"></div>
+      <div id="stock-kpis"></div>
       <div id="stock-view-host" style="flex:1;display:flex;flex-direction:column;overflow:hidden;min-height:0;position:relative"></div>
       <div id="stock-drawer-host"></div>
     `;
@@ -269,84 +267,58 @@ const Stock = {
       return;
     }
 
-    // Desktop: cards completas
-    let kpis;
+    // Escritorio: resumen azul + indicadores (mismo estilo que Inicio y Ventas)
+    const kp = (etq, val, sub, color) => `<div class="m-kpi"><label>${etq}</label><div class="v" style="color:${color}">${val}</div><div class="s">${sub}</div></div>`;
     if (this.currentGroup === 'taller') {
       const herramientas = grupo.filter(p => p.cat === 'herramienta');
       const repuestos    = grupo.filter(p => p.cat === 'repuesto');
       const valorHerr    = herramientas.reduce((a,p) => a + p.costoUSD * Math.max(this.stockReal(p), 1), 0);
       const valorRep     = repuestos.reduce((a,p) => a + p.costoUSD * Math.max(this.stockReal(p), 1), 0);
       const unidadesRep  = repuestos.reduce((a,p) => a + this.stockReal(p), 0);
-      kpis = [
-        ['Herramientas', herramientas.length + ' ítems', '🔧', 'var(--amber)', 'rgba(255,214,10,.12)'],
-        ['Valor herramientas', State.fmtUSD(valorHerr), '💵', 'var(--amber)', 'rgba(255,214,10,.12)'],
-        ['Repuestos', repuestos.length + ' tipos · ' + unidadesRep + ' uds', '🔩', 'var(--blue)', 'var(--blue-light)'],
-        ['Valor repuestos', State.fmtUSD(valorRep), '💰', 'var(--blue)', 'var(--blue-light)'],
-        ['Total activos taller', State.fmtUSD(valorHerr + valorRep), '🏪', 'var(--green)', 'var(--green-light)'],
-      ];
-    } else {
-      const total = grupo.length;
-      const disponibles = grupo.filter(p => (p.estadoInventario||'disponible') === 'disponible' && this.stockReal(p) > 0).length;
-      // Mismo criterio que la pestaña "Vendido" de abajo: antes el KPI sumaba
-      // además todo lo que tuviera 0 unidades, y los dos números no coincidían.
-      const vendidos = grupo.filter(p => (p.estadoInventario||'disponible') === 'vendido').length;
-      const enPie = grupo.filter(p => (p.estadoInventario||'disponible') !== 'vendido');
-      const valorDisponible = enPie.reduce((a,p)=>a + p.costoUSD * this.stockReal(p), 0);
-      // Cuánto entraría si se vendiera lo que HAY. Los vendidos quedan afuera:
-      // antes se les contaba 1 unidad a cada uno, así que este número crecía solo
-      // mes a mes con el histórico de ventas y no significaba nada.
-      const valorVendidoPotencial = enPie.reduce((a,p)=>{
-        const precioUSD = p.cotiz ? p.precioARS / p.cotiz : 0;
-        return a + precioUSD * this.stockReal(p);
-      }, 0);
       document.getElementById('stock-kpis').innerHTML = `
-        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px" class="stock-kpi-grid">
-          <!-- Card unificada: Total / Disponibles / Vendidos -->
-          <div class="card" style="padding:12px 16px;margin-bottom:0;display:flex;align-items:stretch;gap:0;min-height:76px">
-            ${[
-              ['Total', total, 'var(--blue)'],
-              ['Disponibles', disponibles, 'var(--green)'],
-              ['Vendidos', vendidos, 'var(--text-secondary)'],
-            ].map(([label, val, color], i) => `
-              <div style="flex:1;${i>0?'border-left:1px solid var(--border);padding-left:14px;':''}padding-right:14px">
-                <div style="font-size:10px;color:var(--text-secondary);margin-bottom:3px;text-transform:uppercase;letter-spacing:.04em">${label}</div>
-                <div style="font-size:22px;font-weight:700;color:${color}">${val}</div>
-              </div>
-            `).join('')}
+        <div class="e-resumen">
+          <div class="m-vta-res"><div class="m-vta-res-t">Total activos taller</div><div class="m-vta-res-v">${State.fmtUSD(valorHerr + valorRep)}</div>
+            <div class="m-vta-res-s">Herramientas + repuestos, a costo</div></div>
+          <div class="m-kpis">
+            ${kp('Herramientas', herramientas.length + ' ítems', 'En el taller', 'var(--amber)')}
+            ${kp('Valor herramientas', State.fmtUSD(valorHerr), 'A costo', 'var(--amber)')}
+            ${kp('Repuestos', repuestos.length + ' tipos', unidadesRep + ' unidades', 'var(--blue)')}
+            ${kp('Valor repuestos', State.fmtUSD(valorRep), 'A costo', 'var(--blue)')}
           </div>
-          <!-- Valor Disponible -->
-          <div class="card" style="padding:12px 14px;margin-bottom:0;display:flex;justify-content:space-between;align-items:flex-start;gap:8px;min-height:76px">
-            <div><label style="font-size:11px;color:var(--text-secondary);display:block;margin-bottom:4px">Valor Disponible</label><div style="font-size:19px;font-weight:700;color:var(--blue)">${State.fmtUSD(valorDisponible)}</div></div>
-            <div style="width:34px;height:34px;border-radius:8px;background:var(--blue-light);display:flex;align-items:center;justify-content:center;flex-shrink:0;font-size:18px">💰</div>
-          </div>
-          <!-- Valor de Venta -->
-          <div class="card" style="padding:12px 14px;margin-bottom:0;display:flex;justify-content:space-between;align-items:flex-start;gap:8px;min-height:76px">
-            <div><label style="font-size:11px;color:var(--text-secondary);display:block;margin-bottom:4px">Valor de Venta</label><div style="font-size:19px;font-weight:700;color:var(--green)">${State.fmtUSD(valorVendidoPotencial)}</div></div>
-            <div style="width:34px;height:34px;border-radius:8px;background:var(--green-light);display:flex;align-items:center;justify-content:center;flex-shrink:0;font-size:18px">💵</div>
-          </div>
-        </div>
-      `;
+        </div>`;
       return;
     }
-
-    // Taller: layout original de 5 cards
+    const total = grupo.length;
+    const disponibles = grupo.filter(p => (p.estadoInventario||'disponible') === 'disponible' && this.stockReal(p) > 0).length;
+    // Mismo criterio que la pestaña "Vendido" de abajo: antes el KPI sumaba además todo lo que tuviera 0 unidades.
+    const vendidos = grupo.filter(p => (p.estadoInventario||'disponible') === 'vendido').length;
+    const enPie = grupo.filter(p => (p.estadoInventario||'disponible') !== 'vendido');
+    const valorDisponible = enPie.reduce((a,p)=>a + p.costoUSD * this.stockReal(p), 0);
+    // Cuánto entraría si se vendiera lo que HAY (los vendidos quedan afuera: antes se les contaba 1 unidad a cada uno).
+    const valorVendidoPotencial = enPie.reduce((a,p)=>{
+      const precioUSD = p.cotiz ? p.precioARS / p.cotiz : 0;
+      return a + precioUSD * this.stockReal(p);
+    }, 0);
+    const margenPot = valorDisponible > 0 ? ((valorVendidoPotencial - valorDisponible) / valorDisponible * 100) : null;
     document.getElementById('stock-kpis').innerHTML = `
-      <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:10px" class="stock-kpi-grid">
-        ${kpis.map(([label,val,emoji,color,bg]) => `
-          <div class="card" style="padding:12px 14px;margin-bottom:0;display:flex;justify-content:space-between;align-items:flex-start;gap:8px;min-height:90px">
-            <div style="min-width:0;flex:1"><label style="font-size:11px;color:var(--text-secondary);display:block;margin-bottom:4px">${label}</label><div style="font-size:19px;font-weight:700;color:${color};word-break:break-word">${val}</div></div>
-            <div style="width:34px;height:34px;border-radius:8px;background:${bg};display:flex;align-items:center;justify-content:center;flex-shrink:0;font-size:18px">${emoji}</div>
-          </div>
-        `).join('')}
-      </div>
-    `;
+      <div class="e-resumen">
+        <div class="m-vta-res"><div class="m-vta-res-t">Valor disponible (a costo)</div><div class="m-vta-res-v">${State.fmtUSD(valorDisponible)}</div>
+          <div class="m-vta-res-s">${this.GRUPOS[this.currentGroup]?.label || ''}</div>
+          <div class="m-vta-res-chips"><span>Total <b>${total}</b></span><span>Disponibles <b>${disponibles}</b></span><span>Vendidos <b>${vendidos}</b></span></div></div>
+        <div class="m-kpis">
+          ${kp('Valor de venta', State.fmtUSD(valorVendidoPotencial), 'Si se vendiera lo que hay', 'var(--green)')}
+          ${kp('Margen potencial', margenPot === null ? '—' : (margenPot >= 0 ? '+' : '') + margenPot.toFixed(0) + '%', 'Venta ÷ costo del stock disponible', margenPot !== null && margenPot < 0 ? 'var(--red)' : 'var(--blue)')}
+          ${kp('Productos', total, 'En este grupo', 'var(--text)')}
+          ${kp('Con unidades', disponibles, 'Disponibles para vender', 'var(--green)')}
+        </div>
+      </div>`;
   },
 
   renderView() {
     this.renderKpis();
     document.getElementById('stock-view-tabs').innerHTML = `
-      <button class="btn btn-sm ${this.currentView==='productos'?'btn-primary':''}" onclick="Stock.setView('productos')"><i class="ti ti-box"></i> Productos</button>
-      <button class="btn btn-sm ${this.currentView==='historial'?'btn-primary':''}" onclick="Stock.setView('historial')"><i class="ti ti-history"></i> Historial de movimientos</button>
+      <button type="button" role="tab" aria-selected="${this.currentView==='productos'}" class="${this.currentView==='productos'?'activo':''}" onclick="Stock.setView('productos')"><i class="ti ti-box"></i> Productos</button>
+      <button type="button" role="tab" aria-selected="${this.currentView==='historial'}" class="${this.currentView==='historial'?'activo':''}" onclick="Stock.setView('historial')"><i class="ti ti-history"></i> Historial</button>
     `;
     const host = document.getElementById('stock-view-host');
     const mobile = this.isMobile();
@@ -388,32 +360,29 @@ const Stock = {
         this._renderProductosMovil(host, extraSelects);
         return;
       }
-      // Desktop: 2 filas compactas aprovechando el espacio horizontal
+      // Escritorio: chips de grupo, barra de búsqueda + selectores + estado, condición + subcategorías, y la tabla en una tarjeta
       host.innerHTML = `
-        <!-- Fila 1: Grupos (izq) + Estado (der) -->
-        <div style="padding:8px 22px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:0;flex-shrink:0;min-height:0">
-          <div style="display:flex;gap:4px;flex-shrink:0;overflow-x:auto;-webkit-overflow-scrolling:touch" id="stock-grupo-tabs"></div>
-          <div style="width:1px;background:var(--border);height:22px;margin:0 14px;flex-shrink:0"></div>
-          <div style="display:flex;gap:2px;overflow-x:auto;-webkit-overflow-scrolling:touch;flex:1;align-items:center" id="stock-estado-tabs"></div>
+        <div class="m-chips e-chips" id="stock-grupo-tabs"></div>
+        <div class="e-barra">
+          <label class="m-stk-buscar e-buscar"><i class="ti ti-search"></i>
+            <input type="search" id="stock-search" placeholder="Buscar producto" autocomplete="off" oninput="Stock.renderTable()"></label>
+          <div class="e-sels">${extraSelects}</div>
+          <div class="e-estados" id="stock-estado-tabs"></div>
         </div>
-        <!-- Fila 2: Condición + Subcats (izq) + Búsqueda/dropdowns (der) -->
-        <div style="padding:8px 22px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:8px;flex-shrink:0;flex-wrap:nowrap">
-          <div style="display:flex;gap:0;align-items:center;flex-shrink:0" id="stock-tabs-wrap">
-            <div style="display:flex;gap:4px;align-items:center" id="stock-condicion-tabs"></div>
-            <div style="width:1px;background:var(--border);height:20px;margin:0 8px;flex-shrink:0" id="stock-tabs-divider"></div>
-            <div style="display:flex;gap:4px" id="stock-tabs"></div>
-          </div>
-          <div style="flex:1"></div>
-          <input type="text" id="stock-search" placeholder="Buscar..." oninput="Stock.renderTable()" style="font-size:12px;padding:5px 10px;border:1px solid var(--border-strong);border-radius:8px;width:180px;flex-shrink:0">
-          ${extraSelects}
+        <div class="e-barra" id="stock-tabs-wrap">
+          <div class="e-estados" id="stock-condicion-tabs"></div>
+          <span class="e-sep" id="stock-tabs-divider"></span>
+          <div class="e-estados" id="stock-tabs"></div>
         </div>
         <div id="stock-seleccion-bar" style="display:none"></div>
-        <div class="body-pad" style="padding:0;overflow-y:auto;-webkit-overflow-scrolling:touch;flex:1;min-height:0">
-          <table class="stock-table-desktop"><thead><tr>
-            <th style="width:34px"><input type="checkbox" id="stock-check-todos" onchange="Stock.toggleTodos(this.checked)" title="Seleccionar todo lo filtrado"></th>
-            <th>Producto</th><th>Color</th><th>Batería</th><th>Costo USD</th><th>Precio venta USD</th><th>Margen</th><th>Stock</th><th>IMEI</th><th>Estado</th><th></th>
-          </tr></thead><tbody id="stock-tbody"></tbody></table>
-          <div class="stock-cards-mobile" id="stock-cards"></div>
+        <div class="e-tabla">
+          <div class="e-tabla-card">
+            <table class="stock-table-desktop e-table"><thead><tr>
+              <th style="width:34px"><input type="checkbox" id="stock-check-todos" onchange="Stock.toggleTodos(this.checked)" title="Seleccionar todo lo filtrado"></th>
+              <th>Producto</th><th>Color</th><th>Batería</th><th>Costo USD</th><th>Precio venta USD</th><th>Margen</th><th>Stock</th><th>IMEI</th><th>Estado</th><th></th>
+            </tr></thead><tbody id="stock-tbody"></tbody></table>
+            <div class="stock-cards-mobile" id="stock-cards"></div>
+          </div>
         </div>
       `;
       this.renderGrupoTabs();
@@ -598,7 +567,7 @@ const Stock = {
 
   renderGrupoTabs() {
     const mobile = this.isMobile();
-    if (mobile) {
+    if (window.Movil) {
       document.getElementById('stock-grupo-tabs').innerHTML = Object.entries(this.GRUPOS).map(([k, g]) => `
         <button type="button" class="m-chip${this.currentGroup === k ? ' activo' : ''}" onclick="Stock.setGrupo('${k}')"><i class="ti ${g.icon}"></i> ${g.label} <span class="n">${this.productosDelGrupo(k).length}</span></button>`).join('');
       return;
@@ -650,7 +619,7 @@ const Stock = {
       const count = e === 'todos' ? grupo.length : grupo.filter(p => (p.estadoInventario||'disponible') === e).length;
       const label = e === 'todos' ? 'Todos' : this.ESTADO_INV_LABEL[e];
       const active = this.currentEstado === e;
-      return `<span onclick="Stock.setEstadoFiltro('${e}')" style="cursor:pointer;font-size:12px;padding:5px 11px;border-radius:20px;border-bottom:2px solid ${active?'var(--blue)':'transparent'};color:${active?'var(--blue)':'var(--text-secondary)'};font-weight:${active?'600':'400'};display:inline-flex;align-items:center;gap:5px">${label} <span style="background:var(--bg-secondary);padding:1px 6px;border-radius:10px;font-size:10px">${count}</span></span>`;
+      return `<button type="button" class="m-chip sm azul${active ? ' activo' : ''}" onclick="Stock.setEstadoFiltro('${e}')">${label} <span class="n">${count}</span></button>`;
     }).join('');
   },
   setEstadoFiltro(e) { this.currentEstado = e; this.renderEstadoTabs(); this.renderTable(); },
@@ -669,7 +638,7 @@ const Stock = {
     if (counts.sindato > 0) labels.sindato = '❓ Sin estado cargado';
     document.getElementById('stock-condicion-tabs').innerHTML = Object.entries(labels).map(([key, label]) => {
       const active = this.currentCondicion === key;
-      return `<button onclick="Stock.setCondicionFiltro('${key}')" style="cursor:pointer;font-size:11px;padding:4px 9px;border-radius:14px;border:1px solid ${active?'var(--blue)':'var(--border-strong)'};background:${active?'var(--blue-light)':'transparent'};color:${active?'var(--blue)':'var(--text-secondary)'};font-weight:${active?'600':'400'};display:inline-flex;align-items:center;gap:4px;white-space:nowrap">${label} <span style="font-size:10px;opacity:.75">${counts[key]}</span></button>`;
+      return `<button type="button" class="m-chip sm${active ? ' activo' : ''}" onclick="Stock.setCondicionFiltro('${key}')">${label} <span class="n">${counts[key]}</span></button>`;
     }).join('');
   },
   setCondicionFiltro(c) { this.currentCondicion = c; this.renderCondicionTabs(); this.renderTable(); },
@@ -693,7 +662,7 @@ const Stock = {
     document.getElementById('stock-tabs').innerHTML = showSubcats ? cats.map(c => {
       const count = c === 'all' ? this.productosDelGrupo(this.currentGroup).length : State.stock.filter(s => s.cat === c).length;
       const label = c === 'all' ? 'Todos' : (this.CAT_LABELS[c] || c);
-      return `<button class="btn btn-sm ${this.currentTab===c?'btn-primary':''}" onclick="Stock.setTab('${c}')">${label} (${count})</button>`;
+      return `<button type="button" class="m-chip sm azul${this.currentTab===c ? ' activo' : ''}" onclick="Stock.setTab('${c}')">${label} <span class="n">${count}</span></button>`;
     }).join('') : '';
   },
   setTab(c) { this.currentTab = c; this.renderTabs(); this._actualizarColoresDisponibles(); this.renderTable(); },

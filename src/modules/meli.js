@@ -55,9 +55,9 @@ const Meli = {
   render() {
     const c = document.createElement('div');
     c.style.cssText = 'flex:1;overflow-y:auto;padding:16px';
-    if (window.Movil && Movil.activo()) {
-      // Celular: una sola cosa a la vez. Son los mismos bloques de siempre, sólo se muestran de a uno.
-      c.className = 'm-meli';
+    if (window.Movil) {
+      // Una sola cosa a la vez (celular y escritorio). Los tres bloques son los mismos, sólo se muestran de a uno.
+      c.className = 'm-meli' + (Movil.activo() ? '' : ' escritorio');
       c.style.cssText = '';
       const conPub = !!window.MeliVincular;
       c.innerHTML = `
@@ -131,8 +131,8 @@ const Meli = {
   _vista() {
     const e = (s) => State.esc(s == null ? '' : String(s));
 
-    // En el celular las herramientas técnicas quedan plegadas: Órdenes es lo que se usa todos los días.
-    const mov = window.Movil && Movil.activo();
+    // Las herramientas técnicas quedan plegadas (celular y escritorio): Órdenes es lo que se usa todos los días.
+    const mov = !!window.Movil;
     const herr = (titulo, html) => (mov ? `<details class="m-mas-ind m-meli-herr"><summary>${titulo}</summary><div class="m-meli-herr-cuerpo">${html}</div></details>` : html);
     const aviso = this._msg
       ? `<div class="card" style="margin-bottom:12px;border-left:3px solid ${this._msg.ok ? 'var(--green)' : 'var(--red)'}">

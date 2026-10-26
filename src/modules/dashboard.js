@@ -140,7 +140,7 @@ const Dashboard = {
 
     // En el celular se dibuja otra pantalla (tarjeta de saldo, pestañas, hojas), pero con los MISMOS números:
     // se calcularon arriba, una sola vez, y acá sólo se pasan.
-    if (window.Movil && Movil.activo()) {
+    if (window.Movil) {   // mismo estilo en celular y en escritorio (cambia la distribución, ver movil.css)
       return this._renderMovil(container, {
         ventas, resultComercial, resultFinanciero, totalResultado, adelantosPend, pasivoAdelantos,
         clientesConDeudaCC, totalPorCobrarCC, totalVentasUSD, ticketPromedio, repActivas, repListas, stockCritico,
@@ -289,7 +289,8 @@ const Dashboard = {
   },
 
   _renderMovil(container, d) {
-    container.className = 'm-dash';
+    const esc = !(window.Movil && Movil.activo());   // escritorio: todo a la vista, sin pestañas
+    container.className = 'm-dash' + (esc ? ' escritorio' : '');
     const e = (x) => State.esc(String(x ?? ''));
     const fU = (n) => State.fmtUSD(n);
     const sg = (n) => (n >= 0 ? '+' : '');
@@ -364,7 +365,7 @@ const Dashboard = {
         <span class="badge b-blue">${e(Reparaciones.ESTADO_LABEL[r.estado] || r.estado)}</span></button>`).join('') || '<div class="m-vacio">No hay reparaciones activas</div>';
 
     const t = this._tabM;
-    const panel = (k, html) => `<div data-panel="${k}" style="display:${t === k ? 'flex' : 'none'};flex-direction:column;gap:14px">${html}</div>`;
+    const panel = (k, html) => `<div data-panel="${k}" style="display:${esc || t === k ? 'flex' : 'none'};flex-direction:column;gap:14px">${html}</div>`;
     container.innerHTML = `
       <section class="m-hero" aria-label="Saldo en cajas">
         <div class="m-hero-sup"><span>Hola${nombre ? ', ' + nombre : ''} 👋</span>
@@ -387,7 +388,7 @@ const Dashboard = {
       </div>
       ${panel('resumen', `
         <div class="m-kpis">${principales}</div>
-        <details class="m-mas-ind"><summary>Ver más indicadores</summary><div class="m-kpis">${masIndicadores}</div></details>
+        <details class="m-mas-ind"${esc ? ' open' : ''}><summary>Ver más indicadores</summary><div class="m-kpis">${masIndicadores}</div></details>
         <div class="m-card"><h3><i class="ti ti-chart-line"></i> Evolución de ventas</h3><div style="position:relative;height:230px"><canvas id="chart-evolucion"></canvas></div></div>`)}
       ${panel('ventas', `
         <div class="m-sec">Últimas ventas <small role="button" tabindex="0" onclick="App.goTo('ventas')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();this.click()}">Ver todas</small></div>

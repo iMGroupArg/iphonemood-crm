@@ -39,7 +39,7 @@ const estado = (db, orden, amb = 'homologacion') => db.query(`SELECT public.arca
 const tomar = (db, orden, amb = 'homologacion') => db.query(`SELECT public.arca_comprobante_conciliar_tomar($1,$2,$3) r`, [SECRETO, orden, amb]).then((x) => x.rows[0].r);
 const fila = async (db, orden, amb = 'homologacion') => (await db.query(`SELECT * FROM public.meli_comprobantes WHERE orden_id=$1 AND ambiente=$2`, [orden, amb])).rows[0];
 // Hace como que pasaron 3 minutos: vence el candado del intento.
-const vencer = (db) => db.query(`UPDATE public.meli_comprobantes SET trabajo_hasta = now() - interval '1 second' WHERE trabajo_hasta IS NOT NULL`);
+const vencer = (db) => db.query(`UPDATE public.meli_comprobantes SET trabajo_hasta = now() - interval '11 minutes' WHERE trabajo_hasta IS NOT NULL`);
 
 console.log('\n══ Comprobantes de ARCA (Postgres en WebAssembly) ══\n');
 
@@ -155,6 +155,28 @@ console.log('\n══ Comprobantes de ARCA (Postgres en WebAssembly) ══\n');
   check('El proceso 1 tampoco puede rechazar (no libera un número que ARCA pudo haber dado)', (await falla(() => rechazar(db, r.intento, 1)))?.includes('INTENTO_NO_VIGENTE'));
   check('El segundo, con su intento, sí autoriza', (await autorizar(db, t2.intento, 1, '74123456789099')).estado === 'autorizado');
   check('Una orden sin reserva no se puede tomar', (await tomar(db, await ordenId(ctx))).tomado === false);
+}
+
+// ── 4d · Ventana de seguridad, carga manual durante la emisión y conflicto con el control ──
+{
+  const ctx = await nueva(); const { db } = ctx;
+  const a = await ordenId(ctx);
+  await reservar(db, a, { ultimo: 0 });
+  await db.query(`UPDATE public.meli_comprobantes SET trabajo_hasta = now() - interval '3 minutes'`);
+  check('Aunque el candado de 2 min ya venció, a los 3 min NO se acepta conciliar todavía (ventana de seguridad de 10 min)', (await tomar(db, a)).en_curso === true);
+  await vencer(db);
+  check('Pasados los 10 minutos sí', (await tomar(db, a)).tomado === true);
+}
+{
+  const ctx = await nueva(); const { db } = ctx;
+  const a = await ordenId(ctx), b = await ordenId(ctx);
+  const r = await reservar(db, a, { amb: 'produccion', ultimo: 99 });
+  const manual = await falla(() => db.query(`UPDATE public.meli_facturas SET estado='emitida', tipo='C', pto_venta=3, numero=40, emitida_el='2026-10-01', marcada_uid='uid-franco', marcada_por='Franco' WHERE orden_id=$1`, [a]));
+  check('Mientras la factura está reservada (emitiéndose) nadie puede cargar una a mano en el control (FACTURA_EN_EMISION)', manual && manual.includes('FACTURA_EN_EMISION'), manual);
+  await db.query(`INSERT INTO public.meli_facturas (orden_id, estado, tipo, pto_venta, numero, emitida_el, marcada_por, marcada_uid) VALUES ($1,'emitida','C',1,100,'2026-10-01','Franco','uid-franco')`, [b]);
+  const au = await autorizar(db, r.intento, 100);
+  check('Si el control tiene otra factura con ese número, el CAE ya otorgado SE CONSERVA y se avisa el conflicto', au.estado === 'autorizado' && au.control_conflicto === 'CONTROL_DE_FACTURAS_NUMERO_REPETIDO', JSON.stringify(au));
+  check('…y el comprobante quedó autorizado con su CAE', (await fila(db, a, 'produccion')).estado === 'autorizado');
 }
 
 // ── 4c · Pruebas (homologación) y producción no se mezclan ──

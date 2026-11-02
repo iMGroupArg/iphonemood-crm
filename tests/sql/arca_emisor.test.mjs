@@ -83,7 +83,7 @@ const ordenId = async (ctx, bruto = 100000, estado = 'paid') => {
 };
 const emitir = (ctx, orden, a, m = meli(), env = ENV) => emitirFacturaOrden({ orden, env, rpc: ctx.rpc, meliGet: m, fetchImpl: a.f, esperaTicketMs: 50 });
 const comp = async (db, orden, amb = 'homologacion') => (await db.query(`SELECT * FROM public.meli_comprobantes WHERE orden_id=$1 AND ambiente=$2`, [orden, amb])).rows[0];
-const vencer = (db) => db.query(`UPDATE public.meli_comprobantes SET trabajo_hasta = now() - interval '1 second' WHERE trabajo_hasta IS NOT NULL`);
+const vencer = (db) => db.query(`UPDATE public.meli_comprobantes SET trabajo_hasta = now() - interval '11 minutes' WHERE trabajo_hasta IS NOT NULL`);
 
 console.log('\n══ Emisor de facturas (base real + ARCA simulado) ══\n');
 
@@ -247,6 +247,24 @@ console.log('\n══ Emisor de facturas (base real + ARCA simulado) ══\n');
   const ok = await emitir(ctx, o, a, meli({ status: 200, ok: true, json: { billing_info: { doc_type: 'CUIT', doc_number: '20111111112', fiscal_condition: '01 - Responsable Inscripto' } } }));
   check('CUIT con condición informada (1) emite con esa condición', ok.estado === 'emitida' && (await comp(ctx.db, o)).cond_iva === 1, JSON.stringify(ok));
 }
+{ // Codex 2ª pasada: antes de liberar un número tras un rechazo, se consulta
+  const ctx = await entorno(); const a = arca({ rechazar: true }); const o = await ordenId(ctx);
+  const f0 = a.f;
+  a.f = async (url, op) => {
+    if (/FECAESolicitar/.test(op.headers.SOAPAction || '')) a.st.comprobantes.set(1, { cae: '74000000000001', importe: '100000.00', docTipo: '96', docNro: '30111222', fecha: '20261102' });
+    return f0(url, op);
+  };
+  const r = await emitir(ctx, o, a);
+  check('Rechazo «número ya usado» con la MISMA factura en ARCA: se adopta su CAE en vez de liberar el número', r.estado === 'emitida' && r.reconciliada === true && (await comp(ctx.db, o)).cae === '74000000000001', JSON.stringify(r));
+}
+{ // billing estricto
+  const ctx = await entorno(); const a = arca(); const o = await ordenId(ctx);
+  const e1 = await falla(() => emitir(ctx, o, a, meli({ status: 400, ok: false, json: null }), { ...ENV, ARCA_UMBRAL_CONSUMIDOR_FINAL: '500000' }));
+  check('HTTP 400 de Mercado Libre NO es ausencia de documento (MELI_BILLING), aunque haya umbral', e1 && e1.includes('MELI_BILLING') && a.st.emisiones === 0, e1);
+  const e2 = await falla(() => emitir(ctx, o, a, meli({ status: 200, ok: true, json: { billing_info: { identification: { kind: 'CUIT', value: '20111111112' } } } }), { ...ENV, ARCA_UMBRAL_CONSUMIDOR_FINAL: '500000' }));
+  check('Identificación con claves desconocidas: MELI_BILLING_FORMATO, no se emite como consumidor final', e2 && e2.includes('MELI_BILLING_FORMATO') && a.st.emisiones === 0, e2);
+}
+
 { // (6) el diagnóstico comparte el ticket con la emisión
   const ctx = await entorno(); const a = arca(); const o = await ordenId(ctx);
   const d = await diagnosticoArca({ env: ENV, rpc: ctx.rpc, fetchImpl: a.f });

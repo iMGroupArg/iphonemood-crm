@@ -105,6 +105,21 @@ DROP TRIGGER IF EXISTS meli_comprobantes_truncate_tg ON public.meli_comprobantes
 CREATE TRIGGER meli_comprobantes_truncate_tg BEFORE TRUNCATE ON public.meli_comprobantes
   FOR EACH STATEMENT EXECUTE FUNCTION public.arca__comprobante_proteger();
 
+-- Mientras una factura de PRODUCCIÓN de la orden está reservada (se está emitiendo), el control de facturas no se puede cargar ni cambiar a mano.
+CREATE OR REPLACE FUNCTION public.arca__facturas_en_emision()
+RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER SET search_path = '' AS $$
+BEGIN
+  IF NEW.marcada_uid IS DISTINCT FROM 'arca' AND EXISTS (
+       SELECT 1 FROM public.meli_comprobantes c WHERE c.orden_id = NEW.orden_id AND c.ambiente = 'produccion' AND c.estado = 'reservado') THEN
+    RAISE EXCEPTION 'FACTURA_EN_EMISION';
+  END IF;
+  RETURN NEW;
+END $$;
+DROP TRIGGER IF EXISTS arca_facturas_en_emision_tg ON public.meli_facturas;
+CREATE TRIGGER arca_facturas_en_emision_tg BEFORE INSERT OR UPDATE ON public.meli_facturas
+  FOR EACH ROW EXECUTE FUNCTION public.arca__facturas_en_emision();
+REVOKE ALL ON FUNCTION public.arca__facturas_en_emision() FROM PUBLIC, anon, authenticated;
+
 -- ── 3 · Permisos de las tablas ──────────────────────────────────────────────
 ALTER TABLE public.arca_tickets      ENABLE ROW LEVEL SECURITY;   -- sin políticas: cerrada
 ALTER TABLE public.meli_comprobantes ENABLE ROW LEVEL SECURITY;
@@ -115,11 +130,13 @@ REVOKE ALL ON TABLE public.arca_tickets, public.meli_comprobantes FROM PUBLIC, a
 GRANT SELECT (id, orden_id, ambiente, cbte_tipo, pto_venta, numero, estado, importe_centavos, cae, cae_vto, fecha_cbte, intentos, creado_en, actualizado_en)
   ON TABLE public.meli_comprobantes TO authenticated;
 REVOKE ALL ON FUNCTION public.arca__comprobante_proteger() FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON SEQUENCE public.meli_comprobantes_id_seq FROM PUBLIC, anon, authenticated;
 DO $$
 BEGIN
   IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'service_role') THEN
     REVOKE ALL ON TABLE public.arca_tickets, public.meli_comprobantes FROM service_role;
     REVOKE ALL ON FUNCTION public.arca__comprobante_proteger() FROM service_role;
+    REVOKE ALL ON SEQUENCE public.meli_comprobantes_id_seq FROM service_role;
   END IF;
 END $$;
 
@@ -203,7 +220,9 @@ BEGIN
   IF NOT public.meli_secreto_ok(p_secreto) THEN RAISE EXCEPTION 'no autorizado'; END IF;
   SELECT * INTO c FROM public.meli_comprobantes WHERE orden_id = p_orden AND ambiente = p_ambiente FOR UPDATE;
   IF NOT FOUND OR c.estado <> 'reservado' THEN RETURN jsonb_build_object('tomado', FALSE, 'estado', COALESCE(c.estado, 'ninguno')); END IF;
-  IF c.trabajo_hasta IS NOT NULL AND c.trabajo_hasta > now() THEN RETURN jsonb_build_object('tomado', FALSE, 'estado', 'reservado', 'en_curso', TRUE); END IF;
+  -- Ventana de seguridad: el candado dura 2 minutos y ARCA pudo seguir procesando un pedido cuyo cliente se cortó; recién 10 minutos después
+  -- de empezar el intento se acepta una consulta negativa como prueba de que ARCA no lo tiene.
+  IF c.trabajo_hasta IS NOT NULL AND c.trabajo_hasta > now() - interval '8 minutes' THEN RETURN jsonb_build_object('tomado', FALSE, 'estado', 'reservado', 'en_curso', TRUE); END IF;
   UPDATE public.meli_comprobantes SET intento_id = v, trabajo_hasta = now() + interval '2 minutes' WHERE id = c.id;
   RETURN jsonb_build_object('tomado', TRUE, 'intento', v, 'numero', c.numero, 'pto_venta', c.pto_venta, 'importe_centavos', c.importe_centavos,
     'doc_tipo', c.doc_tipo, 'doc_nro', c.doc_nro, 'cond_iva', c.cond_iva);
@@ -228,7 +247,8 @@ BEGIN
      OR (p_doc_tipo = 99 AND p_doc_nro <> '0') THEN RAISE EXCEPTION 'RECEPTOR_INVALIDO'; END IF;
   IF p_cond_iva IS NULL OR p_cond_iva NOT BETWEEN 1 AND 99 THEN RAISE EXCEPTION 'CONDICION_IVA_INVALIDA'; END IF;
 
-  -- Candado por punto de venta: todo lo que sigue es de a una orden por vez.
+  -- Orden común de bloqueos en TODOS los escritores: 1) la orden, 2) el punto de venta, 3) las filas (comprobante, control de facturas).
+  PERFORM pg_advisory_xact_lock(hashtextextended('orden|' || p_orden, 0));
   PERFORM pg_advisory_xact_lock(hashtextextended(p_ambiente || '|' || p_pto_venta::text || '|11', 0));
 
   SELECT * INTO o FROM public.meli_ordenes WHERE meli_order_id = p_orden FOR SHARE;
@@ -286,7 +306,8 @@ BEGIN
   IF p_cae IS NULL OR p_cae !~ '^[0-9]{10,20}$' OR p_cae_vto IS NULL OR p_fecha_cbte IS NULL THEN RAISE EXCEPTION 'CAE_INVALIDO'; END IF;
   SELECT * INTO c FROM public.meli_comprobantes WHERE intento_id = p_intento;
   IF NOT FOUND THEN RAISE EXCEPTION 'INTENTO_NO_VIGENTE'; END IF;
-  -- Mismo orden de bloqueos que arca_comprobante_reservar (primero el candado del punto de venta, después la fila): sin esperas cruzadas.
+  -- Mismo orden de bloqueos que arca_comprobante_reservar (orden, punto de venta, filas): sin esperas cruzadas.
+  PERFORM pg_advisory_xact_lock(hashtextextended('orden|' || c.orden_id, 0));
   PERFORM pg_advisory_xact_lock(hashtextextended(c.ambiente || '|' || c.pto_venta::text || '|11', 0));
   SELECT * INTO c FROM public.meli_comprobantes WHERE intento_id = p_intento FOR UPDATE;
   IF NOT FOUND THEN RAISE EXCEPTION 'INTENTO_NO_VIGENTE'; END IF;
@@ -298,21 +319,26 @@ BEGIN
   IF c.numero IS DISTINCT FROM p_numero THEN RAISE EXCEPTION 'NUMERO_DISTINTO_AL_RESERVADO'; END IF;
   UPDATE public.meli_comprobantes SET estado = 'autorizado', cae = p_cae, cae_vto = p_cae_vto, fecha_cbte = p_fecha_cbte, ultimo_error = NULL, trabajo_hasta = NULL WHERE id = c.id;
 
-  -- Solo las facturas de PRODUCCIÓN cuentan como emitidas en el control; las de homologación no tienen valor fiscal.
+  -- Solo las facturas de PRODUCCIÓN cuentan como emitidas en el control. Si el control no se puede actualizar (otra factura cargada a mano con
+  -- ese número, etc.) el CAE YA OTORGADO se conserva igual y se avisa con control_conflicto: nunca se pierde una factura de ARCA por eso.
   IF c.ambiente = 'produccion' THEN
-    SELECT * INTO f FROM public.meli_facturas WHERE orden_id = c.orden_id FOR UPDATE;
-    IF NOT FOUND THEN
-      INSERT INTO public.meli_facturas (orden_id, estado, tipo, pto_venta, numero, emitida_el, marcada_por, marcada_uid)
-      VALUES (c.orden_id, 'emitida', 'C', c.pto_venta, c.numero, p_fecha_cbte, 'ARCA automático', 'arca');
-    ELSIF f.estado = 'emitida' THEN
-      IF f.tipo IS DISTINCT FROM 'C' OR f.pto_venta IS DISTINCT FROM c.pto_venta OR f.numero IS DISTINCT FROM c.numero THEN
-        RAISE EXCEPTION 'CONTROL_DE_FACTURAS_YA_TIENE_OTRA';
+    BEGIN
+      SELECT * INTO f FROM public.meli_facturas WHERE orden_id = c.orden_id FOR UPDATE;
+      IF NOT FOUND THEN
+        INSERT INTO public.meli_facturas (orden_id, estado, tipo, pto_venta, numero, emitida_el, marcada_por, marcada_uid)
+        VALUES (c.orden_id, 'emitida', 'C', c.pto_venta, c.numero, p_fecha_cbte, 'ARCA automático', 'arca');
+      ELSIF f.estado = 'emitida' THEN
+        IF f.tipo IS DISTINCT FROM 'C' OR f.pto_venta IS DISTINCT FROM c.pto_venta OR f.numero IS DISTINCT FROM c.numero THEN
+          RETURN jsonb_build_object('estado', 'autorizado', 'numero', c.numero, 'control_conflicto', 'CONTROL_DE_FACTURAS_YA_TIENE_OTRA');
+        END IF;
+      ELSE
+        UPDATE public.meli_facturas SET estado = 'emitida', tipo = 'C', pto_venta = c.pto_venta, numero = c.numero, emitida_el = p_fecha_cbte,
+               motivo = NULL, version = f.version + 1, marcada_por = 'ARCA automático', marcada_uid = 'arca', marcada_en = now()
+         WHERE orden_id = c.orden_id;
       END IF;
-    ELSE
-      UPDATE public.meli_facturas SET estado = 'emitida', tipo = 'C', pto_venta = c.pto_venta, numero = c.numero, emitida_el = p_fecha_cbte,
-             motivo = NULL, version = f.version + 1, marcada_por = 'ARCA automático', marcada_uid = 'arca', marcada_en = now()
-       WHERE orden_id = c.orden_id;
-    END IF;
+    EXCEPTION WHEN unique_violation THEN
+      RETURN jsonb_build_object('estado', 'autorizado', 'numero', c.numero, 'control_conflicto', 'CONTROL_DE_FACTURAS_NUMERO_REPETIDO');
+    END;
   END IF;
   RETURN jsonb_build_object('estado', 'autorizado', 'numero', c.numero);
 END $$;

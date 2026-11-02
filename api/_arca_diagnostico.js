@@ -12,7 +12,7 @@
 
 const crypto = require('crypto');
 const A = require('./_arca.js');
-const { cacheEnBase } = require('./_facturacion.js');
+const { cacheEnBase, conTiempo } = require('./_facturacion.js');
 
 const DIA_MS = 86400e3;
 
@@ -39,12 +39,6 @@ const resumirError = (e) => ({ codigo: e && e.codigo ? String(e.codigo) : 'ERROR
 
 // Con `rpc` el ticket se guarda y se lee de la base, igual que en la emisión: así el diagnóstico NO deja a la emisión sin ticket (ARCA no da otro
 // mientras hay uno vigente) ni entre instancias distintas. Sin `rpc` (pruebas) se usa la caché que se pase o la de memoria.
-const conTiempo = (fetchImpl, ms) => async (url, op = {}) => {
-  const ctl = new AbortController();
-  const t = setTimeout(() => ctl.abort(), ms);
-  try { return await fetchImpl(url, { ...op, signal: ctl.signal }); } finally { clearTimeout(t); }
-};
-
 async function diagnosticoArca({ env = process.env, fetchImpl: fetchBase = fetch, ahora = () => new Date(), cache, rpc, pres } = {}) {
   const fetchImpl = conTiempo(fetchBase, 12000);
   const salida = { modo: null, pasos: [], resumen: null };

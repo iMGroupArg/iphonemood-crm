@@ -59,11 +59,13 @@ CREATE POLICY arca_control_historial_leer ON public.arca_control_config_historia
 REVOKE ALL ON TABLE public.arca_control_config, public.arca_control_config_historial FROM PUBLIC, anon, authenticated;
 GRANT SELECT ON TABLE public.arca_control_config, public.arca_control_config_historial TO authenticated;
 REVOKE ALL ON FUNCTION public.arca__control_historial_proteger() FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON SEQUENCE public.arca_control_config_historial_id_seq FROM PUBLIC, anon, authenticated;
 DO $$
 BEGIN
   IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'service_role') THEN
     REVOKE ALL ON TABLE public.arca_control_config, public.arca_control_config_historial FROM service_role;
     REVOKE ALL ON FUNCTION public.arca__control_historial_proteger() FROM service_role;
+    REVOKE ALL ON SEQUENCE public.arca_control_config_historial_id_seq FROM service_role;
   END IF;
 END $$;
 

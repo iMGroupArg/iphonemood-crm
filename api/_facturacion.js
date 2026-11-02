@@ -41,11 +41,14 @@ const infoAdicional = (b, tipo) => {
 };
 // → { docTipo, docNro, condicionIva|null } si trae documento; null si Mercado Libre dice explícitamente que no hay; ErrorArca si no se entiende.
 function leerDatosFacturacion(json) {
-  if (!json || typeof json !== 'object' || Array.isArray(json)) throw new A.ErrorArca('MELI_BILLING_FORMATO', 'Mercado Libre devolvió los datos de facturación en un formato desconocido.');
+  const formato = () => new A.ErrorArca('MELI_BILLING_FORMATO', 'Mercado Libre devolvió los datos de facturación en un formato desconocido.');
+  if (!json || typeof json !== 'object' || Array.isArray(json)) throw formato();
   const b = (json.buyer && json.buyer.billing_info) || json.billing_info || json;
   const ident = (b && b.identification) || null;
   const conocido = !!(ident || 'doc_type' in b || 'doc_number' in b || Array.isArray(b.additional_info) || 'billing_info' in json || 'buyer' in json);
-  if (!conocido) throw new A.ErrorArca('MELI_BILLING_FORMATO', 'Mercado Libre devolvió los datos de facturación en un formato desconocido.');
+  if (!conocido) throw formato();
+  // Una identificación con contenido pero sin las claves conocidas NO es "sin documento": es un formato que no entendemos.
+  if (ident && typeof ident === 'object' && Object.keys(ident).length && !('type' in ident) && !('number' in ident)) throw formato();
   const tipo = (ident && ident.type) ?? b.doc_type ?? infoAdicional(b, 'DOC_TYPE');
   const nro = (ident && ident.number) ?? b.doc_number ?? infoAdicional(b, 'DOC_NUMBER');
   const vacio = (x) => x === undefined || x === null || String(x).trim() === '';
@@ -56,18 +59,20 @@ function leerDatosFacturacion(json) {
 }
 
 async function pedirDatosFacturacion({ meliGet, cuentaId, orden, billingInfoId, pres }) {
-  const intentos = [];
-  if (billingInfoId) intentos.push(`/orders/billing-info/MLA/${billingInfoId}`);   // contrato vigente [NO VERIFICADO]
-  intentos.push(`/orders/${orden}/billing_info`);                                  // contrato anterior
-  let ultimo = null;
-  for (const ruta of intentos) {
-    const r = await meliGet(cuentaId, ruta, pres);
-    ultimo = r;
+  // Primero el contrato vigente (si hay id) y después el anterior. Un 404 solo significa "no hay datos" en la ÚLTIMA ruta; un 400 nunca:
+  // puede ser una ruta o un identificador inválido y no se toma como ausencia de documento.
+  const rutas = [];
+  if (billingInfoId) rutas.push(`/orders/billing-info/MLA/${billingInfoId}`);   // contrato vigente [NO VERIFICADO]
+  rutas.push(`/orders/${orden}/billing_info`);                                  // contrato anterior
+  for (let i = 0; i < rutas.length; i++) {
+    const r = await meliGet(cuentaId, rutas[i], pres);
+    const ultima = i === rutas.length - 1;
     if (r.ok) return leerDatosFacturacion(r.json);
     if (r.status === 401 || r.status === 403) throw new A.ErrorArca('MELI_BILLING_PERMISO', 'Mercado Libre no deja leer los datos de facturación con este acceso.');
-    if (r.status !== 404 && r.status !== 400) throw new A.ErrorArca('MELI_BILLING', `Mercado Libre no devolvió los datos de facturación (HTTP ${r.status}).`);
+    if (r.status === 404 && ultima) return null;                                 // ausencia explícita
+    if ((r.status === 404 || r.status === 400) && !ultima) continue;             // probar el contrato anterior
+    throw new A.ErrorArca('MELI_BILLING', `Mercado Libre no devolvió los datos de facturación (HTTP ${r.status}).`);
   }
-  // 404 en todas las rutas: Mercado Libre no tiene datos de facturación para la orden (ausencia explícita).
   return null;
 }
 
@@ -116,11 +121,16 @@ function cacheEnBase({ rpc, ambiente, cuit, pres, esperaMs = SEGUNDOS(8), pausaM
   };
 }
 
-// fetch con tiempo máximo: un pedido a ARCA colgado no puede dejar la función esperando para siempre.
+// fetch con tiempo máximo que cubre TAMBIÉN la lectura del cuerpo: un servidor que manda encabezados y deja el cuerpo colgado no puede
+// mantener viva la función. Devuelve una respuesta ya leída ({ ok, status, text() }).
 const conTiempo = (fetchImpl, ms) => async (url, op = {}) => {
   const ctl = new AbortController();
   const t = setTimeout(() => ctl.abort(), ms);
-  try { return await fetchImpl(url, { ...op, signal: ctl.signal }); } finally { clearTimeout(t); }
+  try {
+    const r = await fetchImpl(url, { ...op, signal: ctl.signal });
+    const texto = await r.text();
+    return { ok: r.ok, status: r.status, text: async () => texto };
+  } finally { clearTimeout(t); }
 };
 
 const textoError = (e) => (e && e.codigo ? `${e.codigo}: ${String(e.message).slice(0, 200)}` : 'error inesperado');
@@ -204,8 +214,18 @@ async function emitirFacturaOrden({ orden, env = process.env, rpc, meliGet, fetc
     return { estado: 'emitida', numero: res.numero, cae: em.cae, ptoVenta: cfg.ptoVta };
   }
   const motivo = (em.errores || []).concat(em.observaciones || []).map((x) => `${x.codigo}: ${x.mensaje}`).join(' | ').slice(0, 280) || 'rechazada';
+  // Antes de liberar el número se le pregunta a ARCA: un rechazo del tipo «número ya utilizado» puede deberse a OTRO pedido nuestro que ARCA sí aceptó.
+  let c2;
+  try { c2 = await A.consultarComprobante({ cfg, ticket: await ticket(), ptoVta: cfg.ptoVta, numero: res.numero, fetchImpl: f }); }
+  catch (e) { return { estado: 'pendiente_verificar', numero: res.numero, ptoVenta: cfg.ptoVta, error: 'ARCA rechazó pero no se pudo confirmar el número: ' + textoError(e) }; }
+  if (c2.existe) {
+    const igual = Math.round(Number(c2.importe) * 100) === Number(comprobante.importeCentavos) && mismoNumero(c2.docTipo, comprobante.docTipo) && mismoNumero(c2.docNro, comprobante.docNro);
+    if (!igual) throw new A.ErrorArca('RECONCILIACION_DISTINTA', 'ARCA tiene ese número con otro importe o receptor: se frena para revisarlo a mano.');
+    await rpc('arca_comprobante_autorizar', { p_intento: res.intento, p_numero: res.numero, p_cae: c2.cae, p_cae_vto: isoDeAfip(String(c2.caeVto)), p_fecha_cbte: isoDeAfip(String(c2.fecha)) }, presFresco(SEGUNDOS(6)));
+    return { estado: 'emitida', numero: res.numero, cae: c2.cae, ptoVenta: cfg.ptoVta, reconciliada: true };
+  }
   await rpc('arca_comprobante_rechazar', { p_intento: res.intento, p_numero: res.numero, p_error: motivo }, presFresco(SEGUNDOS(6)));
   return { estado: 'rechazada', error: motivo };
 }
 
-module.exports = { emitirFacturaOrden, leerDatosFacturacion, leerCondicion, cacheEnBase, isoDeAfip };
+module.exports = { emitirFacturaOrden, leerDatosFacturacion, leerCondicion, cacheEnBase, isoDeAfip, conTiempo };

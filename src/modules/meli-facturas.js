@@ -38,6 +38,7 @@ const MeliFacturas = {
     const mensajes = {
       FACTURA_CAMBIO_RECARGAR: 'Otra persona cambió la factura. Recargá y volvé a intentar.',
       FACTURA_YA_REGISTRADA: 'La factura ya está registrada. Reabrila antes de cambiarla.',
+      FACTURA_EN_EMISION: 'La factura de esta venta se está emitiendo por ARCA en este momento. Esperá a que termine y recargá.',
       NUMERO_REPETIDO: 'Ese comprobante ya está registrado en otra orden.',
       ESTADO_INVALIDO: 'El estado de factura no es válido.', TIPO_INVALIDO: 'El tipo de comprobante no es válido.',
       PUNTO_VENTA_INVALIDO: 'El punto de venta no es válido.', NUMERO_INVALIDO: 'El número de comprobante no es válido.',

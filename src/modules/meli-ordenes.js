@@ -201,6 +201,9 @@ const MeliOrdenes = {
         acciones += `<button class="btn btn-sm" onclick="MeliOrdenes.reabrirCierre(${o.id}, this)"><i class="ti ti-arrow-back-up"></i> Reabrir</button>`;
       }
       if (o.procesada && !o.revertidaEn) {
+        acciones += `<button class="btn btn-sm" onclick="MeliOrdenes.facturar(${o.id}, this)" title="Emite o verifica la factura electrónica de ARCA de esta venta (no duplica)"><i class="ti ti-file-invoice"></i> Factura</button>`;
+      }
+      if (o.procesada && !o.revertidaEn) {
         acciones += `<button class="btn btn-sm" style="color:var(--red)" onclick="MeliOrdenes.revertir(${o.id}, this)"><i class="ti ti-arrow-back-up"></i> Revertir</button>`;
       }
       return `
@@ -319,9 +322,48 @@ const MeliOrdenes = {
         this.cerrarCuadro(tok);
         return;
       }
-      await this._llamar(btn, 'meli_procesar_orden', { p_orden_id: id, p_cotizacion: cot },
+      const d = await this._llamar(btn, 'meli_procesar_orden', { p_orden_id: id, p_cotizacion: cot },
         d => d.ya_procesada ? 'La orden ya estaba procesada.' : `Orden procesada: venta #${d.venta_id} creada y stock descontado.`);
+      // La factura va DESPUÉS y aparte: si falla, la venta, el stock y la plata ya quedaron bien (se puede reintentar).
+      if (d && d.ya_procesada === false) await this.facturar(id, null, true);
     } finally { if (btn) btn.disabled = false; this.cerrarCuadro(tok); }
+  },
+
+  // ── Factura electrónica (ARCA) ──────────────────────────────────────────────
+  // El servidor arma la factura SOLO con lo que hay en la base y en Mercado Libre (importe, producto y documento del comprador): desde
+  // acá únicamente viaja el número de la orden. Idempotente: tocar el botón otra vez no emite otra factura.
+  _MSG_FACTURA: {
+    FALTA_DOCUMENTO: 'Falta el documento del comprador en Mercado Libre: no se puede facturar todavía.',
+    DOCUMENTO_INVALIDO: 'El documento del comprador que informa Mercado Libre no es válido.',
+    MELI_BILLING: 'Mercado Libre no devolvió los datos de facturación. Probá de nuevo en un rato.',
+    NUMERACION_PENDIENTE: 'Hay otra factura esperando confirmación de ARCA. Reintentá en un momento.',
+    ORDEN_NO_FACTURABLE: 'Esta orden no está pagada: no se factura.',
+    IMPORTE_NO_COINCIDE: 'El importe no coincide con el de la orden: se frenó.',
+    WSAA_TICKET_VIGENTE: 'ARCA todavía tiene abierta la sesión anterior. Reintentá más tarde.',
+    WSAA_TICKET_EN_CURSO: 'Se está iniciando sesión en ARCA. Reintentá en unos segundos.',
+    RECONCILIACION_DISTINTA: 'ARCA tiene ese número con otro importe: avisá para revisarlo a mano.',
+  },
+  async facturar(id, btn, auto) {
+    const o = (State.meliOrdenes || []).find(x => x.id === id);
+    if (!o || !o.orderId) return;
+    if (btn) btn.disabled = true;
+    try {
+      const token = await window.Meli?._token?.();
+      const r = await fetch('/api/meli/worker', {
+        method: 'POST', headers: { 'x-crm-token': token || '', 'Content-Type': 'application/json' },
+        body: JSON.stringify({ accion: 'arca_emitir', orden: String(o.orderId) }),
+      });
+      let j = null;
+      try { j = await r.json(); } catch { /* sin cuerpo */ }
+      if (!r.ok || !j) { toast('No se pudo consultar la factura (HTTP ' + r.status + '). La venta quedó bien; reintentá con «Factura».'); return; }
+      if (j.estado === 'simulacion') { if (!auto) toast('La facturación está en modo simulación: no se emitió nada.'); return; }
+      if (j.estado === 'emitida') toast(`Factura ${j.yaEstaba ? 'ya emitida' : 'emitida'}: punto de venta ${j.ptoVenta}, N.º ${j.numero}.`);
+      else if (j.estado === 'pendiente_verificar') toast('La factura quedó esperando confirmación de ARCA. La venta está bien: tocá «Factura» para verificar (no se duplica).');
+      else if (j.estado === 'rechazada') toast('ARCA rechazó la factura: ' + (j.error || 'sin detalle') + '. Podés reintentar con «Factura».');
+      else toast(this._MSG_FACTURA[j.codigo] || j.mensaje || 'No se pudo emitir la factura. La venta quedó bien; reintentá con «Factura».');
+    } catch {
+      toast('No se pudo emitir la factura. La venta quedó bien; reintentá con «Factura».');
+    } finally { if (btn) btn.disabled = false; }
   },
 
   // ── Cuadro de verificación previa a «Procesar» ──────────────────────────────

@@ -10,7 +10,8 @@ import { spawnSync } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { baseNueva, SQL, SECRETO, nuevaOrden } from './lib/base_meli.mjs';
 const require = createRequire(import.meta.url);
-const { emitirFacturaOrden, leerDocumento } = require('../../api/_facturacion.js');
+const { emitirFacturaOrden, leerDatosFacturacion } = require('../../api/_facturacion.js');
+const { diagnosticoArca } = require('../../api/_arca_diagnostico.js');
 
 let ok = 0, fail = 0;
 const check = (n, cond, det = '') => { cond ? ok++ : fail++; console.log(`${cond ? '  ok  ' : ' FALLA'} │ ${n}${cond ? '' : '  → ' + det}`); };
@@ -48,6 +49,8 @@ function arca({ rechazar = false } = {}) {
       const ta = `<loginTicketResponse><header><expirationTime>${vence}</expirationTime></header><credentials><token>TOK</token><sign>SIG</sign></credentials></loginTicketResponse>`;
       return R(`<e><b><loginCmsReturn>${ta.replace(/</g, '&lt;').replace(/>/g, '&gt;')}</loginCmsReturn></b></e>`);
     }
+    if (/FEDummy/.test(a)) return R(respFe('FEDummy', '<AppServer>OK</AppServer><DbServer>OK</DbServer><AuthServer>OK</AuthServer>'));
+    if (/FEParamGetPtosVenta/.test(a)) return R(respFe('FEParamGetPtosVenta', '<ResultGet><PtoVenta><Nro>1</Nro><EmisionTipo>CAE</EmisionTipo><Bloqueado>N</Bloqueado><FchBaja>NULL</FchBaja></PtoVenta></ResultGet>'));
     if (/FECompUltimoAutorizado/.test(a)) return R(respFe('FECompUltimoAutorizado', `<CbteNro>${st.ultimo}</CbteNro>`));
     if (/FECompConsultar/.test(a)) {
       st.consultas++;
@@ -70,7 +73,7 @@ function arca({ rechazar = false } = {}) {
   };
   return { f, st };
 }
-const meli = (billing = { status: 200, ok: true, json: { buyer: { billing_info: { identification: { type: 'DNI', number: '30111222' } } } } }) =>
+const meli = (billing = { status: 200, ok: true, json: { buyer: { billing_info: { identification: { type: 'DNI', number: '30111222' }, fiscal_condition: '05 - Consumidor Final' } } } }) =>
   { const llamadas = []; const g = async (cuenta, ruta) => { llamadas.push(ruta); return billing; }; g.llamadas = llamadas; return g; };
 const ordenId = async (ctx, bruto = 100000, estado = 'paid') => {
   const id = await nuevaOrden(ctx, [{ item: 'MLA1', precio: bruto }], { bruto, neto: bruto - 1000 });
@@ -79,14 +82,22 @@ const ordenId = async (ctx, bruto = 100000, estado = 'paid') => {
   return (await ctx.db.query(`UPDATE public.meli_ordenes SET meli_order_id = (2000000000000 + id)::text WHERE id=$1 RETURNING meli_order_id m`, [id])).rows[0].m;
 };
 const emitir = (ctx, orden, a, m = meli(), env = ENV) => emitirFacturaOrden({ orden, env, rpc: ctx.rpc, meliGet: m, fetchImpl: a.f, esperaTicketMs: 50 });
-const comp = async (db, orden) => (await db.query(`SELECT * FROM public.meli_comprobantes WHERE orden_id=$1`, [orden])).rows[0];
+const comp = async (db, orden, amb = 'homologacion') => (await db.query(`SELECT * FROM public.meli_comprobantes WHERE orden_id=$1 AND ambiente=$2`, [orden, amb])).rows[0];
+const vencer = (db) => db.query(`UPDATE public.meli_comprobantes SET trabajo_hasta = now() - interval '1 second' WHERE trabajo_hasta IS NOT NULL`);
 
 console.log('\n══ Emisor de facturas (base real + ARCA simulado) ══\n');
 
-{ // leerDocumento
-  check('Documento: forma nueva (identification)', JSON.stringify(leerDocumento({ buyer: { billing_info: { identification: { type: 'dni', number: '30111222' } } } })) === '{"docTipo":"DNI","docNro":"30111222"}');
-  check('Documento: forma vieja (doc_type/doc_number)', JSON.stringify(leerDocumento({ billing_info: { doc_type: 'CUIT', doc_number: '20111111112' } })) === '{"docTipo":"CUIT","docNro":"20111111112"}');
-  check('Documento: sin datos → null', leerDocumento({ billing_info: {} }) === null && leerDocumento(null) === null);
+{ // lectura de los datos de facturación de Mercado Libre
+  const L = (j) => JSON.stringify(leerDatosFacturacion(j));
+  check('Datos: forma nueva (identification) con condición "05 - Consumidor Final"', L({ buyer: { billing_info: { identification: { type: 'dni', number: '43577502' }, fiscal_condition: '05 - Consumidor Final' } } }) === '{"docTipo":"DNI","docNro":"43577502","condicionIva":5}');
+  check('Datos: forma vieja (doc_type/doc_number) sin condición', L({ billing_info: { doc_type: 'CUIT', doc_number: '20111111112' } }) === '{"docTipo":"CUIT","docNro":"20111111112","condicionIva":null}');
+  check('Datos: additional_info con DOC_TYPE/DOC_NUMBER (no se descarta la identidad)', L({ billing_info: { additional_info: [{ type: 'DOC_TYPE', value: 'DNI' }, { type: 'DOC_NUMBER', value: '43577502' }] } }) === '{"docTipo":"DNI","docNro":"43577502","condicionIva":null}');
+  check('Datos: condición por nombre ("Responsable Inscripto" → 1)', JSON.parse(L({ billing_info: { doc_type: 'CUIT', doc_number: '20111111112', fiscal_condition: 'Responsable Inscripto' } })).condicionIva === 1);
+  check('Datos: sin documento → null (ausencia explícita)', leerDatosFacturacion({ billing_info: {} }) === null);
+  const raro = (() => { try { leerDatosFacturacion({ algo: 'otro' }); return null; } catch (e) { return e.codigo; } })();
+  check('Datos: estructura desconocida → MELI_BILLING_FORMATO (no se toma como "sin datos")', raro === 'MELI_BILLING_FORMATO', raro);
+  const cond = (() => { try { leerDatosFacturacion({ billing_info: { doc_type: 'DNI', doc_number: '1', fiscal_condition: 'Marciano' } }); return null; } catch (e) { return e.codigo; } })();
+  check('Datos: condición que no se entiende → CONDICION_IVA_DESCONOCIDA', cond === 'CONDICION_IVA_DESCONOCIDA', cond);
 }
 
 { // camino feliz, una factura por orden, ticket reutilizado
@@ -119,6 +130,9 @@ console.log('\n══ Emisor de facturas (base real + ARCA simulado) ══\n');
   const r = await emitir(ctx, o, a);
   check('Corte tras aceptar ARCA: queda pendiente_verificar (no se pierde ni se duplica)', r.estado === 'pendiente_verificar' && r.numero === 1, JSON.stringify(r));
   check('La base lo tiene como reservado con ese número', (await comp(ctx.db, o)).estado === 'reservado');
+  const inmediato = await emitir(ctx, o, a);
+  check('Un reintento INMEDIATO no pisa al proceso anterior: en_curso, sin consultar ni emitir', inmediato.estado === 'en_curso' && a.st.consultas === 0 && a.st.emisiones === 1, JSON.stringify(inmediato));
+  await vencer(ctx.db);
   const r2 = await emitir(ctx, o, a);
   check('El reintento CONSULTA a ARCA y recupera el CAE sin emitir otra factura', r2.estado === 'emitida' && r2.reconciliada === true && a.st.emisiones === 1 && a.st.consultas === 1, JSON.stringify(r2) + ` emisiones=${a.st.emisiones}`);
   check('Queda autorizada con el CAE que ARCA ya había dado', (await comp(ctx.db, o)).cae === String(74000000000001));
@@ -129,6 +143,7 @@ console.log('\n══ Emisor de facturas (base real + ARCA simulado) ══\n');
   a.st.cortarAntes = true;
   const r = await emitir(ctx, o, a);
   check('Corte antes de que ARCA acepte: pendiente_verificar', r.estado === 'pendiente_verificar', JSON.stringify(r));
+  await vencer(ctx.db);
   const r2 = await emitir(ctx, o, a);
   check('El reintento consulta, ve que ARCA no lo tiene, libera y emite UNA vez', r2.estado === 'emitida' && a.st.comprobantes.size === 1 && r2.numero === 1, JSON.stringify(r2));
 }
@@ -170,6 +185,83 @@ console.log('\n══ Emisor de facturas (base real + ARCA simulado) ══\n');
   check('Producción sin confirmación explícita: error de configuración, nada emitido', e && e.includes('PRODUCCION_NO_CONFIRMADA') && a.st.emisiones === 0, e);
   const e2 = await falla(() => emitir(ctx, o, a, meli(), { ...ENV, ARCA_PTO_VTA: '' }));
   check('Sin punto de venta configurado: SIN_PUNTO_DE_VENTA', e2 && e2.includes('SIN_PUNTO_DE_VENTA'), e2);
+}
+
+{ // hallazgos de la revisión de Codex
+  // (5) recuperar el CAE con lo guardado aunque la orden se cancele después y Mercado Libre ya no responda
+  const ctx = await entorno(); const a = arca(); const o = await ordenId(ctx);
+  a.st.cortarDespues = true;
+  await emitir(ctx, o, a);
+  await vencer(ctx.db);
+  await ctx.db.query(`UPDATE public.meli_ordenes SET estado='cancelled' WHERE meli_order_id=$1`, [o]);
+  const m = meli({ status: 500, ok: false, json: null });
+  const r = await emitir(ctx, o, a, m);
+  check('Orden cancelada y Mercado Libre caído DESPUÉS del corte: igual se recupera el CAE ya otorgado por ARCA', r.estado === 'emitida' && r.reconciliada === true && m.llamadas.length === 0 && a.st.emisiones === 1, JSON.stringify(r));
+}
+{ // (4) conciliación con receptor distinto
+  const ctx = await entorno(); const a = arca(); const o = await ordenId(ctx);
+  a.st.cortarDespues = true;
+  await emitir(ctx, o, a);
+  await vencer(ctx.db);
+  a.st.comprobantes.get(1).docNro = '99999999';                       // ARCA tiene ese número, pero con OTRO documento
+  const e = await falla(() => emitir(ctx, o, a));
+  check('Si ARCA tiene ese número con otro receptor NO se adopta (RECONCILIACION_DISTINTA)', e && e.includes('RECONCILIACION_DISTINTA'), e);
+  check('…y la reserva queda sin autorizar', (await comp(ctx.db, o)).estado === 'reservado' && !(await comp(ctx.db, o)).cae);
+}
+{ // (7) error 502 del autorizador: no es un rechazo
+  const ctx = await entorno(); const a = arca(); const o = await ordenId(ctx);
+  const f0 = a.f;
+  let primera = true;
+  a.f = async (url, op) => (primera && /FECAESolicitar/.test(op.headers.SOAPAction || '') && (primera = false, true)
+    ? { ok: true, status: 200, text: async () => respFe('FECAESolicitar', '<Errors><Err><Code>502</Code><Msg>Error interno del autorizador</Msg></Err></Errors>') }
+    : f0(url, op));
+  const r = await emitir(ctx, o, a);
+  check('Error 502 sin detalle: pendiente_verificar y la reserva NO se libera', r.estado === 'pendiente_verificar' && (await comp(ctx.db, o)).estado === 'reservado' && (await comp(ctx.db, o)).numero === 1, JSON.stringify(r));
+}
+{ // (2) ambientes: una factura de prueba no se devuelve como emitida en producción
+  const ctx = await entorno(); const a = arca(); const o = await ordenId(ctx);
+  await emitir(ctx, o, a);                                              // homologación
+  const prod = { ...ENV, ARCA_MODO: 'produccion', ARCA_CONFIRMA_PRODUCCION: 'SI' };
+  const a2 = arca();
+  const r = await emitir(ctx, o, a2, meli(), prod);
+  check('Con la orden ya facturada en HOMOLOGACIÓN, producción emite la suya (no devuelve la de prueba como emitida)', r.estado === 'emitida' && !r.yaEstaba && a2.st.emisiones === 1, JSON.stringify(r));
+  check('Quedan dos comprobantes, uno por ambiente', (await ctx.db.query(`SELECT count(*)::int n FROM public.meli_comprobantes WHERE orden_id=$1`, [o])).rows[0].n === 2);
+  const fc = (await ctx.db.query(`SELECT estado, numero FROM public.meli_facturas WHERE orden_id=$1`, [o])).rows[0];
+  check('En producción el control de facturas queda "emitida"', fc && fc.estado === 'emitida', JSON.stringify(fc));
+}
+{ // (3) factura manual ya cargada: no se emite
+  const ctx = await entorno(); const a = arca(); const o = await ordenId(ctx);
+  await ctx.db.query(`INSERT INTO public.meli_facturas (orden_id, estado, tipo, pto_venta, numero, emitida_el, marcada_por) VALUES ($1,'emitida','C',3,40,'2026-10-01','Franco')`, [o]);
+  const prod = { ...ENV, ARCA_MODO: 'produccion', ARCA_CONFIRMA_PRODUCCION: 'SI' };
+  const e = await falla(() => emitir(ctx, o, a, meli(), prod));
+  check('Orden con factura manual cargada: no se emite NADA (ni siquiera se le pide número a ARCA para emitir)', e && e.includes('FACTURA_MANUAL_YA_REGISTRADA') && a.st.emisiones === 0, e);
+}
+{ // (8) Mercado Libre: formato desconocido, permiso y ausencia
+  const ctx = await entorno(); const a = arca(); const o = await ordenId(ctx);
+  const e1 = await falla(() => emitir(ctx, o, a, meli({ status: 200, ok: true, json: { algo: 'otro' } })));
+  check('Respuesta de Mercado Libre desconocida: MELI_BILLING_FORMATO (no se asume consumidor final)', e1 && e1.includes('MELI_BILLING_FORMATO') && a.st.emisiones === 0, e1);
+  const e2 = await falla(() => emitir(ctx, o, a, meli({ status: 403, ok: false, json: null }), { ...ENV, ARCA_UMBRAL_CONSUMIDOR_FINAL: '500000' }));
+  check('403 de Mercado Libre: MELI_BILLING_PERMISO aunque haya umbral (no es "ausencia")', e2 && e2.includes('MELI_BILLING_PERMISO'), e2);
+  const e3 = await falla(() => emitir(ctx, o, a, meli({ status: 200, ok: true, json: { billing_info: { doc_type: 'CUIT', doc_number: '20111111112' } } })));
+  check('CUIT sin condición frente al IVA informada: CONDICION_IVA_FALTANTE', e3 && e3.includes('CONDICION_IVA_FALTANTE'), e3);
+  const ok = await emitir(ctx, o, a, meli({ status: 200, ok: true, json: { billing_info: { doc_type: 'CUIT', doc_number: '20111111112', fiscal_condition: '01 - Responsable Inscripto' } } }));
+  check('CUIT con condición informada (1) emite con esa condición', ok.estado === 'emitida' && (await comp(ctx.db, o)).cond_iva === 1, JSON.stringify(ok));
+}
+{ // (6) el diagnóstico comparte el ticket con la emisión
+  const ctx = await entorno(); const a = arca(); const o = await ordenId(ctx);
+  const d = await diagnosticoArca({ env: ENV, rpc: ctx.rpc, fetchImpl: a.f });
+  check('El diagnóstico termina bien', d.pasos.every((p) => p.ok), JSON.stringify(d.pasos.filter((p) => !p.ok)));
+  const r = await emitir(ctx, o, a);
+  check('Después del diagnóstico la emisión REUTILIZA el ticket (un solo login, sin WSAA_TICKET_VIGENTE)', r.estado === 'emitida' && a.st.logins === 1, JSON.stringify(r) + ` logins=${a.st.logins}`);
+}
+{ // (10) si el pedido del ticket falla, el candado se suelta
+  const ctx = await entorno(); const a = arca(); const o = await ordenId(ctx);
+  const mal = { f: async (url, op) => { if (/LoginCms/.test(url)) throw new Error('sin red'); return a.f(url, op); } };
+  await falla(() => emitir(ctx, o, mal));
+  const lease = (await ctx.db.query(`SELECT lease_id FROM public.arca_tickets`)).rows[0];
+  check('Si falla el login, el candado del ticket queda liberado (no espera 60 s)', lease && lease.lease_id === null, JSON.stringify(lease));
+  const r = await emitir(ctx, o, a);
+  check('…y el siguiente intento emite normalmente', r.estado === 'emitida', JSON.stringify(r));
 }
 
 console.log(`\n${ok} pasan, ${fail} fallan de ${ok + fail}`);

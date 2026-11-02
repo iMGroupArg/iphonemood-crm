@@ -157,8 +157,8 @@ await caso('FECAESolicitar: aprobada devuelve CAE y vencimiento; rechazada devue
   assert.equal(a.resultado, 'A'); assert.equal(a.cae, '74000000000001'); assert.equal(a.caeVto, '20261103'); assert.equal(a.numero, 5);
   const r = await A.solicitarCAE({ cfg: cfgHomo, ticket, ptoVta: 3, numero: 5, comprobante: comp, fetchImpl: fakeFetch(() => respuestaCae('R', '<Observaciones><Obs><Code>10016</Code><Msg>El numero de comprobante no es correlativo</Msg></Obs></Observaciones>')) });
   assert.equal(r.resultado, 'R'); assert.equal(r.cae, null); assert.equal(r.observaciones[0].codigo, '10016');
-  const e = await A.solicitarCAE({ cfg: cfgHomo, ticket, ptoVta: 3, numero: 5, comprobante: comp, fetchImpl: fakeFetch(() => soap('<FECAESolicitarResult><Errors><Err><Code>600</Code><Msg>ValidacionDeToken: No apareció CUIT en lista de relaciones</Msg></Err></Errors></FECAESolicitarResult>')) });
-  assert.equal(e.errores[0].codigo, '600');
+  // Errores SIN detalle del comprobante (autenticación, 502 del autorizador…) no prueban que ARCA no lo haya procesado: estado desconocido.
+  await assert.rejects(() => A.solicitarCAE({ cfg: cfgHomo, ticket, ptoVta: 3, numero: 5, comprobante: comp, fetchImpl: fakeFetch(() => soap('<FECAESolicitarResult><Errors><Err><Code>502</Code><Msg>Error interno del autorizador</Msg></Err></Errors></FECAESolicitarResult>')) }), e => e.codigo === 'WSFE_ESTADO_DESCONOCIDO');
 });
 
 await caso('Último autorizado y consulta de comprobante (para reconciliar tras un corte)', async () => {

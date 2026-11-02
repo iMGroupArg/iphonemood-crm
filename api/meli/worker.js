@@ -176,7 +176,7 @@ module.exports = async function handler(req, res) {
   // Diagnóstico de ARCA de solo lectura (api/_arca_diagnostico.js): consulta el estado, el login y los puntos de venta. No emite.
   if (req.method === 'POST' && req.body && typeof req.body === 'object' && req.body.accion === 'arca_diagnostico') {
     try {
-      res.status(200).json(await diagnosticoArca());
+      res.status(200).json(await diagnosticoArca({ rpc: M.rpc, pres: M.presupuestoHasta(t0 + PRESUPUESTO_MS - RESERVA_MS, t0 + PRESUPUESTO_MS) }));
     } catch (e) {
       console.error('meli/worker (arca_diagnostico):', e.codigo || '');
       res.status(502).json({ error: 'No se pudo ejecutar el diagnóstico de ARCA' });

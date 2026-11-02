@@ -43,6 +43,10 @@ await caso('Pendiente de verificar: explica que la venta está bien y que no se 
   const { M, toasts } = cargar({ respuesta: { json: { estado: 'pendiente_verificar' } } });
   await M.facturar(5); assert.match(toasts[0], /La venta está bien/); assert.match(toasts[0], /no se duplica/);
 });
+await caso('En curso: pide esperar y aclara que no se duplica', async () => {
+  const { M, toasts } = cargar({ respuesta: { json: { estado: 'en_curso' } } });
+  await M.facturar(5); assert.match(toasts[0], /Esperá un minuto/); assert.match(toasts[0], /no se duplica/);
+});
 await caso('Rechazada: muestra el motivo', async () => {
   const { M, toasts } = cargar({ respuesta: { json: { estado: 'rechazada', error: '10015: Documento inválido' } } });
   await M.facturar(5); assert.match(toasts[0], /10015: Documento inválido/);

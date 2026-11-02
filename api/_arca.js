@@ -336,8 +336,8 @@ async function solicitarCAE({ cfg, ticket, ptoVta, numero, comprobante, fetchImp
   const errores = erroresDe(bloque);
   const detalles = todas(bloque, 'FECAEDetResponse');
   if (!detalles.length) {
-    // Rechazo de toda la solicitud (por ejemplo autenticación): trae errores y ningún detalle.
-    if (errores.length) return { resultado: 'R', numero, cae: null, caeVto: null, observaciones: [], errores };
+    // Errores sin detalle del comprobante (autenticación, 502 del autorizador, etc.): NO prueban que ARCA no lo haya procesado. Se trata
+    // como estado DESCONOCIDO: la reserva queda y se consulta el número antes de reutilizarlo. Solo un 'R' con detalle es un rechazo.
     throw new ErrorArca('WSFE_ESTADO_DESCONOCIDO', 'La respuesta de ARCA no trae el detalle del comprobante: hay que consultarlo.');
   }
   if (detalles.length !== 1) throw new ErrorArca('WSFE_ESTADO_DESCONOCIDO', 'ARCA devolvió más de un detalle para un solo comprobante.');

@@ -340,6 +340,12 @@ const MeliOrdenes = {
     ORDEN_NO_FACTURABLE: 'Esta orden no está pagada: no se factura.',
     IMPORTE_NO_COINCIDE: 'El importe no coincide con el de la orden: se frenó.',
     WSAA_TICKET_VIGENTE: 'ARCA todavía tiene abierta la sesión anterior. Reintentá más tarde.',
+    MELI_BILLING_FORMATO: 'Mercado Libre respondió los datos de facturación en un formato que el sistema no entiende: avisá para revisarlo.',
+    MELI_BILLING_PERMISO: 'Mercado Libre no deja leer los datos de facturación con este acceso: avisá para revisarlo.',
+    CONDICION_IVA_FALTANTE: 'Mercado Libre no informó la condición frente al IVA del comprador (CUIT): no se emite sola.',
+    CONDICION_IVA_DESCONOCIDA: 'Mercado Libre informó una condición fiscal que el sistema no reconoce: avisá para revisarlo.',
+    FACTURA_MANUAL_YA_REGISTRADA: 'Esta orden ya tiene una factura cargada a mano: no se emite otra.',
+    ORDEN_MARCADA_NO_CORRESPONDE: 'Esta orden está marcada como «no corresponde facturar». Reabrila en Facturas si hay que emitirla.',
     WSAA_TICKET_EN_CURSO: 'Se está iniciando sesión en ARCA. Reintentá en unos segundos.',
     RECONCILIACION_DISTINTA: 'ARCA tiene ese número con otro importe: avisá para revisarlo a mano.',
   },
@@ -359,6 +365,7 @@ const MeliOrdenes = {
       if (j.estado === 'simulacion') { if (!auto) toast('La facturación está en modo simulación: no se emitió nada.'); return; }
       if (j.estado === 'emitida') toast(`Factura ${j.yaEstaba ? 'ya emitida' : 'emitida'}: punto de venta ${j.ptoVenta}, N.º ${j.numero}.`);
       else if (j.estado === 'pendiente_verificar') toast('La factura quedó esperando confirmación de ARCA. La venta está bien: tocá «Factura» para verificar (no se duplica).');
+      else if (j.estado === 'en_curso') toast('Otro proceso está resolviendo esta factura. Esperá un minuto y tocá «Factura» otra vez (no se duplica).');
       else if (j.estado === 'rechazada') toast('ARCA rechazó la factura: ' + (j.error || 'sin detalle') + '. Podés reintentar con «Factura».');
       else toast(this._MSG_FACTURA[j.codigo] || j.mensaje || 'No se pudo emitir la factura. La venta quedó bien; reintentá con «Factura».');
     } catch {

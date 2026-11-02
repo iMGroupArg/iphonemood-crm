@@ -3,41 +3,78 @@
 // (POST { accion: 'arca_emitir', orden }, sesión del CRM). Lo que no es plata ni obligación fiscal (pantalla, impresión) vive aparte.
 //
 // Reglas (decididas por Franco; ver el plan de facturación):
-//   · Importe y moneda salen de la base (la orden), nunca de la petición; la base además los compara al reservar.
-//   · Una factura por orden: si ya está autorizada se devuelve tal cual; si hay un intento SIN respuesta se consulta a ARCA ese número
-//     (FECompConsultar) antes de hacer cualquier otra cosa, así un corte de red nunca duplica una factura.
-//   · El documento del comprador se lee de Mercado Libre, se manda a ARCA y queda SOLO en el comprobante: no se guarda en otro lado
-//     ni se devuelve al navegador.
-//   · Una factura que falla NO frena la venta: acá solo se devuelve el estado (emitida / pendiente / error) para que la pantalla
-//     lo muestre y ofrezca reintentar.
+//   · Solo Factura C. Importe y moneda salen de la base (la orden), nunca de la petición; la base además los compara al reservar.
+//   · Una factura por orden y ambiente. Si hay un intento SIN respuesta se consulta a ARCA ese número con los datos GUARDADOS (no con los
+//     de hoy: la orden o Mercado Libre pudieron cambiar) antes de hacer cualquier otra cosa; un corte de red nunca duplica una factura.
+//   · Dos procesos nunca trabajan el mismo intento: la base entrega un intento con candado de 2 minutos; autorizar/rechazar lo exigen.
+//   · El documento del comprador se lee de Mercado Libre, se manda a ARCA y queda SOLO en el comprobante: no se devuelve al navegador.
+//   · Una factura que falla NO frena la venta: acá solo se devuelve el estado para que la pantalla lo muestre y ofrezca reintentar.
 //   · En 'simulacion' no se habla con ARCA ni se escribe nada en la base.
+//   · Un error de ARCA sin detalle del comprobante NO es un rechazo: la reserva queda y se consulta antes de reutilizar el número.
 
 'use strict';
 
 const A = require('./_arca.js');
 
-const SEGUNDOS = (n) => n * 1000;
 const primera = (x) => (Array.isArray(x) ? x[0] : x);
-
-// Convierte YYYYMMDD → YYYY-MM-DD.
+const SEGUNDOS = (n) => n * 1000;
 const isoDeAfip = (s) => `${s.slice(0, 4)}-${s.slice(4, 6)}-${s.slice(6, 8)}`;
+const presFresco = (ms) => { const hasta = Date.now() + ms; return { hasta, restante: () => hasta - Date.now() }; };
 
-// Documento del comprador según la respuesta de Mercado Libre (/orders/{id}/billing_info). El formato exacto es [NO VERIFICADO]:
-// se aceptan las dos formas conocidas (con `identification` y con `doc_type`/`doc_number`). Si hay algún dato de documento, se
-// devuelve completo para que armarComprobanteC lo valide; si no hay ninguno, null (consumidor final solo bajo el umbral).
-function leerDocumento(json) {
-  if (!json || typeof json !== 'object') return null;
+// ── Datos de facturación del comprador (Mercado Libre) ───────────────────────────────────────────────────────────────
+// Formatos aceptados [NO VERIFICADO contra la cuenta real; se confirma con la primera prueba en homologación]:
+//   · { buyer|billing_info: { identification: { type, number } } } · { billing_info: { doc_type, doc_number } } · additional_info [{ type, value }]
+// Condición fiscal: Mercado Libre la informa con el código de ARCA ("05 - Consumidor Final"): se lee el número. También se entienden los nombres.
+const CONDICIONES_POR_NOMBRE = [[/consumidor\s*final/i, 5], [/responsable\s*inscripto/i, 1], [/monotribut/i, 6], [/exent/i, 4]];
+function leerCondicion(v) {
+  if (v === undefined || v === null || String(v).trim() === '') return null;
+  const t = String(v).trim();
+  const m = t.match(/^0*(\d{1,2})\b/);
+  if (m && Number(m[1]) >= 1) return Number(m[1]);
+  for (const [re, cod] of CONDICIONES_POR_NOMBRE) if (re.test(t)) return cod;
+  throw new A.ErrorArca('CONDICION_IVA_DESCONOCIDA', 'Mercado Libre informó una condición fiscal que el sistema no reconoce.');
+}
+const infoAdicional = (b, tipo) => {
+  const lista = Array.isArray(b && b.additional_info) ? b.additional_info : [];
+  const x = lista.find((e) => e && String(e.type || '').toUpperCase() === tipo);
+  return x ? x.value : null;
+};
+// → { docTipo, docNro, condicionIva|null } si trae documento; null si Mercado Libre dice explícitamente que no hay; ErrorArca si no se entiende.
+function leerDatosFacturacion(json) {
+  if (!json || typeof json !== 'object' || Array.isArray(json)) throw new A.ErrorArca('MELI_BILLING_FORMATO', 'Mercado Libre devolvió los datos de facturación en un formato desconocido.');
   const b = (json.buyer && json.buyer.billing_info) || json.billing_info || json;
-  const ident = (b && b.identification) || b || {};
-  const tipo = ident.type ?? ident.doc_type ?? null;
-  const nro = ident.number ?? ident.doc_number ?? null;
-  if ((tipo === null || tipo === '') && (nro === null || nro === '')) return null;
-  return { docTipo: tipo === null ? null : String(tipo).trim().toUpperCase(), docNro: nro === null ? null : String(nro) };
+  const ident = (b && b.identification) || null;
+  const conocido = !!(ident || 'doc_type' in b || 'doc_number' in b || Array.isArray(b.additional_info) || 'billing_info' in json || 'buyer' in json);
+  if (!conocido) throw new A.ErrorArca('MELI_BILLING_FORMATO', 'Mercado Libre devolvió los datos de facturación en un formato desconocido.');
+  const tipo = (ident && ident.type) ?? b.doc_type ?? infoAdicional(b, 'DOC_TYPE');
+  const nro = (ident && ident.number) ?? b.doc_number ?? infoAdicional(b, 'DOC_NUMBER');
+  const vacio = (x) => x === undefined || x === null || String(x).trim() === '';
+  if (vacio(tipo) && vacio(nro)) return null;
+  const cond = leerCondicion(b.fiscal_condition ?? b.condition ?? (b.taxes && b.taxes.taxpayer_type && b.taxes.taxpayer_type.id)
+    ?? (ident && ident.taxpayer_type) ?? infoAdicional(b, 'TAXPAYER_TYPE_ID') ?? infoAdicional(b, 'FISCAL_CONDITION'));
+  return { docTipo: vacio(tipo) ? null : String(tipo).trim().toUpperCase(), docNro: vacio(nro) ? null : String(nro), condicionIva: cond };
 }
 
-// Caché del ticket de ARCA en la base, con candado: el ticket dura 12 h y ARCA no entrega otro mientras hay uno vigente.
-// `leer` devuelve el vigente; si no hay, intenta tomar el candado (solo UNA instancia lo logra) y devuelve null para que la
-// instancia ganadora lo pida; las demás esperan un poco a que aparezca. `guardar` lo guarda con el candado propio.
+async function pedirDatosFacturacion({ meliGet, cuentaId, orden, billingInfoId, pres }) {
+  const intentos = [];
+  if (billingInfoId) intentos.push(`/orders/billing-info/MLA/${billingInfoId}`);   // contrato vigente [NO VERIFICADO]
+  intentos.push(`/orders/${orden}/billing_info`);                                  // contrato anterior
+  let ultimo = null;
+  for (const ruta of intentos) {
+    const r = await meliGet(cuentaId, ruta, pres);
+    ultimo = r;
+    if (r.ok) return leerDatosFacturacion(r.json);
+    if (r.status === 401 || r.status === 403) throw new A.ErrorArca('MELI_BILLING_PERMISO', 'Mercado Libre no deja leer los datos de facturación con este acceso.');
+    if (r.status !== 404 && r.status !== 400) throw new A.ErrorArca('MELI_BILLING', `Mercado Libre no devolvió los datos de facturación (HTTP ${r.status}).`);
+  }
+  // 404 en todas las rutas: Mercado Libre no tiene datos de facturación para la orden (ausencia explícita).
+  return null;
+}
+
+// ── Ticket de ARCA en la base, con candado ──────────────────────────────────────────────────────────────────────────
+// El ticket dura 12 h y ARCA no entrega otro mientras hay uno vigente. `leer` devuelve el vigente; si no hay, toma el candado (solo UNA instancia
+// lo logra) y devuelve null para que esa instancia lo pida; las demás esperan. `guardar` reintenta con tiempo PROPIO (el ticket recibido no se
+// puede perder por haber gastado el presupuesto de las consultas).
 function cacheEnBase({ rpc, ambiente, cuit, pres, esperaMs = SEGUNDOS(8), pausaMs = 400, dormir = (ms) => new Promise((r) => setTimeout(r, ms)) }) {
   let lease = null;
   const vigente = async () => {
@@ -60,18 +97,34 @@ function cacheEnBase({ rpc, ambiente, cuit, pres, esperaMs = SEGUNDOS(8), pausaM
     },
     async guardar(t) {
       if (!lease) return;
-      await rpc('arca_ticket_guardar', { p_ambiente: ambiente, p_cuit: cuit, p_lease: lease, p_token: t.token, p_sign: t.sign, p_expira: t.expira }, pres);
-      lease = null;
+      let ultimoError = null;
+      for (let i = 0; i < 3; i++) {
+        try {
+          const ok = await rpc('arca_ticket_guardar', { p_ambiente: ambiente, p_cuit: cuit, p_lease: lease, p_token: t.token, p_sign: t.sign, p_expira: t.expira }, presFresco(SEGUNDOS(5)));
+          if (ok === true) { lease = null; return; }
+          ultimoError = new Error('el candado ya no era nuestro');
+          break;
+        } catch (e) { ultimoError = e; await dormir(pausaMs); }
+      }
+      console.error('arca: no se pudo guardar el ticket recibido:', ultimoError && ultimoError.message);
     },
     async soltar() {
       if (!lease) return;
-      try { await rpc('arca_ticket_lease_soltar', { p_ambiente: ambiente, p_cuit: cuit, p_lease: lease }, pres); } catch { /* vence solo */ }
+      try { await rpc('arca_ticket_lease_soltar', { p_ambiente: ambiente, p_cuit: cuit, p_lease: lease }, presFresco(SEGUNDOS(3))); } catch { /* vence solo */ }
       lease = null;
     },
   };
 }
 
+// fetch con tiempo máximo: un pedido a ARCA colgado no puede dejar la función esperando para siempre.
+const conTiempo = (fetchImpl, ms) => async (url, op = {}) => {
+  const ctl = new AbortController();
+  const t = setTimeout(() => ctl.abort(), ms);
+  try { return await fetchImpl(url, { ...op, signal: ctl.signal }); } finally { clearTimeout(t); }
+};
+
 const textoError = (e) => (e && e.codigo ? `${e.codigo}: ${String(e.message).slice(0, 200)}` : 'error inesperado');
+const mismoNumero = (a, b) => Number(String(a).trim()) === Number(String(b).trim());
 
 async function emitirFacturaOrden({ orden, env = process.env, rpc, meliGet, fetchImpl = fetch, ahora = () => new Date(), pres, cache, esperaTicketMs } = {}) {
   const cfg = A.configuracion(env);
@@ -79,58 +132,71 @@ async function emitirFacturaOrden({ orden, env = process.env, rpc, meliGet, fetc
   if (cfg.modo === 'simulacion') return { estado: 'simulacion', mensaje: 'ARCA está en modo simulación: no se emitió ni se guardó nada.' };
   if (!cfg.cuit || cfg.cuit.length !== 11) throw new A.ErrorArca('SIN_CUIT', 'Falta ARCA_CUIT (11 dígitos).');
   if (!Number.isInteger(cfg.ptoVta) || cfg.ptoVta < 1) throw new A.ErrorArca('SIN_PUNTO_DE_VENTA', 'Falta ARCA_PTO_VTA.');
+  const ordenS = String(orden);
+  const f = conTiempo(fetchImpl, SEGUNDOS(12));
 
-  const f = primera;
-  const datos = f(await rpc('arca_orden_para_facturar', { p_orden: String(orden) }, pres));
+  const cacheTicket = cache || cacheEnBase({ rpc, ambiente: cfg.modo, cuit: cfg.cuit, pres, ...(esperaTicketMs ? { esperaMs: esperaTicketMs } : {}) });
+  let ticketCache = null;
+  const ticket = async () => {
+    if (ticketCache) return ticketCache;
+    try { ticketCache = await A.obtenerTicket({ cfg, cache: cacheTicket, fetchImpl: f, ahora }); } catch (e) { if (cacheTicket.soltar) await cacheTicket.soltar(); throw e; }
+    return ticketCache;
+  };
+
+  // 1 · ¿Ya hay algo de esta orden en este ambiente? Se resuelve PRIMERO, con lo guardado, sin mirar si la orden sigue siendo facturable.
+  const est = primera(await rpc('arca_comprobante_estado', { p_orden: ordenS, p_ambiente: cfg.modo }, pres));
+  if (est.estado === 'autorizado') return { estado: 'emitida', numero: est.numero, cae: est.cae, ptoVenta: est.pto_venta, yaEstaba: true };
+
+  if (est.estado === 'reservado') {
+    const t = primera(await rpc('arca_comprobante_conciliar_tomar', { p_orden: ordenS, p_ambiente: cfg.modo }, pres));
+    if (!t.tomado) return { estado: 'en_curso', mensaje: 'Otro proceso está resolviendo esta factura.' };
+    const c = await A.consultarComprobante({ cfg, ticket: await ticket(), ptoVta: t.pto_venta, numero: t.numero, fetchImpl: f });
+    if (c.existe) {
+      // Se compara TODO lo guardado: una factura de ARCA que no coincide no se adopta (queda para revisar a mano).
+      const igual = Math.round(Number(c.importe) * 100) === Number(t.importe_centavos) && mismoNumero(c.docTipo, t.doc_tipo) && mismoNumero(c.docNro, t.doc_nro);
+      if (!igual) throw new A.ErrorArca('RECONCILIACION_DISTINTA', 'ARCA tiene ese número con otro importe o receptor: se frena para revisarlo a mano.');
+      await rpc('arca_comprobante_autorizar', { p_intento: t.intento, p_numero: t.numero, p_cae: c.cae, p_cae_vto: isoDeAfip(String(c.caeVto)), p_fecha_cbte: isoDeAfip(String(c.fecha)) }, pres);
+      return { estado: 'emitida', numero: t.numero, cae: c.cae, ptoVenta: t.pto_venta, reconciliada: true };
+    }
+    await rpc('arca_comprobante_rechazar', { p_intento: t.intento, p_numero: t.numero, p_error: 'Reserva sin comprobante en ARCA (consultado): número liberado' }, pres);
+  }
+
+  // 2 · Emisión NUEVA. Recién acá se valida la orden de hoy y se piden los datos del comprador.
+  const datos = primera(await rpc('arca_orden_para_facturar', { p_orden: ordenS }, pres));
   const cuentaId = Number(datos.cuenta_id);
   const bruto = Number(datos.bruto_centavos) / 100;
   if (!Number.isSafeInteger(cuentaId) || !(bruto > 0)) throw new A.ErrorArca('ORDEN_INVALIDA', 'La orden no tiene los datos necesarios para facturar.');
-
-  // Documento del comprador: solo se lee acá. Si Mercado Libre no responde bien NO se asume consumidor final.
-  const r = await meliGet(cuentaId, `/orders/${String(orden)}/billing_info`, pres);
-  if (r.status === 404 || r.status === 403) { /* sin datos de facturación */ }
-  else if (!r.ok) throw new A.ErrorArca('MELI_BILLING', `Mercado Libre no devolvió los datos de facturación (HTTP ${r.status}).`);
-  const comprador = r.ok ? leerDocumento(r.json) : null;
-
-  const comprobante = A.armarComprobanteC({ bruto, moneda: 'ARS' }, comprador || {}, { cfg, ahora: ahora() });
-
-  const cacheTicket = cache || cacheEnBase({ rpc, ambiente: cfg.modo, cuit: cfg.cuit, pres, ...(esperaTicketMs ? { esperaMs: esperaTicketMs } : {}) });
-  const ticket = await A.obtenerTicket({ cfg, cache: cacheTicket, fetchImpl, ahora });
-
-  const reservar = async () => {
-    const ultimo = await A.ultimoAutorizado({ cfg, ticket, ptoVta: cfg.ptoVta, fetchImpl });
-    return f(await rpc('arca_comprobante_reservar', {
-      p_orden: String(orden), p_ambiente: cfg.modo, p_pto_venta: cfg.ptoVta, p_ultimo_arca: ultimo,
-      p_importe_centavos: comprobante.importeCentavos, p_doc_tipo: comprobante.docTipo, p_doc_nro: comprobante.docNro,
-    }, pres));
-  };
-  let res = await reservar();
-  if (res.estado === 'autorizado') return { estado: 'emitida', numero: res.numero, cae: res.cae, ptoVenta: cfg.ptoVta, yaEstaba: true };
-
-  // Hay un intento anterior SIN respuesta (res.nuevo === false): se le pregunta a ARCA por ese número antes de emitir nada.
-  if (res.estado === 'reservado' && res.nuevo === false) {
-    const c = await A.consultarComprobante({ cfg, ticket, ptoVta: cfg.ptoVta, numero: res.numero, fetchImpl });
-    if (c.existe) {
-      const mismoImporte = Math.round(Number(c.importe) * 100) === Number(res.importe_centavos);
-      if (!mismoImporte) throw new A.ErrorArca('RECONCILIACION_DISTINTA', 'ARCA tiene ese número con otro importe: se frena para revisarlo a mano.');
-      await rpc('arca_comprobante_autorizar', { p_orden: String(orden), p_cae: c.cae, p_cae_vto: isoDeAfip(String(c.caeVto)), p_fecha_cbte: isoDeAfip(String(c.fecha)) }, pres);
-      return { estado: 'emitida', numero: res.numero, cae: c.cae, ptoVenta: cfg.ptoVta, reconciliada: true };
-    }
-    await rpc('arca_comprobante_rechazar', { p_orden: String(orden), p_error: 'Reserva sin comprobante en ARCA (consultado): número liberado' }, pres);
-    res = await reservar();
+  const billing = await pedirDatosFacturacion({ meliGet, cuentaId, orden: ordenS, billingInfoId: datos.billing_info_id, pres });
+  const comprador = billing ? { docTipo: billing.docTipo, docNro: billing.docNro, ...(billing.condicionIva ? { condicionIva: billing.condicionIva } : {}) } : {};
+  const comprobante = A.armarComprobanteC({ bruto, moneda: 'ARS' }, comprador, { cfg, ahora: ahora() });
+  // Con CUIT/CUIL la condición frente al IVA no se supone: tiene que venir de Mercado Libre.
+  if ((comprobante.docTipo === 80 || comprobante.docTipo === 86) && !(billing && billing.condicionIva)) {
+    throw new A.ErrorArca('CONDICION_IVA_FALTANTE', 'Mercado Libre no informó la condición frente al IVA del comprador (CUIT/CUIL).');
   }
 
-  // Emisión. Si ARCA responde A se anota el CAE; si responde R (rechazo definitivo) se libera el número; ante CUALQUIER duda
-  // (corte, respuesta incompleta) la reserva queda y la próxima vez se consulta a ARCA.
+  const ultimo = await A.ultimoAutorizado({ cfg, ticket: await ticket(), ptoVta: cfg.ptoVta, fetchImpl: f });
+  let res;
+  try {
+    res = primera(await rpc('arca_comprobante_reservar', {
+      p_orden: ordenS, p_ambiente: cfg.modo, p_pto_venta: cfg.ptoVta, p_ultimo_arca: ultimo, p_importe_centavos: comprobante.importeCentavos,
+      p_doc_tipo: comprobante.docTipo, p_doc_nro: comprobante.docNro, p_cond_iva: comprobante.condicionIva,
+    }, pres));
+  } catch (e) {
+    if (e && /COMPROBANTE_YA_EXISTE/.test(String(e.message))) return { estado: 'en_curso', mensaje: 'Otro proceso está emitiendo esta factura.' };
+    throw e;
+  }
+
+  // Emisión. 'A' → se anota el CAE. 'R' con detalle (rechazo definitivo) → se libera el número. Ante CUALQUIER duda (corte, error del
+  // autorizador, respuesta incompleta) la reserva queda y la próxima vez se consulta a ARCA.
   let em;
   try {
-    em = await A.emitirFacturaC({ orden: { bruto, moneda: 'ARS' }, comprador: comprador || {}, numeroReservado: res.numero, env, cache: cacheTicket, fetchImpl, ahora });
+    em = await A.emitirFacturaC({ orden: { bruto, moneda: 'ARS' }, comprador, numeroReservado: res.numero, env, cache: cacheTicket, fetchImpl: f, ahora });
   } catch (e) {
     return { estado: 'pendiente_verificar', numero: res.numero, ptoVenta: cfg.ptoVta, error: textoError(e) };
   }
   if (em.resultado === 'A') {
     try {
-      await rpc('arca_comprobante_autorizar', { p_orden: String(orden), p_cae: em.cae, p_cae_vto: isoDeAfip(em.caeVto), p_fecha_cbte: isoDeAfip(em.comprobante.fecha) }, pres);
+      await rpc('arca_comprobante_autorizar', { p_intento: res.intento, p_numero: res.numero, p_cae: em.cae, p_cae_vto: isoDeAfip(em.caeVto), p_fecha_cbte: isoDeAfip(em.comprobante.fecha) }, presFresco(SEGUNDOS(6)));
     } catch (e) {
       // ARCA ya la emitió: NO se libera nada. Queda reservada y se reconcilia en el próximo intento.
       return { estado: 'pendiente_verificar', numero: res.numero, ptoVenta: cfg.ptoVta, error: 'ARCA emitió la factura pero no se pudo anotar: ' + textoError(e) };
@@ -138,8 +204,8 @@ async function emitirFacturaOrden({ orden, env = process.env, rpc, meliGet, fetc
     return { estado: 'emitida', numero: res.numero, cae: em.cae, ptoVenta: cfg.ptoVta };
   }
   const motivo = (em.errores || []).concat(em.observaciones || []).map((x) => `${x.codigo}: ${x.mensaje}`).join(' | ').slice(0, 280) || 'rechazada';
-  await rpc('arca_comprobante_rechazar', { p_orden: String(orden), p_error: motivo }, pres);
+  await rpc('arca_comprobante_rechazar', { p_intento: res.intento, p_numero: res.numero, p_error: motivo }, presFresco(SEGUNDOS(6)));
   return { estado: 'rechazada', error: motivo };
 }
 
-module.exports = { emitirFacturaOrden, leerDocumento, cacheEnBase, isoDeAfip };
+module.exports = { emitirFacturaOrden, leerDatosFacturacion, leerCondicion, cacheEnBase, isoDeAfip };

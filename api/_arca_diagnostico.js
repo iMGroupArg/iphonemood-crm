@@ -12,6 +12,7 @@
 
 const crypto = require('crypto');
 const A = require('./_arca.js');
+const { cacheEnBase } = require('./_facturacion.js');
 
 const DIA_MS = 86400e3;
 
@@ -36,7 +37,16 @@ function revisarCertificado(cfg, ahora) {
 
 const resumirError = (e) => ({ codigo: e && e.codigo ? String(e.codigo) : 'ERROR', mensaje: e && e.codigo ? String(e.message).slice(0, 240) : 'Falló una consulta a ARCA.' });
 
-async function diagnosticoArca({ env = process.env, fetchImpl = fetch, ahora = () => new Date(), cache } = {}) {
+// Con `rpc` el ticket se guarda y se lee de la base, igual que en la emisión: así el diagnóstico NO deja a la emisión sin ticket (ARCA no da otro
+// mientras hay uno vigente) ni entre instancias distintas. Sin `rpc` (pruebas) se usa la caché que se pase o la de memoria.
+const conTiempo = (fetchImpl, ms) => async (url, op = {}) => {
+  const ctl = new AbortController();
+  const t = setTimeout(() => ctl.abort(), ms);
+  try { return await fetchImpl(url, { ...op, signal: ctl.signal }); } finally { clearTimeout(t); }
+};
+
+async function diagnosticoArca({ env = process.env, fetchImpl: fetchBase = fetch, ahora = () => new Date(), cache, rpc, pres } = {}) {
+  const fetchImpl = conTiempo(fetchBase, 12000);
   const salida = { modo: null, pasos: [], resumen: null };
   const paso = (nombre, ok, detalle) => salida.pasos.push({ paso: nombre, ok, ...detalle });
 
@@ -78,7 +88,9 @@ async function diagnosticoArca({ env = process.env, fetchImpl = fetch, ahora = (
 
   let ticket;
   try {
-    ticket = await A.obtenerTicket({ cfg, fetchImpl, ahora, ...(cache ? { cache } : {}) });
+    const cacheTicket = cache || (rpc ? cacheEnBase({ rpc, ambiente: cfg.modo, cuit: cfg.cuit, pres }) : null);
+    try { ticket = await A.obtenerTicket({ cfg, fetchImpl, ahora, ...(cacheTicket ? { cache: cacheTicket } : {}) }); }
+    catch (e) { if (cacheTicket && cacheTicket.soltar) await cacheTicket.soltar(); throw e; }
     paso('Login con el certificado (WSAA)', true, { ticketVenceEn: new Date(ticket.expira).toISOString() });
   } catch (e) {
     paso('Login con el certificado (WSAA)', false, { ...resumirError(e), ...(e && e.codigo === 'WSAA_TICKET_VIGENTE' ? { ayuda: 'ARCA ya entregó un ticket y no da otro hasta que venza (hasta 12 horas). No es un error de configuración: reintentá más tarde.' } : {}) });

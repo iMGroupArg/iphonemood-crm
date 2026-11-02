@@ -17,6 +17,8 @@ const M = require('../_meli.js');
 const { procesarNotificacion } = require('../_meli_ingesta.js');
 const { sonda, conciliar } = require('../_meli_sonda.js');
 const { diagnosticoArca } = require('../_arca_diagnostico.js');
+const { emitirFacturaOrden } = require('../_facturacion.js');
+const { ErrorArca } = require('../_arca.js');
 const { barrer, barrerTodas } = require('../_meli_barrido.js');
 
 // Debe coincidir con `functions` en vercel.json.
@@ -152,6 +154,21 @@ module.exports = async function handler(req, res) {
     } catch (e) {
       console.error('meli/worker (barrido):', e.codigo || '', e.message);
       res.status(502).json({ error: 'No se pudo buscar ventas' });
+    }
+    return;
+  }
+
+  // Factura electrónica de UNA orden (api/_facturacion.js). El número de orden es lo único que viene de la petición: importe, cuenta y
+  // documento del comprador salen de la base y de Mercado Libre. Una falla de la factura nunca toca la venta: se devuelve el estado.
+  if (req.method === 'POST' && req.body && typeof req.body === 'object' && req.body.accion === 'arca_emitir') {
+    try {
+      const pres = M.presupuestoHasta(t0 + PRESUPUESTO_MS - RESERVA_MS, t0 + PRESUPUESTO_MS);
+      res.status(200).json(await emitirFacturaOrden({ orden: String(req.body.orden || ''), rpc: M.rpc, meliGet: M.meliGet, pres }));
+    } catch (e) {
+      // Los errores de la base llegan como "RPC: <CODIGO>…": se devuelve solo el código. Los de ARCA traen un mensaje pensado para mostrarse.
+      const codigo = e && e.codigo === 'RPC' ? ((String(e.message).match(/\b[A-Z][A-Z_]{5,}\b/) || ['RPC'])[0]) : ((e && e.codigo) || 'ERROR');
+      console.error('meli/worker (arca_emitir):', codigo);
+      res.status(200).json({ estado: 'error', codigo, mensaje: e instanceof ErrorArca ? e.message : null });
     }
     return;
   }

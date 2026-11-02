@@ -276,17 +276,33 @@ BEGIN
   RETURN jsonb_build_object('estado', 'rechazado');
 END $$;
 
+-- Lo único que el servidor necesita saber de la orden para facturar: a qué cuenta pertenece, el bruto exacto en centavos y que
+-- esté pagada. NADA del comprador. Solo órdenes en pesos y pagadas.
+DROP FUNCTION IF EXISTS public.arca_orden_para_facturar(TEXT, TEXT);
+CREATE FUNCTION public.arca_orden_para_facturar(p_secreto TEXT, p_orden TEXT)
+RETURNS JSONB LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp AS $$
+DECLARE o public.meli_ordenes%ROWTYPE;
+BEGIN
+  IF NOT public.meli_secreto_ok(p_secreto) THEN RAISE EXCEPTION 'no autorizado'; END IF;
+  SELECT * INTO o FROM public.meli_ordenes WHERE meli_order_id = p_orden;
+  IF NOT FOUND THEN RAISE EXCEPTION 'ORDEN_INEXISTENTE'; END IF;
+  IF COALESCE(o.moneda, 'ARS') <> 'ARS' THEN RAISE EXCEPTION 'MONEDA_NO_SOPORTADA'; END IF;
+  IF o.estado IS DISTINCT FROM 'paid' THEN RAISE EXCEPTION 'ORDEN_NO_FACTURABLE'; END IF;
+  IF o.bruto IS NULL OR o.bruto <= 0 THEN RAISE EXCEPTION 'BRUTO_DESCONOCIDO'; END IF;
+  RETURN jsonb_build_object('cuenta_id', o.cuenta_id, 'bruto_centavos', round(o.bruto * 100)::BIGINT, 'moneda', 'ARS');
+END $$;
+
 REVOKE ALL ON FUNCTION
   public.arca_ticket_leer(TEXT, TEXT, TEXT), public.arca_ticket_lease_tomar(TEXT, TEXT, TEXT),
   public.arca_ticket_guardar(TEXT, TEXT, TEXT, UUID, TEXT, TEXT, TIMESTAMPTZ), public.arca_ticket_lease_soltar(TEXT, TEXT, TEXT, UUID),
   public.arca_comprobante_reservar(TEXT, TEXT, TEXT, INTEGER, INTEGER, BIGINT, INTEGER, TEXT),
-  public.arca_comprobante_autorizar(TEXT, TEXT, TEXT, DATE, DATE), public.arca_comprobante_rechazar(TEXT, TEXT, TEXT)
+  public.arca_comprobante_autorizar(TEXT, TEXT, TEXT, DATE, DATE), public.arca_comprobante_rechazar(TEXT, TEXT, TEXT), public.arca_orden_para_facturar(TEXT, TEXT)
 FROM PUBLIC, anon, authenticated;
 GRANT EXECUTE ON FUNCTION
   public.arca_ticket_leer(TEXT, TEXT, TEXT), public.arca_ticket_lease_tomar(TEXT, TEXT, TEXT),
   public.arca_ticket_guardar(TEXT, TEXT, TEXT, UUID, TEXT, TEXT, TIMESTAMPTZ), public.arca_ticket_lease_soltar(TEXT, TEXT, TEXT, UUID),
   public.arca_comprobante_reservar(TEXT, TEXT, TEXT, INTEGER, INTEGER, BIGINT, INTEGER, TEXT),
-  public.arca_comprobante_autorizar(TEXT, TEXT, TEXT, DATE, DATE), public.arca_comprobante_rechazar(TEXT, TEXT, TEXT)
+  public.arca_comprobante_autorizar(TEXT, TEXT, TEXT, DATE, DATE), public.arca_comprobante_rechazar(TEXT, TEXT, TEXT), public.arca_orden_para_facturar(TEXT, TEXT)
 TO anon, authenticated;
 
 COMMIT;

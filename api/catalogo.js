@@ -75,6 +75,11 @@ async function financiacion() {
 }
 
 module.exports = async function handler(req, res) {
+  // /api/presupuesto-bot (reescritura en vercel.json) entra por acá: el plan Hobby no deja crear otra función. Va ANTES del resto: tiene su
+  // propia clave (BOT_PRESUPUESTO_KEY, distinta de la del catálogo), su propio límite y sus propios métodos.
+  const _f = (req.query && req.query._f) || (() => { try { return new URL(req.url || '/', 'http://x').searchParams.get('_f'); } catch { return null; } })();
+  if (_f === 'presupuesto') return require('./_presupuesto_bot.js')(req, res);
+
   // El rate limit va PRIMERO, antes de mirar la clave: si fuera al revés, un
   // atacante podría probar claves sin límite.
   if (!limitar(req, res, { max: 60, ventanaMs: 60_000 })) return;
@@ -118,6 +123,14 @@ module.exports = async function handler(req, res) {
     return;
   }
 
+  // Vocabulario EXACTO de los modelos y capacidades que acepta el canje del presupuesto del bot (la misma vista pública que usa la
+  // landing). Si no se puede leer no se rompe el catálogo: el bloque va vacío y el bot lo sabe por `canje_modelos: []`.
+  // Con su PROPIO plazo (3 s): es un dato opcional y no puede dejar colgado el catálogo hasta el límite de la función.
+  const conPlazo = (promesa, ms) => Promise.race([promesa, new Promise((_, no) => setTimeout(() => no(new Error('tiempo agotado')), ms))]);
+  const modelosCanje = conPlazo(supa('/rest/v1/catalogo_modelos_publico?select=modelo,capacidades&order=orden,modelo'), 3000)
+    .then((d) => (Array.isArray(d) ? d.map((m) => ({ modelo: m.modelo, capacidades: Array.isArray(m.capacidades) ? m.capacidades : [] })) : []))
+    .catch((e) => { console.error('catalogo: no se pudo leer el vocabulario del canje —', e.message); return []; });
+
   let cotiz, finan;
   try {
     [cotiz, finan] = await Promise.all([tipoCambio(), financiacion()]);
@@ -133,6 +146,7 @@ module.exports = async function handler(req, res) {
   }
 
   const productos = filas.map(p => ({
+    id:          p.id,           // la unidad: es lo que el bot manda a /api/presupuesto-bot
     nombre:      p.nombre,
     categoria:   p.categoria,
     modelo:      p.modelo,
@@ -155,6 +169,7 @@ module.exports = async function handler(req, res) {
     actualizado: new Date().toISOString(),
     tipoCambio: cotiz,
     financiacion: finan,
+    canje_modelos: await modelosCanje,
     productos,
   });
 };

@@ -1,5 +1,6 @@
 import './supabase-config.js';
 import './state.js';
+import './portapapeles.js';
 import './movil.js';
 import './dashboard.js';
 import './stock.js';
@@ -22,6 +23,9 @@ import './blog.js';
 import './meli.js';
 import './meli-vincular.js';
 import './meli-ordenes.js';
+import './meli-facturas.js';
+import './liberaciones.js';
+import './actividades.js';
 import Bandeja from './bandeja.js';
 
 const App = {
@@ -45,6 +49,7 @@ const App = {
     reportes: { title: 'Reportes', module: Reportes },
     blog: { title: 'Blog', module: Blog },
     meli: { title: 'Mercado Libre', module: Meli },
+    actividades: { title: 'Actividades', module: Actividades },
     panel: { title: 'Panel de control', module: Panel },
   },
 
@@ -128,6 +133,11 @@ const App = {
     document.getElementById('topbar-usdt').textContent = State.refUsdt.toLocaleString('es-AR');
     Panel.cargarMarcaAlInicio();
     this.goTo('dashboard');
+    // Las actividades se leen primero: el aviso de apertura las incluye («tenés N transferencias pendientes»).
+    Promise.resolve(window.Actividades?.cargar?.()).catch(() => {}).then(() => {
+      window.Actividades?.actualizarBadge?.();
+      window.Liberaciones?.avisoAlAbrir?.();
+    });
 
     // Si la página se recargó sola mientras había una venta a medio cargar
     // (por ejemplo, el navegador descargó la pestaña por inactividad), avisamos
@@ -291,6 +301,8 @@ const App = {
       if (pend > 0) { badgeAd.textContent = pend; badgeAd.style.display = 'inline-flex'; }
       else { badgeAd.style.display = 'none'; }
     }
+    window.Liberaciones?.actualizarBadge?.();
+    window.Actividades?.actualizarBadge?.();
   }
 };
 

@@ -116,6 +116,7 @@ const MeliOrdenes = {
     const root = document.getElementById('meli-ordenes-root');
     if (!root) return;
     root.innerHTML = this._vista();
+    window.Liberaciones?.actualizarBadge?.();   // el badge del menú sale de los mismos datos que la tarjeta
   },
 
   _estadoDe(o) {
@@ -139,10 +140,12 @@ const MeliOrdenes = {
         (db/pendientes/meli_esquema_base.sql y meli_ventas_migration.sql).</div>`;
     }
     const todas = State.meliOrdenes || [];
+    const MF = window.MeliFacturas;
+    const facturables = MF && MF._soloSinFactura && !State.meliFacturasError ? todas.filter(o => MF.sinFactura(o)) : todas;
     const pend = State.meliPendienteLiberar();
     const FILTROS = { pendientes: 'Para procesar', acreditar: 'Para acreditar', revision: 'En revisión', cerradas: 'Cerradas', todas: 'Todas' };
     const cuenta = k => k === 'todas' ? todas.length : todas.filter(o => this._estadoDe(o).clave === k).length;
-    const lista = (this._filtro === 'todas' ? todas : todas.filter(o => this._estadoDe(o).clave === this._filtro));
+    const lista = (this._filtro === 'todas' ? facturables : facturables.filter(o => this._estadoDe(o).clave === this._filtro));
     const visibles = lista.slice(0, this._limite);
 
     const tabs = Object.entries(FILTROS).map(([k, t]) =>
@@ -219,6 +222,7 @@ const MeliOrdenes = {
           </div>
           ${o.cerradaManual ? `<div style="font-size:12px;color:var(--text-secondary);margin-top:6px"><i class="ti ti-lock"></i> ${o.cerradaManual.motivo === 'ya_cargada' ? 'Ya cargada a mano' : 'Descartada'} por ${e(o.cerradaManual.por || '—')} el ${this._dia(o.cerradaManual.en)}${o.cerradaManual.ventaId ? ` · venta #${e(o.cerradaManual.ventaId)}` : ''}${o.cerradaManual.nota ? ` · ${e(o.cerradaManual.nota)}` : ''}. No descuenta stock ni mueve plata.</div>` : ''}
           ${o.revisar ? `<div style="font-size:12px;color:var(--red);margin-top:6px"><i class="ti ti-alert-triangle"></i> ${e(o.motivoRevisar || 'Hay que revisar esta orden')}</div>` : ''}
+          ${window.MeliFacturas ? window.MeliFacturas.tarjeta(o) : ''}
           ${acciones ? `<div class="mo-acc" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:10px">${acciones}</div>` : ''}
         </div>`;
     }).join('');
@@ -228,6 +232,7 @@ const MeliOrdenes = {
         <h3 style="font-size:13px;font-weight:600;color:var(--text-secondary);text-transform:uppercase;letter-spacing:.4px;flex:1">Ventas de Mercado Libre</h3>
         <button class="btn btn-sm" onclick="MeliOrdenes.cargar()"><i class="ti ti-refresh"></i> Actualizar</button>
       </div>
+      ${window.Liberaciones ? window.Liberaciones.tarjetaHtml() : ''}
       <div class="card mo-liberar" style="margin-bottom:10px;display:flex;gap:24px;flex-wrap:wrap">
         <div><div style="font-size:22px;font-weight:600;color:var(--amber)">${this._ars(pend.ars)}</div>
           <div style="font-size:11.5px;color:var(--text-secondary)">a liberar (${pend.ordenes} orden${pend.ordenes === 1 ? '' : 'es'}${pend.sinDato ? `, ${pend.sinDato} sin importe confirmado` : ''})</div></div>
@@ -235,6 +240,7 @@ const MeliOrdenes = {
           Plata ya vendida que Mercado Libre todavía no depositó. No está en las cajas hasta que confirmes la acreditación.
           «Procesar» descuenta el stock y crea la venta; «Confirmar acreditación» mueve la plata a la caja cuando Mercado Libre la libera.</div>
       </div>
+      ${window.MeliFacturas ? window.MeliFacturas.cabecera(todas) : ''}
       <div class="mo-tabs" style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px">${tabs}</div>
       ${tarjetas || '<div class="card" style="font-size:13px;color:var(--text-secondary)">No hay órdenes en esta vista.</div>'}
       ${lista.length > visibles.length ? `<button class="btn btn-sm" onclick="MeliOrdenes.verMas()">Ver más (${lista.length - visibles.length} más)</button>` : ''}`;
@@ -267,6 +273,7 @@ const MeliOrdenes = {
   async _recargar() {
     // Stock, ventas y cajas cambiaron en la base: se vuelve a leer todo.
     await DB.cargarTodo();
+    if (window.Actividades?.cargar) await window.Actividades.cargar();   // acreditar crea una actividad: el badge tiene que verla
     this.pintar();
     if (typeof App !== 'undefined' && App.actualizarBadges) App.actualizarBadges();
   },

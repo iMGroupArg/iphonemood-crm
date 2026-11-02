@@ -2899,7 +2899,11 @@ function renderPresupuesto(d) {
       </div>
     </div>`;
 
-  const promoHtml = promoHeroHtml(cfg, listaARS);
+  // La promo del presupuesto vale lo que vale el presupuesto: su vigencia es la fecha de vencimiento, no el texto
+  // genérico de la ficha ("solo por hoy", "jueves a sábado"), que contradeciría los valores congelados.
+  const venceTxt = d.vence_en ? new Date(d.vence_en).toLocaleDateString('es-AR', { day: 'numeric', month: 'long' }) : '';
+  const cfgPromo = cfg.promo ? { ...cfg, promo: { ...cfg.promo, vigencia: venceTxt ? `Válida hasta el ${venceTxt}` : '' } } : cfg;
+  const promoHtml = promoHeroHtml(cfgPromo, listaARS);
 
   const cOtros = cuotasDe(cfg.otros, listaARS);
   const claseBadge = n => /off/i.test(n) ? 'off' : /sin inter/i.test(n) ? 'cero' : 'mas';
@@ -2924,8 +2928,9 @@ function renderPresupuesto(d) {
 
   // ── aviso legal + validez ──
   const avisoCanje = ti ? `<div class="pres-aviso">
-      ⚠️ <strong>Sobre la cotización de tu equipo:</strong> está sujeta al estado estético y al
-      funcionamiento. Trabajamos solo con usados en excelente estado, así que si al revisarlo
+      ⚠️ <strong>Sobre la cotización de tu equipo:</strong> Es un valor estimado: se confirma,
+      o se ajusta, cuando nuestro equipo revisa tu equipo en persona. Está sujeta al estado
+      estético y al funcionamiento. Trabajamos solo con usados en excelente estado, así que si al revisarlo
       aparecen fallas, golpes o rayaduras, el equipo se recotiza o se indica que no se puede
       tomar como parte de pago.
     </div>` : '';

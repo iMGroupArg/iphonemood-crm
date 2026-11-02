@@ -168,6 +168,11 @@ const Cajas = {
     activo_fijo:'Activo fijo', ajuste:'Ajuste manual', otro:'Otro'
   },
 
+  // El reinicio del control de cuadre deja un asiento de ajuste por caja (referencia 'reinicio-control'): iguala el libro al saldo,
+  // pero NO es plata que entró ni salió en el período: no suma a Entradas, Salidas ni Neto, ni se exporta como entrada o salida.
+  esReinicioControl(m) { return !!m && m.tipo === 'ajuste' && m.referencia === 'reinicio-control'; },
+  conceptoLibro(m) { return this.esReinicioControl(m) ? 'Reinicio del control (no es un movimiento de plata)' : (this.TIPOS_LIBRO[m.tipo] || m.tipo); },
+
   exportarLibroExcel() {
     if (typeof XLSX === 'undefined') { toast('No se pudo cargar el módulo de exportación. Revisá tu conexión.'); return; }
     const filas = this._libro || [];
@@ -180,11 +185,11 @@ const Cajas = {
         'Hora':       d.toLocaleTimeString('es-AR', { hour:'2-digit', minute:'2-digit' }),
         'Persona':    m.persona,
         'Bolsillo':   m.bolsillo,
-        'Concepto':   this.TIPOS_LIBRO[m.tipo] || m.tipo,
+        'Concepto':   this.conceptoLibro(m),
         'Referencia': m.referencia || '',
         'Detalle':    m.descripcion || '',
-        'Entrada':    Number(m.delta) > 0 ? Number(m.delta) : '',
-        'Salida':     Number(m.delta) < 0 ? Math.abs(Number(m.delta)) : '',
+        'Entrada':    !this.esReinicioControl(m) && Number(m.delta) > 0 ? Number(m.delta) : '',
+        'Salida':     !this.esReinicioControl(m) && Number(m.delta) < 0 ? Math.abs(Number(m.delta)) : '',
         'Movimiento': Number(m.delta),
         'Saldo':      m.saldo_post != null ? Number(m.saldo_post) : '',
         'Quién':      m.creado_por || '',
@@ -213,8 +218,9 @@ const Cajas = {
     const sel = 'font-size:12px;padding:6px 8px;border:1px solid var(--border-strong);border-radius:8px;background:var(--bg);color:var(--text)';
     const btnR = (clave, txt) => `<button class="btn btn-sm" onclick="Cajas.setRangoLibro('${clave}')">${txt}</button>`;
 
-    const entradas = filas.filter(m => Number(m.delta) > 0).reduce((a,m)=>a+Number(m.delta),0);
-    const salidas  = filas.filter(m => Number(m.delta) < 0).reduce((a,m)=>a+Math.abs(Number(m.delta)),0);
+    const flujo = filas.filter(m => !this.esReinicioControl(m));
+    const entradas = flujo.filter(m => Number(m.delta) > 0).reduce((a,m)=>a+Number(m.delta),0);
+    const salidas  = flujo.filter(m => Number(m.delta) < 0).reduce((a,m)=>a+Math.abs(Number(m.delta)),0);
 
     const barra = `
       <div class="card" style="margin-bottom:12px">
@@ -275,7 +281,7 @@ const Cajas = {
             return `<tr style="border-top:1px solid var(--border)">
               <td style="padding:8px 12px;white-space:nowrap;color:var(--text-secondary)">${fecha}</td>
               <td style="padding:8px 12px;white-space:nowrap"><b>${m.persona}</b><br><span style="font-size:11px;color:var(--text-secondary)">${m.bolsillo}</span></td>
-              <td style="padding:8px 12px">${TIPO[m.tipo] || m.tipo}${ref}
+              <td style="padding:8px 12px">${this.conceptoLibro(m)}${ref}
                 ${m.descripcion ? `<br><span style="font-size:11px;color:var(--text-secondary)">${m.descripcion}</span>` : ''}</td>
               <td style="padding:8px 12px;text-align:right;white-space:nowrap;font-weight:700;color:${pos?'var(--green)':'var(--red)'}">${pos?'+':'−'}${fmt(Math.abs(m.delta))}</td>
               <td style="padding:8px 12px;text-align:right;white-space:nowrap;color:var(--text-secondary)">${m.saldo_post != null ? fmt(m.saldo_post) : '—'}</td>

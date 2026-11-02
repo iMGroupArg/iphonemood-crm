@@ -479,9 +479,10 @@ const Turnos = {
     // Ruta absoluta: el CRM ahora se sirve en /login, así que derivar el
     // link del pathname daba /loginturnos.html.
     const url = window.location.origin + '/turnos.html';
-    navigator.clipboard.writeText(url).then(() => toast('🔗 Link copiado al portapapeles')).catch(() => {
-      prompt('Copiá este link:', url);
-    });
+    return window.Portapapeles
+      ? window.Portapapeles.copiarOMostrar({ titulo: 'Link de turnos', url,
+        aviso: '🔗 Link copiado al portapapeles' })
+      : toast(State.esc('Copiá este link: ' + url));
   },
 
   _fmtFecha(iso) {

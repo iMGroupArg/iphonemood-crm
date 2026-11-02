@@ -233,6 +233,8 @@ const DB = {
       id: p.id, loteId: p.lote_id, tipo: p.tipo,
       montoUsd: Number(p.monto_usd), montoUsdt: Number(p.monto_usdt),
       comisionPct: Number(p.comision_pct), comisionUsd: Number(p.comision_usd),
+      // Conversión con sobrante (script 14): NULL = fila vieja, se lee como siempre. Un 0 es un valor.
+      usdtLote: p.usdt_lote == null ? null : Number(p.usdt_lote), comisionLoteUsd: p.comision_lote_usd == null ? null : Number(p.comision_lote_usd),
       moneda: p.moneda || 'USD', persona: p.persona || '', bolsillo: p.bolsillo || '',
       personaDest: p.persona_dest || '', bolsilloDestino: p.bolsillo_dest || '',
       fecha: p.fecha || '', notas: p.notas || '',
@@ -303,6 +305,7 @@ const DB = {
 
   // Órdenes de Mercado Libre para la pantalla y para "pendiente de liberar".
   // Nunca tira: ante cualquier error deja la lista vacía y marca `State.meliError`.
+  marcarFactura(args) { return supa.rpc('meli_factura_marcar', args); },
   async cargarMeliOrdenes() {
     State.meliOrdenes = []; State.meliError = false;
     try {
@@ -367,7 +370,7 @@ const DB = {
     } catch (e) {
       console.warn('No se pudieron leer las órdenes de Mercado Libre:', e);
       State.meliOrdenes = []; State.meliError = true;
-    }
+    } finally { if (window.MeliFacturas) await window.MeliFacturas.cargar(supa); }
   },
 
   // Agrega un valor al catálogo de un modelo y lo persiste. Devuelve true solo
@@ -535,8 +538,17 @@ const DB = {
 
   // ─── Presupuestos con canje ───
   async listarPresupuestos() {
-    const { data } = await supa.from('presupuestos').select('*').order('creado_en', { ascending: false }).limit(100);
-    return data || [];
+    // Los presupuestos de PRUEBA del bot (origen 'bot_prueba') no van en la lista: se excluyen ANTES del límite de 100 para que no
+    // desplacen a los reales. Si todavía no se corrió el script 13 (la columna no existe), se sigue sin el filtro.
+    let r = await supa.from('presupuestos').select('*').neq('origen', 'bot_prueba').order('creado_en', { ascending: false }).limit(100);
+    if (r.error && (r.error.code === '42703' || /origen/i.test(String(r.error.message || '')))) {
+      r = await supa.from('presupuestos').select('*').order('creado_en', { ascending: false }).limit(100);
+    }
+    return r.data || [];
+  },
+  // Borra los teléfonos / usuarios de contacto vencidos (180 días). Silencioso: si todavía no se corrió el script 13, no hace nada.
+  async limpiarContactosPresupuestos() {
+    try { await supa.rpc('presupuestos_limpiar_contactos'); } catch { /* sin el script 13 */ }
   },
   async crearPresupuesto(fila) {
     return await supa.from('presupuestos').insert(fila);
@@ -971,9 +983,16 @@ const DB = {
   // sus movimientos. Si difieren, algo se escribió mal y hay que revisarlo.
   // Devuelve { ok, sinLibro, diferencias: [{persona, bolsillo, saldo, suma, dif}] }
   async cuadreCajas() {
-    const { data, error } = await supa.from('caja_ledger').select('persona,bolsillo,delta');
-    if (error) return { ok: false, sinLibro: true, diferencias: [] };
-    if (!data || !data.length) return { ok: true, sinLibro: true, diferencias: [] };
+    // El libro se lee COMPLETO y por páginas: el servicio corta cada respuesta en 1.000 filas, y sumar solo las primeras
+    // 1.000 hace parecer que "no cuadra" una caja sana. Se ordena por id para que las páginas no se repitan ni se salteen.
+    const data = [];
+    for (let desde = 0; ; desde += 1000) {
+      const { data: pagina, error } = await supa.from('caja_ledger').select('persona,bolsillo,delta').order('id', { ascending: true }).range(desde, desde + 999);
+      if (error) return { ok: false, sinLibro: true, diferencias: [] };
+      data.push(...(pagina || []));
+      if (!pagina || pagina.length < 1000) break;
+    }
+    if (!data.length) return { ok: true, sinLibro: true, diferencias: [] };
 
     const suma = {};
     data.forEach(m => {
@@ -1194,15 +1213,18 @@ const DB = {
     await supa.from('ventas').update({ estado }).eq('id', ventaId);
   },
 
+  // Devuelve el link de seguimiento que la base genera al crear la reparación (o null si no se pudo leer): la pantalla lo
+  // necesita ya, sin esperar a recargar.
   async crearReparacion(o) {
-    await supa.from('reparaciones').insert({
+    const { data } = await supa.from('reparaciones').insert({
       id: o.id, cliente: o.cliente, telefono: o.tel, equipo: o.equipo, falla: o.falla,
       clave_desbloqueo: o.clave, estado: o.estado, diagnostico: o.diagnostico,
       presupuesto_aprobado: o.presupuestoAprobado, tecnico: o.tecnico,
       custodio_id: this.personaId(o.custodio) || null, costo_mano_obra: o.costoMO,
       precio_final: o.precioFinal, notas: o.notas, equipo_devuelto: o.equipoDevuelto,
       condicion_ingreso: o.condicionIngreso || {},
-    });
+    }).select('token_seguimiento').single();
+    return data?.token_seguimiento || null;
   },
   async actualizarReparacion(o) {
     const { error } = await supa.from('reparaciones').update({
@@ -1404,16 +1426,30 @@ const DB = {
     return loteObj;
   },
 
+  // ¿Existen en la base las columnas de la conversión con sobrante (script 14)? true / false / null
+  // (null = no se pudo saber: red, permisos). Solo se recuerda el true; un false se vuelve a mirar
+  // (Franco puede correr el script sin recargar la página).
+  async columnasConversionListas() {
+    if (this._colsConversion === true) return true;
+    try {
+      const { error } = await supa.from('lote_pagos').select('usdt_lote,comision_lote_usd').limit(1);
+      if (!error) { this._colsConversion = true; return true; }
+      return this._esErrorDeColumnaFaltante(error) ? false : null;
+    } catch (e) { return null; }
+  },
+
   async guardarLotePago(loteId, p) {
+    const conLote = p.usdtLote != null && p.comisionLoteUsd != null;   // las dos o ninguna (la base lo exige)
     const { data: row } = await supa.from('lote_pagos').insert({
       lote_id: loteId, tipo: p.tipo, monto_usd: p.montoUsd, monto_usdt: p.montoUsdt || 0,
       comision_pct: p.comisionPct || 0, comision_usd: p.comisionUsd || 0,
+      ...(conLote ? { usdt_lote: p.usdtLote, comision_lote_usd: p.comisionLoteUsd } : {}),
       moneda: p.moneda || 'USD', persona: p.persona || '', bolsillo: p.bolsillo || '',
       persona_dest: p.personaDest || '', bolsillo_dest: p.bolsilloDestino || '',
       fecha: p.fecha || new Date().toISOString().slice(0, 10), notas: p.notas || '',
     }).select().single();
     if (!row) return false;
-    State.lotePagos.push({ id: row.id, loteId, tipo: p.tipo, montoUsd: Number(p.montoUsd), montoUsdt: Number(p.montoUsdt || 0), comisionPct: Number(p.comisionPct || 0), comisionUsd: Number(p.comisionUsd || 0), moneda: p.moneda || 'USD', persona: p.persona || '', bolsillo: p.bolsillo || '', personaDest: p.personaDest || '', bolsilloDestino: p.bolsilloDestino || '', fecha: p.fecha || '', notas: p.notas || '' });
+    State.lotePagos.push({ id: row.id, loteId, tipo: p.tipo, montoUsd: Number(p.montoUsd), montoUsdt: Number(p.montoUsdt || 0), comisionPct: Number(p.comisionPct || 0), comisionUsd: Number(p.comisionUsd || 0), usdtLote: conLote ? Number(p.usdtLote) : null, comisionLoteUsd: conLote ? Number(p.comisionLoteUsd) : null, moneda: p.moneda || 'USD', persona: p.persona || '', bolsillo: p.bolsillo || '', personaDest: p.personaDest || '', bolsilloDestino: p.bolsilloDestino || '', fecha: p.fecha || '', notas: p.notas || '' });
     return true;
   },
 

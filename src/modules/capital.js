@@ -62,10 +62,18 @@ const Capital = {
 
     // Pedidos en tránsito: lotes pagados pero aún no recibidos
     // El dinero ya salió de las cajas, pero el stock no entró todavía
-    const pedidosEnTransito = (State.lotePagos || []).reduce((s, p) => {
-      const lote = (State.lotesCompra || []).find(l => l.id === p.loteId);
-      if (!lote || lote.estado === 'recibido') return s;
-      return s + (p.montoUsd || 0);
+    // Por LOTE (no sumando filas sueltas): lo que ya salió hacia ese pedido = pagos al proveedor
+    // + saldo a favor aplicado − devoluciones + envíos/costos + comisión de la conversión
+    // (el mismo costo con el que después entra la mercadería al stock, así Capital no «salta» al
+    // recibirla). Quedan AFUERA: las filas de «conversión» (solo cambiaron de caja: esa plata ya
+    // está en las cajas USDT), los lotes cancelados (devolvieron la plata pero conservan las
+    // filas) y lo ya guardado como saldo a favor (tiene su propia línea más abajo).
+    const pedidosEnTransito = !window.Proveedores ? 0 : (State.lotesCompra || []).reduce((s, l) => {
+      if (['recibido', 'cancelado'].includes(l.estado)) return s;
+      const c = window.Proveedores._cuentaLote(l.id);
+      const creditoGenerado = (State.proveedorCreditos || [])
+        .filter(x => x.loteId === l.id && x.tipo === 'generado').reduce((a, x) => a + (x.montoUsd || 0), 0);
+      return s + Math.max(0, c.pagadoNeto + c.envio + c.comision - creditoGenerado);
     }, 0);
 
     // Activos fijos

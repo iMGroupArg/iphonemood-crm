@@ -541,11 +541,11 @@ const Reparaciones = {
     // CRM ya no es index.html sino /login.
     const base = location.origin;
     const link = `${base}/seguimiento.html?t=${o.tokenSeguimiento}`;
-    navigator.clipboard.writeText(link).then(() => {
-      toast('Link copiado al portapapeles. Ya podés enviárselo al cliente.');
-    }).catch(() => {
-      prompt('Copiá este link y enviáselo al cliente:', link);
-    });
+    return window.Portapapeles
+      ? window.Portapapeles.copiarOMostrar({ titulo: 'Seguimiento de reparación', url: link,
+        nota: 'Copiá este link y enviáselo al cliente:',
+        aviso: 'Link copiado al portapapeles. Ya podés enviárselo al cliente.' })
+      : toast(State.esc('Copiá este link y enviáselo al cliente: ' + link));
   },
 
   async _cargarMsgsSeguimiento() {
@@ -820,7 +820,7 @@ const Reparaciones = {
       notas: '',
       equipoDevuelto: false
     };
-    await DB.crearReparacion(o);
+    o.tokenSeguimiento = await DB.crearReparacion(o) || null;   // el link nace con la reparación: sin esto la tarjeta decía «aún no tiene link» hasta recargar
     Sheets.reparacion(o);
     State.reparaciones.unshift(o);
     this.currentId = id;

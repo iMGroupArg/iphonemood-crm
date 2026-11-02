@@ -1021,6 +1021,7 @@ footer { background: #1D1D1F; color: rgba(255,255,255,.5); padding: 24px 20px; f
 /* Versión blanca: sobre el fondo #1D1D1F del pie, la negra sería invisible. */
 .footer-logo { width: 34px; height: 34px; object-fit: contain; display: block; margin: 0 auto 10px; opacity: .9; }
 footer a { color: rgba(255,255,255,.5); text-decoration: none; }
+@media (max-width: 600px) { footer { padding-bottom: 88px; } }   /* en el celular, los botones flotantes (Plan canje y WhatsApp) no tapan el pie */
 footer strong { color: rgba(255,255,255,.85); }
 
 /* ─── WA FLOAT ─── */
@@ -2579,7 +2580,8 @@ body:has(#modal-overlay.open) .wa-float { display: none; }
   <img class="footer-logo" src="assets/logo-mark-blanco-512.png" alt="" width="34" height="34">
   <strong>iPhone Mood</strong><br>
   Granadero Baigorria · Solo con turno previo<br>
-  <a href="https://wa.me/5493416907597">+54 9 3416 90-7597</a>
+  <a href="https://wa.me/5493416907597">+54 9 3416 90-7597</a><br>
+  <a href="/privacidad.html" style="font-size:11px">Política de privacidad</a>
 </footer>
 
 <!-- WA FLOAT -->

@@ -202,6 +202,7 @@ const MeliOrdenes = {
       }
       if (o.procesada && !o.revertidaEn) {
         acciones += `<button class="btn btn-sm" onclick="MeliOrdenes.facturar(${o.id}, this)" title="Emite o verifica la factura electrónica de ARCA de esta venta (no duplica)"><i class="ti ti-file-invoice"></i> Factura</button>`;
+        acciones += `<button class="btn btn-sm" onclick="MeliOrdenes.notaCredito(${o.id}, this)" title="Anula por su total la factura de esta venta (devolución, cancelación o error). Es definitiva"><i class="ti ti-file-minus"></i> Nota de crédito</button>`;
       }
       if (o.procesada && !o.revertidaEn) {
         acciones += `<button class="btn btn-sm" style="color:var(--red)" onclick="MeliOrdenes.revertir(${o.id}, this)"><i class="ti ti-arrow-back-up"></i> Revertir</button>`;
@@ -346,8 +347,40 @@ const MeliOrdenes = {
     CONDICION_IVA_DESCONOCIDA: 'Mercado Libre informó una condición fiscal que el sistema no reconoce: avisá para revisarlo.',
     FACTURA_MANUAL_YA_REGISTRADA: 'Esta orden ya tiene una factura cargada a mano: no se emite otra.',
     ORDEN_MARCADA_NO_CORRESPONDE: 'Esta orden está marcada como «no corresponde facturar». Reabrila en Facturas si hay que emitirla.',
+    FACTURA_NO_AUTORIZADA: 'Esta venta no tiene una factura autorizada para anular.',
+    PUNTO_DE_VENTA_DISTINTO: 'La factura es de otro punto de venta que el configurado: no se emite la nota de crédito.',
+    MOTIVO_INVALIDO: 'Elegí un motivo de la lista.',
     WSAA_TICKET_EN_CURSO: 'Se está iniciando sesión en ARCA. Reintentá en unos segundos.',
     RECONCILIACION_DISTINTA: 'ARCA tiene ese número con otro importe: avisá para revisarlo a mano.',
+  },
+  // Nota de crédito C: anula por su TOTAL la factura autorizada de la venta. Es definitiva: pide motivo y una confirmación. Idempotente.
+  MOTIVOS_NC: { 1: ['devolucion', 'Devolución'], 2: ['cancelacion', 'Cancelación'], 3: ['error_de_facturacion', 'Error de facturación'] },
+  async notaCredito(id, btn) {
+    const o = (State.meliOrdenes || []).find(x => x.id === id);
+    if (!o || !o.orderId) return;
+    const eleccion = prompt('Nota de crédito por el TOTAL de la factura de esta venta. Es definitiva: queda registrada ante ARCA.\n\nMotivo:\n1 = Devolución\n2 = Cancelación\n3 = Error de facturación\n\nEscribí 1, 2 o 3 (o cancelá).');
+    const m = this.MOTIVOS_NC[String(eleccion || '').trim()];
+    if (!m) { if (eleccion !== null) toast('Elegí 1, 2 o 3.'); return; }
+    if (!confirm(`¿Emitir la nota de crédito (${m[1]}) que anula la factura de la orden ${o.orderId}? No se puede deshacer.`)) return;
+    if (btn) btn.disabled = true;
+    try {
+      const token = await window.Meli?._token?.();
+      const r = await fetch('/api/meli/worker', {
+        method: 'POST', headers: { 'x-crm-token': token || '', 'Content-Type': 'application/json' },
+        body: JSON.stringify({ accion: 'arca_nc', orden: String(o.orderId), motivo: m[0] }),
+      });
+      let j = null;
+      try { j = await r.json(); } catch { /* sin cuerpo */ }
+      if (!r.ok || !j) { toast('No se pudo consultar la nota de crédito (HTTP ' + r.status + '). Reintentá con «Nota de crédito»: no se duplica.'); return; }
+      if (j.estado === 'simulacion') toast('La facturación está en modo simulación: no se emitió nada.');
+      else if (j.estado === 'emitida') toast(`Nota de crédito ${j.yaEstaba ? 'ya emitida' : 'emitida'}: punto de venta ${j.ptoVenta}, N.º ${j.numero}.`);
+      else if (j.estado === 'pendiente_verificar') toast('La nota de crédito quedó esperando confirmación de ARCA. Tocá «Nota de crédito» para verificar (no se duplica).');
+      else if (j.estado === 'en_curso') toast('Otro proceso está resolviendo esta nota de crédito. Esperá un minuto y reintentá (no se duplica).');
+      else if (j.estado === 'rechazada') toast('ARCA rechazó la nota de crédito: ' + (j.error || 'sin detalle') + '. Podés reintentar.');
+      else toast(this._MSG_FACTURA[j.codigo] || j.mensaje || 'No se pudo emitir la nota de crédito.');
+    } catch {
+      toast('No se pudo emitir la nota de crédito. Reintentá: no se duplica.');
+    } finally { if (btn) btn.disabled = false; }
   },
   async facturar(id, btn, auto) {
     const o = (State.meliOrdenes || []).find(x => x.id === id);

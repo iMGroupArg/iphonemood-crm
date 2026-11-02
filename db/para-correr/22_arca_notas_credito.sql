@@ -39,6 +39,7 @@ CREATE TABLE IF NOT EXISTS public.meli_notas_credito (
   cond_iva        INTEGER     NOT NULL CHECK (cond_iva BETWEEN 1 AND 99),
   motivo          TEXT        NOT NULL CHECK (motivo IN ('devolucion', 'cancelacion', 'error_de_facturacion')),
   creado_por      TEXT        NOT NULL,
+  ultimo_solicitante TEXT,                                -- quién pidió el último intento (creado_por conserva a quien la pidió primero)
   cae             TEXT        CHECK (cae ~ '^[0-9]{10,20}$'),
   cae_vto         DATE,
   fecha_cbte      DATE,
@@ -82,7 +83,7 @@ DROP POLICY IF EXISTS meli_nc_leer ON public.meli_notas_credito;
 CREATE POLICY meli_nc_leer ON public.meli_notas_credito FOR SELECT TO authenticated USING (public.is_authorized_user());
 REVOKE ALL ON TABLE public.meli_notas_credito FROM PUBLIC, anon, authenticated;
 -- El CRM lee la nota SIN el documento del receptor ni el identificador de intento (que es el candado).
-GRANT SELECT (id, comprobante_id, orden_id, ambiente, pto_venta, numero, estado, importe_centavos, motivo, creado_por, cae, cae_vto, fecha_cbte, intentos, creado_en, actualizado_en)
+GRANT SELECT (id, comprobante_id, orden_id, ambiente, pto_venta, numero, estado, importe_centavos, motivo, creado_por, ultimo_solicitante, cae, cae_vto, fecha_cbte, intentos, creado_en, actualizado_en)
   ON TABLE public.meli_notas_credito TO authenticated;
 REVOKE ALL ON FUNCTION public.arca__nc_proteger() FROM PUBLIC, anon, authenticated;
 REVOKE ALL ON SEQUENCE public.meli_notas_credito_id_seq FROM PUBLIC, anon, authenticated;
@@ -154,10 +155,10 @@ BEGIN
   IF v_num > 99999999 THEN RAISE EXCEPTION 'NUMERACION_AGOTADA'; END IF;
 
   IF v_nuevo THEN
-    INSERT INTO public.meli_notas_credito (comprobante_id, orden_id, ambiente, pto_venta, numero, estado, importe_centavos, doc_tipo, doc_nro, cond_iva, motivo, creado_por, intento_id, trabajo_hasta)
-    VALUES (f.id, p_orden, p_ambiente, f.pto_venta, v_num, 'reservado', f.importe_centavos, f.doc_tipo, f.doc_nro, f.cond_iva, p_motivo, left(btrim(p_usuario), 200), v_intento, now() + interval '2 minutes');
+    INSERT INTO public.meli_notas_credito (comprobante_id, orden_id, ambiente, pto_venta, numero, estado, importe_centavos, doc_tipo, doc_nro, cond_iva, motivo, creado_por, ultimo_solicitante, intento_id, trabajo_hasta)
+    VALUES (f.id, p_orden, p_ambiente, f.pto_venta, v_num, 'reservado', f.importe_centavos, f.doc_tipo, f.doc_nro, f.cond_iva, p_motivo, left(btrim(p_usuario), 200), left(btrim(p_usuario), 200), v_intento, now() + interval '2 minutes');
   ELSE
-    UPDATE public.meli_notas_credito SET estado = 'reservado', numero = v_num, motivo = p_motivo, intento_id = v_intento, trabajo_hasta = now() + interval '2 minutes',
+    UPDATE public.meli_notas_credito SET estado = 'reservado', numero = v_num, motivo = p_motivo, ultimo_solicitante = left(btrim(p_usuario), 200), intento_id = v_intento, trabajo_hasta = now() + interval '2 minutes',
            intentos = intentos + 1, ultimo_error = NULL WHERE id = n.id;
   END IF;
   RETURN jsonb_build_object('estado', 'reservado', 'intento', v_intento, 'numero', v_num, 'pto_venta', f.pto_venta, 'importe_centavos', f.importe_centavos,

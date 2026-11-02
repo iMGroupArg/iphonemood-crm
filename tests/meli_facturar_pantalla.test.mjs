@@ -8,11 +8,11 @@ let n = 0, fallos = 0;
 async function caso(nombre, fn) { n++; try { await fn(); console.log(`ok ${n} - ${nombre}`); } catch (e) { fallos++; console.log(`NO OK ${n} - ${nombre}\n   ${e && e.message}`); } }
 
 const src = fs.readFileSync(new URL('../src/modules/meli-ordenes.js', import.meta.url), 'utf8');
-function cargar({ respuesta, ordenes = [{ id: 5, orderId: '2000000000005' }] }) {
+function cargar({ respuesta, ordenes = [{ id: 5, orderId: '2000000000005' }], eleccion = '1', confirma = true }) {
   const toasts = [], llamadas = [];
   const ctx = {
     State: { esc: (s) => String(s), meliOrdenes: ordenes }, toast: (t) => toasts.push(t), console,
-    window: { Meli: { _token: async () => 'tok' } }, document: { getElementById: () => null }, supa: {}, DB: {}, App: {},
+    window: { Meli: { _token: async () => 'tok' } }, prompt: () => eleccion, confirm: () => confirma, document: { getElementById: () => null }, supa: {}, DB: {}, App: {},
     fetch: async (url, op) => { llamadas.push({ url, body: JSON.parse(op.body), headers: op.headers }); const r = respuesta; if (r instanceof Error) throw r; return { ok: r.ok !== false, status: r.status || 200, json: async () => r.json }; },
   };
   ctx.window.window = ctx.window;
@@ -61,5 +61,24 @@ await caso('Sin conexión o HTTP malo: la venta queda bien y se puede reintentar
 });
 await caso('Orden desconocida: no llama al servidor', async () => {
   const { M, llamadas } = cargar({ respuesta: { json: {} }, ordenes: [] }); await M.facturar(5); assert.equal(llamadas.length, 0);
+});
+await caso('Nota de crédito: manda solo orden y motivo de la lista; avisa el número', async () => {
+  const { M, toasts, llamadas } = cargar({ respuesta: { json: { estado: 'emitida', numero: 3, ptoVenta: 1 } }, eleccion: '2' });
+  await M.notaCredito(5);
+  assert.deepEqual(llamadas[0].body, { accion: 'arca_nc', orden: '2000000000005', motivo: 'cancelacion' });
+  assert.match(toasts[0], /Nota de crédito emitida: punto de venta 1, N\.º 3/);
+});
+await caso('Nota de crédito: sin motivo válido o sin confirmar NO llama al servidor', async () => {
+  const a = cargar({ respuesta: { json: {} }, eleccion: '9' }); await a.M.notaCredito(5); assert.equal(a.llamadas.length, 0); assert.match(a.toasts[0], /Elegí 1, 2 o 3/);
+  const b = cargar({ respuesta: { json: {} }, eleccion: null }); await b.M.notaCredito(5); assert.equal(b.llamadas.length, 0);
+  const c = cargar({ respuesta: { json: {} }, eleccion: '1', confirma: false }); await c.M.notaCredito(5); assert.equal(c.llamadas.length, 0);
+});
+await caso('Nota de crédito: estados y errores en castellano', async () => {
+  const t = async (json) => { const x = cargar({ respuesta: { json } }); await x.M.notaCredito(5); return x.toasts[0]; };
+  assert.match(await t({ estado: 'emitida', numero: 3, ptoVenta: 1, yaEstaba: true }), /ya emitida/);
+  assert.match(await t({ estado: 'pendiente_verificar' }), /no se duplica/);
+  assert.match(await t({ estado: 'rechazada', error: '10016: x' }), /10016/);
+  assert.match(await t({ estado: 'error', codigo: 'FACTURA_NO_AUTORIZADA' }), /no tiene una factura autorizada/);
+  assert.match(await t({ estado: 'en_curso' }), /no se duplica/);
 });
 console.log(`\n${n - fallos}/${n} ok`); process.exit(fallos ? 1 : 0);

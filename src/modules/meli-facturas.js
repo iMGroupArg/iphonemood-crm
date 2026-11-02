@@ -106,10 +106,10 @@ const MeliFacturas = {
     const pesos = c => (Number(c || 0) / 100).toFixed(2);
     return `<div class="card" style="margin-bottom:10px;font-size:12.5px">
       <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center"><b>Facturación de los últimos 12 meses</b><span class="badge ${est.clase}">${e(est.txt)}${est.pct === null ? '' : ' · ' + e(String(est.pct).replace('.', ',')) + ' %'}</span></div>
-      <div style="margin-top:4px">Total <b>${e(this._pesos(a.total_centavos))}</b>${Number(a.limite_centavos) > 0 ? ` de <b>${e(this._pesos(a.limite_centavos))}</b>` : ''} · desde el CRM ${e(this._pesos(a.facturado_crm_centavos))} (${e(a.cantidad)} facturas) · fuera del CRM ${e(this._pesos(a.fuera_crm_centavos))}</div>
+      <div style="margin-top:4px">Total <b>${e(this._pesos(a.total_centavos))}</b>${Number(a.limite_centavos) > 0 ? ` de <b>${e(this._pesos(a.limite_centavos))}</b>` : ''} · desde el CRM ${e(this._pesos(a.facturado_crm_centavos))} (${e(a.cantidad)} facturas)${Number(a.notas_credito_centavos) > 0 ? ` menos notas de crédito ${e(this._pesos(a.notas_credito_centavos))}` : ''} · fuera del CRM ${e(this._pesos(a.fuera_crm_centavos))}</div>
       ${barra}
       ${meses ? `<div style="font-size:11.5px;color:var(--text-secondary);line-height:1.6">${meses}</div>` : ''}
-      <div style="font-size:11.5px;color:var(--text-secondary);margin-top:6px">Es un seguimiento interno: no bloquea ninguna factura. Cuenta solo las facturas reales (producción) autorizadas por ARCA desde el CRM; las de prueba no suman. Las notas de crédito se restarán cuando se agreguen.</div>
+      <div style="font-size:11.5px;color:var(--text-secondary);margin-top:6px">Es un seguimiento interno: no bloquea ninguna factura. Cuenta solo las facturas reales (producción) autorizadas por ARCA desde el CRM; las de prueba no suman. Las notas de crédito autorizadas se restan.</div>
       <details style="margin-top:8px"><summary style="cursor:pointer">Configurar límite y facturado fuera del CRM</summary>
         <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px;align-items:flex-end">
           <label style="font-size:11.5px">Límite anual (ARS)<br><input type="number" id="fa-limite" min="0" step="0.01" value="${pesos(a.limite_centavos)}" style="width:160px;padding:6px 8px;border:1px solid var(--border-strong);border-radius:8px"></label>

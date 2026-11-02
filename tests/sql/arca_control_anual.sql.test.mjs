@@ -76,5 +76,14 @@ console.log('\n══ Control de facturación anual (Postgres en WebAssembly) �
   check('Pero sí la puede leer', lee.rows.length === 1);
   check('service_role no toca las tablas', /permission denied/i.test(String(await falla(() => comoRol(db, 'service_role', null, () => db.query(`SELECT * FROM public.arca_control_config`))))));
 }
+{ // El script 21 no pisa la versión del 22 si ya está instalado
+  const SQL22 = SQL('arca_notas_credito.sql');
+  await db.exec(SQL22);
+  const src = (await db.query(`SELECT pg_get_functiondef('public.arca_control_anual()'::regprocedure) d`)).rows[0].d;
+  check('Con el script 22 instalado, la función suma las notas de crédito', /meli_notas_credito/.test(src));
+  await db.exec(SCRIPT);
+  const src2 = (await db.query(`SELECT pg_get_functiondef('public.arca_control_anual()'::regprocedure) d`)).rows[0].d;
+  check('Volver a correr el 21 DESPUÉS del 22 NO pisa la versión con notas de crédito', /meli_notas_credito/.test(src2));
+}
 console.log(`\n${ok} pasan, ${fail} fallan de ${ok + fail}`);
 process.exit(fail ? 1 : 0);

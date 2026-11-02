@@ -70,8 +70,12 @@ BEGIN
 END $$;
 
 -- Lo facturado en los últimos 12 meses y su comparación con el límite. Solo usuarios autorizados.
-DROP FUNCTION IF EXISTS public.arca_control_anual();
-CREATE FUNCTION public.arca_control_anual()
+-- Si el script 22 (notas de crédito) ya está instalado, su versión de esta función RESTA las notas de crédito: este script NO la pisa.
+DO $fn$
+BEGIN
+  IF to_regclass('public.meli_notas_credito') IS NULL THEN
+    EXECUTE $def$
+CREATE OR REPLACE FUNCTION public.arca_control_anual()
 RETURNS JSONB LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = public, pg_temp AS $$
 DECLARE
   v_hoy DATE := (now() AT TIME ZONE 'America/Argentina/Buenos_Aires')::date;
@@ -91,6 +95,13 @@ BEGIN
     'actualizado_por', v_cfg.actualizado_por, 'actualizado_en', v_cfg.actualizado_en);
 END $$;
 
+
+    $def$;
+    REVOKE ALL ON FUNCTION public.arca_control_anual() FROM PUBLIC, anon;
+    GRANT EXECUTE ON FUNCTION public.arca_control_anual() TO authenticated;
+  END IF;
+END $fn$;
+
 -- Guarda el límite anual y lo facturado fuera del CRM (en centavos). Deja el cambio en el historial.
 DROP FUNCTION IF EXISTS public.arca_control_config_guardar(BIGINT, BIGINT);
 CREATE FUNCTION public.arca_control_config_guardar(p_limite_centavos BIGINT, p_fuera_centavos BIGINT)
@@ -108,8 +119,8 @@ BEGIN
   RETURN jsonb_build_object('ok', TRUE);
 END $$;
 
-REVOKE ALL ON FUNCTION public.arca_control_anual(), public.arca_control_config_guardar(BIGINT, BIGINT) FROM PUBLIC, anon;
-GRANT EXECUTE ON FUNCTION public.arca_control_anual(), public.arca_control_config_guardar(BIGINT, BIGINT) TO authenticated;
+REVOKE ALL ON FUNCTION public.arca_control_config_guardar(BIGINT, BIGINT) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.arca_control_config_guardar(BIGINT, BIGINT) TO authenticated;
 
 COMMIT;
 

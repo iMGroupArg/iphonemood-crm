@@ -332,6 +332,12 @@ console.log('\n══ Emisor de facturas (base real + ARCA simulado) ══\n');
   check('NC: queda guardada con motivo y quién la pidió', fila.length === 1 && fila[0].motivo === 'devolucion' && fila[0].creado_por === 'franco@x.com', JSON.stringify(fila));
   check('NC: una autorizada no se modifica ni se borra', /INMODIFICABLE/.test(String(await falla(() => ctx.db.query(`UPDATE public.meli_notas_credito SET importe_centavos=1`)))) && /NO_SE_BORRA/.test(String(await falla(() => ctx.db.query(`DELETE FROM public.meli_notas_credito`)))));
 }
+{ // punto de venta distinto al configurado
+  const ctx = await entorno(); const a = arca(); const o = await ordenId(ctx);
+  await emitir(ctx, o, a);
+  const e = await falla(() => emitirNC(ctx, o, a, 'devolucion', { ...ENV, ARCA_PTO_VTA: '2' }));
+  check('NC: si el punto de venta configurado no es el de la factura NO se emite (PUNTO_DE_VENTA_DISTINTO) y no queda reserva colgada', e && e.includes('PUNTO_DE_VENTA_DISTINTO') && a.st.cuerposNC.length === 0 && (await ctx.db.query(`SELECT estado FROM public.meli_notas_credito`)).rows[0].estado === 'rechazado', e);
+}
 { // corte de red y rechazo en la nota de crédito
   const ctx = await entorno(); const a = arca(); const o = await ordenId(ctx);
   await emitir(ctx, o, a);

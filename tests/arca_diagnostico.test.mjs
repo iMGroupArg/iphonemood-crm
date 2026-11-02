@@ -68,6 +68,15 @@ await caso('Punto de venta configurado que no existe en ARCA: lo avisa con los v
   assert.match(r.resumen, /\(1\) no está entre los habilitados \(3, 5\)/);
 });
 
+await caso('Lista de puntos de venta vacía: el paso avisa (no se marca como todo normal) pero no falla', async () => {
+  const f = async (url, op) => (/FEParamGetPtosVenta/.test((op.headers || {}).SOAPAction || '')
+    ? { ok: true, status: 200, text: async () => fe('<FEParamGetPtosVentaResponse><FEParamGetPtosVentaResult><Errors><Err><Code>602</Code><Msg>Sin Resultados</Msg></Err></Errors></FEParamGetPtosVentaResult></FEParamGetPtosVentaResponse>') }
+    : servidor().f(url, op));
+  const r = await diagnosticoArca({ env: ENV, fetchImpl: f, ahora, cache: cacheNueva() });
+  const p = r.pasos.find(x => /Puntos de venta/.test(x.paso));
+  assert.equal(p.ok, true); assert.match(p.aviso, /producción/);
+});
+
 await caso('Sin puntos de venta (error 602): lista vacía y no es una falla', async () => {
   const s = servidor();
   const f = async (url, op) => (/FEParamGetPtosVenta/.test((op.headers || {}).SOAPAction || '')

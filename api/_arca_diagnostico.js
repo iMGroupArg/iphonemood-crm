@@ -95,7 +95,7 @@ async function diagnosticoArca({ env = process.env, fetchImpl: fetchBase = fetch
   let puntos = null;
   try {
     puntos = await A.puntosDeVenta({ cfg, ticket, fetchImpl });
-    paso('Puntos de venta habilitados', true, { puntos });
+    paso('Puntos de venta habilitados', true, { puntos, ...(puntos.length ? {} : { aviso: 'ARCA no lista puntos de venta para este CUIT en este ambiente. En homologación puede ser normal; antes de pasar a producción hay que confirmar que el punto de venta real esté habilitado como Web Services.' }) });
   } catch (e) { paso('Puntos de venta habilitados', false, resumirError(e)); }
 
   if (hay.puntoDeVenta) {

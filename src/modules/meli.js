@@ -277,7 +277,8 @@ ${herr('Diagnóstico de datos', `      <div class="card" style="margin-top:14px"
       const e = (s) => State.esc(s == null ? '' : String(s));
       const filas = (json.pasos || []).map((p) => {
         const { paso, ok, ...resto } = p;
-        return `<div style="font-size:12.5px;margin-top:6px"><b style="color:${ok ? 'var(--green)' : 'var(--red)'}">${ok ? '✔' : '✘'}</b> <b>${e(paso)}</b>`
+        const aviso = ok && resto.aviso;
+        return `<div style="font-size:12.5px;margin-top:6px"><b style="color:${!ok ? 'var(--red)' : aviso ? 'var(--amber)' : 'var(--green)'}">${!ok ? '✘' : aviso ? '⚠' : '✔'}</b> <b>${e(paso)}</b>`
           + `<div style="font-size:11.5px;color:var(--text-secondary);margin-left:18px;white-space:pre-wrap">${e(JSON.stringify(resto))}</div></div>`;
       }).join('');
       out.innerHTML = `<div style="font-size:12.5px;margin-bottom:4px"><b>Modo:</b> ${e(json.modo)} · ${e(json.resumen)}</div>${filas}`

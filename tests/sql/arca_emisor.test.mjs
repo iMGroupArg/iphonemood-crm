@@ -57,7 +57,7 @@ function arca({ rechazar = false } = {}) {
     if (/FECompConsultar/.test(a)) {
       st.consultas++;
       const n = Number(body.match(/<ar:CbteNro>(\d+)</)[1]); const c = (tipoDe(/<ar:CbteTipo>(\d+)</) === 13 ? st.nc : st.comprobantes).get(n);
-      return R(respFe('FECompConsultar', c ? `<ResultGet><CodAutorizacion>${c.cae}</CodAutorizacion><FchVto>20261112</FchVto><ImpTotal>${c.importe}</ImpTotal><DocTipo>${c.docTipo}</DocTipo><DocNro>${c.docNro}</DocNro><CbteFch>${c.fecha}</CbteFch></ResultGet>`
+      return R(respFe('FECompConsultar', c ? `<ResultGet><CodAutorizacion>${c.cae}</CodAutorizacion><FchVto>20261112</FchVto><ImpTotal>${c.importe}</ImpTotal><DocTipo>${c.docTipo}</DocTipo><DocNro>${c.docNro}</DocNro><CbteFch>${c.fecha}</CbteFch>${c.asoc ? `<CbtesAsoc><CbteAsoc><Tipo>${c.asoc.tipo}</Tipo><PtoVta>${c.asoc.pv}</PtoVta><Nro>${c.asoc.nro}</Nro><Cuit>${c.asoc.cuit}</Cuit></CbteAsoc></CbtesAsoc>` : ''}</ResultGet>`
         : '<Errors><Err><Code>602</Code><Msg>Sin resultados</Msg></Err></Errors>'));
     }
     if (/FECAESolicitar/.test(a)) {
@@ -68,7 +68,8 @@ function arca({ rechazar = false } = {}) {
       const esNC = tipoDe(/<ar:CbteTipo>(\d+)</) === 13;
       const cae = String((esNC ? 75000000000000 : 74000000000000) + n);
       if (esNC) st.cuerposNC.push(body);
-      (esNC ? st.nc : st.comprobantes).set(n, { cae, importe: body.match(/<ar:ImpTotal>([\d.]+)</)[1], docTipo: body.match(/<ar:DocTipo>(\d+)</)[1], docNro: body.match(/<ar:DocNro>(\d+)</)[1], fecha: body.match(/<ar:CbteFch>(\d+)</)[1] });
+      const am = body.match(/<ar:CbteAsoc><ar:Tipo>(\d+)<\/ar:Tipo><ar:PtoVta>(\d+)<\/ar:PtoVta><ar:Nro>(\d+)<\/ar:Nro><ar:Cuit>(\d+)<\/ar:Cuit>/);
+      (esNC ? st.nc : st.comprobantes).set(n, { asoc: am ? { tipo: am[1], pv: am[2], nro: am[3], cuit: am[4] } : null, cae, importe: body.match(/<ar:ImpTotal>([\d.]+)</)[1], docTipo: body.match(/<ar:DocTipo>(\d+)</)[1], docNro: body.match(/<ar:DocNro>(\d+)</)[1], fecha: body.match(/<ar:CbteFch>(\d+)</)[1] });
       if (esNC) st.ultimoNC = Math.max(st.ultimoNC, n); else st.ultimo = Math.max(st.ultimo, n);
       if (st.cortarDespues) { st.cortarDespues = false; throw new Error('se cortó la respuesta'); }
       return R(respFe('FECAESolicitar', `<FeCabResp><Resultado>A</Resultado></FeCabResp><FeDetResp><FECAEDetResponse><CbteDesde>${n}</CbteDesde><CbteHasta>${n}</CbteHasta><Resultado>A</Resultado><CAE>${cae}</CAE><CAEFchVto>20261112</CAEFchVto></FECAEDetResponse></FeDetResp>`));
@@ -336,7 +337,21 @@ console.log('\n══ Emisor de facturas (base real + ARCA simulado) ══\n');
   const ctx = await entorno(); const a = arca(); const o = await ordenId(ctx);
   await emitir(ctx, o, a);
   const e = await falla(() => emitirNC(ctx, o, a, 'devolucion', { ...ENV, ARCA_PTO_VTA: '2' }));
-  check('NC: si el punto de venta configurado no es el de la factura NO se emite (PUNTO_DE_VENTA_DISTINTO) y no queda reserva colgada', e && e.includes('PUNTO_DE_VENTA_DISTINTO') && a.st.cuerposNC.length === 0 && (await ctx.db.query(`SELECT estado FROM public.meli_notas_credito`)).rows[0].estado === 'rechazado', e);
+  check('NC: si el punto de venta configurado no es el de la factura NO se emite (PUNTO_DE_VENTA_DISTINTO) y la base no escribe nada', e && e.includes('PUNTO_DE_VENTA_DISTINTO') && a.st.cuerposNC.length === 0 && (await ctx.db.query(`SELECT count(*)::int n FROM public.meli_notas_credito`)).rows[0].n === 0, e);
+}
+{ // la conciliación exige la factura ASOCIADA correcta (Codex)
+  const ctx = await entorno(); const a = arca(); const o = await ordenId(ctx);
+  await emitir(ctx, o, a);
+  a.st.cortarDespues = true;
+  await emitirNC(ctx, o, a);
+  await vencerNC(ctx.db);
+  a.st.nc.get(1).asoc = { tipo: '11', pv: '1', nro: '99', cuit: '20111111112' };       // ARCA tiene ese número, mismo importe y documento, pero asociado a OTRA factura
+  const e = await falla(() => emitirNC(ctx, o, a));
+  check('NC: ARCA tiene el número con mismo importe y documento pero asociado a OTRA factura → RECONCILIACION_DISTINTA (no se adopta)', e && e.includes('RECONCILIACION_DISTINTA') && (await ctx.db.query(`SELECT estado FROM public.meli_notas_credito`)).rows[0].estado === 'reservado', e);
+  a.st.nc.get(1).asoc = null;
+  await vencerNC(ctx.db);
+  const e2 = await falla(() => emitirNC(ctx, o, a));
+  check('NC: sin asociación en la respuesta de ARCA tampoco se adopta', e2 && e2.includes('RECONCILIACION_DISTINTA'), e2);
 }
 { // corte de red y rechazo en la nota de crédito
   const ctx = await entorno(); const a = arca(); const o = await ordenId(ctx);

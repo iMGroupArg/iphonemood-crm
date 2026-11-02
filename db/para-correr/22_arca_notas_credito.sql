@@ -113,7 +113,7 @@ END $$;
 DROP FUNCTION IF EXISTS public.arca_nc_conciliar_tomar(TEXT, TEXT, TEXT);
 CREATE FUNCTION public.arca_nc_conciliar_tomar(p_secreto TEXT, p_orden TEXT, p_ambiente TEXT)
 RETURNS JSONB LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp AS $$
-DECLARE n public.meli_notas_credito%ROWTYPE; v UUID := gen_random_uuid();
+DECLARE n public.meli_notas_credito%ROWTYPE; v UUID := gen_random_uuid(); v_fnum INTEGER;
 BEGIN
   IF NOT public.meli_secreto_ok(p_secreto) THEN RAISE EXCEPTION 'no autorizado'; END IF;
   SELECT n2.* INTO n FROM public.meli_notas_credito n2 WHERE n2.orden_id = p_orden AND n2.ambiente = p_ambiente FOR UPDATE;
@@ -121,12 +121,15 @@ BEGIN
   -- Misma ventana de seguridad que las facturas: 10 minutos desde que empezó el intento.
   IF n.trabajo_hasta IS NOT NULL AND n.trabajo_hasta > now() - interval '8 minutes' THEN RETURN jsonb_build_object('tomado', FALSE, 'estado', 'reservado', 'en_curso', TRUE); END IF;
   UPDATE public.meli_notas_credito SET intento_id = v, trabajo_hasta = now() + interval '2 minutes' WHERE id = n.id;
-  RETURN jsonb_build_object('tomado', TRUE, 'intento', v, 'numero', n.numero, 'pto_venta', n.pto_venta, 'importe_centavos', n.importe_centavos, 'doc_tipo', n.doc_tipo, 'doc_nro', n.doc_nro);
+  SELECT numero INTO v_fnum FROM public.meli_comprobantes WHERE id = n.comprobante_id;
+  RETURN jsonb_build_object('tomado', TRUE, 'intento', v, 'numero', n.numero, 'pto_venta', n.pto_venta, 'importe_centavos', n.importe_centavos, 'doc_tipo', n.doc_tipo, 'doc_nro', n.doc_nro, 'factura_numero', v_fnum);
 END $$;
 
 -- Reserva el número de la nota de crédito para anular la factura AUTORIZADA de la orden en ese ambiente. p_ultimo_arca = último tipo 13 según ARCA.
 DROP FUNCTION IF EXISTS public.arca_nc_reservar(TEXT, TEXT, TEXT, INTEGER, TEXT, TEXT);
-CREATE FUNCTION public.arca_nc_reservar(p_secreto TEXT, p_orden TEXT, p_ambiente TEXT, p_ultimo_arca INTEGER, p_motivo TEXT, p_usuario TEXT)
+DROP FUNCTION IF EXISTS public.arca_nc_reservar(TEXT, TEXT, TEXT, INTEGER, INTEGER, TEXT, TEXT);
+-- p_pto_venta = el punto de venta con el que se consultó el último número de ARCA: tiene que ser el de la factura (si no, se rechaza ANTES de escribir nada).
+CREATE FUNCTION public.arca_nc_reservar(p_secreto TEXT, p_orden TEXT, p_ambiente TEXT, p_pto_venta INTEGER, p_ultimo_arca INTEGER, p_motivo TEXT, p_usuario TEXT)
 RETURNS JSONB LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp AS $$
 DECLARE f public.meli_comprobantes%ROWTYPE; n public.meli_notas_credito%ROWTYPE; v_num INTEGER; v_max INTEGER; v_nuevo BOOLEAN := TRUE; v_intento UUID := gen_random_uuid();
 BEGIN
@@ -140,6 +143,7 @@ BEGIN
   PERFORM pg_advisory_xact_lock(hashtextextended('orden|' || p_orden, 0));
   SELECT * INTO f FROM public.meli_comprobantes WHERE orden_id = p_orden AND ambiente = p_ambiente;
   IF NOT FOUND OR f.estado <> 'autorizado' THEN RAISE EXCEPTION 'FACTURA_NO_AUTORIZADA'; END IF;
+  IF p_pto_venta IS DISTINCT FROM f.pto_venta THEN RAISE EXCEPTION 'PUNTO_DE_VENTA_DISTINTO'; END IF;
   PERFORM pg_advisory_xact_lock(hashtextextended(p_ambiente || '|' || f.pto_venta::text || '|13', 0));
 
   SELECT * INTO n FROM public.meli_notas_credito WHERE comprobante_id = f.id FOR UPDATE;
@@ -203,11 +207,11 @@ BEGIN
 END $$;
 
 REVOKE ALL ON FUNCTION
-  public.arca_nc_estado(TEXT, TEXT, TEXT), public.arca_nc_conciliar_tomar(TEXT, TEXT, TEXT), public.arca_nc_reservar(TEXT, TEXT, TEXT, INTEGER, TEXT, TEXT),
+  public.arca_nc_estado(TEXT, TEXT, TEXT), public.arca_nc_conciliar_tomar(TEXT, TEXT, TEXT), public.arca_nc_reservar(TEXT, TEXT, TEXT, INTEGER, INTEGER, TEXT, TEXT),
   public.arca_nc_autorizar(TEXT, UUID, INTEGER, TEXT, DATE, DATE), public.arca_nc_rechazar(TEXT, UUID, INTEGER, TEXT)
 FROM PUBLIC, anon, authenticated;
 GRANT EXECUTE ON FUNCTION
-  public.arca_nc_estado(TEXT, TEXT, TEXT), public.arca_nc_conciliar_tomar(TEXT, TEXT, TEXT), public.arca_nc_reservar(TEXT, TEXT, TEXT, INTEGER, TEXT, TEXT),
+  public.arca_nc_estado(TEXT, TEXT, TEXT), public.arca_nc_conciliar_tomar(TEXT, TEXT, TEXT), public.arca_nc_reservar(TEXT, TEXT, TEXT, INTEGER, INTEGER, TEXT, TEXT),
   public.arca_nc_autorizar(TEXT, UUID, INTEGER, TEXT, DATE, DATE), public.arca_nc_rechazar(TEXT, UUID, INTEGER, TEXT)
 TO anon, authenticated;
 
@@ -244,7 +248,7 @@ COMMIT;
 
 -- Verificación (solo lectura): tiene que dar dos filas con ✅.
 SELECT 'tabla y funciones' AS control,
-       CASE WHEN to_regclass('public.meli_notas_credito') IS NOT NULL AND to_regprocedure('public.arca_nc_reservar(text,text,text,integer,text,text)') IS NOT NULL THEN '✅' ELSE '❌' END AS resultado
+       CASE WHEN to_regclass('public.meli_notas_credito') IS NOT NULL AND to_regprocedure('public.arca_nc_reservar(text,text,text,integer,integer,text,text)') IS NOT NULL THEN '✅' ELSE '❌' END AS resultado
 UNION ALL
 SELECT 'cerradas al navegador',
        CASE WHEN NOT has_table_privilege('anon', 'public.meli_notas_credito', 'SELECT') AND NOT has_table_privilege('authenticated', 'public.meli_notas_credito', 'INSERT') THEN '✅' ELSE '❌' END;

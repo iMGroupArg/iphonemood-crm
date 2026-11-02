@@ -257,7 +257,8 @@ async function consultarComprobante({ cfg, ticket, ptoVta, cbteTipo = CBTE_FACTU
   }
   const cae = etiqueta(xml, 'CodAutorizacion');
   if (cae === null || !/^\d{10,20}$/.test(cae.trim())) throw new ErrorArca('WSFE_RESPUESTA', 'La consulta del comprobante vino incompleta.');
-  return { existe: true, cae: cae.trim(), caeVto: etiqueta(xml, 'FchVto'), importe: etiqueta(xml, 'ImpTotal'), docTipo: etiqueta(xml, 'DocTipo'), docNro: etiqueta(xml, 'DocNro'), fecha: etiqueta(xml, 'CbteFch') };
+  const asoc = todas(etiqueta(xml, 'CbtesAsoc') || '', 'CbteAsoc').map(a => ({ tipo: Number(etiqueta(a, 'Tipo')), ptoVta: Number(etiqueta(a, 'PtoVta')), nro: Number(etiqueta(a, 'Nro')), cuit: String(etiqueta(a, 'Cuit') || '').trim() }));
+  return { existe: true, cae: cae.trim(), caeVto: etiqueta(xml, 'FchVto'), importe: etiqueta(xml, 'ImpTotal'), docTipo: etiqueta(xml, 'DocTipo'), docNro: etiqueta(xml, 'DocNro'), fecha: etiqueta(xml, 'CbteFch'), asoc };
 }
 
 // ── Armado del comprobante: SOLO desde la orden (nunca desde lo que mande el navegador) ──────────────────────────────

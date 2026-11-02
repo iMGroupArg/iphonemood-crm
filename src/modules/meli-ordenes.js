@@ -373,11 +373,11 @@ const MeliOrdenes = {
       try { j = await r.json(); } catch { /* sin cuerpo */ }
       if (!r.ok || !j) { toast('No se pudo consultar la nota de crédito (HTTP ' + r.status + '). Reintentá con «Nota de crédito»: no se duplica.'); return; }
       if (j.estado === 'simulacion') toast('La facturación está en modo simulación: no se emitió nada.');
-      else if (j.estado === 'emitida') toast(`Nota de crédito ${j.yaEstaba ? 'ya emitida' : 'emitida'}: punto de venta ${j.ptoVenta}, N.º ${j.numero}.`);
+      else if (j.estado === 'emitida') toast(`Nota de crédito ${j.yaEstaba ? 'ya emitida' : 'emitida'}: punto de venta ${State.esc(j.ptoVenta)}, N.º ${State.esc(j.numero)}.`);
       else if (j.estado === 'pendiente_verificar') toast('La nota de crédito quedó esperando confirmación de ARCA. Tocá «Nota de crédito» para verificar (no se duplica).');
       else if (j.estado === 'en_curso') toast('Otro proceso está resolviendo esta nota de crédito. Esperá un minuto y reintentá (no se duplica).');
-      else if (j.estado === 'rechazada') toast('ARCA rechazó la nota de crédito: ' + (j.error || 'sin detalle') + '. Podés reintentar.');
-      else toast(this._MSG_FACTURA[j.codigo] || j.mensaje || 'No se pudo emitir la nota de crédito.');
+      else if (j.estado === 'rechazada') toast('ARCA rechazó la nota de crédito: ' + State.esc(j.error || 'sin detalle') + '. Podés reintentar.');
+      else toast(this._MSG_FACTURA[j.codigo] || State.esc(j.mensaje || '') || 'No se pudo emitir la nota de crédito.');
     } catch {
       toast('No se pudo emitir la nota de crédito. Reintentá: no se duplica.');
     } finally { if (btn) btn.disabled = false; }
@@ -397,13 +397,13 @@ const MeliOrdenes = {
       if (!r.ok || !j) { toast('No se pudo consultar la factura (HTTP ' + r.status + '). La venta quedó bien; reintentá con «Factura».'); return; }
       if (j.estado === 'simulacion') { if (!auto) toast('La facturación está en modo simulación: no se emitió nada.'); return; }
       if (j.estado === 'emitida') {
-        toast(`Factura ${j.yaEstaba ? 'ya emitida' : 'emitida'}: punto de venta ${j.ptoVenta}, N.º ${j.numero}.`);
+        toast(`Factura ${j.yaEstaba ? 'ya emitida' : 'emitida'}: punto de venta ${State.esc(j.ptoVenta)}, N.º ${State.esc(j.numero)}.`);
         if (j.controlConflicto) toast('Atención: la factura de ARCA se guardó, pero el control de facturas ya tiene otra con ese número cargada a mano. Revisalo en Facturas.');
       }
       else if (j.estado === 'pendiente_verificar') toast('La factura quedó esperando confirmación de ARCA. La venta está bien: tocá «Factura» para verificar (no se duplica).');
       else if (j.estado === 'en_curso') toast('Otro proceso está resolviendo esta factura. Esperá un minuto y tocá «Factura» otra vez (no se duplica).');
-      else if (j.estado === 'rechazada') toast('ARCA rechazó la factura: ' + (j.error || 'sin detalle') + '. Podés reintentar con «Factura».');
-      else toast(this._MSG_FACTURA[j.codigo] || j.mensaje || 'No se pudo emitir la factura. La venta quedó bien; reintentá con «Factura».');
+      else if (j.estado === 'rechazada') toast('ARCA rechazó la factura: ' + State.esc(j.error || 'sin detalle') + '. Podés reintentar con «Factura».');
+      else toast(this._MSG_FACTURA[j.codigo] || State.esc(j.mensaje || '') || 'No se pudo emitir la factura. La venta quedó bien; reintentá con «Factura».');
     } catch {
       toast('No se pudo emitir la factura. La venta quedó bien; reintentá con «Factura».');
     } finally { if (btn) btn.disabled = false; }

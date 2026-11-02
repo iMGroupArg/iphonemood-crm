@@ -27,7 +27,7 @@ async function facturada(ctx, { amb = 'homologacion', pv = 1, ultimo = 0, bruto 
   await q(ctx.db, `SELECT public.arca_comprobante_autorizar($1,$2,$3,$4,$5,$6)`, [SECRETO, r.intento, r.numero, '74123456789012', '2026-11-12', '2026-11-02']);
   return o;
 }
-const reservar = (db, o, a = {}) => q(db, `SELECT public.arca_nc_reservar($1,$2,$3,$4,$5,$6) r`, [a.secreto ?? SECRETO, o, a.amb ?? 'homologacion', a.ultimo ?? 0, a.motivo ?? 'devolucion', a.usuario ?? 'franco@x.com']).then((x) => x[0].r);
+const reservar = (db, o, a = {}) => q(db, `SELECT public.arca_nc_reservar($1,$2,$3,$4,$5,$6,$7) r`, [a.secreto ?? SECRETO, o, a.amb ?? 'homologacion', a.pv ?? 1, a.ultimo ?? 0, a.motivo ?? 'devolucion', a.usuario ?? 'franco@x.com']).then((x) => x[0].r);
 const autorizar = (db, i, n, cae = '75123456789012') => q(db, `SELECT public.arca_nc_autorizar($1,$2,$3,$4,$5,$6) r`, [SECRETO, i, n, cae, '2026-11-12', '2026-11-02']).then((x) => x[0].r);
 const rechazar = (db, i, n, e = 'no') => q(db, `SELECT public.arca_nc_rechazar($1,$2,$3,$4) r`, [SECRETO, i, n, e]).then((x) => x[0].r);
 const estado = (db, o, amb = 'homologacion') => q(db, `SELECT public.arca_nc_estado($1,$2,$3) r`, [SECRETO, o, amb]).then((x) => x[0].r);
@@ -52,6 +52,8 @@ console.log('\n══ Notas de crédito C (Postgres en WebAssembly) ══\n');
   check('Estado: hay factura y todavía no hay nota', (await estado(db, o)).estado === 'ninguna');
   check('Motivo fuera de la lista', (await falla(() => reservar(db, o, { motivo: 'x' })))?.includes('MOTIVO_INVALIDO'));
   check('Usuario vacío', (await falla(() => reservar(db, o, { usuario: ' ' })))?.includes('USUARIO_INVALIDO'));
+  const dist = await falla(() => reservar(db, o, { pv: 2, ultimo: 0 }));
+  check('Si el punto de venta consultado no es el de la factura: PUNTO_DE_VENTA_DISTINTO y NO se escribe nada', dist && dist.includes('PUNTO_DE_VENTA_DISTINTO') && (await q(db, `SELECT count(*)::int n FROM public.meli_notas_credito`))[0].n === 0, dist);
   const r = await reservar(db, o, { ultimo: 2 });
   check('Reserva con numeración PROPIA (último 2 → 3), mismo importe, receptor y punto de venta de la factura, con la factura asociada',
     r.numero === 3 && Number(r.importe_centavos) === 10000000 && r.doc_tipo === 96 && r.doc_nro === '43577502' && r.pto_venta === 1 && r.factura_numero === 6 && r.factura_fecha === '2026-11-02', JSON.stringify(r));
@@ -82,7 +84,7 @@ console.log('\n══ Notas de crédito C (Postgres en WebAssembly) ══\n');
   check('A los 3 minutos todavía NO (ventana de seguridad de 10)', (await tomar(db, o)).en_curso === true);
   await vencer(db);
   const t = await tomar(db, o);
-  check('Pasados los 10 minutos se toma con intento NUEVO y los datos guardados', t.tomado === true && t.intento !== r.intento && t.numero === 1 && t.doc_nro === '43577502', JSON.stringify(t));
+  check('Pasados los 10 minutos se toma con intento NUEVO y los datos guardados', t.tomado === true && t.intento !== r.intento && t.numero === 1 && t.doc_nro === '43577502' && t.factura_numero === 1, JSON.stringify(t));
   check('El intento viejo ya no puede autorizar ni rechazar', (await falla(() => autorizar(db, r.intento, 1)))?.includes('INTENTO_NO_VIGENTE') && (await falla(() => rechazar(db, r.intento, 1)))?.includes('INTENTO_NO_VIGENTE'));
   const rej = await rechazar(db, t.intento, 1, 'ARCA dijo que no');
   const f = (await q(db, `SELECT estado, numero, ultimo_error, creado_por, ultimo_solicitante, intentos FROM public.meli_notas_credito`))[0];

@@ -91,6 +91,7 @@ const MeliFacturas = {
   // Porcentaje del límite usado y color: amarillo desde 70 %, rojo desde 90 %. Sin límite configurado no hay porcentaje.
   estadoAnual(a) {
     const limite = Number(a && a.limite_centavos || 0), total = Number(a && a.total_centavos || 0);
+    if (total < 0) return { pct: null, clase: 'b-amber', txt: 'Saldo negativo: hay notas de crédito de facturas de más de 12 meses. Revisalo con tu contador' };
     if (!(limite > 0)) return { pct: null, clase: 'b-gray', txt: 'Sin límite configurado' };
     const pct = Math.round((total / limite) * 1000) / 10;
     return { pct, clase: pct >= 90 ? 'b-red' : pct >= 70 ? 'b-amber' : 'b-green', txt: pct >= 100 ? 'Límite superado' : pct >= 90 ? 'Cerca del límite' : pct >= 70 ? 'Atención' : 'En rango' };

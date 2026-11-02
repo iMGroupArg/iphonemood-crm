@@ -71,7 +71,7 @@ try {
   };
   const reservarF = (cli, o, ultimo = 0, pv = 1) => rpc(cli, 'arca_comprobante_reservar', { p_orden: o, p_ambiente: 'homologacion', p_pto_venta: pv, p_ultimo_arca: ultimo, p_importe_centavos: 10000000, p_doc_tipo: 96, p_doc_nro: '43577502', p_cond_iva: 5 });
   const autorizarF = (cli, i, n) => rpc(cli, 'arca_comprobante_autorizar', { p_intento: i, p_numero: n, p_cae: String(74000000000000 + n), p_cae_vto: '2026-12-01', p_fecha_cbte: '2026-11-02' });
-  const reservarN = (cli, o, ultimo = 0) => rpc(cli, 'arca_nc_reservar', { p_orden: o, p_ambiente: 'homologacion', p_ultimo_arca: ultimo, p_motivo: 'devolucion', p_usuario: 'franco@x.com' });
+  const reservarN = (cli, o, ultimo = 0) => rpc(cli, 'arca_nc_reservar', { p_orden: o, p_ambiente: 'homologacion', p_pto_venta: 1, p_ultimo_arca: ultimo, p_motivo: 'devolucion', p_usuario: 'franco@x.com' });
   const autorizarN = (cli, i, n) => rpc(cli, 'arca_nc_autorizar', { p_intento: i, p_numero: n, p_cae: String(75000000000000 + n), p_cae_vto: '2026-12-01', p_fecha_cbte: '2026-11-02' });
   const cli = []; for (let i = 0; i < 8; i++) cli.push(await nueva());
 

@@ -43,7 +43,11 @@ const infoAdicional = (b, tipo) => {
 function leerDatosFacturacion(json) {
   const formato = () => new A.ErrorArca('MELI_BILLING_FORMATO', 'Mercado Libre devolvió los datos de facturación en un formato desconocido.');
   if (!json || typeof json !== 'object' || Array.isArray(json)) throw formato();
+  // Un envoltorio `buyer` sin `billing_info` o una identificación que no es un objeto son formatos que no entendemos, no «sin documento».
+  if ('buyer' in json && !(json.buyer && typeof json.buyer === 'object' && json.buyer.billing_info && typeof json.buyer.billing_info === 'object') && !(json.billing_info && typeof json.billing_info === 'object')) throw formato();
   const b = (json.buyer && json.buyer.billing_info) || json.billing_info || json;
+  if (!b || typeof b !== 'object' || Array.isArray(b)) throw formato();
+  if ('identification' in b && b.identification !== null && (typeof b.identification !== 'object' || Array.isArray(b.identification))) throw formato();
   const ident = (b && b.identification) || null;
   const conocido = !!(ident || 'doc_type' in b || 'doc_number' in b || Array.isArray(b.additional_info) || 'billing_info' in json || 'buyer' in json);
   if (!conocido) throw formato();
@@ -52,7 +56,12 @@ function leerDatosFacturacion(json) {
   const tipo = (ident && ident.type) ?? b.doc_type ?? infoAdicional(b, 'DOC_TYPE');
   const nro = (ident && ident.number) ?? b.doc_number ?? infoAdicional(b, 'DOC_NUMBER');
   const vacio = (x) => x === undefined || x === null || String(x).trim() === '';
-  if (vacio(tipo) && vacio(nro)) return null;
+  if (vacio(tipo) && vacio(nro)) {
+    // «Sin documento» solo si la respuesta tiene una forma conocida: cualquier clave que no reconocemos puede ser una identificación en otro formato.
+    const CONOCIDAS = new Set(['identification', 'doc_type', 'doc_number', 'additional_info', 'id', 'name', 'first_name', 'last_name', 'address', 'taxes', 'fiscal_condition', 'condition', 'billing_info', 'buyer']);
+    if (Object.keys(b).some((k) => !CONOCIDAS.has(k))) throw formato();
+    return null;
+  }
   const cond = leerCondicion(b.fiscal_condition ?? b.condition ?? (b.taxes && b.taxes.taxpayer_type && b.taxes.taxpayer_type.id)
     ?? (ident && ident.taxpayer_type) ?? infoAdicional(b, 'TAXPAYER_TYPE_ID') ?? infoAdicional(b, 'FISCAL_CONDITION'));
   return { docTipo: vacio(tipo) ? null : String(tipo).trim().toUpperCase(), docNro: vacio(nro) ? null : String(nro), condicionIva: cond };
@@ -165,9 +174,12 @@ async function emitirFacturaOrden({ orden, env = process.env, rpc, meliGet, fetc
       // Se compara TODO lo guardado: una factura de ARCA que no coincide no se adopta (queda para revisar a mano).
       const igual = Math.round(Number(c.importe) * 100) === Number(t.importe_centavos) && mismoNumero(c.docTipo, t.doc_tipo) && mismoNumero(c.docNro, t.doc_nro);
       if (!igual) throw new A.ErrorArca('RECONCILIACION_DISTINTA', 'ARCA tiene ese número con otro importe o receptor: se frena para revisarlo a mano.');
-      await rpc('arca_comprobante_autorizar', { p_intento: t.intento, p_numero: t.numero, p_cae: c.cae, p_cae_vto: isoDeAfip(String(c.caeVto)), p_fecha_cbte: isoDeAfip(String(c.fecha)) }, pres);
-      return { estado: 'emitida', numero: t.numero, cae: c.cae, ptoVenta: t.pto_venta, reconciliada: true };
+      const au = primera(await rpc('arca_comprobante_autorizar', { p_intento: t.intento, p_numero: t.numero, p_cae: c.cae, p_cae_vto: isoDeAfip(String(c.caeVto)), p_fecha_cbte: isoDeAfip(String(c.fecha)) }, pres));
+      return { estado: 'emitida', numero: t.numero, cae: c.cae, ptoVenta: t.pto_venta, reconciliada: true, ...(au && au.control_conflicto ? { controlConflicto: au.control_conflicto } : {}) };
     }
+    // Consulta negativa: antes de liberar se comprueba que ARCA NO haya avanzado hasta ese número (si el último autorizado ya llegó, algo no cuadra).
+    const ult = await A.ultimoAutorizado({ cfg, ticket: await ticket(), ptoVta: t.pto_venta, fetchImpl: f });
+    if (ult >= t.numero) throw new A.ErrorArca('RECONCILIACION_DISTINTA', 'ARCA ya avanzó hasta ese número pero no figura a nombre de esta factura: se frena para revisarlo a mano.');
     await rpc('arca_comprobante_rechazar', { p_intento: t.intento, p_numero: t.numero, p_error: 'Reserva sin comprobante en ARCA (consultado): número liberado' }, pres);
   }
 
@@ -205,13 +217,14 @@ async function emitirFacturaOrden({ orden, env = process.env, rpc, meliGet, fetc
     return { estado: 'pendiente_verificar', numero: res.numero, ptoVenta: cfg.ptoVta, error: textoError(e) };
   }
   if (em.resultado === 'A') {
+    let au;
     try {
-      await rpc('arca_comprobante_autorizar', { p_intento: res.intento, p_numero: res.numero, p_cae: em.cae, p_cae_vto: isoDeAfip(em.caeVto), p_fecha_cbte: isoDeAfip(em.comprobante.fecha) }, presFresco(SEGUNDOS(6)));
+      au = primera(await rpc('arca_comprobante_autorizar', { p_intento: res.intento, p_numero: res.numero, p_cae: em.cae, p_cae_vto: isoDeAfip(em.caeVto), p_fecha_cbte: isoDeAfip(em.comprobante.fecha) }, presFresco(SEGUNDOS(6))));
     } catch (e) {
       // ARCA ya la emitió: NO se libera nada. Queda reservada y se reconcilia en el próximo intento.
       return { estado: 'pendiente_verificar', numero: res.numero, ptoVenta: cfg.ptoVta, error: 'ARCA emitió la factura pero no se pudo anotar: ' + textoError(e) };
     }
-    return { estado: 'emitida', numero: res.numero, cae: em.cae, ptoVenta: cfg.ptoVta };
+    return { estado: 'emitida', numero: res.numero, cae: em.cae, ptoVenta: cfg.ptoVta, ...(au && au.control_conflicto ? { controlConflicto: au.control_conflicto } : {}) };
   }
   const motivo = (em.errores || []).concat(em.observaciones || []).map((x) => `${x.codigo}: ${x.mensaje}`).join(' | ').slice(0, 280) || 'rechazada';
   // Antes de liberar el número se le pregunta a ARCA: un rechazo del tipo «número ya utilizado» puede deberse a OTRO pedido nuestro que ARCA sí aceptó.
@@ -221,8 +234,8 @@ async function emitirFacturaOrden({ orden, env = process.env, rpc, meliGet, fetc
   if (c2.existe) {
     const igual = Math.round(Number(c2.importe) * 100) === Number(comprobante.importeCentavos) && mismoNumero(c2.docTipo, comprobante.docTipo) && mismoNumero(c2.docNro, comprobante.docNro);
     if (!igual) throw new A.ErrorArca('RECONCILIACION_DISTINTA', 'ARCA tiene ese número con otro importe o receptor: se frena para revisarlo a mano.');
-    await rpc('arca_comprobante_autorizar', { p_intento: res.intento, p_numero: res.numero, p_cae: c2.cae, p_cae_vto: isoDeAfip(String(c2.caeVto)), p_fecha_cbte: isoDeAfip(String(c2.fecha)) }, presFresco(SEGUNDOS(6)));
-    return { estado: 'emitida', numero: res.numero, cae: c2.cae, ptoVenta: cfg.ptoVta, reconciliada: true };
+    const au2 = primera(await rpc('arca_comprobante_autorizar', { p_intento: res.intento, p_numero: res.numero, p_cae: c2.cae, p_cae_vto: isoDeAfip(String(c2.caeVto)), p_fecha_cbte: isoDeAfip(String(c2.fecha)) }, presFresco(SEGUNDOS(6))));
+    return { estado: 'emitida', numero: res.numero, cae: c2.cae, ptoVenta: cfg.ptoVta, reconciliada: true, ...(au2 && au2.control_conflicto ? { controlConflicto: au2.control_conflicto } : {}) };
   }
   await rpc('arca_comprobante_rechazar', { p_intento: res.intento, p_numero: res.numero, p_error: motivo }, presFresco(SEGUNDOS(6)));
   return { estado: 'rechazada', error: motivo };

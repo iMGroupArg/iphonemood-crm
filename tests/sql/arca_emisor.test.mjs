@@ -96,6 +96,11 @@ console.log('\n══ Emisor de facturas (base real + ARCA simulado) ══\n');
   check('Datos: sin documento → null (ausencia explícita)', leerDatosFacturacion({ billing_info: {} }) === null);
   const raro = (() => { try { leerDatosFacturacion({ algo: 'otro' }); return null; } catch (e) { return e.codigo; } })();
   check('Datos: estructura desconocida → MELI_BILLING_FORMATO (no se toma como "sin datos")', raro === 'MELI_BILLING_FORMATO', raro);
+  const cod = (j) => { try { leerDatosFacturacion(j); return null; } catch (e) { return e.codigo; } };
+  check('Datos: identificación que no es un objeto → MELI_BILLING_FORMATO', cod({ billing_info: { identification: 'CUIT:20111111112' } }) === 'MELI_BILLING_FORMATO');
+  check('Datos: «document» (clave desconocida) dentro de buyer.billing_info → MELI_BILLING_FORMATO', cod({ buyer: { billing_info: { document: { type: 'CUIT', number: '20111111112' } } } }) === 'MELI_BILLING_FORMATO');
+  check('Datos: buyer sin billing_info → MELI_BILLING_FORMATO', cod({ buyer: { id: 5 } }) === 'MELI_BILLING_FORMATO');
+  check('Datos: ausencia explícita y conocida (billing_info vacío) sigue siendo null', leerDatosFacturacion({ billing_info: {} }) === null && leerDatosFacturacion({ buyer: { billing_info: { identification: {} } } }) === null);
   const cond = (() => { try { leerDatosFacturacion({ billing_info: { doc_type: 'DNI', doc_number: '1', fiscal_condition: 'Marciano' } }); return null; } catch (e) { return e.codigo; } })();
   check('Datos: condición que no se entiende → CONDICION_IVA_DESCONOCIDA', cond === 'CONDICION_IVA_DESCONOCIDA', cond);
 }
@@ -263,6 +268,24 @@ console.log('\n══ Emisor de facturas (base real + ARCA simulado) ══\n');
   check('HTTP 400 de Mercado Libre NO es ausencia de documento (MELI_BILLING), aunque haya umbral', e1 && e1.includes('MELI_BILLING') && a.st.emisiones === 0, e1);
   const e2 = await falla(() => emitir(ctx, o, a, meli({ status: 200, ok: true, json: { billing_info: { identification: { kind: 'CUIT', value: '20111111112' } } } }), { ...ENV, ARCA_UMBRAL_CONSUMIDOR_FINAL: '500000' }));
   check('Identificación con claves desconocidas: MELI_BILLING_FORMATO, no se emite como consumidor final', e2 && e2.includes('MELI_BILLING_FORMATO') && a.st.emisiones === 0, e2);
+}
+
+{ // Codex 3ª pasada: conciliación negativa con ARCA ya avanzado, y conflicto del control propagado
+  const ctx = await entorno(); const a = arca(); const o = await ordenId(ctx);
+  a.st.cortarAntes = true;
+  await emitir(ctx, o, a);                                              // reserva el 1; ARCA no recibió nada
+  await vencer(ctx.db);
+  a.st.ultimo = 7;                                                      // ARCA avanzó (otro sistema emitió) pero el 1 no figura a nuestro nombre
+  const e = await falla(() => emitir(ctx, o, a));
+  check('Consulta negativa pero ARCA ya está más adelante: NO se libera el número (RECONCILIACION_DISTINTA)', e && e.includes('RECONCILIACION_DISTINTA') && (await comp(ctx.db, o)).estado === 'reservado', e);
+}
+{
+  const ctx = await entorno(); const a = arca(); const o = await ordenId(ctx), otra = await ordenId(ctx);
+  await ctx.db.query(`INSERT INTO public.meli_facturas (orden_id, estado, tipo, pto_venta, numero, emitida_el, marcada_por, marcada_uid) VALUES ($1,'emitida','C',1,6,'2026-10-01','Franco','uid-franco')`, [otra]);
+  a.st.ultimo = 5;
+  const prod = { ...ENV, ARCA_MODO: 'produccion', ARCA_CONFIRMA_PRODUCCION: 'SI' };
+  const r = await emitir(ctx, o, a, meli(), prod);
+  check('Conflicto con el control de facturas: la factura se emite igual y el aviso llega al servidor de la pantalla (controlConflicto)', r.estado === 'emitida' && r.controlConflicto === 'CONTROL_DE_FACTURAS_NUMERO_REPETIDO', JSON.stringify(r));
 }
 
 { // (6) el diagnóstico comparte el ticket con la emisión

@@ -124,7 +124,8 @@ const MeliFacturas = {
     const t = String(v ?? '').trim().replace(',', '.');
     if (!/^\d{1,12}(\.\d{1,2})?$/.test(t)) return null;
     const [ent, dec = ''] = t.split('.');
-    return Number(ent) * 100 + Number((dec + '00').slice(0, 2));
+    const c = Number(ent) * 100 + Number((dec + '00').slice(0, 2));
+    return c <= 99999999999900 ? c : null;      // el mismo tope que la base
   },
   async guardarAnual(btn) {
     const limite = this.aCentavos(document.getElementById('fa-limite')?.value), fuera = this.aCentavos(document.getElementById('fa-fuera')?.value);

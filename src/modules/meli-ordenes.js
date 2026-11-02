@@ -363,7 +363,10 @@ const MeliOrdenes = {
       try { j = await r.json(); } catch { /* sin cuerpo */ }
       if (!r.ok || !j) { toast('No se pudo consultar la factura (HTTP ' + r.status + '). La venta quedó bien; reintentá con «Factura».'); return; }
       if (j.estado === 'simulacion') { if (!auto) toast('La facturación está en modo simulación: no se emitió nada.'); return; }
-      if (j.estado === 'emitida') toast(`Factura ${j.yaEstaba ? 'ya emitida' : 'emitida'}: punto de venta ${j.ptoVenta}, N.º ${j.numero}.`);
+      if (j.estado === 'emitida') {
+        toast(`Factura ${j.yaEstaba ? 'ya emitida' : 'emitida'}: punto de venta ${j.ptoVenta}, N.º ${j.numero}.`);
+        if (j.controlConflicto) toast('Atención: la factura de ARCA se guardó, pero el control de facturas ya tiene otra con ese número cargada a mano. Revisalo en Facturas.');
+      }
       else if (j.estado === 'pendiente_verificar') toast('La factura quedó esperando confirmación de ARCA. La venta está bien: tocá «Factura» para verificar (no se duplica).');
       else if (j.estado === 'en_curso') toast('Otro proceso está resolviendo esta factura. Esperá un minuto y tocá «Factura» otra vez (no se duplica).');
       else if (j.estado === 'rechazada') toast('ARCA rechazó la factura: ' + (j.error || 'sin detalle') + '. Podés reintentar con «Factura».');

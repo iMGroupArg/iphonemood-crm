@@ -16,6 +16,7 @@ const { limitar } = require('../_ratelimit.js');
 const M = require('../_meli.js');
 const { procesarNotificacion } = require('../_meli_ingesta.js');
 const { sonda, conciliar } = require('../_meli_sonda.js');
+const { diagnosticoArca } = require('../_arca_diagnostico.js');
 const { barrer, barrerTodas } = require('../_meli_barrido.js');
 
 // Debe coincidir con `functions` en vercel.json.
@@ -151,6 +152,17 @@ module.exports = async function handler(req, res) {
     } catch (e) {
       console.error('meli/worker (barrido):', e.codigo || '', e.message);
       res.status(502).json({ error: 'No se pudo buscar ventas' });
+    }
+    return;
+  }
+
+  // Diagnóstico de ARCA de solo lectura (api/_arca_diagnostico.js): consulta el estado, el login y los puntos de venta. No emite.
+  if (req.method === 'POST' && req.body && typeof req.body === 'object' && req.body.accion === 'arca_diagnostico') {
+    try {
+      res.status(200).json(await diagnosticoArca());
+    } catch (e) {
+      console.error('meli/worker (arca_diagnostico):', e.codigo || '');
+      res.status(502).json({ error: 'No se pudo ejecutar el diagnóstico de ARCA' });
     }
     return;
   }

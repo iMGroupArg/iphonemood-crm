@@ -223,6 +223,7 @@ ${herr('Diagnóstico de datos', `      <div class="card" style="margin-top:14px"
             "Conciliar importes" muestra además los importes de las últimas 6 ventas, sin datos de compradores.</div>
           <button class="btn btn-sm" id="meli-btn-sonda" onclick="Meli.sonda()"><i class="ti ti-stethoscope"></i> Ejecutar diagnóstico</button>
           <button class="btn btn-sm" id="meli-btn-conciliar" onclick="Meli.sonda('conciliar')" title="Importes de las últimas 6 ventas y si la cuenta cierra"><i class="ti ti-calculator"></i> Conciliar importes</button>
+          <button class="btn btn-sm" id="meli-btn-arca" onclick="Meli.arcaDiagnostico()" title="Prueba de solo lectura contra ARCA: no emite facturas"><i class="ti ti-file-certificate"></i> Probar conexión con ARCA</button>
         </div>
         <div id="meli-sonda-salida" style="margin-top:10px"></div>
       </div>`)}`;
@@ -254,6 +255,39 @@ ${herr('Diagnóstico de datos', `      <div class="card" style="margin-top:14px"
       if (out) out.textContent = 'No se pudo ejecutar el diagnóstico.';
     } finally {
       btns.forEach((b) => { b.disabled = false; });
+    }
+  },
+
+  // Prueba de solo lectura contra ARCA (api/_arca_diagnostico.js): estado, login con el certificado y puntos de venta. No emite nada.
+  async arcaDiagnostico() {
+    const out = document.getElementById('meli-sonda-salida');
+    const btn = document.getElementById('meli-btn-arca');
+    if (btn) btn.disabled = true;
+    if (out) out.textContent = 'Consultando a ARCA…';
+    try {
+      const token = await this._token();
+      const r = await fetch('/api/meli/worker', {
+        method: 'POST', headers: { 'x-crm-token': token, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ accion: 'arca_diagnostico' }),
+      });
+      let json = null;
+      try { json = await r.json(); } catch { /* sin cuerpo */ }
+      if (!out) return;
+      if (!r.ok || !json) { out.textContent = 'No se pudo ejecutar la prueba (HTTP ' + r.status + ').'; return; }
+      const e = (s) => State.esc(s == null ? '' : String(s));
+      const filas = (json.pasos || []).map((p) => {
+        const { paso, ok, ...resto } = p;
+        return `<div style="font-size:12.5px;margin-top:6px"><b style="color:${ok ? 'var(--green)' : 'var(--red)'}">${ok ? '✔' : '✘'}</b> <b>${e(paso)}</b>`
+          + `<div style="font-size:11.5px;color:var(--text-secondary);margin-left:18px;white-space:pre-wrap">${e(JSON.stringify(resto))}</div></div>`;
+      }).join('');
+      out.innerHTML = `<div style="font-size:12.5px;margin-bottom:4px"><b>Modo:</b> ${e(json.modo)} · ${e(json.resumen)}</div>${filas}`
+        + '<div style="font-size:11.5px;color:var(--text-secondary);margin:8px 0 4px">Si hace falta pasarlo, copiá este texto (no incluye certificado, clave ni CUIT):</div>'
+        + '<textarea readonly style="width:100%;height:160px;font-family:monospace;font-size:11px;padding:8px;border:1px solid var(--border);border-radius:8px"></textarea>';
+      out.querySelector('textarea').value = JSON.stringify(json, null, 2);
+    } catch {
+      if (out) out.textContent = 'No se pudo ejecutar la prueba.';
+    } finally {
+      if (btn) btn.disabled = false;
     }
   },
 

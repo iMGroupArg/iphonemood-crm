@@ -233,6 +233,17 @@ async function ultimoAutorizado({ cfg, ticket, ptoVta, cbteTipo = CBTE_FACTURA_C
   if (crudo === null || !/^\d+$/.test(crudo.trim())) throw new ErrorArca('WSFE_RESPUESTA', 'No se pudo leer el último comprobante autorizado.');
   return Number(crudo.trim());
 }
+// Puntos de venta habilitados para el emisor (solo lectura). Sin ninguno ARCA responde el error 602 ("sin resultados"): es lista vacía. [NO VERIFICADO]
+async function puntosDeVenta({ cfg, ticket, fetchImpl = fetch }) {
+  const xml = await llamarFe(cfg, 'FEParamGetPtosVenta', authXmlValida(cfg, ticket), fetchImpl);
+  const errores = erroresDe(xml);
+  if (errores.length) {
+    if (errores.every(e => String(e.codigo).trim() === '602')) return [];
+    throw new ErrorArca('WSFE_ERROR', `ARCA respondió con error al listar puntos de venta: ${errores[0].mensaje}`, errores);
+  }
+  return todas(xml, 'PtoVenta').map(p => ({ numero: Number(String(etiqueta(p, 'Nro') || '').trim()), emision: String(etiqueta(p, 'EmisionTipo') || '').trim(), bloqueado: String(etiqueta(p, 'Bloqueado') || '').trim() === 'S', baja: !/^(NULL)?$/.test(String(etiqueta(p, 'FchBaja') || '').trim()) }))
+    .filter(p => Number.isSafeInteger(p.numero));
+}
 // Solo el error 602 ("no existe") significa que el comprobante no existe; cualquier otro error (autenticación, servicio, datos) deja el
 // estado DESCONOCIDO y se propaga: concluir "no existe" por un problema de infraestructura llevaría a emitir dos veces.
 async function consultarComprobante({ cfg, ticket, ptoVta, cbteTipo = CBTE_FACTURA_C, numero, fetchImpl = fetch }) {
@@ -367,6 +378,6 @@ module.exports = {
   // criptografía y login
   oid, firmarCms, armarTra, parsearRespuestaLogin, obtenerTicket, cacheEnMemoria,
   // servicios de factura electrónica
-  feDummy, ultimoAutorizado, consultarComprobante, solicitarCAE, armarSolicitud, armarComprobanteC, emitirFacturaC,
+  feDummy, ultimoAutorizado, puntosDeVenta, consultarComprobante, solicitarCAE, armarSolicitud, armarComprobanteC, emitirFacturaC,
   _util: { etiqueta, todas, fechaAR, dosDecimales, importeEnCentavos },
 };

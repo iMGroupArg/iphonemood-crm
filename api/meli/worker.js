@@ -17,7 +17,7 @@ const M = require('../_meli.js');
 const { procesarNotificacion } = require('../_meli_ingesta.js');
 const { sonda, conciliar } = require('../_meli_sonda.js');
 const { diagnosticoArca } = require('../_arca_diagnostico.js');
-const { emitirFacturaOrden } = require('../_facturacion.js');
+const { emitirFacturaOrden, emitirNotaCreditoOrden } = require('../_facturacion.js');
 const { ErrorArca } = require('../_arca.js');
 const { barrer, barrerTodas } = require('../_meli_barrido.js');
 
@@ -168,6 +168,20 @@ module.exports = async function handler(req, res) {
       // Los errores de la base llegan como "RPC: <CODIGO>…": se devuelve solo el código. Los de ARCA traen un mensaje pensado para mostrarse.
       const codigo = e && e.codigo === 'RPC' ? ((String(e.message).match(/\b[A-Z][A-Z_]{5,}\b/) || ['RPC'])[0]) : ((e && e.codigo) || 'ERROR');
       console.error('meli/worker (arca_emitir):', codigo);
+      res.status(200).json({ estado: 'error', codigo, mensaje: e instanceof ErrorArca ? e.message : null });
+    }
+    return;
+  }
+
+  // Nota de crédito C de UNA orden (api/_facturacion.js): anula por su total la factura autorizada. De la petición solo vienen el número de orden y el
+  // motivo (lista cerrada); quién la pide sale de la sesión. Una falla no toca la venta: se devuelve el estado.
+  if (req.method === 'POST' && req.body && typeof req.body === 'object' && req.body.accion === 'arca_nc') {
+    try {
+      const pres = M.presupuestoHasta(t0 + PRESUPUESTO_MS - RESERVA_MS, t0 + PRESUPUESTO_MS);
+      res.status(200).json(await emitirNotaCreditoOrden({ orden: String(req.body.orden || ''), motivo: String(req.body.motivo || ''), usuario: email, rpc: M.rpc, pres }));
+    } catch (e) {
+      const codigo = e && e.codigo === 'RPC' ? ((String(e.message).match(/\b[A-Z][A-Z_]{5,}\b/) || ['RPC'])[0]) : ((e && e.codigo) || 'ERROR');
+      console.error('meli/worker (arca_nc):', codigo);
       res.status(200).json({ estado: 'error', codigo, mensaje: e instanceof ErrorArca ? e.message : null });
     }
     return;

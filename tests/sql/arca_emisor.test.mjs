@@ -10,7 +10,7 @@ import { spawnSync } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { baseNueva, SQL, SECRETO, nuevaOrden } from './lib/base_meli.mjs';
 const require = createRequire(import.meta.url);
-const { emitirFacturaOrden, leerDatosFacturacion } = require('../../api/_facturacion.js');
+const { emitirFacturaOrden, emitirNotaCreditoOrden, leerDatosFacturacion } = require('../../api/_facturacion.js');
 const { diagnosticoArca } = require('../../api/_arca_diagnostico.js');
 
 let ok = 0, fail = 0;
@@ -27,6 +27,7 @@ const PREPARAR = `DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolnam
 async function entorno() {
   const ctx = await baseNueva({ conVentas: false, sin7: true });
   await ctx.db.exec(PREPARAR); await ctx.db.exec(SQL('meli_facturas.sql')); await ctx.db.exec(SQL('arca_comprobantes.sql'));
+  await ctx.db.exec(SQL('arca_control_anual.sql')); await ctx.db.exec(SQL('arca_notas_credito.sql'));
   // rpc como la de api/_meli.js: agrega el secreto y devuelve lo mismo que PostgREST (jsonb pelado, tabla como arreglo).
   const rpc = async (nombre, args = {}) => {
     const todos = { p_secreto: SECRETO, ...args }; const claves = Object.keys(todos);
@@ -39,7 +40,7 @@ async function entorno() {
 const respFe = (m, cuerpo) => `<soap:Envelope xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/"><soap:Body><${m}Response><${m}Result>${cuerpo}</${m}Result></${m}Response></soap:Body></soap:Envelope>`;
 // ARCA simulado con memoria: lo que acepta queda registrado.
 function arca({ rechazar = false } = {}) {
-  const st = { ultimo: 0, comprobantes: new Map(), logins: 0, emisiones: 0, consultas: 0, cortarDespues: false, cortarAntes: false };
+  const st = { ultimo: 0, ultimoNC: 0, nc: new Map(), cuerposNC: [], comprobantes: new Map(), logins: 0, emisiones: 0, consultas: 0, cortarDespues: false, cortarAntes: false };
   const f = async (url, op) => {
     const a = op.headers.SOAPAction || '', body = String(op.body);
     const R = (x) => ({ ok: true, status: 200, text: async () => x });
@@ -51,10 +52,11 @@ function arca({ rechazar = false } = {}) {
     }
     if (/FEDummy/.test(a)) return R(respFe('FEDummy', '<AppServer>OK</AppServer><DbServer>OK</DbServer><AuthServer>OK</AuthServer>'));
     if (/FEParamGetPtosVenta/.test(a)) return R(respFe('FEParamGetPtosVenta', '<ResultGet><PtoVenta><Nro>1</Nro><EmisionTipo>CAE</EmisionTipo><Bloqueado>N</Bloqueado><FchBaja>NULL</FchBaja></PtoVenta></ResultGet>'));
-    if (/FECompUltimoAutorizado/.test(a)) return R(respFe('FECompUltimoAutorizado', `<CbteNro>${st.ultimo}</CbteNro>`));
+    const tipoDe = (re) => Number((body.match(re) || [])[1] || 11);
+    if (/FECompUltimoAutorizado/.test(a)) return R(respFe('FECompUltimoAutorizado', `<CbteNro>${tipoDe(/<ar:CbteTipo>(\d+)</) === 13 ? st.ultimoNC : st.ultimo}</CbteNro>`));
     if (/FECompConsultar/.test(a)) {
       st.consultas++;
-      const n = Number(body.match(/<ar:CbteNro>(\d+)</)[1]); const c = st.comprobantes.get(n);
+      const n = Number(body.match(/<ar:CbteNro>(\d+)</)[1]); const c = (tipoDe(/<ar:CbteTipo>(\d+)</) === 13 ? st.nc : st.comprobantes).get(n);
       return R(respFe('FECompConsultar', c ? `<ResultGet><CodAutorizacion>${c.cae}</CodAutorizacion><FchVto>20261112</FchVto><ImpTotal>${c.importe}</ImpTotal><DocTipo>${c.docTipo}</DocTipo><DocNro>${c.docNro}</DocNro><CbteFch>${c.fecha}</CbteFch></ResultGet>`
         : '<Errors><Err><Code>602</Code><Msg>Sin resultados</Msg></Err></Errors>'));
     }
@@ -63,9 +65,11 @@ function arca({ rechazar = false } = {}) {
       if (st.cortarAntes) { st.cortarAntes = false; throw new Error('red caída'); }
       const n = Number(body.match(/<ar:CbteDesde>(\d+)</)[1]);
       if (rechazar) return R(respFe('FECAESolicitar', `<FeCabResp><Resultado>R</Resultado></FeCabResp><FeDetResp><FECAEDetResponse><CbteDesde>${n}</CbteDesde><CbteHasta>${n}</CbteHasta><Resultado>R</Resultado><Observaciones><Obs><Code>10015</Code><Msg>Documento inválido</Msg></Obs></Observaciones></FECAEDetResponse></FeDetResp>`));
-      const cae = String(74000000000000 + n);
-      st.comprobantes.set(n, { cae, importe: body.match(/<ar:ImpTotal>([\d.]+)</)[1], docTipo: body.match(/<ar:DocTipo>(\d+)</)[1], docNro: body.match(/<ar:DocNro>(\d+)</)[1], fecha: body.match(/<ar:CbteFch>(\d+)</)[1] });
-      st.ultimo = Math.max(st.ultimo, n);
+      const esNC = tipoDe(/<ar:CbteTipo>(\d+)</) === 13;
+      const cae = String((esNC ? 75000000000000 : 74000000000000) + n);
+      if (esNC) st.cuerposNC.push(body);
+      (esNC ? st.nc : st.comprobantes).set(n, { cae, importe: body.match(/<ar:ImpTotal>([\d.]+)</)[1], docTipo: body.match(/<ar:DocTipo>(\d+)</)[1], docNro: body.match(/<ar:DocNro>(\d+)</)[1], fecha: body.match(/<ar:CbteFch>(\d+)</)[1] });
+      if (esNC) st.ultimoNC = Math.max(st.ultimoNC, n); else st.ultimo = Math.max(st.ultimo, n);
       if (st.cortarDespues) { st.cortarDespues = false; throw new Error('se cortó la respuesta'); }
       return R(respFe('FECAESolicitar', `<FeCabResp><Resultado>A</Resultado></FeCabResp><FeDetResp><FECAEDetResponse><CbteDesde>${n}</CbteDesde><CbteHasta>${n}</CbteHasta><Resultado>A</Resultado><CAE>${cae}</CAE><CAEFchVto>20261112</CAEFchVto></FECAEDetResponse></FeDetResp>`));
     }
@@ -83,6 +87,8 @@ const ordenId = async (ctx, bruto = 100000, estado = 'paid') => {
 };
 const emitir = (ctx, orden, a, m = meli(), env = ENV) => emitirFacturaOrden({ orden, env, rpc: ctx.rpc, meliGet: m, fetchImpl: a.f, esperaTicketMs: 50 });
 const comp = async (db, orden, amb = 'homologacion') => (await db.query(`SELECT * FROM public.meli_comprobantes WHERE orden_id=$1 AND ambiente=$2`, [orden, amb])).rows[0];
+const vencerNC = (db) => db.query(`UPDATE public.meli_notas_credito SET trabajo_hasta = now() - interval '11 minutes' WHERE trabajo_hasta IS NOT NULL`);
+const emitirNC = (ctx, orden, a, motivo = 'devolucion', env = ENV, usuario = 'franco@x.com') => emitirNotaCreditoOrden({ orden, motivo, usuario, env, rpc: ctx.rpc, fetchImpl: a.f, esperaTicketMs: 50 });
 const vencer = (db) => db.query(`UPDATE public.meli_comprobantes SET trabajo_hasta = now() - interval '11 minutes' WHERE trabajo_hasta IS NOT NULL`);
 
 console.log('\n══ Emisor de facturas (base real + ARCA simulado) ══\n');
@@ -303,6 +309,70 @@ console.log('\n══ Emisor de facturas (base real + ARCA simulado) ══\n');
   check('Si falla el login, el candado del ticket queda liberado (no espera 60 s)', lease && lease.lease_id === null, JSON.stringify(lease));
   const r = await emitir(ctx, o, a);
   check('…y el siguiente intento emite normalmente', r.estado === 'emitida', JSON.stringify(r));
+}
+
+{ // ── Nota de crédito C ──
+  const ctx = await entorno(); const a = arca(); const o = await ordenId(ctx);
+  const e0 = await falla(() => emitirNC(ctx, o, a));
+  check('NC: sin factura autorizada no se puede emitir (FACTURA_NO_AUTORIZADA)', e0 && e0.includes('FACTURA_NO_AUTORIZADA') && a.st.emisiones === 0, e0);
+  a.st.ultimo = 5; a.st.ultimoNC = 2;
+  const fac = await emitir(ctx, o, a);
+  check('NC: (preparación) factura emitida N.º 6', fac.estado === 'emitida' && fac.numero === 6, JSON.stringify(fac));
+  check('NC: motivo fuera de la lista se rechaza', (await falla(() => emitirNC(ctx, o, a, 'porque si')))?.includes('MOTIVO_INVALIDO'));
+  check('NC: sin usuario se rechaza', (await falla(() => emitirNC(ctx, o, a, 'devolucion', ENV, '')))?.includes('USUARIO_INVALIDO'));
+  const nc = await emitirNC(ctx, o, a);
+  check('NC: emitida con numeración PROPIA del tipo 13 (último 2 → N.º 3)', nc.estado === 'emitida' && nc.numero === 3 && /^75\d{12}$/.test(nc.cae), JSON.stringify(nc));
+  const cuerpo = a.st.cuerposNC[0] || '';
+  check('NC: ARCA recibió tipo 13 y la factura asociada (Tipo 11, punto de venta 1, N.º 6, CUIT del emisor y fecha) DESPUÉS de CondicionIVAReceptorId',
+    /<ar:CbteTipo>13</.test(cuerpo) && /<\/ar:CondicionIVAReceptorId><ar:CbtesAsoc><ar:CbteAsoc><ar:Tipo>11<\/ar:Tipo><ar:PtoVta>1<\/ar:PtoVta><ar:Nro>6<\/ar:Nro><ar:Cuit>20111111112<\/ar:Cuit><ar:CbteFch>\d{8}<\/ar:CbteFch><\/ar:CbteAsoc><\/ar:CbtesAsoc>/.test(cuerpo), cuerpo.slice(-420));
+  check('NC: el importe y el receptor son los de la factura (total, mismo DNI)', a.st.nc.get(3).importe === '100000.00' && a.st.nc.get(3).docNro === '30111222' && a.st.nc.get(3).docTipo === '96', JSON.stringify(a.st.nc.get(3)));
+  const nc2 = await emitirNC(ctx, o, a);
+  check('NC: pedirla otra vez NO emite otra (yaEstaba)', nc2.estado === 'emitida' && nc2.yaEstaba === true && a.st.cuerposNC.length === 1, JSON.stringify(nc2));
+  const fila = (await ctx.db.query(`SELECT estado, motivo, creado_por, numero FROM public.meli_notas_credito`)).rows;
+  check('NC: queda guardada con motivo y quién la pidió', fila.length === 1 && fila[0].motivo === 'devolucion' && fila[0].creado_por === 'franco@x.com', JSON.stringify(fila));
+  check('NC: una autorizada no se modifica ni se borra', /INMODIFICABLE/.test(String(await falla(() => ctx.db.query(`UPDATE public.meli_notas_credito SET importe_centavos=1`)))) && /NO_SE_BORRA/.test(String(await falla(() => ctx.db.query(`DELETE FROM public.meli_notas_credito`)))));
+}
+{ // corte de red y rechazo en la nota de crédito
+  const ctx = await entorno(); const a = arca(); const o = await ordenId(ctx);
+  await emitir(ctx, o, a);
+  a.st.cortarDespues = true;
+  const r = await emitirNC(ctx, o, a);
+  check('NC: corte después de que ARCA aceptó → pendiente_verificar', r.estado === 'pendiente_verificar', JSON.stringify(r));
+  const inm = await emitirNC(ctx, o, a);
+  check('NC: reintento inmediato → en_curso (no consulta ni emite)', inm.estado === 'en_curso' && a.st.cuerposNC.length === 1, JSON.stringify(inm));
+  await vencerNC(ctx.db);
+  const r2 = await emitirNC(ctx, o, a);
+  check('NC: tras la ventana se CONSULTA a ARCA y se recupera el CAE sin emitir otra nota', r2.estado === 'emitida' && r2.reconciliada === true && a.st.cuerposNC.length === 1, JSON.stringify(r2));
+}
+{
+  const ctx = await entorno(); const a = arca(); const o = await ordenId(ctx);
+  await emitir(ctx, o, a);
+  const f0 = a.f; let primera = true;
+  a.f = async (url, op) => (primera && /FECAESolicitar/.test(op.headers.SOAPAction || '') && /<ar:CbteTipo>13</.test(String(op.body)) && (primera = false, true)
+    ? { ok: true, status: 200, text: async () => respFe('FECAESolicitar', '<FeCabResp><Resultado>R</Resultado></FeCabResp><FeDetResp><FECAEDetResponse><CbteDesde>1</CbteDesde><CbteHasta>1</CbteHasta><Resultado>R</Resultado><Observaciones><Obs><Code>10016</Code><Msg>no correlativo</Msg></Obs></Observaciones></FECAEDetResponse></FeDetResp>') }
+    : f0(url, op));
+  const r = await emitirNC(ctx, o, a);
+  check('NC: rechazo de ARCA → rechazada con el motivo y el número queda libre', r.estado === 'rechazada' && /10016/.test(r.error) && (await ctx.db.query(`SELECT numero FROM public.meli_notas_credito`)).rows[0].numero === null, JSON.stringify(r));
+  const r2 = await emitirNC(ctx, o, a);
+  check('NC: se puede reintentar tras un rechazo', r2.estado === 'emitida' && r2.numero === 1, JSON.stringify(r2));
+}
+{ // control anual: la nota resta (solo producción)
+  const ctx = await entorno(); const a = arca(); const o = await ordenId(ctx, 100000);
+  const prod = { ...ENV, ARCA_MODO: 'produccion', ARCA_CONFIRMA_PRODUCCION: 'SI' };
+  await emitir(ctx, o, a, meli(), prod);
+  const antes = (await ctx.db.query(`SELECT public.arca_control_anual() r`)).rows[0].r;
+  check('Control anual: la factura de producción suma', Number(antes.total_centavos) === 10000000 && antes.cantidad === 1, JSON.stringify(antes));
+  await emitirNC(ctx, o, a, 'cancelacion', prod);
+  const desp = (await ctx.db.query(`SELECT public.arca_control_anual() r`)).rows[0].r;
+  check('Control anual: la nota de crédito RESTA y el total vuelve a cero', Number(desp.total_centavos) === 0 && Number(desp.notas_credito_centavos) === 10000000 && desp.notas_credito_cantidad === 1, JSON.stringify(desp));
+  const h = await ctx.db.query(`SELECT count(*)::int n FROM public.meli_notas_credito WHERE ambiente='produccion'`);
+  check('Control anual: la nota de producción quedó en producción', h.rows[0].n === 1);
+}
+{ // homologación no cuenta
+  const ctx = await entorno(); const a = arca(); const o = await ordenId(ctx);
+  await emitir(ctx, o, a); await emitirNC(ctx, o, a);
+  const x = (await ctx.db.query(`SELECT public.arca_control_anual() r`)).rows[0].r;
+  check('Control anual: facturas y notas de HOMOLOGACIÓN no cuentan', Number(x.total_centavos) === 0 && Number(x.notas_credito_centavos) === 0, JSON.stringify(x));
 }
 
 console.log(`\n${ok} pasan, ${fail} fallan de ${ok + fail}`);

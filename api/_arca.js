@@ -27,6 +27,7 @@ const URLS = {
 };
 const NS_FE = 'http://ar.gov.afip.dif.FEV1/';
 const CBTE_FACTURA_C = 11;
+const CBTE_NOTA_CREDITO_C = 13;
 
 // Códigos de tipo de documento del receptor (tabla de ARCA) [NO VERIFICADO contra FEParamGetTiposDoc].
 const DOC_TIPOS = { CUIT: 80, CUIL: 86, DNI: 96 };
@@ -312,18 +313,27 @@ function validarComprobante(comp) {
   if (!/^\d{1,11}$/.test(String(comp.docNro))) throw new ErrorArca('DATO_INVALIDO', 'Número de documento inválido.');
   enteroEn(comp.condicionIva, 1, 99, 'Condición frente al IVA');
   if (!/^\d{8}$/.test(String(comp.fecha))) throw new ErrorArca('DATO_INVALIDO', 'Fecha del comprobante inválida.');
+  if (comp.asociado) {   // nota de crédito: la factura que anula
+    const a = comp.asociado;
+    if (Number(a.tipo) !== CBTE_FACTURA_C) throw new ErrorArca('DATO_INVALIDO', 'La nota de crédito solo puede anular una Factura C.');
+    enteroEn(a.ptoVta, 1, 99999, 'Punto de venta de la factura'); enteroEn(a.numero, 1, 99999999, 'Número de la factura');
+    if (!/^\d{11}$/.test(String(a.cuit))) throw new ErrorArca('DATO_INVALIDO', 'CUIT del emisor inválido.');
+    if (!/^\d{8}$/.test(String(a.fecha))) throw new ErrorArca('DATO_INVALIDO', 'Fecha de la factura inválida.');
+  } else if (Number(comp.cbteTipo) === CBTE_NOTA_CREDITO_C) throw new ErrorArca('DATO_INVALIDO', 'Falta la factura que anula la nota de crédito.');
   if (!/^\d{1,9}\.\d{2}$/.test(String(comp.importe)) || Number(comp.importe) <= 0) throw new ErrorArca('IMPORTE_INVALIDO', 'Importe del comprobante inválido.');
 }
 
 function armarSolicitud(cfg, ticket, ptoVta, numero, comp) {
   validarComprobante(comp);
   const pv = enteroEn(ptoVta, 1, 99999, 'Punto de venta'), nro = enteroEn(numero, 1, 99999999, 'Número de comprobante');
+  // CbtesAsoc va DESPUÉS de CondicionIVAReceptorId, como pide el WSDL de WSFEv1.
+  const asoc = comp.asociado ? `<ar:CbtesAsoc><ar:CbteAsoc><ar:Tipo>${CBTE_FACTURA_C}</ar:Tipo><ar:PtoVta>${enteroEn(comp.asociado.ptoVta, 1, 99999, 'Punto de venta')}</ar:PtoVta><ar:Nro>${enteroEn(comp.asociado.numero, 1, 99999999, 'Número')}</ar:Nro><ar:Cuit>${comp.asociado.cuit}</ar:Cuit><ar:CbteFch>${comp.asociado.fecha}</ar:CbteFch></ar:CbteAsoc></ar:CbtesAsoc>` : '';
   // Factura C (monotributo): importe neto = total, sin IVA discriminado ni tributos. El orden de los elementos importa para ARCA.
   return `${authXmlValida(cfg, ticket)}<ar:FeCAEReq><ar:FeCabReq><ar:CantReg>1</ar:CantReg><ar:PtoVta>${pv}</ar:PtoVta><ar:CbteTipo>${comp.cbteTipo}</ar:CbteTipo></ar:FeCabReq>`
     + `<ar:FeDetReq><ar:FECAEDetRequest><ar:Concepto>${comp.concepto}</ar:Concepto><ar:DocTipo>${comp.docTipo}</ar:DocTipo><ar:DocNro>${comp.docNro}</ar:DocNro>`
     + `<ar:CbteDesde>${nro}</ar:CbteDesde><ar:CbteHasta>${nro}</ar:CbteHasta><ar:CbteFch>${comp.fecha}</ar:CbteFch><ar:ImpTotal>${comp.importe}</ar:ImpTotal>`
     + `<ar:ImpTotConc>0.00</ar:ImpTotConc><ar:ImpNeto>${comp.importe}</ar:ImpNeto><ar:ImpOpEx>0.00</ar:ImpOpEx><ar:ImpTrib>0.00</ar:ImpTrib><ar:ImpIVA>0.00</ar:ImpIVA>`
-    + `<ar:MonId>PES</ar:MonId><ar:MonCotiz>1</ar:MonCotiz><ar:CondicionIVAReceptorId>${comp.condicionIva}</ar:CondicionIVAReceptorId></ar:FECAEDetRequest></ar:FeDetReq></ar:FeCAEReq>`;
+    + `<ar:MonId>PES</ar:MonId><ar:MonCotiz>1</ar:MonCotiz><ar:CondicionIVAReceptorId>${comp.condicionIva}</ar:CondicionIVAReceptorId>${asoc}</ar:FECAEDetRequest></ar:FeDetReq></ar:FeCAEReq>`;
 }
 
 // Pide el CAE del número `numero` (que reserva la base; ver docs). No elige el número ni reintenta: lo hace el orquestador.
@@ -357,6 +367,29 @@ async function solicitarCAE({ cfg, ticket, ptoVta, numero, comprobante, fetchImp
   throw new ErrorArca('WSFE_ESTADO_DESCONOCIDO', 'ARCA no informó si el comprobante fue aprobado o rechazado: hay que consultarlo.');
 }
 
+// Nota de crédito C que anula por su TOTAL una factura ya autorizada. Los datos (importe, receptor, factura) salen de la base, nunca de la petición.
+// datos: { importeCentavos, docTipo, docNro, condicionIva, factura: { ptoVta, numero, fecha: 'YYYY-MM-DD' } }
+function armarNotaCreditoC(datos, { cfg, ahora = new Date() } = {}) {
+  const c = importeEnCentavos(Number(datos.importeCentavos) / 100);
+  if (c !== Number(datos.importeCentavos)) throw new ErrorArca('IMPORTE_INVALIDO', 'El importe de la nota de crédito no es válido.');
+  const f = datos.factura || {};
+  return {
+    cbteTipo: CBTE_NOTA_CREDITO_C, concepto: 1, docTipo: Number(datos.docTipo), docNro: String(datos.docNro), condicionIva: Number(datos.condicionIva),
+    importeCentavos: c, importe: dosDecimales(c), fecha: fechaAR(ahora),
+    asociado: { tipo: CBTE_FACTURA_C, ptoVta: f.ptoVta, numero: f.numero, cuit: cfg.cuit, fecha: String(f.fecha || '').replace(/-/g, '') },
+  };
+}
+async function emitirNotaCreditoC({ datos, numeroReservado, env = process.env, cache, fetchImpl = fetch, ahora = () => new Date() }) {
+  const cfg = configuracion(env);
+  const comprobante = armarNotaCreditoC(datos, { cfg, ahora: ahora() });
+  if (cfg.modo === 'simulacion') return { simulado: true, modo: cfg.modo, comprobante, resultado: 'A', numero: numeroReservado || 0, cae: 'SIMULADO', caeVto: null, observaciones: [], errores: [] };
+  if (!cfg.cuit || cfg.cuit.length !== 11) throw new ErrorArca('SIN_CUIT', 'Falta ARCA_CUIT (11 dígitos).');
+  enteroEn(numeroReservado, 1, 99999999, 'Número de comprobante');
+  const ticket = await obtenerTicket({ cfg, cache, fetchImpl, ahora });
+  const r = await solicitarCAE({ cfg, ticket, ptoVta: datos.factura.ptoVta, numero: numeroReservado, comprobante, fetchImpl });
+  return { simulado: false, modo: cfg.modo, comprobante, ...r };
+}
+
 // Emisión de punta a punta para el modo configurado. En 'simulacion' NO toca la red y devuelve un CAE falso marcado `simulado`.
 async function emitirFacturaC({ orden, comprador, numeroReservado, env = process.env, cache, fetchImpl = fetch, ahora = () => new Date() }) {
   const cfg = configuracion(env);
@@ -374,10 +407,10 @@ async function emitirFacturaC({ orden, comprador, numeroReservado, env = process
 }
 
 module.exports = {
-  MODOS, URLS, CBTE_FACTURA_C, DOC_TIPOS, ErrorArca, configuracion,
+  MODOS, URLS, CBTE_FACTURA_C, CBTE_NOTA_CREDITO_C, DOC_TIPOS, ErrorArca, configuracion,
   // criptografía y login
   oid, firmarCms, armarTra, parsearRespuestaLogin, obtenerTicket, cacheEnMemoria,
   // servicios de factura electrónica
-  feDummy, ultimoAutorizado, puntosDeVenta, consultarComprobante, solicitarCAE, armarSolicitud, armarComprobanteC, emitirFacturaC,
+  feDummy, ultimoAutorizado, puntosDeVenta, consultarComprobante, solicitarCAE, armarSolicitud, armarComprobanteC, emitirFacturaC, armarNotaCreditoC, emitirNotaCreditoC,
   _util: { etiqueta, todas, fechaAR, dosDecimales, importeEnCentavos },
 };

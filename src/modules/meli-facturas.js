@@ -2,7 +2,7 @@
 const MeliFacturas = {
   _soloSinFactura: false,
   _ocupadas: new Set(),
-  TEXTO: 'El CRM no emite facturas: acá solo se registra la que emitiste. Tiene que ser a nombre de Franco Ezequiel Velas y por el importe real de la venta.',
+  TEXTO: 'Las facturas de ARCA se emiten desde el botón «Factura» de cada venta procesada; acá también podés registrar una que emitiste por fuera. Siempre a nombre de Franco Ezequiel Velas y por el importe real de la venta.',
   REABRIR: 'Reabrir NO anula el comprobante ante ARCA; el número queda en el historial.',
   MOTIVOS: {
     no_es_venta_real: 'No es una venta real',
@@ -57,6 +57,7 @@ const MeliFacturas = {
         filas.push(...(data || []));
       }
       State.meliFacturas = filas; State.meliFacturasError = false; State.meliFacturasAusente = false;
+      if (typeof cliente.rpc === 'function') await this.cargarAnual(cliente);
       return true;
     } catch (error) {
       State.meliFacturasError = true;
@@ -74,10 +75,72 @@ const MeliFacturas = {
     const boton = (estado, texto) => `<button class="btn btn-sm" data-orden="${e(orden.orderId)}" data-estado="${estado}" onclick="MeliFacturas.accion(this)">${texto}</button>`;
     return `<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px"><span class="badge ${clase}">${e(txt)}</span>${f.estado === 'pendiente' ? boton('emitida', 'Marcar emitida…') + boton('no_corresponde', 'No corresponde…') : boton('pendiente', 'Reabrir')}</div>`;
   },
+  // ── Control de facturación anual (seguimiento del tope de monotributo; NO bloquea nada) ──
+  async cargarAnual(cliente) {
+    try {
+      const { data, error } = await cliente.rpc('arca_control_anual');
+      if (error) throw error;
+      State.facturacionAnual = data; State.facturacionAnualError = false;
+    } catch (error) {
+      State.facturacionAnual = null;
+      State.facturacionAnualError = !['42883', 'PGRST202'].includes(error && error.code);   // función ausente = todavía no se corrió el script 21
+    }
+  },
+  _pesos(centavos) { return new Intl.NumberFormat('es-AR', { style: 'currency', currency: 'ARS', maximumFractionDigits: 2 }).format(Number(centavos || 0) / 100); },
+  // Porcentaje del límite usado y color: amarillo desde 70 %, rojo desde 90 %. Sin límite configurado no hay porcentaje.
+  estadoAnual(a) {
+    const limite = Number(a && a.limite_centavos || 0), total = Number(a && a.total_centavos || 0);
+    if (!(limite > 0)) return { pct: null, clase: 'b-gray', txt: 'Sin límite configurado' };
+    const pct = Math.round((total / limite) * 1000) / 10;
+    return { pct, clase: pct >= 90 ? 'b-red' : pct >= 70 ? 'b-amber' : 'b-green', txt: pct >= 100 ? 'Límite superado' : pct >= 90 ? 'Cerca del límite' : pct >= 70 ? 'Atención' : 'En rango' };
+  },
+  tarjetaAnual() {
+    const a = State.facturacionAnual;
+    if (State.facturacionAnualError) return '<div class="card" style="margin-bottom:10px;font-size:12px">Control de facturación anual no disponible. Probá actualizar.</div>';
+    if (!a) return '';
+    const e = s => State.esc(String(s ?? ''));
+    const est = this.estadoAnual(a);
+    const barra = est.pct === null ? '' : `<div style="height:8px;border-radius:4px;background:var(--border);margin:8px 0;overflow:hidden"><div style="height:100%;width:${Math.min(est.pct, 100)}%;background:var(--${est.clase === 'b-red' ? 'red' : est.clase === 'b-amber' ? 'amber' : 'green'})"></div></div>`;
+    const meses = (a.por_mes || []).map(m => `<span style="white-space:nowrap">${e(m.mes)}: <b>${e(this._pesos(m.centavos))}</b> (${e(m.cantidad)})</span>`).join(' · ');
+    const pesos = c => (Number(c || 0) / 100).toFixed(2);
+    return `<div class="card" style="margin-bottom:10px;font-size:12.5px">
+      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center"><b>Facturación de los últimos 12 meses</b><span class="badge ${est.clase}">${e(est.txt)}${est.pct === null ? '' : ' · ' + e(String(est.pct).replace('.', ',')) + ' %'}</span></div>
+      <div style="margin-top:4px">Total <b>${e(this._pesos(a.total_centavos))}</b>${Number(a.limite_centavos) > 0 ? ` de <b>${e(this._pesos(a.limite_centavos))}</b>` : ''} · desde el CRM ${e(this._pesos(a.facturado_crm_centavos))} (${e(a.cantidad)} facturas) · fuera del CRM ${e(this._pesos(a.fuera_crm_centavos))}</div>
+      ${barra}
+      ${meses ? `<div style="font-size:11.5px;color:var(--text-secondary);line-height:1.6">${meses}</div>` : ''}
+      <div style="font-size:11.5px;color:var(--text-secondary);margin-top:6px">Es un seguimiento interno: no bloquea ninguna factura. Cuenta solo las facturas reales (producción) autorizadas por ARCA desde el CRM; las de prueba no suman. Las notas de crédito se restarán cuando se agreguen.</div>
+      <details style="margin-top:8px"><summary style="cursor:pointer">Configurar límite y facturado fuera del CRM</summary>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px;align-items:flex-end">
+          <label style="font-size:11.5px">Límite anual (ARS)<br><input type="number" id="fa-limite" min="0" step="0.01" value="${pesos(a.limite_centavos)}" style="width:160px;padding:6px 8px;border:1px solid var(--border-strong);border-radius:8px"></label>
+          <label style="font-size:11.5px">Facturado fuera del CRM, últimos 12 meses (ARS)<br><input type="number" id="fa-fuera" min="0" step="0.01" value="${pesos(a.fuera_crm_centavos)}" style="width:160px;padding:6px 8px;border:1px solid var(--border-strong);border-radius:8px"></label>
+          <button class="btn btn-sm btn-primary" onclick="MeliFacturas.guardarAnual(this)">Guardar</button>
+        </div>
+        ${a.actualizado_por ? `<div style="font-size:11px;color:var(--text-secondary);margin-top:4px">Última actualización: ${e(a.actualizado_por)}</div>` : ''}
+      </details></div>`;
+  },
+  // Pesos con hasta dos decimales → centavos enteros, sin errores de coma flotante. null si no es un monto válido.
+  aCentavos(v) {
+    const t = String(v ?? '').trim().replace(',', '.');
+    if (!/^\d{1,12}(\.\d{1,2})?$/.test(t)) return null;
+    const [ent, dec = ''] = t.split('.');
+    return Number(ent) * 100 + Number((dec + '00').slice(0, 2));
+  },
+  async guardarAnual(btn) {
+    const limite = this.aCentavos(document.getElementById('fa-limite')?.value), fuera = this.aCentavos(document.getElementById('fa-fuera')?.value);
+    if (limite === null || fuera === null) { toast('Ingresá montos válidos en pesos (hasta dos decimales).'); return; }
+    if (btn) btn.disabled = true;
+    try {
+      const { data, error } = await supa.rpc('arca_control_config_guardar', { p_limite_centavos: limite, p_fuera_centavos: fuera });
+      if (error || !data || data.ok !== true) { toast('No se pudo guardar. Probá de nuevo.'); return; }
+      await this.cargarAnual(supa);
+      toast('Control de facturación actualizado.');
+      if (window.MeliOrdenes && MeliOrdenes.pintar) MeliOrdenes.pintar();
+    } catch { toast('No se pudo guardar. Probá de nuevo.'); } finally { if (btn) btn.disabled = false; }
+  },
   cabecera(ordenes) {
-    if (State.meliFacturasAusente) return '';
+    if (State.meliFacturasAusente) return this.tarjetaAnual();
     const n = State.meliFacturasError ? 0 : this.contar(ordenes);
-    return `<div class="card" style="margin-bottom:10px;font-size:12px">${State.esc(this.TEXTO)}<p>${State.esc(this.REABRIR)}</p><p>Cancelar o revertir la orden no cambia su factura.</p>${State.meliFacturasError ? '<p>Control de facturas no disponible. Probá actualizar.</p>' : `${n > 0 ? `<p>${n} ventas de Mercado Libre sin factura <button class="btn btn-sm" onclick="MeliFacturas.filtrar(true)">Ver</button></p>` : ''}<button class="btn btn-sm ${this._soloSinFactura ? 'btn-primary' : ''}" onclick="MeliFacturas.filtrar()">Sin factura</button>`}</div>`;
+    return this.tarjetaAnual() + `<div class="card" style="margin-bottom:10px;font-size:12px">${State.esc(this.TEXTO)}<p>${State.esc(this.REABRIR)}</p><p>Cancelar o revertir la orden no cambia su factura.</p>${State.meliFacturasError ? '<p>Control de facturas no disponible. Probá actualizar.</p>' : `${n > 0 ? `<p>${n} ventas de Mercado Libre sin factura <button class="btn btn-sm" onclick="MeliFacturas.filtrar(true)">Ver</button></p>` : ''}<button class="btn btn-sm ${this._soloSinFactura ? 'btn-primary' : ''}" onclick="MeliFacturas.filtrar()">Sin factura</button>`}</div>`;
   },
   filtrar(ver) { this._soloSinFactura = ver === true || !this._soloSinFactura; MeliOrdenes.filtrar('todas'); },
   async accion(btn) {

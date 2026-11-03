@@ -174,6 +174,17 @@ module.exports = async function handler(req, res) {
     return;
   }
 
+  // Ambiente con el que corre ARCA en este servidor (solo lectura, sin datos sensibles): lo usa la pantalla al encender la facturación automática.
+  if (req.method === 'POST' && req.body && typeof req.body === 'object' && req.body.accion === 'arca_modo') {
+    try {
+      const modo = require('../_arca.js').configuracion().modo;
+      res.status(200).json({ modo });
+    } catch (e) {
+      res.status(200).json({ modo: null, codigo: (e && e.codigo) || 'ERROR' });
+    }
+    return;
+  }
+
   // Nota de crédito C de UNA orden (api/_facturacion.js): anula por su total la factura autorizada. De la petición solo vienen el número de orden y el
   // motivo (lista cerrada); quién la pide sale de la sesión. Una falla no toca la venta: se devuelve el estado.
   if (req.method === 'POST' && req.body && typeof req.body === 'object' && req.body.accion === 'arca_nc') {
@@ -237,7 +248,7 @@ module.exports = async function handler(req, res) {
     let auto = null;
     try {
       const limiteAuto = t0 + PRESUPUESTO_MS;
-      auto = await correrAutomatizacion({ rpc: M.rpc, meliGet: M.meliGet, pres: M.presupuestoHasta(limiteAuto - RESERVA_MS, limiteAuto), restanteMs: () => limiteAuto - Date.now() });
+      auto = await correrAutomatizacion({ rpc: M.rpc, meliGet: M.meliGet, pres: M.presupuestoHasta(limiteAuto - RESERVA_MS, limiteAuto), restanteMs: () => limiteAuto - Date.now(), limite: limiteAuto });
     } catch (e) {
       console.error('meli/worker (facturación automática):', (e && e.codigo) || '');
       auto = { omitido: 'error' };

@@ -20,7 +20,7 @@ const primera = (x) => (Array.isArray(x) ? x[0] : x);
 const TEXTO_NOTA = 'automático: cancelación en Mercado Libre';
 const textoError = (e) => (e && e.codigo ? `${e.codigo}: ${String(e.message).slice(0, 200)}` : 'error inesperado');
 
-async function correrAutomatizacion({ rpc, meliGet, env = process.env, fetchImpl = fetch, ahora = () => new Date(), pres, maxPorCorrida = 2, restanteMs = () => Infinity, minimoMs = 9000,
+async function correrAutomatizacion({ rpc, meliGet, env = process.env, fetchImpl = fetch, ahora = () => new Date(), pres, maxPorCorrida = 2, restanteMs = () => Infinity, minimoMs = 14000, limite = Infinity,
   emitirFactura = emitirFacturaOrden, emitirNota = emitirNotaCreditoOrden } = {}) {
   const resumen = { omitido: null, hechas: 0, emitidas: 0, pendientes: 0, fallas: 0 };
   let cfg;
@@ -29,6 +29,8 @@ async function correrAutomatizacion({ rpc, meliGet, env = process.env, fetchImpl
 
   const conf = primera(await rpc('arca_auto_config', {}, pres));
   if (!conf || (!conf.factura_auto && !conf.nota_auto)) { resumen.omitido = 'apagado'; return resumen; }
+  // Encendida para otro ambiente (por ejemplo se probó en homologación y ahora el servidor está en producción): no hace nada hasta volver a encenderla.
+  if (conf.ambiente !== cfg.modo) { resumen.omitido = 'ambiente_distinto'; return resumen; }
 
   // jsonb: PostgREST entrega el arreglo tal cual (NO es una tabla de filas): no se usa primera().
   const candidatos = await rpc('arca_auto_candidatos', { p_ambiente: cfg.modo, p_limite: maxPorCorrida }, pres);
@@ -40,10 +42,13 @@ async function correrAutomatizacion({ rpc, meliGet, env = process.env, fetchImpl
     if (c.tipo === 'nota' && !conf.nota_auto) continue;
     let estado = 'error', error = null;
     try {
-      const r = c.tipo === 'factura'
-        ? await emitirFactura({ orden: c.orden, env, rpc, meliGet, fetchImpl, ahora, pres })
-        : await emitirNota({ orden: c.orden, motivo: 'cancelacion', usuario: TEXTO_NOTA, env, rpc, fetchImpl, ahora, pres });
+      let r;
+      if (c.tipo === 'registro') r = { estado: 'emitida' };          // la nota ya está autorizada: solo falta anotar el resultado y el aviso
+      else if (c.tipo === 'factura') r = await emitirFactura({ orden: c.orden, env, rpc, meliGet, fetchImpl, ahora, pres, limite, reservarFn: 'arca_auto_reservar_factura' });
+      else r = await emitirNota({ orden: c.orden, motivo: 'cancelacion', usuario: TEXTO_NOTA, env, rpc, fetchImpl, ahora, pres, limite, reservarFn: 'arca_auto_reservar_nota' });
       estado = r.estado;
+      if (estado === 'sin_tiempo') { resumen.omitido = 'sin_tiempo'; break; }                       // no se anota: el reclamo vence solo
+      if (estado === 'omitida') estado = 'en_curso';                                              // ya no es elegible: se vuelve a mirar más tarde, sin gastar reintentos
       if (estado === 'rechazada' || estado === 'pendiente_verificar') error = r.error || estado;
       if (estado === 'simulacion') continue;
     } catch (e) {
@@ -51,7 +56,7 @@ async function correrAutomatizacion({ rpc, meliGet, env = process.env, fetchImpl
     }
     resumen.hechas++;
     if (estado === 'emitida') resumen.emitidas++; else if (estado === 'en_curso' || estado === 'pendiente_verificar') resumen.pendientes++; else resumen.fallas++;
-    try { await rpc('arca_auto_registrar', { p_orden: String(c.orden), p_tipo: c.tipo, p_ambiente: cfg.modo, p_estado: ['emitida', 'en_curso', 'pendiente_verificar', 'rechazada'].includes(estado) ? estado : 'error', p_error: error }, pres); }
+    try { await rpc('arca_auto_registrar', { p_orden: String(c.orden), p_tipo: c.tipo === 'registro' ? 'nota' : c.tipo, p_ambiente: cfg.modo, p_estado: ['emitida', 'en_curso', 'pendiente_verificar', 'rechazada'].includes(estado) ? estado : 'error', p_error: error }, pres); }
     catch (e) { console.error('arca auto: no se pudo anotar el intento:', e && e.codigo ? e.codigo : ''); }
   }
   return resumen;

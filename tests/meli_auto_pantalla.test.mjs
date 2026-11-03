@@ -6,13 +6,13 @@ import vm from 'node:vm';
 let n = 0, fallos = 0;
 async function caso(nombre, fn) { n++; try { await fn(); console.log(`ok ${n} - ${nombre}`); } catch (e) { fallos++; console.log(`NO OK ${n} - ${nombre}\n   ${e && e.message}`); } }
 const fuente = fs.readFileSync(new URL('../src/modules/meli-facturas.js', import.meta.url), 'utf8');
-function cargar({ estado, checks = {}, confirma = true, respuesta = { data: { ok: true } } }) {
-  const llamadas = [], toasts = [];
+function cargar({ estado, checks = {}, confirma = true, respuesta = { data: { ok: true } }, modo = 'homologacion' }) {
+  const llamadas = [], toasts = [], confirmaciones = [];
   const State = { esc: s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])), facturacionAuto: estado, meliOrdenes: [] };
-  const ctx = { State, console, toast: m => toasts.push(m), confirm: () => confirma, document: { getElementById: id => (id in checks ? { checked: checks[id] } : null) },
+  const ctx = { State, console, toast: m => toasts.push(m), confirm: (t) => { confirmaciones.push(t); return confirma; }, Meli: { _token: async () => 'tok' }, fetch: async () => ({ json: async () => ({ modo }) }), document: { getElementById: id => (id in checks ? { checked: checks[id] } : null) },
     supa: { rpc: async (fn, args) => { llamadas.push({ fn, args }); return fn === 'arca_auto_estado' ? { data: estado, error: null } : respuesta; } }, MeliOrdenes: { pintar() {} } };
   ctx.window = ctx; vm.createContext(ctx); vm.runInContext(fuente, ctx);
-  return { M: ctx.MeliFacturas, State, llamadas, toasts };
+  return { M: ctx.MeliFacturas, State, llamadas, toasts, confirmaciones };
 }
 const base = { factura_auto: false, nota_auto: false, desde: null, pendientes: [], avisos: [] };
 
@@ -29,8 +29,22 @@ await caso('Sin la función en la base (script 23 sin correr) no muestra nada; c
 await caso('Encender pide confirmación y manda solo dos booleanos', async () => {
   const { M, llamadas, toasts } = cargar({ estado: base, checks: { 'fauto-factura': true, 'fauto-nota': false } });
   await M.guardarAuto();
-  assert.deepEqual(JSON.parse(JSON.stringify(llamadas[0])), { fn: 'arca_auto_config_guardar', args: { p_factura: true, p_nota: false } });
+  assert.deepEqual(JSON.parse(JSON.stringify(llamadas[0])), { fn: 'arca_auto_config_guardar', args: { p_factura: true, p_nota: false, p_ambiente: 'homologacion' } });
   assert.match(toasts[0], /actualizada/);
+});
+await caso('Al encender pregunta el ambiente real del servidor y lo dice en la confirmación (producción = comprobantes reales)', async () => {
+  const { M, llamadas, confirmaciones } = cargar({ estado: base, checks: { 'fauto-factura': true, 'fauto-nota': true }, modo: 'produccion' });
+  await M.guardarAuto();
+  assert.match(confirmaciones[0], /PRODUCCIÓN \(comprobantes reales/); assert.match(confirmaciones[0], /atada a este ambiente/);
+  assert.equal(llamadas[0].args.p_ambiente, 'produccion');
+});
+await caso('En simulación o sin respuesta del servidor NO se puede encender', async () => {
+  const { M, llamadas, toasts } = cargar({ estado: base, checks: { 'fauto-factura': true, 'fauto-nota': false }, modo: null });
+  await M.guardarAuto(); assert.equal(llamadas.length, 0); assert.match(toasts[0], /simulación o no responde/);
+});
+await caso('Muestra para qué ambiente está encendida y avisa que hay que volver a encenderla si cambia', () => {
+  const { M } = cargar({ estado: { ...base, factura_auto: true, ambiente: 'homologacion', desde: '2026-11-03T10:00:00Z' } });
+  const h = M.tarjetaAuto(); assert.match(h, /Encendida para: <b>PRUEBAS/); assert.match(h, /volver a encenderla/);
 });
 await caso('Si no confirma, no se enciende nada', async () => {
   const { M, llamadas } = cargar({ estado: base, checks: { 'fauto-factura': true, 'fauto-nota': true }, confirma: false });

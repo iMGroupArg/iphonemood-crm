@@ -132,27 +132,32 @@ function cacheEnBase({ rpc, ambiente, cuit, pres, esperaMs = SEGUNDOS(8), pausaM
 
 // fetch con tiempo máximo que cubre TAMBIÉN la lectura del cuerpo: un servidor que manda encabezados y deja el cuerpo colgado no puede
 // mantener viva la función. Devuelve una respuesta ya leída ({ ok, status, text() }).
-const conTiempo = (fetchImpl, ms) => async (url, op = {}) => {
+const conTiempo = (fetchImpl, ms, restante) => async (url, op = {}) => {
+  // `ms` puede ser un número o una función (tiempo máximo de ESTE pedido, calculado contra el plazo absoluto de la función).
   const ctl = new AbortController();
-  const t = setTimeout(() => ctl.abort(), ms);
+  const t = setTimeout(() => ctl.abort(), typeof ms === 'function' ? ms() : ms);
   try {
     const r = await fetchImpl(url, { ...op, signal: ctl.signal });
     const texto = await r.text();
     return { ok: r.ok, status: r.status, text: async () => texto };
   } finally { clearTimeout(t); }
 };
+// Plazo absoluto (Date.now() en ms) de toda la operación: cada pedido a ARCA usa como máximo el menor entre 12 s y lo que queda menos 3 s.
+const topeDePedido = (limite) => () => (Number.isFinite(limite) ? Math.max(1000, Math.min(12000, limite - Date.now() - 3000)) : 12000);
+const TIEMPO_MINIMO_NUEVA_EMISION_MS = 14000;
+const esNoElegible = (e) => !!(e && /AUTO_NO_ELEGIBLE/.test(String(e.message)));
 
 const textoError = (e) => (e && e.codigo ? `${e.codigo}: ${String(e.message).slice(0, 200)}` : 'error inesperado');
 const mismoNumero = (a, b) => Number(String(a).trim()) === Number(String(b).trim());
 
-async function emitirFacturaOrden({ orden, env = process.env, rpc, meliGet, fetchImpl = fetch, ahora = () => new Date(), pres, cache, esperaTicketMs } = {}) {
+async function emitirFacturaOrden({ orden, env = process.env, rpc, meliGet, fetchImpl = fetch, ahora = () => new Date(), pres, cache, esperaTicketMs, reservarFn = 'arca_comprobante_reservar', limite = Infinity } = {}) {
   const cfg = A.configuracion(env);
   if (!/^\d{1,20}$/.test(String(orden || ''))) throw new A.ErrorArca('ORDEN_INVALIDA', 'Número de orden inválido.');
   if (cfg.modo === 'simulacion') return { estado: 'simulacion', mensaje: 'ARCA está en modo simulación: no se emitió ni se guardó nada.' };
   if (!cfg.cuit || cfg.cuit.length !== 11) throw new A.ErrorArca('SIN_CUIT', 'Falta ARCA_CUIT (11 dígitos).');
   if (!Number.isInteger(cfg.ptoVta) || cfg.ptoVta < 1) throw new A.ErrorArca('SIN_PUNTO_DE_VENTA', 'Falta ARCA_PTO_VTA.');
   const ordenS = String(orden);
-  const f = conTiempo(fetchImpl, SEGUNDOS(12));
+  const f = conTiempo(fetchImpl, topeDePedido(limite));
 
   const cacheTicket = cache || cacheEnBase({ rpc, ambiente: cfg.modo, cuit: cfg.cuit, pres, ...(esperaTicketMs ? { esperaMs: esperaTicketMs } : {}) });
   let ticketCache = null;
@@ -183,7 +188,8 @@ async function emitirFacturaOrden({ orden, env = process.env, rpc, meliGet, fetc
     await rpc('arca_comprobante_rechazar', { p_intento: t.intento, p_numero: t.numero, p_error: 'Reserva sin comprobante en ARCA (consultado): número liberado' }, pres);
   }
 
-  // 2 · Emisión NUEVA. Recién acá se valida la orden de hoy y se piden los datos del comprador.
+  // 2 · Emisión NUEVA. Recién acá se valida la orden de hoy y se piden los datos del comprador. Con poco tiempo NO se empieza (no queda nada a medias).
+  if (limite - Date.now() < TIEMPO_MINIMO_NUEVA_EMISION_MS) return { estado: 'sin_tiempo', mensaje: 'No queda tiempo para emitir en esta corrida.' };
   const datos = primera(await rpc('arca_orden_para_facturar', { p_orden: ordenS }, pres));
   const cuentaId = Number(datos.cuenta_id);
   const bruto = Number(datos.bruto_centavos) / 100;
@@ -199,12 +205,13 @@ async function emitirFacturaOrden({ orden, env = process.env, rpc, meliGet, fetc
   const ultimo = await A.ultimoAutorizado({ cfg, ticket: await ticket(), ptoVta: cfg.ptoVta, fetchImpl: f });
   let res;
   try {
-    res = primera(await rpc('arca_comprobante_reservar', {
+    res = primera(await rpc(reservarFn, {
       p_orden: ordenS, p_ambiente: cfg.modo, p_pto_venta: cfg.ptoVta, p_ultimo_arca: ultimo, p_importe_centavos: comprobante.importeCentavos,
       p_doc_tipo: comprobante.docTipo, p_doc_nro: comprobante.docNro, p_cond_iva: comprobante.condicionIva,
     }, pres));
   } catch (e) {
     if (e && /COMPROBANTE_YA_EXISTE/.test(String(e.message))) return { estado: 'en_curso', mensaje: 'Otro proceso está emitiendo esta factura.' };
+    if (esNoElegible(e)) return { estado: 'omitida', mensaje: 'La venta ya no es elegible para la facturación automática.' };
     throw e;
   }
 
@@ -248,7 +255,7 @@ const MOTIVOS_NC = ['devolucion', 'cancelacion', 'error_de_facturacion'];
 // La nota de ARCA tiene que estar asociada EXACTAMENTE a la factura esperada (tipo 11, punto de venta, número y CUIT del emisor): importe y documento
 // iguales no alcanzan (con consumidor final 99/0 es fácil que coincidan en notas de OTRAS facturas).
 const asociadaA = (c, ptoVta, facturaNumero, cuit) => Array.isArray(c.asoc) && c.asoc.length === 1 && c.asoc[0].tipo === 11 && c.asoc[0].ptoVta === Number(ptoVta) && c.asoc[0].nro === Number(facturaNumero) && c.asoc[0].cuit === String(cuit);
-async function emitirNotaCreditoOrden({ orden, motivo, usuario, env = process.env, rpc, fetchImpl = fetch, ahora = () => new Date(), pres, cache, esperaTicketMs } = {}) {
+async function emitirNotaCreditoOrden({ orden, motivo, usuario, env = process.env, rpc, fetchImpl = fetch, ahora = () => new Date(), pres, cache, esperaTicketMs, reservarFn = 'arca_nc_reservar', limite = Infinity } = {}) {
   const cfg = A.configuracion(env);
   if (!/^\d{1,20}$/.test(String(orden || ''))) throw new A.ErrorArca('ORDEN_INVALIDA', 'Número de orden inválido.');
   if (!MOTIVOS_NC.includes(motivo)) throw new A.ErrorArca('MOTIVO_INVALIDO', 'Elegí un motivo de la lista.');
@@ -256,7 +263,7 @@ async function emitirNotaCreditoOrden({ orden, motivo, usuario, env = process.en
   if (cfg.modo === 'simulacion') return { estado: 'simulacion', mensaje: 'ARCA está en modo simulación: no se emitió ni se guardó nada.' };
   if (!cfg.cuit || cfg.cuit.length !== 11) throw new A.ErrorArca('SIN_CUIT', 'Falta ARCA_CUIT (11 dígitos).');
   const ordenS = String(orden);
-  const f = conTiempo(fetchImpl, SEGUNDOS(12));
+  const f = conTiempo(fetchImpl, topeDePedido(limite));
   const cacheTicket = cache || cacheEnBase({ rpc, ambiente: cfg.modo, cuit: cfg.cuit, pres, ...(esperaTicketMs ? { esperaMs: esperaTicketMs } : {}) });
   let ticketCache = null;
   const ticket = async () => {
@@ -285,15 +292,17 @@ async function emitirNotaCreditoOrden({ orden, motivo, usuario, env = process.en
     await rpc('arca_nc_rechazar', { p_intento: t.intento, p_numero: t.numero, p_error: 'Reserva sin comprobante en ARCA (consultado): número liberado' }, pres);
   }
 
+  if (limite - Date.now() < TIEMPO_MINIMO_NUEVA_EMISION_MS) return { estado: 'sin_tiempo', mensaje: 'No queda tiempo para emitir en esta corrida.' };
   // Nueva emisión. El punto de venta sale de la factura (lo devuelve la base al reservar); para pedir el último número de ARCA se usa el configurado
   // y la base rechaza si no coincide con el de la factura.
   if (!Number.isInteger(cfg.ptoVta) || cfg.ptoVta < 1) throw new A.ErrorArca('SIN_PUNTO_DE_VENTA', 'Falta ARCA_PTO_VTA.');
   const ultimo = await A.ultimoAutorizado({ cfg, ticket: await ticket(), ptoVta: cfg.ptoVta, cbteTipo: TIPO, fetchImpl: f });
   let res;
   try {
-    res = primera(await rpc('arca_nc_reservar', { p_orden: ordenS, p_ambiente: cfg.modo, p_pto_venta: cfg.ptoVta, p_ultimo_arca: ultimo, p_motivo: motivo, p_usuario: String(usuario) }, pres));
+    res = primera(await rpc(reservarFn, { p_orden: ordenS, p_ambiente: cfg.modo, p_pto_venta: cfg.ptoVta, p_ultimo_arca: ultimo, p_motivo: motivo, p_usuario: String(usuario) }, pres));
   } catch (e) {
     if (e && /NOTA_CREDITO_YA_EXISTE/.test(String(e.message))) return { estado: 'en_curso', mensaje: 'Otro proceso está emitiendo esta nota de crédito.' };
+    if (esNoElegible(e)) return { estado: 'omitida', mensaje: 'La venta ya no es elegible para la nota de crédito automática.' };
     if (e && /PUNTO_DE_VENTA_DISTINTO/.test(String(e.message))) throw new A.ErrorArca('PUNTO_DE_VENTA_DISTINTO', 'La factura es de otro punto de venta que el configurado: no se emite la nota de crédito.');
     throw e;
   }

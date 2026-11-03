@@ -119,19 +119,33 @@ const MeliFacturas = {
         <label><input type="checkbox" id="fauto-nota" ${a.nota_auto ? 'checked' : ''}> Emitir sola la nota de crédito al cancelarse</label>
         <button class="btn btn-sm btn-primary" onclick="MeliFacturas.guardarAuto(this)">Guardar</button>
       </div>
-      ${a.desde && a.factura_auto ? `<div style="font-size:11px;color:var(--text-secondary);margin-top:4px">Factura sola desde: ${e(new Date(a.desde).toLocaleString('es-AR'))}${a.actualizado_por ? ' · ' + e(a.actualizado_por) : ''}</div>` : ''}
+      ${a.ambiente ? `<div style="font-size:11px;color:var(--text-secondary);margin-top:4px">Encendida para: <b>${e(this.NOMBRE_MODO[a.ambiente] || a.ambiente)}</b>${a.desde && a.factura_auto ? ' · factura sola desde ' + e(new Date(a.desde).toLocaleString('es-AR')) : ''}${a.actualizado_por ? ' · ' + e(a.actualizado_por) : ''}. Si el ambiente de ARCA cambia, hay que volver a encenderla.</div>` : ''}
       ${avisos}
       ${pend ? `<div style="margin-top:8px;font-size:12px"><b>Pendientes con problemas</b>${pend}</div>` : ''}
     </div>`;
   },
+  async _modoArca() {
+    try {
+      const token = await window.Meli?._token?.();
+      const r = await fetch('/api/meli/worker', { method: 'POST', headers: { 'x-crm-token': token || '', 'Content-Type': 'application/json' }, body: JSON.stringify({ accion: 'arca_modo' }) });
+      const j = await r.json();
+      return ['homologacion', 'produccion'].includes(j && j.modo) ? j.modo : null;
+    } catch { return null; }
+  },
+  NOMBRE_MODO: { homologacion: 'PRUEBAS (homologación, sin valor fiscal)', produccion: 'PRODUCCIÓN (comprobantes reales ante ARCA)' },
   async guardarAuto(btn) {
     const f = !!document.getElementById('fauto-factura')?.checked, n = !!document.getElementById('fauto-nota')?.checked;
     const actual = State.facturacionAuto || {};
-    const enciende = (f && !actual.factura_auto) || (n && !actual.nota_auto);
-    if (enciende && !confirm('Vas a ENCENDER la facturación automática. Desde ahora el sistema emitirá solo ' + (f && !actual.factura_auto ? 'las facturas de las ventas pagadas nuevas ' : '') + (n && !actual.nota_auto ? 'las notas de crédito de las ventas que se cancelen ' : '') + '(en producción son comprobantes reales ante ARCA). ¿Continuar?')) return;
     if (btn) btn.disabled = true;
     try {
-      const { data, error } = await supa.rpc('arca_auto_config_guardar', { p_factura: f, p_nota: n });
+      let modo = null;
+      if (f || n) {
+        modo = await this._modoArca();
+        if (!modo) { toast('La facturación con ARCA está en simulación o no responde: no se puede encender la automática.'); return; }
+        const enciende = (f && !actual.factura_auto) || (n && !actual.nota_auto) || actual.ambiente !== modo;
+        if (enciende && !confirm(`Vas a ENCENDER la facturación automática en ${this.NOMBRE_MODO[modo]}. Desde ahora el sistema emitirá solo ${f ? 'las facturas de las ventas pagadas nuevas ' : ''}${n ? 'las notas de crédito de las ventas que se cancelen ' : ''}. Queda atada a este ambiente: si cambiás de ambiente hay que volver a encenderla. ¿Continuar?`)) return;
+      }
+      const { data, error } = await supa.rpc('arca_auto_config_guardar', { p_factura: f, p_nota: n, p_ambiente: modo });
       if (error || !data || data.ok !== true) { toast('No se pudo guardar. Probá de nuevo.'); return; }
       await this.cargarAuto(supa);
       toast('Facturación automática actualizada.');

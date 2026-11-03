@@ -399,8 +399,8 @@ console.log('\n══ Emisor de facturas (base real + ARCA simulado) ══\n');
 
 { // ── Facturación automática ──
   const auto = (ctx, a, o = {}) => correrAutomatizacion({ env: ENV, rpc: ctx.rpc, meliGet: meli(), fetchImpl: a.f, maxPorCorrida: 5, ...o });
-  const encender = (ctx, f, n) => ctx.db.query(`SELECT public.arca_auto_config_guardar($1,$2)`, [f, n]);
-  const nueva = async (ctx) => { const id = await ordenId(ctx); await ctx.db.query(`UPDATE public.meli_ordenes SET creado_en = now() + interval '1 minute' WHERE meli_order_id=$1`, [id]); return id; };
+  const encender = (ctx, f, n, amb = 'homologacion') => ctx.db.query(`SELECT public.arca_auto_config_guardar($1,$2,$3)`, [f, n, (f || n) ? amb : null]);
+  const nueva = async (ctx) => { const id = await ordenId(ctx); await ctx.db.query(`UPDATE public.meli_ordenes SET fecha_orden = now() + interval '1 minute' WHERE meli_order_id=$1`, [id]); return id; };
   { // apagado y simulación
     const ctx = await entorno(); const a = arca(); await nueva(ctx);
     const r = await auto(ctx, a);
@@ -466,6 +466,56 @@ console.log('\n══ Emisor de facturas (base real + ARCA simulado) ══\n');
     check('AUTO: aunque la venta se canceló, la factura reservada se CONCILIA con ARCA y queda autorizada (sin emitir otra)', (await comp(ctx.db, o)).estado === 'autorizado' && a.st.emisiones === 1, JSON.stringify(r2));
     const r3 = await auto(ctx, a);
     check('AUTO: recién después se emite la nota de crédito', r3.emitidas === 1 && a.st.cuerposNC.length === 1, JSON.stringify(r3));
+  }
+  { // Codex: reactivada antes de reservar, apagar a mitad de corrida, ambiente distinto, venta vieja que entra tarde
+    const ctx = await entorno(); const a = arca(); await encender(ctx, true, true); const o = await nueva(ctx);
+    // la corrida elige la venta... y antes de reservar el comprador la REACTIVA (vuelve a pagada) o la cancelan: la reserva automática lo revalida
+    const apagarAlReservar = { ...ctx, rpc: async (fn, args) => { if (fn === 'arca_auto_reservar_factura') await ctx.db.query(`SELECT public.arca_auto_config_guardar(false,false,NULL)`); return ctx.rpc(fn, args); } };
+    const r = await auto(apagarAlReservar, a);
+    check('AUTO: si apagan el interruptor DESPUÉS de elegir la venta pero antes de reservar, NO se emite (sin consumir un número)', a.st.emisiones === 0 && !(await comp(ctx.db, o)), JSON.stringify(r));
+  }
+  { // la venta se cancela entre la elección y la reserva
+    const ctx = await entorno(); const a = arca(); await encender(ctx, true, true);
+    const o2 = await nueva(ctx);
+    const cambiarEstado = { ...ctx, rpc: async (fn, args) => { if (fn === 'arca_auto_reservar_factura') await ctx.db.query(`UPDATE public.meli_ordenes SET estado='cancelled' WHERE meli_order_id=$1`, [o2]); return ctx.rpc(fn, args); } };
+    const r2 = await auto(cambiarEstado, a);
+    check('AUTO: si la venta se CANCELA entre la elección y la reserva, no se factura', a.st.emisiones === 0 && !(await comp(ctx.db, o2)), JSON.stringify(r2));
+  }
+  { // nota: venta reactivada antes de reservar
+    const ctx = await entorno(); const a = arca(); await encender(ctx, true, true); const o = await nueva(ctx);
+    await auto(ctx, a);
+    await ctx.db.query(`UPDATE public.meli_ordenes SET estado='cancelled' WHERE meli_order_id=$1`, [o]);
+    const reactiva = { ...ctx, rpc: async (fn, args) => { if (fn === 'arca_auto_reservar_nota') await ctx.db.query(`UPDATE public.meli_ordenes SET estado='paid' WHERE meli_order_id=$1`, [o]); return ctx.rpc(fn, args); } };
+    const r = await auto(reactiva, a);
+    check('AUTO: si la venta se REACTIVA (vuelve a pagada) antes de reservar la nota, NO se emite la nota', a.st.cuerposNC.length === 0 && (await ctx.db.query(`SELECT count(*)::int n FROM public.meli_notas_credito`)).rows[0].n === 0, JSON.stringify(r));
+  }
+  { // ambiente distinto
+    const ctx = await entorno(); const a = arca(); await encender(ctx, true, true, 'homologacion'); await nueva(ctx);
+    const prod = { ...ENV, ARCA_MODO: 'produccion', ARCA_CONFIRMA_PRODUCCION: 'SI' };
+    const r = await auto(ctx, a, { env: prod });
+    check('AUTO: encendida en HOMOLOGACIÓN pero el servidor pasa a PRODUCCIÓN: no hace nada hasta volver a encenderla', r.omitido === 'ambiente_distinto' && a.st.emisiones === 0, JSON.stringify(r));
+  }
+  { // aviso perdido
+    const ctx = await entorno(); const a = arca(); await encender(ctx, true, true); const o = await nueva(ctx);
+    await auto(ctx, a);
+    await ctx.db.query(`UPDATE public.meli_ordenes SET estado='cancelled', procesada=true WHERE meli_order_id=$1`, [o]);
+    const sinRegistro = { ...ctx, rpc: async (fn, args) => { if (fn === 'arca_auto_registrar') throw new Error('se cayó el registro'); return ctx.rpc(fn, args); } };
+    await auto(sinRegistro, a);                                          // la nota se emite pero NO se anota el resultado
+    check('AUTO: la nota se emitió aunque no se pudo anotar el resultado', a.st.cuerposNC.length === 1);
+    await ctx.db.query(`UPDATE public.arca_auto_intentos SET proximo_intento = now() - interval '1 second'`);
+    await auto(ctx, a);
+    const av = (await ctx.db.query(`SELECT public.arca_auto_estado() r`)).rows[0].r.avisos;
+    check('AUTO: en la corrida siguiente se completa el registro y NO se pierde el aviso de «venta procesada: revertila» (ni se emite otra nota)', av.some((x) => x.aviso === 'nota_emitida_venta_procesada') && a.st.cuerposNC.length === 1, JSON.stringify(av));
+  }
+  { // dos corridas a la vez no reciben el mismo candidato
+    const ctx = await entorno(); const a = arca(); await encender(ctx, true, false); await nueva(ctx);
+    const [r1, r2] = await Promise.all([auto(ctx, a), auto(ctx, a)]);
+    check('AUTO: dos corridas simultáneas: una emite y la otra no recibe el mismo candidato (una sola emisión)', a.st.emisiones === 1 && r1.hechas + r2.hechas === 1, JSON.stringify([r1, r2]));
+  }
+  { // plazo absoluto
+    const ctx = await entorno(); const a = arca(); await encender(ctx, true, false); const o = await nueva(ctx);
+    const r = await auto(ctx, a, { limite: Date.now() + 8000, restanteMs: () => 20000 });
+    check('AUTO: con menos de 14 s de plazo real NO empieza una emisión nueva (nada queda a medias)', r.omitido === 'sin_tiempo' && a.st.emisiones === 0 && !(await comp(ctx.db, o)), JSON.stringify(r));
   }
   { // falta de tiempo
     const ctx = await entorno(); const a = arca(); await encender(ctx, true, false); await nueva(ctx);

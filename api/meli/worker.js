@@ -18,6 +18,7 @@ const { procesarNotificacion } = require('../_meli_ingesta.js');
 const { sonda, conciliar } = require('../_meli_sonda.js');
 const { diagnosticoArca } = require('../_arca_diagnostico.js');
 const { emitirFacturaOrden, emitirNotaCreditoOrden } = require('../_facturacion.js');
+const { correrAutomatizacion } = require('../_facturacion_auto.js');
 const { ErrorArca } = require('../_arca.js');
 const { barrer, barrerTodas } = require('../_meli_barrido.js');
 
@@ -231,7 +232,18 @@ module.exports = async function handler(req, res) {
       }
     }
     const r = await drenar(t0);
-    res.status(200).json(barrido ? { ...r, barrido } : r);
+    // Facturación automática (api/_facturacion_auto.js): con el tiempo que sobra y SOLO si los interruptores están encendidos. Una falla acá nunca
+    // afecta al drenaje ni a la respuesta de arriba: solo se agrega un resumen sin datos personales.
+    let auto = null;
+    try {
+      const limiteAuto = t0 + PRESUPUESTO_MS;
+      auto = await correrAutomatizacion({ rpc: M.rpc, meliGet: M.meliGet, pres: M.presupuestoHasta(limiteAuto - RESERVA_MS, limiteAuto), restanteMs: () => limiteAuto - Date.now() });
+    } catch (e) {
+      console.error('meli/worker (facturación automática):', (e && e.codigo) || '');
+      auto = { omitido: 'error' };
+    }
+    const salida = barrido ? { ...r, barrido } : r;
+    res.status(200).json(auto && !auto.omitido ? { ...salida, facturacion_auto: auto } : salida);
   } catch (e) {
     console.error('meli/worker:', e.codigo || '', e.message);
     res.status(502).json({ error: 'No se pudo procesar la cola' });

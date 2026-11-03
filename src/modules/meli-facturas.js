@@ -58,7 +58,7 @@ const MeliFacturas = {
         filas.push(...(data || []));
       }
       State.meliFacturas = filas; State.meliFacturasError = false; State.meliFacturasAusente = false;
-      if (typeof cliente.rpc === 'function') await this.cargarAnual(cliente);
+      if (typeof cliente.rpc === 'function') { await this.cargarAnual(cliente); await this.cargarAuto(cliente); }
       return true;
     } catch (error) {
       State.meliFacturasError = true;
@@ -86,6 +86,66 @@ const MeliFacturas = {
       State.facturacionAnual = null;
       State.facturacionAnualError = !['42883', 'PGRST202'].includes(error && error.code);   // función ausente = todavía no se corrió el script 21
     }
+  },
+  // ── Facturación automática (interruptores, pendientes y avisos) ──
+  async cargarAuto(cliente) {
+    try {
+      const { data, error } = await cliente.rpc('arca_auto_estado');
+      if (error) throw error;
+      State.facturacionAuto = data; State.facturacionAutoError = false;
+    } catch (error) {
+      State.facturacionAuto = null;
+      State.facturacionAutoError = !['42883', 'PGRST202'].includes(error && error.code);   // función ausente = todavía no se corrió el script 23
+    }
+  },
+  AVISOS: {
+    nota_emitida: 'Se emitió sola la nota de crédito porque la venta se canceló.',
+    nota_emitida_venta_procesada: 'Se emitió sola la nota de crédito porque la venta se canceló. La venta SIGUE PROCESADA (stock y plata): revertila si corresponde.',
+    fallo: 'No se pudo completar y dejó de intentar solo. Revisá el motivo y usá el botón de la venta.',
+  },
+  tarjetaAuto() {
+    if (State.facturacionAutoError) return '<div class="card" style="margin-bottom:10px;font-size:12px">Facturación automática no disponible. Probá actualizar.</div>';
+    const a = State.facturacionAuto;
+    if (!a) return '';
+    const e = s => State.esc(String(s ?? ''));
+    const TIPO = { factura: 'Factura', nota: 'Nota de crédito' };
+    const pend = (a.pendientes || []).map(p => `<div style="margin-top:4px">${e(TIPO[p.tipo] || p.tipo)} de la orden <b>${e(p.orden)}</b>${p.ambiente === 'homologacion' ? ' (prueba)' : ''}: ${p.sin_mas_intentos ? 'dejó de intentar solo' : `reintenta solo (intento ${e(p.intentos)})`} · ${e(p.error || 'sin detalle')}</div>`).join('');
+    const avisos = (a.avisos || []).map(v => `<div style="margin-top:6px;display:flex;gap:8px;flex-wrap:wrap;align-items:center"><span class="badge ${v.aviso === 'fallo' ? 'b-red' : 'b-amber'}">${e(TIPO[v.tipo] || v.tipo)} · orden ${e(v.orden)}</span><span>${e(this.AVISOS[v.aviso] || '')}${v.aviso === 'fallo' && v.error ? ' ' + e(v.error) : ''}</span><button class="btn btn-sm" data-orden="${e(v.orden)}" data-tipo="${e(v.tipo)}" data-amb="${e(v.ambiente)}" onclick="MeliFacturas.avisoVisto(this)">Entendido</button></div>`).join('');
+    return `<div class="card" style="margin-bottom:10px;font-size:12.5px">
+      <b>Facturación automática</b> <span class="badge ${a.factura_auto || a.nota_auto ? 'b-green' : 'b-gray'}">${a.factura_auto || a.nota_auto ? 'Encendida' : 'Apagada'}</span>
+      <div style="font-size:11.5px;color:var(--text-secondary);margin:4px 0 8px;line-height:1.5">Apagada por defecto. Con el interruptor de facturas, el sistema emite solo la factura de cada venta <b>pagada desde el momento en que lo encendés</b> (no las anteriores), sin procesar la venta. Con el de notas, emite solo la nota de crédito total cuando una venta ya facturada se cancela en Mercado Libre. Reembolsos parciales, devoluciones y reclamos siguen manuales. Si falla, reintenta unas pocas veces y te avisa acá. En producción emite facturas reales.</div>
+      <div style="display:flex;gap:18px;flex-wrap:wrap">
+        <label><input type="checkbox" id="fauto-factura" ${a.factura_auto ? 'checked' : ''}> Facturar solas las ventas nuevas</label>
+        <label><input type="checkbox" id="fauto-nota" ${a.nota_auto ? 'checked' : ''}> Emitir sola la nota de crédito al cancelarse</label>
+        <button class="btn btn-sm btn-primary" onclick="MeliFacturas.guardarAuto(this)">Guardar</button>
+      </div>
+      ${a.desde && a.factura_auto ? `<div style="font-size:11px;color:var(--text-secondary);margin-top:4px">Factura sola desde: ${e(new Date(a.desde).toLocaleString('es-AR'))}${a.actualizado_por ? ' · ' + e(a.actualizado_por) : ''}</div>` : ''}
+      ${avisos}
+      ${pend ? `<div style="margin-top:8px;font-size:12px"><b>Pendientes con problemas</b>${pend}</div>` : ''}
+    </div>`;
+  },
+  async guardarAuto(btn) {
+    const f = !!document.getElementById('fauto-factura')?.checked, n = !!document.getElementById('fauto-nota')?.checked;
+    const actual = State.facturacionAuto || {};
+    const enciende = (f && !actual.factura_auto) || (n && !actual.nota_auto);
+    if (enciende && !confirm('Vas a ENCENDER la facturación automática. Desde ahora el sistema emitirá solo ' + (f && !actual.factura_auto ? 'las facturas de las ventas pagadas nuevas ' : '') + (n && !actual.nota_auto ? 'las notas de crédito de las ventas que se cancelen ' : '') + '(en producción son comprobantes reales ante ARCA). ¿Continuar?')) return;
+    if (btn) btn.disabled = true;
+    try {
+      const { data, error } = await supa.rpc('arca_auto_config_guardar', { p_factura: f, p_nota: n });
+      if (error || !data || data.ok !== true) { toast('No se pudo guardar. Probá de nuevo.'); return; }
+      await this.cargarAuto(supa);
+      toast('Facturación automática actualizada.');
+      if (window.MeliOrdenes && MeliOrdenes.pintar) MeliOrdenes.pintar();
+    } catch { toast('No se pudo guardar. Probá de nuevo.'); } finally { if (btn) btn.disabled = false; }
+  },
+  async avisoVisto(btn) {
+    const d = btn && btn.dataset ? btn.dataset : {};
+    try {
+      const { data, error } = await supa.rpc('arca_auto_aviso_visto', { p_orden: d.orden, p_tipo: d.tipo, p_ambiente: d.amb });
+      if (error || !data || data.ok !== true) { toast('No se pudo marcar como visto.'); return; }
+      await this.cargarAuto(supa);
+      if (window.MeliOrdenes && MeliOrdenes.pintar) MeliOrdenes.pintar();
+    } catch { toast('No se pudo marcar como visto.'); }
   },
   _pesos(centavos) { return new Intl.NumberFormat('es-AR', { style: 'currency', currency: 'ARS', maximumFractionDigits: 2 }).format(Number(centavos || 0) / 100); },
   // Porcentaje del límite usado y color: amarillo desde 70 %, rojo desde 90 %. Sin límite configurado no hay porcentaje.
@@ -141,9 +201,9 @@ const MeliFacturas = {
     } catch { toast('No se pudo guardar. Probá de nuevo.'); } finally { if (btn) btn.disabled = false; }
   },
   cabecera(ordenes) {
-    if (State.meliFacturasAusente) return this.tarjetaAnual();
+    if (State.meliFacturasAusente) return this.tarjetaAuto() + this.tarjetaAnual();
     const n = State.meliFacturasError ? 0 : this.contar(ordenes);
-    return this.tarjetaAnual() + `<div class="card" style="margin-bottom:10px;font-size:12px">${State.esc(this.TEXTO)}<p>${State.esc(this.REABRIR)}</p><p>Cancelar o revertir la orden no cambia su factura.</p>${State.meliFacturasError ? '<p>Control de facturas no disponible. Probá actualizar.</p>' : `${n > 0 ? `<p>${n} ventas de Mercado Libre sin factura <button class="btn btn-sm" onclick="MeliFacturas.filtrar(true)">Ver</button></p>` : ''}<button class="btn btn-sm ${this._soloSinFactura ? 'btn-primary' : ''}" onclick="MeliFacturas.filtrar()">Sin factura</button>`}</div>`;
+    return this.tarjetaAuto() + this.tarjetaAnual() + `<div class="card" style="margin-bottom:10px;font-size:12px">${State.esc(this.TEXTO)}<p>${State.esc(this.REABRIR)}</p><p>Cancelar o revertir la orden no cambia su factura.</p>${State.meliFacturasError ? '<p>Control de facturas no disponible. Probá actualizar.</p>' : `${n > 0 ? `<p>${n} ventas de Mercado Libre sin factura <button class="btn btn-sm" onclick="MeliFacturas.filtrar(true)">Ver</button></p>` : ''}<button class="btn btn-sm ${this._soloSinFactura ? 'btn-primary' : ''}" onclick="MeliFacturas.filtrar()">Sin factura</button>`}</div>`;
   },
   filtrar(ver) { this._soloSinFactura = ver === true || !this._soloSinFactura; MeliOrdenes.filtrar('todas'); },
   async accion(btn) {

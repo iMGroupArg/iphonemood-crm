@@ -12,6 +12,7 @@ import { baseNueva, SQL, SECRETO, nuevaOrden } from './lib/base_meli.mjs';
 const require = createRequire(import.meta.url);
 const { emitirFacturaOrden, emitirNotaCreditoOrden, leerDatosFacturacion } = require('../../api/_facturacion.js');
 const { diagnosticoArca } = require('../../api/_arca_diagnostico.js');
+const { correrAutomatizacion } = require('../../api/_facturacion_auto.js');
 
 let ok = 0, fail = 0;
 const check = (n, cond, det = '') => { cond ? ok++ : fail++; console.log(`${cond ? '  ok  ' : ' FALLA'} │ ${n}${cond ? '' : '  → ' + det}`); };
@@ -27,7 +28,7 @@ const PREPARAR = `DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolnam
 async function entorno() {
   const ctx = await baseNueva({ conVentas: false, sin7: true });
   await ctx.db.exec(PREPARAR); await ctx.db.exec(SQL('meli_facturas.sql')); await ctx.db.exec(SQL('arca_comprobantes.sql'));
-  await ctx.db.exec(SQL('arca_control_anual.sql')); await ctx.db.exec(SQL('arca_notas_credito.sql'));
+  await ctx.db.exec(SQL('arca_control_anual.sql')); await ctx.db.exec(SQL('arca_notas_credito.sql')); await ctx.db.exec(SQL('arca_automatico.sql'));
   // rpc como la de api/_meli.js: agrega el secreto y devuelve lo mismo que PostgREST (jsonb pelado, tabla como arreglo).
   const rpc = async (nombre, args = {}) => {
     const todos = { p_secreto: SECRETO, ...args }; const claves = Object.keys(todos);
@@ -394,6 +395,83 @@ console.log('\n══ Emisor de facturas (base real + ARCA simulado) ══\n');
   await emitir(ctx, o, a); await emitirNC(ctx, o, a);
   const x = (await ctx.db.query(`SELECT public.arca_control_anual() r`)).rows[0].r;
   check('Control anual: facturas y notas de HOMOLOGACIÓN no cuentan', Number(x.total_centavos) === 0 && Number(x.notas_credito_centavos) === 0, JSON.stringify(x));
+}
+
+{ // ── Facturación automática ──
+  const auto = (ctx, a, o = {}) => correrAutomatizacion({ env: ENV, rpc: ctx.rpc, meliGet: meli(), fetchImpl: a.f, maxPorCorrida: 5, ...o });
+  const encender = (ctx, f, n) => ctx.db.query(`SELECT public.arca_auto_config_guardar($1,$2)`, [f, n]);
+  const nueva = async (ctx) => { const id = await ordenId(ctx); await ctx.db.query(`UPDATE public.meli_ordenes SET creado_en = now() + interval '1 minute' WHERE meli_order_id=$1`, [id]); return id; };
+  { // apagado y simulación
+    const ctx = await entorno(); const a = arca(); await nueva(ctx);
+    const r = await auto(ctx, a);
+    check('AUTO: con los interruptores apagados no hace NADA (ni llama a ARCA)', r.omitido === 'apagado' && a.st.logins === 0 && a.st.emisiones === 0, JSON.stringify(r));
+    await encender(ctx, true, true);
+    const rs = await auto(ctx, a, { env: { ...ENV, ARCA_MODO: 'simulacion' } });
+    check('AUTO: en modo simulación tampoco', rs.omitido === 'simulacion' && a.st.emisiones === 0, JSON.stringify(rs));
+  }
+  { // factura al aprobarse el pago, sin procesar
+    const ctx = await entorno(); const a = arca();
+    const vieja = await ordenId(ctx);                      // ANTERIOR al encendido
+    await encender(ctx, true, false);
+    const o1 = await nueva(ctx), o2 = await nueva(ctx);
+    const r = await auto(ctx, a, { maxPorCorrida: 1 });
+    check('AUTO: factura de a una por corrida y SIN procesar la venta', r.emitidas === 1 && a.st.emisiones === 1 && (await ctx.db.query(`SELECT procesada FROM public.meli_ordenes WHERE meli_order_id=$1`, [o1])).rows[0].procesada === false, JSON.stringify(r));
+    const r2 = await auto(ctx, a, { maxPorCorrida: 5 });
+    check('AUTO: la segunda corrida factura la que falta y NO toca la anterior al encendido', r2.emitidas === 1 && !(await comp(ctx.db, vieja)) && (await comp(ctx.db, o2)).estado === 'autorizado', JSON.stringify(r2));
+    const r3 = await auto(ctx, a);
+    check('AUTO: con todo facturado no queda nada por hacer', r3.hechas === 0 && a.st.emisiones === 2, JSON.stringify(r3));
+  }
+  { // cancelada antes de facturar y nota automática al cancelarse
+    const ctx = await entorno(); const a = arca(); await encender(ctx, true, true);
+    const o = await nueva(ctx);
+    await ctx.db.query(`UPDATE public.meli_ordenes SET estado='cancelled' WHERE meli_order_id=$1`, [o]);
+    const r0 = await auto(ctx, a);
+    check('AUTO: una venta cancelada ANTES de facturar no se factura', r0.hechas === 0 && a.st.emisiones === 0, JSON.stringify(r0));
+    const o2 = await nueva(ctx);
+    await auto(ctx, a);                                                // factura la o2
+    await ctx.db.query(`UPDATE public.meli_ordenes SET estado='cancelled', procesada=true WHERE meli_order_id=$1`, [o2]);
+    const r = await auto(ctx, a);
+    const nc = (await ctx.db.query(`SELECT estado, motivo, creado_por, importe_centavos FROM public.meli_notas_credito`)).rows[0];
+    check('AUTO: al cancelarse la venta facturada se emite SOLA la nota de crédito total (motivo cancelación, pedida por «automático»)', r.emitidas === 1 && nc.estado === 'autorizado' && nc.motivo === 'cancelacion' && /autom/.test(nc.creado_por) && Number(nc.importe_centavos) === 10000000, JSON.stringify([r, nc]));
+    const av = (await ctx.db.query(`SELECT public.arca_auto_estado() r`)).rows[0].r.avisos;
+    check('AUTO: como la venta ya estaba PROCESADA deja el aviso para revertir el stock a mano', av.length === 1 && av[0].aviso === 'nota_emitida_venta_procesada', JSON.stringify(av));
+    const r2 = await auto(ctx, a);
+    check('AUTO: no emite una segunda nota', r2.hechas === 0 && a.st.cuerposNC.length === 1, JSON.stringify(r2));
+  }
+  { // fallas con reintentos acotados
+    const ctx = await entorno(); const a = arca(); await encender(ctx, true, false); const o = await nueva(ctx);
+    const caido = () => async () => ({ status: 500, ok: false, json: null });
+    const r = await auto(ctx, a, { meliGet: caido() });
+    check('AUTO: Mercado Libre caído → falla anotada con su error y la venta intacta', r.fallas === 1 && (await ctx.db.query(`SELECT intentos, ultimo_error FROM public.arca_auto_intentos`)).rows[0].intentos === 1 && !(await comp(ctx.db, o)), JSON.stringify(r));
+    const r2 = await auto(ctx, a, { meliGet: caido() });
+    check('AUTO: NO reintenta de inmediato (espera acotada)', r2.hechas === 0, JSON.stringify(r2));
+    for (let i = 0; i < 5; i++) { await ctx.db.query(`UPDATE public.arca_auto_intentos SET proximo_intento = now() - interval '1 second'`); await auto(ctx, a, { meliGet: caido() }); }
+    const f = (await ctx.db.query(`SELECT intentos, aviso FROM public.arca_auto_intentos`)).rows[0];
+    check('AUTO: al sexto fallo para y deja el aviso de fallo (sin bucle infinito)', f.intentos === 6 && f.aviso === 'fallo', JSON.stringify(f));
+    await ctx.db.query(`UPDATE public.arca_auto_intentos SET proximo_intento = now() - interval '1 second'`);
+    const r3 = await auto(ctx, a);
+    check('AUTO: con 6 intentos no vuelve a intentar sola (queda para el botón)', r3.hechas === 0, JSON.stringify(r3));
+    const manual = await emitir(ctx, o, a);
+    check('AUTO: el botón sigue funcionando para esa venta', manual.estado === 'emitida', JSON.stringify(manual));
+  }
+  { // carrera: factura reservada (corte) y cancelación después → se concilia, luego la nota
+    const ctx = await entorno(); const a = arca(); await encender(ctx, true, true); const o = await nueva(ctx);
+    a.st.cortarDespues = true;
+    const r1 = await auto(ctx, a);
+    check('AUTO: corte después de que ARCA aceptó → pendiente de verificar (no se pierde)', r1.pendientes === 1 && (await comp(ctx.db, o)).estado === 'reservado', JSON.stringify(r1));
+    await ctx.db.query(`UPDATE public.meli_ordenes SET estado='cancelled' WHERE meli_order_id=$1`, [o]);
+    await ctx.db.query(`UPDATE public.meli_comprobantes SET trabajo_hasta = now() - interval '11 minutes'`);
+    await ctx.db.query(`UPDATE public.arca_auto_intentos SET proximo_intento = now() - interval '1 second'`);
+    const r2 = await auto(ctx, a);
+    check('AUTO: aunque la venta se canceló, la factura reservada se CONCILIA con ARCA y queda autorizada (sin emitir otra)', (await comp(ctx.db, o)).estado === 'autorizado' && a.st.emisiones === 1, JSON.stringify(r2));
+    const r3 = await auto(ctx, a);
+    check('AUTO: recién después se emite la nota de crédito', r3.emitidas === 1 && a.st.cuerposNC.length === 1, JSON.stringify(r3));
+  }
+  { // falta de tiempo
+    const ctx = await entorno(); const a = arca(); await encender(ctx, true, false); await nueva(ctx);
+    const r = await auto(ctx, a, { restanteMs: () => 1000 });
+    check('AUTO: si no queda tiempo suficiente no empieza (no compite con el drenaje de avisos)', r.omitido === 'sin_tiempo' && a.st.emisiones === 0, JSON.stringify(r));
+  }
 }
 
 console.log(`\n${ok} pasan, ${fail} fallan de ${ok + fail}`);

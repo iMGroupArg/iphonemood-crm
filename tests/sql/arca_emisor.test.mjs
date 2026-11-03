@@ -512,6 +512,14 @@ console.log('\n══ Emisor de facturas (base real + ARCA simulado) ══\n');
     const [r1, r2] = await Promise.all([auto(ctx, a), auto(ctx, a)]);
     check('AUTO: dos corridas simultáneas: una emite y la otra no recibe el mismo candidato (una sola emisión)', a.st.emisiones === 1 && r1.hechas + r2.hechas === 1, JSON.stringify([r1, r2]));
   }
+  { // plazo: justo antes de reservar se vuelve a comprobar (Codex)
+    const ctx = await entorno(); const a = arca(); await encender(ctx, true, false); const o = await nueva(ctx);
+    const r = await emitirFacturaOrden({ orden: o, env: ENV, rpc: ctx.rpc, meliGet: meli(), fetchImpl: a.f, limite: Date.now() + 13000, reservarFn: 'arca_auto_reservar_factura', esperaTicketMs: 50 });
+    check('PLAZO: con menos de 14 s no empieza; entre 12 y 14 s ya no se comprueba de nuevo pero con menos de 12 s antes de reservar NO reserva', r.estado === 'sin_tiempo' && a.st.emisiones === 0 && !(await comp(ctx.db, o)), JSON.stringify(r));
+    const lento = { ...a, f: async (url, op) => { if (/FECompUltimoAutorizado/.test(op.headers.SOAPAction || '')) await new Promise((z) => setTimeout(z, 3000)); return a.f(url, op); } };
+    const r2 = await emitirFacturaOrden({ orden: o, env: ENV, rpc: ctx.rpc, meliGet: meli(), fetchImpl: lento.f, limite: Date.now() + 14500, reservarFn: 'arca_auto_reservar_factura', esperaTicketMs: 50 });
+    check('PLAZO: si la preparación gastó el tiempo (quedan menos de 12 s antes de reservar) NO reserva el número', r2.estado === 'sin_tiempo' && !(await comp(ctx.db, o)), JSON.stringify(r2));
+  }
   { // plazo absoluto
     const ctx = await entorno(); const a = arca(); await encender(ctx, true, false); const o = await nueva(ctx);
     const r = await auto(ctx, a, { limite: Date.now() + 8000, restanteMs: () => 20000 });

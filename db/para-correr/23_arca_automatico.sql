@@ -129,12 +129,18 @@ BEGIN
   RETURN jsonb_build_object('factura_auto', c.factura_auto, 'nota_auto', c.nota_auto, 'desde', c.desde, 'ambiente', c.ambiente);
 END $$;
 
--- Reclama un trabajo por 3 minutos: dos corridas del worker nunca reciben el mismo candidato, y una ráfaga de fallos no gasta varios reintentos.
-CREATE OR REPLACE FUNCTION public.arca__auto_reclamar(p_orden TEXT, p_tipo TEXT, p_ambiente TEXT)
-RETURNS VOID LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp AS $$
+-- Reclama un trabajo por 3 minutos de forma EXCLUSIVA: devuelve TRUE solo a quien lo logra. El INSERT ... ON CONFLICT serializa a los que llegan a la vez y el
+-- WHERE de la actualización se evalúa contra la fila ya reclamada por el ganador, así que el segundo recibe FALSE. Dos corridas nunca atienden lo mismo.
+DROP FUNCTION IF EXISTS public.arca__auto_reclamar(TEXT, TEXT, TEXT);
+CREATE FUNCTION public.arca__auto_reclamar(p_orden TEXT, p_tipo TEXT, p_ambiente TEXT)
+RETURNS BOOLEAN LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp AS $$
+DECLARE n INTEGER;
 BEGIN
-  INSERT INTO public.arca_auto_intentos (orden_id, tipo, ambiente, proximo_intento) VALUES (p_orden, p_tipo, p_ambiente, now() + interval '3 minutes')
-  ON CONFLICT (orden_id, tipo, ambiente) DO UPDATE SET proximo_intento = now() + interval '3 minutes', actualizado_en = now() WHERE public.arca_auto_intentos.resuelto_en IS NULL;
+  INSERT INTO public.arca_auto_intentos AS i (orden_id, tipo, ambiente, proximo_intento) VALUES (p_orden, p_tipo, p_ambiente, now() + interval '3 minutes')
+  ON CONFLICT (orden_id, tipo, ambiente) DO UPDATE SET proximo_intento = now() + interval '3 minutes', actualizado_en = now()
+   WHERE i.resuelto_en IS NULL AND i.intentos < 6 AND i.proximo_intento <= now();
+  GET DIAGNOSTICS n = ROW_COUNT;
+  RETURN n = 1;
 END $$;
 REVOKE ALL ON FUNCTION public.arca__auto_reclamar(TEXT, TEXT, TEXT) FROM PUBLIC, anon, authenticated;
 
@@ -159,8 +165,9 @@ BEGIN
                 AND NOT EXISTS (SELECT 1 FROM public.arca_auto_intentos i WHERE i.orden_id = c.orden_id AND i.tipo = 'factura' AND i.ambiente = p_ambiente
                                   AND i.resuelto_en IS NULL AND (i.intentos >= 6 OR i.proximo_intento > now()))
               ORDER BY c.creado_en LIMIT p_limite - v_n FOR UPDATE OF c SKIP LOCKED LOOP
-      PERFORM public.arca__auto_reclamar(r.orden_id, 'factura', p_ambiente);
-      v_res := v_res || jsonb_build_array(jsonb_build_object('orden', r.orden_id, 'tipo', 'factura')); v_n := v_n + 1;
+      IF public.arca__auto_reclamar(r.orden_id, 'factura', p_ambiente) THEN
+        v_res := v_res || jsonb_build_array(jsonb_build_object('orden', r.orden_id, 'tipo', 'factura')); v_n := v_n + 1;
+      END IF;
     END LOOP;
   END IF;
 
@@ -172,20 +179,22 @@ BEGIN
                 AND NOT EXISTS (SELECT 1 FROM public.arca_auto_intentos i WHERE i.orden_id = c.orden_id AND i.tipo = 'nota' AND i.ambiente = p_ambiente
                                   AND i.resuelto_en IS NULL AND (i.intentos >= 6 OR i.proximo_intento > now()))
               ORDER BY c.creado_en LIMIT p_limite - v_n FOR UPDATE OF c SKIP LOCKED LOOP
-      PERFORM public.arca__auto_reclamar(r.orden_id, 'nota', p_ambiente);
-      v_res := v_res || jsonb_build_array(jsonb_build_object('orden', r.orden_id, 'tipo', 'nota')); v_n := v_n + 1;
+      IF public.arca__auto_reclamar(r.orden_id, 'nota', p_ambiente) THEN
+        v_res := v_res || jsonb_build_array(jsonb_build_object('orden', r.orden_id, 'tipo', 'nota')); v_n := v_n + 1;
+      END IF;
     END LOOP;
   END IF;
 
   -- Notas AUTOMÁTICAS ya autorizadas cuyo resultado (y el aviso de revertir la venta) no llegó a anotarse: se completa el registro, sin emitir nada.
   IF cfg.nota_auto AND v_n < p_limite THEN
     FOR r IN SELECT n.orden_id FROM public.meli_notas_credito n
-              WHERE n.ambiente = p_ambiente AND n.estado = 'autorizado' AND n.creado_por LIKE 'automático%'
+              WHERE n.ambiente = p_ambiente AND n.estado = 'autorizado' AND (n.creado_por LIKE 'automático%' OR n.ultimo_solicitante LIKE 'automático%')
                 AND NOT EXISTS (SELECT 1 FROM public.arca_auto_intentos i WHERE i.orden_id = n.orden_id AND i.tipo = 'nota' AND i.ambiente = p_ambiente AND i.resuelto_en IS NOT NULL)
                 AND NOT EXISTS (SELECT 1 FROM public.arca_auto_intentos i WHERE i.orden_id = n.orden_id AND i.tipo = 'nota' AND i.ambiente = p_ambiente AND i.resuelto_en IS NULL AND i.proximo_intento > now())
               ORDER BY n.creado_en LIMIT p_limite - v_n LOOP
-      PERFORM public.arca__auto_reclamar(r.orden_id, 'nota', p_ambiente);
-      v_res := v_res || jsonb_build_array(jsonb_build_object('orden', r.orden_id, 'tipo', 'registro')); v_n := v_n + 1;
+      IF public.arca__auto_reclamar(r.orden_id, 'nota', p_ambiente) THEN
+        v_res := v_res || jsonb_build_array(jsonb_build_object('orden', r.orden_id, 'tipo', 'registro')); v_n := v_n + 1;
+      END IF;
     END LOOP;
   END IF;
 
@@ -198,8 +207,9 @@ BEGIN
                                   AND i.resuelto_en IS NULL AND (i.intentos >= 6 OR i.proximo_intento > now()))
                 AND NOT EXISTS (SELECT 1 FROM public.arca_auto_intentos i WHERE i.orden_id = o.meli_order_id AND i.tipo = 'factura' AND i.ambiente = p_ambiente AND i.resuelto_en IS NOT NULL)
               ORDER BY COALESCE(o.fecha_orden, o.creado_en) LIMIT p_limite - v_n LOOP
-      PERFORM public.arca__auto_reclamar(r.meli_order_id, 'factura', p_ambiente);
-      v_res := v_res || jsonb_build_array(jsonb_build_object('orden', r.meli_order_id, 'tipo', 'factura')); v_n := v_n + 1;
+      IF public.arca__auto_reclamar(r.meli_order_id, 'factura', p_ambiente) THEN
+        v_res := v_res || jsonb_build_array(jsonb_build_object('orden', r.meli_order_id, 'tipo', 'factura')); v_n := v_n + 1;
+      END IF;
     END LOOP;
   END IF;
   RETURN v_res;

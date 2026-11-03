@@ -89,7 +89,7 @@ async function pedirDatosFacturacion({ meliGet, cuentaId, orden, billingInfoId, 
 // El ticket dura 12 h y ARCA no entrega otro mientras hay uno vigente. `leer` devuelve el vigente; si no hay, toma el candado (solo UNA instancia
 // lo logra) y devuelve null para que esa instancia lo pida; las demás esperan. `guardar` reintenta con tiempo PROPIO (el ticket recibido no se
 // puede perder por haber gastado el presupuesto de las consultas).
-function cacheEnBase({ rpc, ambiente, cuit, pres, esperaMs = SEGUNDOS(8), pausaMs = 400, dormir = (ms) => new Promise((r) => setTimeout(r, ms)) }) {
+function cacheEnBase({ rpc, ambiente, cuit, pres, esperaMs = SEGUNDOS(8), pausaMs = 400, dormir = (ms) => new Promise((r) => setTimeout(r, ms)), limite = Infinity }) {
   let lease = null;
   const vigente = async () => {
     const t = primera(await rpc('arca_ticket_leer', { p_ambiente: ambiente, p_cuit: cuit }, pres));
@@ -113,12 +113,15 @@ function cacheEnBase({ rpc, ambiente, cuit, pres, esperaMs = SEGUNDOS(8), pausaM
       if (!lease) return;
       let ultimoError = null;
       for (let i = 0; i < 3; i++) {
+        // El guardado del ticket respeta el plazo absoluto: nunca se pasa del tiempo de la función (con el ticket en memoria esta corrida sigue; el candado vence solo).
+        const quedan = limite - Date.now();
+        if (quedan < 1500) { ultimoError = new Error('sin tiempo para guardar el ticket'); break; }
         try {
-          const ok = await rpc('arca_ticket_guardar', { p_ambiente: ambiente, p_cuit: cuit, p_lease: lease, p_token: t.token, p_sign: t.sign, p_expira: t.expira }, presFresco(SEGUNDOS(5)));
+          const ok = await rpc('arca_ticket_guardar', { p_ambiente: ambiente, p_cuit: cuit, p_lease: lease, p_token: t.token, p_sign: t.sign, p_expira: t.expira }, presFresco(Math.min(SEGUNDOS(5), quedan - 500)));
           if (ok === true) { lease = null; return; }
           ultimoError = new Error('el candado ya no era nuestro');
           break;
-        } catch (e) { ultimoError = e; await dormir(pausaMs); }
+        } catch (e) { ultimoError = e; if (limite - Date.now() > pausaMs + 1500) await dormir(pausaMs); }
       }
       console.error('arca: no se pudo guardar el ticket recibido:', ultimoError && ultimoError.message);
     },
@@ -143,8 +146,15 @@ const conTiempo = (fetchImpl, ms, restante) => async (url, op = {}) => {
   } finally { clearTimeout(t); }
 };
 // Plazo absoluto (Date.now() en ms) de toda la operación: cada pedido a ARCA usa como máximo el menor entre 12 s y lo que queda menos 3 s.
-const topeDePedido = (limite) => () => (Number.isFinite(limite) ? Math.max(1000, Math.min(12000, limite - Date.now() - 3000)) : 12000);
+const topeDePedido = (limite) => () => {
+  if (!Number.isFinite(limite)) return 12000;
+  const ms = Math.min(12000, limite - Date.now() - 3000);
+  if (ms < 1000) throw new A.ErrorArca('SIN_TIEMPO', 'Se agotó el tiempo de esta corrida: no se hace el pedido.');   // un pedido vencido NO se envía
+  return ms;
+};
 const TIEMPO_MINIMO_NUEVA_EMISION_MS = 14000;
+const TIEMPO_MINIMO_ANTES_DE_RESERVAR_MS = 12000;   // se vuelve a comprobar justo antes de reservar el número (la preparación pudo gastar tiempo)
+const TIEMPO_MINIMO_ANTES_DE_EMITIR_MS = 5000;
 const esNoElegible = (e) => !!(e && /AUTO_NO_ELEGIBLE/.test(String(e.message)));
 
 const textoError = (e) => (e && e.codigo ? `${e.codigo}: ${String(e.message).slice(0, 200)}` : 'error inesperado');
@@ -159,7 +169,7 @@ async function emitirFacturaOrden({ orden, env = process.env, rpc, meliGet, fetc
   const ordenS = String(orden);
   const f = conTiempo(fetchImpl, topeDePedido(limite));
 
-  const cacheTicket = cache || cacheEnBase({ rpc, ambiente: cfg.modo, cuit: cfg.cuit, pres, ...(esperaTicketMs ? { esperaMs: esperaTicketMs } : {}) });
+  const cacheTicket = cache || cacheEnBase({ rpc, ambiente: cfg.modo, cuit: cfg.cuit, pres, limite, ...(esperaTicketMs ? { esperaMs: esperaTicketMs } : {}) });
   let ticketCache = null;
   const ticket = async () => {
     if (ticketCache) return ticketCache;
@@ -203,6 +213,7 @@ async function emitirFacturaOrden({ orden, env = process.env, rpc, meliGet, fetc
   }
 
   const ultimo = await A.ultimoAutorizado({ cfg, ticket: await ticket(), ptoVta: cfg.ptoVta, fetchImpl: f });
+  if (limite - Date.now() < TIEMPO_MINIMO_ANTES_DE_RESERVAR_MS) return { estado: 'sin_tiempo', mensaje: 'No queda tiempo para emitir en esta corrida.' };
   let res;
   try {
     res = primera(await rpc(reservarFn, {
@@ -217,6 +228,7 @@ async function emitirFacturaOrden({ orden, env = process.env, rpc, meliGet, fetc
 
   // Emisión. 'A' → se anota el CAE. 'R' con detalle (rechazo definitivo) → se libera el número. Ante CUALQUIER duda (corte, error del
   // autorizador, respuesta incompleta) la reserva queda y la próxima vez se consulta a ARCA.
+  if (limite - Date.now() < TIEMPO_MINIMO_ANTES_DE_EMITIR_MS) return { estado: 'pendiente_verificar', numero: res.numero, ptoVenta: cfg.ptoVta, error: 'SIN_TIEMPO: quedó reservada sin emitir; se resuelve en la próxima corrida' };
   let em;
   try {
     em = await A.emitirFacturaC({ orden: { bruto, moneda: 'ARS' }, comprador, numeroReservado: res.numero, env, cache: cacheTicket, fetchImpl: f, ahora });
@@ -264,7 +276,7 @@ async function emitirNotaCreditoOrden({ orden, motivo, usuario, env = process.en
   if (!cfg.cuit || cfg.cuit.length !== 11) throw new A.ErrorArca('SIN_CUIT', 'Falta ARCA_CUIT (11 dígitos).');
   const ordenS = String(orden);
   const f = conTiempo(fetchImpl, topeDePedido(limite));
-  const cacheTicket = cache || cacheEnBase({ rpc, ambiente: cfg.modo, cuit: cfg.cuit, pres, ...(esperaTicketMs ? { esperaMs: esperaTicketMs } : {}) });
+  const cacheTicket = cache || cacheEnBase({ rpc, ambiente: cfg.modo, cuit: cfg.cuit, pres, limite, ...(esperaTicketMs ? { esperaMs: esperaTicketMs } : {}) });
   let ticketCache = null;
   const ticket = async () => {
     if (ticketCache) return ticketCache;
@@ -297,6 +309,7 @@ async function emitirNotaCreditoOrden({ orden, motivo, usuario, env = process.en
   // y la base rechaza si no coincide con el de la factura.
   if (!Number.isInteger(cfg.ptoVta) || cfg.ptoVta < 1) throw new A.ErrorArca('SIN_PUNTO_DE_VENTA', 'Falta ARCA_PTO_VTA.');
   const ultimo = await A.ultimoAutorizado({ cfg, ticket: await ticket(), ptoVta: cfg.ptoVta, cbteTipo: TIPO, fetchImpl: f });
+  if (limite - Date.now() < TIEMPO_MINIMO_ANTES_DE_RESERVAR_MS) return { estado: 'sin_tiempo', mensaje: 'No queda tiempo para emitir en esta corrida.' };
   let res;
   try {
     res = primera(await rpc(reservarFn, { p_orden: ordenS, p_ambiente: cfg.modo, p_pto_venta: cfg.ptoVta, p_ultimo_arca: ultimo, p_motivo: motivo, p_usuario: String(usuario) }, pres));
@@ -307,6 +320,7 @@ async function emitirNotaCreditoOrden({ orden, motivo, usuario, env = process.en
     throw e;
   }
   const datos = { importeCentavos: Number(res.importe_centavos), docTipo: res.doc_tipo, docNro: res.doc_nro, condicionIva: res.cond_iva, factura: { ptoVta: res.pto_venta, numero: res.factura_numero, fecha: res.factura_fecha } };
+  if (limite - Date.now() < TIEMPO_MINIMO_ANTES_DE_EMITIR_MS) return { estado: 'pendiente_verificar', numero: res.numero, ptoVenta: cfg.ptoVta, error: 'SIN_TIEMPO: quedó reservada sin emitir; se resuelve en la próxima corrida' };
   let em;
   try {
     em = await A.emitirNotaCreditoC({ datos, numeroReservado: res.numero, env, cache: cacheTicket, fetchImpl: f, ahora });

@@ -51,7 +51,7 @@ try {
   await admin.query(`UPDATE public.meli_config SET valor = $1 WHERE clave = 'rpc_secret_sha256'`, [crypto.createHash('sha256').update(SECRETO).digest('hex')]);
   await admin.query(ventasConParche(SQL('meli_ventas_migration.sql')));
   await admin.query(`DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname='service_role') THEN CREATE ROLE service_role NOLOGIN BYPASSRLS; END IF; END $$;`);
-  for (const f of ['meli_facturas.sql', 'arca_comprobantes.sql', 'arca_control_anual.sql', 'arca_notas_credito.sql']) await admin.query(SQL(f));
+  for (const f of ['meli_facturas.sql', 'arca_comprobantes.sql', 'arca_control_anual.sql', 'arca_notas_credito.sql', 'arca_automatico.sql']) await admin.query(SQL(f));
   const { rows: [p] } = await admin.query(`INSERT INTO public.personas (nombre) VALUES ('Franco') RETURNING id`);
   const { rows: [c] } = await admin.query(`INSERT INTO public.meli_cuentas (meli_user_id, nickname, persona_id, bolsillo) VALUES ('999','FRANCO',$1,'ARS Mercado Pago') RETURNING id`, [p.id]);
 
@@ -136,6 +136,22 @@ try {
     check(`Esfuerzo: ${N} facturas con 6 conexiones → todas autorizadas, sin números repetidos y sin interbloqueos (esperas: ${ocupados})`, interbloqueos === 0 && new Set(nums).size === nums.length, `interbloqueos=${interbloqueos}`);
     const tanda = nums.slice(-N);
     check('La numeración de la tanda de esfuerzo es correlativa (sin saltos ni repetidos)', tanda.length === N && tanda.every((n, i) => i === 0 || n === tanda[i - 1] + 1), JSON.stringify(tanda));
+  }
+  { // 6. reclamo exclusivo de la automática entre conexiones reales (Codex)
+    await admin.query(`SELECT public.arca_auto_config_guardar(true, true, 'homologacion')`);
+    const o = await orden(); await admin.query(`UPDATE public.meli_ordenes SET fecha_orden = now() + interval '1 minute' WHERE meli_order_id=$1`, [o]);
+    const rondas = [];
+    for (let r = 0; r < 5; r++) {
+      const oo = r === 0 ? o : await orden();
+      if (r > 0) await admin.query(`UPDATE public.meli_ordenes SET fecha_orden = now() + interval '1 minute' WHERE meli_order_id=$1`, [oo]);
+      const res = await Promise.all(cli.map((cl) => rpc(cl, 'arca_auto_candidatos', { p_ambiente: 'homologacion', p_limite: 20 })));
+      rondas.push(res);
+    }
+    const reclamos = new Map();
+    for (const res of rondas) for (const x of res) { if (!x.ok) continue; for (const c of x.r) reclamos.set(c.orden + '|' + c.tipo, (reclamos.get(c.orden + '|' + c.tipo) || 0) + 1); }
+    check('8 conexiones piden candidatos a la vez en 5 rondas: cada trabajo lo recibe UNA sola conexión (reclamo exclusivo)', [...reclamos.values()].every((v) => v === 1) && reclamos.size >= 1, JSON.stringify([...reclamos]));
+    check('…y sin interbloqueos ni errores', rondas.every((res) => res.every((x) => x.ok)), JSON.stringify(rondas.flat().filter((x) => !x.ok).map((x) => x.e)));
+    check('Reclamar no gastó ningún reintento', (await admin.query(`SELECT count(*)::int n FROM public.arca_auto_intentos WHERE intentos > 0`)).rows[0].n === 0);
   }
 } catch (e) { console.log(' FALLA │ ' + (e && e.stack || e)); fail++; }
 finally {

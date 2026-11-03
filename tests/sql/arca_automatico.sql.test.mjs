@@ -180,6 +180,18 @@ console.log('\n══ Facturación automática (Postgres en WebAssembly) ══\
   const c = await cand(db);
   check('Factura reservada sin confirmar se sigue resolviendo AUNQUE la orden ya esté cancelada', c.length === 1 && c[0].tipo === 'factura' && c[0].orden === o, JSON.stringify(c));
 }
+{ // nota que empezó manual (rechazada) y la reintentó la automática: el aviso no se pierde
+  const ctx = await nueva(); const { db } = ctx; await conf(db, false, true);
+  const o = await ordenId(ctx); await facturada(ctx, o); await q(db, `UPDATE public.meli_ordenes SET estado='cancelled', procesada=true WHERE meli_order_id=$1`, [o]);
+  const m = (await q(db, `SELECT public.arca_nc_reservar($1,$2,'homologacion',1,0,'devolucion','franco@x.com') r`, [SECRETO, o]))[0].r;
+  await q(db, `SELECT public.arca_nc_rechazar($1,$2,$3,'ARCA dijo que no')`, [SECRETO, m.intento, m.numero]);
+  const a = (await q(db, `SELECT public.arca_nc_reservar($1,$2,'homologacion',1,0,'cancelacion','automático: cancelación en Mercado Libre') r`, [SECRETO, o]))[0].r;
+  await q(db, `SELECT public.arca_nc_autorizar($1,$2,$3,'75123456789099','2026-12-01','2026-11-02')`, [SECRETO, a.intento, a.numero]);
+  const cr = (await q(db, `SELECT creado_por, ultimo_solicitante FROM public.meli_notas_credito`))[0];
+  check('(preparación) creado_por conserva al primero (manual) y ultimo_solicitante al automático', cr.creado_por === 'franco@x.com' && /^automático/.test(cr.ultimo_solicitante), JSON.stringify(cr));
+  const c = await cand(db);
+  check('Nota que empezó manual pero la autorizó la automática: igual se completa el registro y el aviso', c.length === 1 && c[0].tipo === 'registro', JSON.stringify(c));
+}
 { // permisos
   const ctx = await nueva(); const { db } = ctx;
   for (const rol of ['anon']) {

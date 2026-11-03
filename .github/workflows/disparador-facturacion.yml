@@ -1,0 +1,34 @@
+# Disparador de la facturación automática: llama al worker cada ~5 minutos para que la factura y la nota de crédito automáticas no dependan de tener el
+# CRM abierto. Hace UNA llamada GET (modo liviano: procesa avisos y corre la automatización, sin el barrido pesado). No guarda ni muestra datos: solo
+# comprueba que el servidor respondió bien.
+#
+# Requiere el secreto DISPARADOR_SECRET en GitHub (Settings → Secrets and variables → Actions) con el MISMO valor que la variable DISPARADOR_SECRET de Vercel.
+# Los horarios de GitHub son aproximados (puede demorar unos minutos) y GitHub pausa las programaciones de un repositorio sin actividad por 60 días: si pasa,
+# se reactiva desde la pestaña Actions.
+name: Disparador de facturación automática
+
+on:
+  schedule:
+    - cron: '*/5 * * * *'
+  workflow_dispatch: {}
+
+permissions: {}
+
+concurrency:
+  group: disparador-facturacion
+  cancel-in-progress: false
+
+jobs:
+  disparar:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Llamar al worker (modo frecuente)
+        env:
+          DISPARADOR_SECRET: ${{ secrets.DISPARADOR_SECRET }}
+        run: |
+          set -eu
+          if [ -z "${DISPARADOR_SECRET:-}" ]; then echo "Falta el secreto DISPARADOR_SECRET en GitHub."; exit 1; fi
+          codigo=$(curl -sS -o /dev/null -w '%{http_code}' -m 60 -H "Authorization: Bearer ${DISPARADOR_SECRET}" "https://iphonemood.com/api/meli/worker?modo=frecuente")
+          echo "Respuesta del servidor: ${codigo}"
+          [ "${codigo}" = "200" ]

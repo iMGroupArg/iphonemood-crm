@@ -123,9 +123,17 @@ module.exports = async function handler(req, res) {
   }
 
   let email = null;
+  let frecuente = false;
   if (req.method === 'GET') {
-    // Sólo el cron. Sin CRON_SECRET cargado, el GET queda cerrado.
-    const cron = process.env.CRON_SECRET;
+    // Dos formas, cada una con SU secreto y sin que se mezclen:
+    //   · el cron diario de Vercel (CRON_SECRET): barrido + drenaje + automatización;
+    //   · el DISPARADOR frecuente (?modo=frecuente, DISPARADOR_SECRET): solo drenaje + automatización, sin el barrido pesado. Lo llama un programador externo
+    //     cada pocos minutos para que la facturación automática no dependa de tener el CRM abierto. Un secreto no sirve para el otro modo.
+    // Sin el secreto cargado, el GET correspondiente queda cerrado.
+    let modo = null;
+    try { modo = new URL(req.url || '', 'http://localhost').searchParams.get('modo'); } catch { /* sin modo */ }
+    frecuente = modo === 'frecuente';
+    const cron = frecuente ? process.env.DISPARADOR_SECRET : process.env.CRON_SECRET;
     const dado = (req.headers.authorization || '').replace(/^Bearer\s+/i, '');
     if (!cron || !M.comparar(dado, cron)) {
       res.status(401).json({ error: 'No autorizado' });
@@ -231,7 +239,7 @@ module.exports = async function handler(req, res) {
     // El cron diario hace primero el barrido (encola lo que falte) y con el tiempo que queda drena. El barrido se
     // topea a ~12 s para que el drenaje conserve el resto. Si el barrido falla, el drenaje corre igual.
     let barrido = null;
-    if (req.method === 'GET') {
+    if (req.method === 'GET' && !frecuente) {
       try {
         // El barrido tiene SU PROPIO plazo, que incluye sus escrituras y el cierre: así una base lenta no se come el tiempo
         // del drenaje (consultas hasta t0+12 s; guardar y cerrar hasta t0+14 s).

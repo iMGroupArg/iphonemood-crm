@@ -677,3 +677,52 @@ dialog.dlg-crm::backdrop { background: rgba(0,0,0,.45); }
   .m-sheet:has(.dlg-crm) { top: 0; bottom: 0; left: 0; right: 0; margin: auto; width: min(560px, 92vw); height: fit-content; max-height: 84vh; transform: scale(.98); }
   .m-sheet.visible:has(.dlg-crm) { transform: none; }
 }
+
+/* ── Mercado Libre → Facturación: interruptores, cabeceras y botones alineados ── */
+.mf-card { margin-bottom: 10px; font-size: 12.5px; }
+.mf-cab { display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap; }
+.mf-cab > b { font-size: 14px; }
+.mf-nota { font-size: 11.5px; color: var(--text-secondary); line-height: 1.5; margin: 6px 0 8px; }
+.mf-panel { margin-top: 10px; padding: 10px 12px; border-radius: var(--radius-md, 10px); background: var(--bg-elevated); font-size: 12px; line-height: 1.6; color: var(--text-secondary); }
+.mf-panel p { margin: 6px 0 0; }
+.mf-acciones { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-top: 12px; }
+.mf-filas { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 10px 28px; margin-top: 4px; }
+.mf-sw { display: inline-flex; align-items: center; gap: 10px; cursor: pointer; font-size: 13px; position: relative; -webkit-tap-highlight-color: transparent; }
+.mf-sw.mf-fila { display: flex; justify-content: space-between; min-height: 36px; }
+.mf-sw input { position: absolute; opacity: 0; width: 1px; height: 1px; margin: 0; }
+.mf-sw .mf-estado { font-weight: 600; }
+.mf-pista { position: relative; flex: none; width: 44px; height: 26px; border-radius: 13px; background: var(--border-strong); transition: background .18s; }
+.mf-pista::after { content: ''; position: absolute; top: 3px; left: 3px; width: 20px; height: 20px; border-radius: 50%; background: #fff; box-shadow: 0 1px 3px rgba(0,0,0,.3); transition: transform .18s; }
+.mf-sw input:checked + .mf-pista { background: var(--green); }
+.mf-sw input:checked + .mf-pista::after { transform: translateX(18px); }
+.mf-sw input:focus-visible + .mf-pista { outline: 2px solid var(--blue); outline-offset: 2px; }
+.mf-sw input:disabled + .mf-pista { opacity: .5; }
+.mf-tabla { width: 100%; overflow-x: auto; margin-top: 8px; }
+.mf-tabla table { width: 100%; border-collapse: collapse; font-size: 12px; min-width: 520px; }
+.mf-tabla th { text-align: left; font-weight: 600; color: var(--text-secondary); padding: 4px 8px; border-bottom: 1px solid var(--border); white-space: nowrap; }
+.mf-tabla td { padding: 5px 8px; border-bottom: 1px solid var(--separator); }
+.mf-tabla .mf-der { text-align: right; white-space: nowrap; }
+.mf-filtros { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 8px; margin-top: 8px; }
+.mf-filtros label { display: flex; flex-direction: column; gap: 3px; font-size: 11.5px; }
+.mf-filtros input { width: 100%; min-height: 36px; padding: 6px 9px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg); font: inherit; font-size: 13px; color: var(--text); box-sizing: border-box; }
+@media (max-width: 560px) {
+  .mf-acciones { flex-direction: column; align-items: stretch; }
+  .mf-acciones .btn { width: 100%; justify-content: center; }
+  .mf-filas { grid-template-columns: 1fr; }
+  .mf-cab { align-items: center; }
+  /* La lista de facturas emitidas pasa de tabla a tarjetas: nombre e importe arriba, fecha y número, ID de compra y origen. */
+  .mf-tabla table, .mf-tabla tbody { display: block; width: 100%; min-width: 0; }
+  .mf-filtros { grid-template-columns: 1fr 1fr; }
+  .mf-filtros label:last-child { grid-column: 1 / -1; }
+  .mf-tabla thead { display: none; }
+  .mf-tabla tbody tr { display: grid; grid-template-columns: 1fr auto; grid-template-areas: "nom imp" "fecha fact" "id org"; gap: 2px 10px; padding: 9px 0; border-bottom: 1px solid var(--separator); }
+  .mf-tabla td { border: 0; padding: 0; }
+  .mf-tabla .c-nom { grid-area: nom; font-weight: 600; font-size: 13px; }
+  .mf-tabla .c-imp { grid-area: imp; }
+  .mf-tabla .c-fecha { grid-area: fecha; color: var(--text-secondary); }
+  .mf-tabla .c-fact { grid-area: fact; text-align: right; color: var(--text-secondary); }
+  .mf-tabla .c-id { grid-area: id; color: var(--text-secondary); }
+  .mf-tabla .c-id::before { content: attr(data-l); }
+  .mf-tabla .c-org { grid-area: org; text-align: right; color: var(--text-secondary); }
+}
+@media (prefers-reduced-motion: reduce) { .mf-pista, .mf-pista::after { transition: none; } }

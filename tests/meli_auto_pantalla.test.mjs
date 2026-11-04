@@ -7,19 +7,48 @@ let n = 0, fallos = 0;
 async function caso(nombre, fn) { n++; try { await fn(); console.log(`ok ${n} - ${nombre}`); } catch (e) { fallos++; console.log(`NO OK ${n} - ${nombre}\n   ${e && e.message}`); } }
 const fuente = fs.readFileSync(new URL('../src/modules/meli-facturas.js', import.meta.url), 'utf8');
 function cargar({ estado, checks = {}, confirma = true, respuesta = { data: { ok: true } }, modo = 'homologacion' }) {
-  const llamadas = [], toasts = [], confirmaciones = [];
+  const llamadas = [], toasts = [], confirmaciones = [], els = {};
   const State = { esc: s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])), facturacionAuto: estado, meliOrdenes: [] };
-  const ctx = { State, console, toast: m => toasts.push(m), confirm: (t) => { confirmaciones.push(t); return confirma; }, Meli: { _token: async () => 'tok' }, fetch: async () => ({ json: async () => ({ modo }) }), document: { getElementById: id => (id in checks ? { checked: checks[id] } : null) },
+  const ctx = { State, console, toast: m => toasts.push(m), confirm: (t) => { confirmaciones.push(t); return confirma; }, Meli: { _token: async () => 'tok' }, fetch: async () => ({ json: async () => ({ modo }) }), document: { getElementById: id => (id in checks ? (els[id] = els[id] || { checked: checks[id] }) : null) },
     supa: { rpc: async (fn, args) => { llamadas.push({ fn, args }); return fn === 'arca_auto_estado' ? { data: estado, error: null } : respuesta; } }, MeliOrdenes: { pintar() {} } };
   ctx.window = ctx; vm.createContext(ctx); vm.runInContext(fuente, ctx);
-  return { M: ctx.MeliFacturas, State, llamadas, toasts, confirmaciones };
+  return { M: ctx.MeliFacturas, State, llamadas, toasts, confirmaciones, els };
 }
 const base = { factura_auto: false, nota_auto: false, desde: null, pendientes: [], avisos: [] };
 
 await caso('Apagada por defecto y explica qué hace', () => {
   const { M } = cargar({ estado: base });
   const h = M.tarjetaAuto();
-  assert.match(h, /Apagada/); assert.match(h, /desde el momento en que lo encendés/); assert.match(h, /siguen manuales/);
+  assert.match(h, /Apagada/); assert.match(h, /desde que la encendés/); assert.match(h, /siguen manuales/);
+});
+await caso('Interruptores on/off: general y uno por función, con textos cortos y sin botón Guardar', () => {
+  const { M } = cargar({ estado: base });
+  let h = M.tarjetaAuto();
+  assert.match(h, /role="switch" id="fauto-master"/); assert.match(h, /role="switch" id="fauto-factura"/); assert.match(h, /role="switch" id="fauto-nota"/);
+  assert.match(h, /class="mf-pista"/); assert.doesNotMatch(h, /type="checkbox" id=|>Guardar</); assert.match(h, /Facturas de ventas nuevas/); assert.match(h, /Notas de crédito al cancelar/);
+  assert.doesNotMatch(h, /fauto-master"[^>]*checked/); assert.match(h, />Apagada</);
+  const m = cargar({ estado: { ...base, factura_auto: true } }); h = m.M.tarjetaAuto();
+  assert.match(h, />Encendida</); assert.match(h, /fauto-master"[^>]*checked/); assert.match(h, /fauto-factura"[^>]*checked/); assert.doesNotMatch(h, /fauto-nota"[^>]*checked/);
+  assert.match(h, /onchange="MeliFacturas\.maestroAuto\(this\)"/); assert.match(h, /id="fauto-factura"[^>]*onchange="MeliFacturas\.guardarAuto\(this\)"/);
+});
+await caso('Interruptor general: al encender prende los dos y guarda; al apagar apaga los dos y guarda sin pedir confirmación', async () => {
+  const on = cargar({ estado: base, checks: { 'fauto-master': true, 'fauto-factura': false, 'fauto-nota': false } });
+  const mOn = { checked: true }; await on.M.maestroAuto(mOn);
+  assert.equal(on.els['fauto-factura'].checked, true); assert.equal(on.els['fauto-nota'].checked, true); assert.equal(on.confirmaciones.length, 1);
+  assert.deepEqual(JSON.parse(JSON.stringify(on.llamadas[0])), { fn: 'arca_auto_config_guardar', args: { p_factura: true, p_nota: true, p_ambiente: 'homologacion' } });
+  const off = cargar({ estado: { ...base, factura_auto: true, nota_auto: true }, checks: { 'fauto-master': false, 'fauto-factura': true, 'fauto-nota': true } });
+  const mOff = { checked: false }; await off.M.maestroAuto(mOff);
+  assert.equal(off.els['fauto-factura'].checked, false); assert.equal(off.els['fauto-nota'].checked, false); assert.equal(off.confirmaciones.length, 0);
+  assert.deepEqual(JSON.parse(JSON.stringify(off.llamadas[0])), { fn: 'arca_auto_config_guardar', args: { p_factura: false, p_nota: false, p_ambiente: null } });
+});
+await caso('Si cancelás la confirmación o falla el guardado, la pantalla se repinta con lo que hay guardado (el interruptor vuelve atrás)', async () => {
+  const llamadasSeccion = [];
+  const a = cargar({ estado: base, checks: { 'fauto-factura': true, 'fauto-nota': false }, confirma: false });
+  a.M.pintarSeccion = () => llamadasSeccion.push('repinta');
+  await a.M.guardarAuto(a.els['fauto-factura']); assert.equal(a.llamadas.length, 0); assert.deepEqual(llamadasSeccion, ['repinta']);
+  llamadasSeccion.length = 0;
+  const b = cargar({ estado: base, checks: { 'fauto-factura': true, 'fauto-nota': false }, respuesta: { data: { ok: false } } });
+  b.M.pintarSeccion = () => llamadasSeccion.push('repinta'); await b.M.guardarAuto({}); assert.deepEqual(llamadasSeccion, ['repinta']); assert.match(b.toasts[0], /No se pudo guardar/);
 });
 await caso('Sin la función en la base (script 23 sin correr) no muestra nada; con error real avisa', () => {
   const { M, State } = cargar({ estado: null });

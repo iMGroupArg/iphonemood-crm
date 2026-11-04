@@ -75,6 +75,13 @@ await caso('Reutiliza el ticket vigente de la base: solo llama a FECompConsultar
   const s2 = servidor(); await assert.rejects(() => datosComprobante({ pto: 4, numero: 66, env: ENV, rpc, fetchImpl: s2.f, limite: Date.now() + 1000 }), e => e.codigo === 'SIN_TIEMPO'); assert.equal(s2.llamadas.length, 0);
   assert.match(fs.readFileSync(new URL('../api/meli/worker.js', import.meta.url), 'utf8'), /datosComprobante\(\{[^}]*limite: t0 \+ PRESUPUESTO_MS/);
 });
+await caso('Si el login gasta el plazo, no se hace la consulta a ARCA (SIN_TIEMPO) y el tiempo de cada llamada se recalcula', async () => {
+  const llamadas = []; const f = async (url, op) => { llamadas.push((op && op.headers && op.headers.SOAPAction) || url); if (/LoginCms/.test(url)) await new Promise(r => setTimeout(r, 1300)); return { ok: true, status: 200, text: async () => (/LoginCms/.test(url) ? login : fe(resultado)) }; };
+  await assert.rejects(() => datosComprobante({ pto: 4, numero: 66, env: ENV, fetchImpl: f, cache: A.cacheEnMemoria(), limite: Date.now() + 4000 }), e => e.codigo === 'SIN_TIEMPO');
+  assert.ok(llamadas.some(x => /LoginCms/.test(x))); assert.ok(!llamadas.some(x => /FECompConsultar/.test(x)), 'no consulta si no queda tiempo');
+  const fuente = fs.readFileSync(new URL('../api/_arca_comprobante.js', import.meta.url), 'utf8');
+  assert.match(fuente, /const fetchImpl = \(url, opciones\) => conTiempo\(fetchBase, Math\.max\(1500, Math\.min\(12000, quedan\(\) - 1500\)\)\)\(url, opciones\)/);
+});
 await caso('El worker rechaza la acción sin sesión (401) y no llega a consultar a ARCA', async () => {
   process.env.MELI_RPC_SECRET = 'x'.repeat(40); process.env.MELI_APP_ID = '1'; process.env.MELI_CLIENT_SECRET = 'y'.repeat(30); process.env.CRON_SECRET = 'c'.repeat(32); process.env.DISPARADOR_SECRET = 'd'.repeat(32);
   const handler = require('../api/meli/worker.js');

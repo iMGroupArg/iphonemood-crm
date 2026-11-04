@@ -87,7 +87,7 @@ const Movil = {
     ['meli', 'Mercado Libre', 'ti-shopping-cart'],
   ],
   // Avisos de las pantallas que quedan dentro de "Más": se suman en su insignia.
-  BADGES_MAS: ['badge-reparaciones', 'badge-cc', 'badge-adelantos', 'badge-actividades'],
+  BADGES_MAS: ['badge-reparaciones', 'badge-cc', 'badge-adelantos', 'badge-actividades', 'badge-agentes'],
   _barra: null,
   _pagina: 'dashboard',
 

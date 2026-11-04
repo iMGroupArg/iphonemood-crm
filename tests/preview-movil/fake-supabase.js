@@ -86,6 +86,16 @@
   const FIXTURES = {
     usuarios_autorizados: [{ email: 'demo@iphonemood.com', nombre: 'Franco', activo: true }],
     personas, cajas, stock, ventas, venta_items, venta_pagos, reparaciones, gastos,
+    agente_propuestas: [
+      { id: 1, agente: 'contenido', tipo: 'post', titulo: 'iPhone 15: equipos de la semana', resumen: 'Post para mostrar los usados seleccionados.', payload: { texto: 'Tu próximo iPhone te espera.\nConsultanos por disponibilidad y garantía.' }, revision_codex: 'aprobado', estado: 'pendiente' },
+      { id: 2, agente: 'bot', tipo: 'tarea', titulo: 'Revisar consultas sin respuesta', resumen: 'Hay tres consultas de canje para revisar.', payload: {}, revision_codex: 'no_aplica', estado: 'pendiente' },
+      { id: 3, agente: 'pauta', tipo: 'ajuste_presupuesto', titulo: 'Ampliar campaña de usados', resumen: 'La campaña mejoró su costo por consulta.', payload: { incremento_diario_ars: 1500 }, monto_extra_ars: 18000, revision_codex: 'no_aplica', estado: 'auto' },
+      { id: 4, agente: 'contenido', tipo: 'story', titulo: 'Story de financiación', resumen: 'Revisar las condiciones antes de publicar.', payload: { texto: 'Renová tu iPhone en cuotas.' }, revision_codex: 'objeciones', codex_texto: 'Falta aclarar las tarjetas y el costo de financiación.', estado: 'pendiente' },
+      { id: 5, agente: 'finanzas', tipo: 'informe', titulo: 'Resumen de la semana', resumen: 'Ventas estables y margen dentro del objetivo.', payload: {}, revision_codex: 'no_aplica', estado: 'informativa', leida_en: null },
+    ].map(p => ({ revision: 1, creada_en: ts(0), programada_para: ts(0), ...p })),
+    pauta_config: [{ id: 1, tope_mensual_ars: 300000, gasto_al_dia_ars: 85000, gasto_proyectado_ars: 240000, reporte_en: ts(0), reporte_mes: new Date(Date.now() - 3 * 3600000).toISOString().slice(0, 7) + '-01' }],
+    agente_directivas: [{ semana: dia(0), texto: 'Priorizar usados con buen margen y responder las consultas pendientes.' }],
+    agente_bitacora: [{ agente: 'pauta', nivel: 'hallazgo', mensaje: 'Bajó el costo por consulta en usados.', creado_en: ts(0) }],
     configuracion: [{ clave: 'ref_blue', valor: String(COT) }, { clave: 'ref_usdt', valor: String(COT - 10) }],
     categorias_gasto: [{ id: 1, nombre: 'Operativo', color: '#0071E3' }],
     garantias: [{ id: 1, nombre: '6 meses', dias: 180, color: '#1D8348', tipo: 'usado' }],
@@ -102,13 +112,29 @@
       single: () => Promise.resolve({ data: filas[0] || null, error: null }),
       insert: () => Promise.resolve({ data: [], error: null }), update: () => q, delete: () => q, upsert: () => Promise.resolve({ data: [], error: null }),
     };
-    ['select', 'order', 'eq', 'neq', 'in', 'is', 'gte', 'lte', 'gt', 'lt', 'limit', 'range', 'not', 'or', 'filter', 'ilike', 'like', 'match', 'contains']
+    ['select', 'order', 'eq', 'neq', 'is', 'gte', 'lte', 'gt', 'lt', 'limit', 'not', 'or', 'filter', 'ilike', 'like', 'match', 'contains']
       .forEach((m) => { q[m] = () => q; });
+    q.range = (a, b) => { filas = filas.slice(a, b + 1); return q; };
+    q.in = (campo, valores) => { filas = filas.filter(f => valores.includes(f[campo])); return q; };
     return q;
   }
   const cliente = {
     from: consulta,
-    rpc: () => Promise.resolve({ data: null, error: null }),
+    rpc: (fn, args) => {
+      if (fn.startsWith('agente_')) {
+        const p = FIXTURES.agente_propuestas.find(p => p.id === args.p_id);
+        if (fn === 'agente_pauta_tope') FIXTURES.pauta_config[0].tope_mensual_ars = args.p_tope;
+        if (p && fn === 'agente_marcar_leida') p.leida_en = new Date().toISOString();
+        if (p && ['agente_aprobar', 'agente_rechazar'].includes(fn)) {
+          if (p.revision !== args.p_revision) return Promise.resolve({ error: { message: 'PROPUESTA_DESACTUALIZADA' } });
+          p.estado = fn === 'agente_aprobar' ? 'aprobada' : 'rechazada'; p.revision++;
+          p.decidida_en = new Date().toISOString();
+          if (args.p_texto) p.payload.texto = args.p_texto;
+          p.motivo = args.p_motivo;
+        }
+      }
+      return Promise.resolve({ data: { ok: true }, error: null });
+    },
     auth: {
       getSession: () => Promise.resolve({ data: { session: { access_token: 'preview', user: { email: 'demo@iphonemood.com', user_metadata: { full_name: 'Franco' } } } } }),
       onAuthStateChange: () => ({ data: { subscription: { unsubscribe() {} } } }),

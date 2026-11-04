@@ -12,11 +12,28 @@
 //   node agentes/mesa.mjs blog      archivo.json
 //   node agentes/mesa.mjs codex     archivo.json          (SOLO en la Mac: usa REVISOR_CLAVE)
 //
-// Entorno: SUPABASE_URL y SUPABASE_ANON_KEY (públicas) + AGENTES_CLAVE (nube) o REVISOR_CLAVE (solo la Mac:
-// sirve para leer y para el veredicto de Codex, no para proponer).
+// Entorno: AGENTES_CLAVE (nube) o REVISOR_CLAVE (solo la Mac:
+// sirve para leer y para el veredicto de Codex, no para proponer). SUPABASE_URL y SUPABASE_ANON_KEY son públicas:
+// salen de config.js si el entorno no las trae (o las trae rotas).
 // Las claves se generan en el SQL Editor con agente_api_generar_clave(); NUNCA van en el repo.
 // Con MESA_ENSAYO=1 no llama a nada: imprime lo que mandaría (sin la clave).
 import fs from 'node:fs';
+
+// La URL y la clave anon de Supabase son PÚBLICAS (las sirve la página del CRM) y están en config.js del repo.
+// Se toman de ahí para no depender de copiarlas al entorno: el chat muestra la clave anon tapada (eyJhbGci•••) y
+// pegarla así la rompe. Si el entorno trae un valor válido, manda el entorno.
+export function configPublica(texto) {
+  const tomar = (k) => (texto.match(new RegExp(k + `\\s*:\\s*'([^']+)'`)) || [])[1];
+  return { SUPABASE_URL: tomar('SUPABASE_URL'), SUPABASE_ANON_KEY: tomar('SUPABASE_ANON_KEY') };
+}
+const valido = (v) => typeof v === 'string' && v.length > 0 && /^[\x21-\x7e]+$/.test(v);
+export function publicos(entorno, leerConfig = () => fs.readFileSync(new URL('../config.js', import.meta.url), 'utf8')) {
+  if (valido(entorno.SUPABASE_URL) && valido(entorno.SUPABASE_ANON_KEY)) return { url: entorno.SUPABASE_URL, anon: entorno.SUPABASE_ANON_KEY };
+  let cfg = {};
+  try { cfg = configPublica(leerConfig()); } catch { /* sin config.js: se usa lo que haya */ }
+  return { url: valido(entorno.SUPABASE_URL) ? entorno.SUPABASE_URL : cfg.SUPABASE_URL,
+           anon: valido(entorno.SUPABASE_ANON_KEY) ? entorno.SUPABASE_ANON_KEY : cfg.SUPABASE_ANON_KEY };
+}
 
 // campo del JSON → parámetro de la función (el `clave` del JSON es la clave de idempotencia, no la secreta)
 const LLAMADAS = {
@@ -61,6 +78,8 @@ export function urlSupabase(u) {
   let url;
   try { url = new URL(u); } catch { throw new Error('SUPABASE_URL no es una URL válida'); }
   if (url.protocol !== 'https:') throw new Error('SUPABASE_URL tiene que ser https://');
+  // La clave secreta solo viaja a un proyecto de Supabase (no a cualquier host que alguien ponga en el entorno).
+  if (!/^[a-z0-9]+\.supabase\.co$/.test(url.hostname) || url.port) throw new Error('SUPABASE_URL tiene que ser https://<proyecto>.supabase.co');
   return url.origin;
 }
 
@@ -69,13 +88,15 @@ function leerJson(arg) {
   return JSON.parse(crudo);
 }
 
-export async function llamar(accion, datos, entorno = process.env, fetchImpl = fetch) {
+export async function llamar(accion, datos, entorno = process.env, fetchImpl = fetch, leerConfig) {
   const { rpc, cuerpo, variableClave: porDefecto } = armarLlamada(accion, datos);
   const variableClave = elegirClave(accion, porDefecto, entorno);
   if (entorno.MESA_ENSAYO === '1') return { ensayo: true, rpc, cuerpo };
-  const base = urlSupabase(entorno.SUPABASE_URL || '');
-  const anon = entorno.SUPABASE_ANON_KEY, clave = entorno[variableClave];
-  if (!anon) throw new Error('Falta SUPABASE_ANON_KEY');
+  const pub = publicos(entorno, leerConfig);
+  const base = urlSupabase(pub.url || '');
+  const anon = pub.anon, clave = entorno[variableClave];
+  if (!valido(anon)) throw new Error('Falta SUPABASE_ANON_KEY (ni en el entorno ni en config.js)');
+  if (clave && !valido(clave)) throw new Error(`${variableClave} tiene caracteres inválidos: volvé a pegarla (sin espacios ni •)`);
   if (!clave) throw new Error(`Falta ${variableClave}${variableClave === 'REVISOR_CLAVE' ? ' (solo existe en la Mac)' : ''}`);
   const r = await fetchImpl(`${base}/rest/v1/rpc/${rpc}`, {
     method: 'POST',

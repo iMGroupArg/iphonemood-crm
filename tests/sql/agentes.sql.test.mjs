@@ -323,7 +323,7 @@ console.log('\n══ Mesa de control de los agentes (Postgres en WebAssembly) �
   check('…y les borra la contraseña vieja (si algún día les devuelven el login, no entra nadie con ella)', pw.length === 0, JSON.stringify(pw));
   const est = await q(db, `SELECT p.proname, p.provolatile FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace
                             WHERE n.nspname='public' AND p.proname LIKE 'agente\\_api\\_%' ORDER BY 1`);
-  check('Todas las funciones de la ventanilla son VOLATILE: la API las acepta solo por POST (la clave nunca va en una URL)',
+  check('Todas las funciones de la ventanilla son VOLATILE (escriben o pueden escribir; el GET se frena aparte)',
     est.length >= 9 && est.every(x => x.provolatile === 'v'), JSON.stringify(est));
   const eProc = await falla(() => comoAgente(db, () => q(db, `CALL public.procedimiento_viejo()`)));
   check('Un procedimiento viejo de public también queda cerrado para los agentes (y no rompe la instalación)', eProc && /permission denied/.test(eProc), eProc);
@@ -382,6 +382,18 @@ console.log('\n══ Mesa de control de los agentes (Postgres en WebAssembly) �
   check('Un valor de filtro con comillas es solo un valor (no trae nada)', inj.cantidad === 0, JSON.stringify(inj));
   const vistas = await comoAnon(() => q(db, `SELECT public.agente_api_vistas($1) AS r`, [claveA]).then(x => x[0].r));
   check('Lista de vistas y columnas para no adivinar', !!vistas.ventas && !!vistas.cajas && !vistas.usuarios_autorizados, Object.keys(vistas).join(','));
+  // PostgREST corre los GET (clave en la URL) en una transacción de solo lectura y marca request.method: se rechaza.
+  await db.query(`SELECT set_config('request.method', 'GET', false)`);
+  const eGet = await falla(() => comoAnon(() => q(db, `SELECT public.agente_api_vistas($1)`, [claveA])));
+  const eGetL = await falla(() => leer(claveR, { vista: 'ventas' }));
+  await db.query(`SELECT set_config('request.method', 'POST', false)`);
+  check('Un GET con la clave correcta se rechaza (la clave nunca va en una URL)', eGet && /SOLO_POST/.test(eGet) && eGetL && /SOLO_POST/.test(eGetL), `${eGet} | ${eGetL}`);
+  await db.exec(`SET default_transaction_read_only = on`);
+  const eRo = await falla(() => comoAnon(() => q(db, `SELECT public.agente_api_vistas($1)`, [claveA])));
+  await db.exec(`SET default_transaction_read_only = off`);
+  check('…y también en una transacción de solo lectura (así corre PostgREST los GET)', eRo && /SOLO_POST/.test(eRo), eRo);
+  const post = await comoAnon(() => q(db, `SELECT public.agente_api_vistas($1) AS r`, [claveA]).then(x => x[0].r));
+  check('Por POST sigue andando', !!post.ventas);
 
   const pr = await comoAnon(() => q(db, `SELECT public.agente_api_proponer($1,'contenido','story','Story perfumes',NULL,'{"texto":"hola"}',NULL,'api-1',false,true) AS r`, [claveA]).then(x => x[0].r));
   check('Con la clave del agente se propone (queda pendiente)', pr.ok && pr.estado === 'pendiente', JSON.stringify(pr));

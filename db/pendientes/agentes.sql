@@ -691,9 +691,15 @@ LANGUAGE sql IMMUTABLE SET search_path = public, pg_temp AS $$
 $$;
 
 -- Devuelve quién es el dueño de la clave ('agentes' | 'revisor') o frena. Clave corta = rechazo sin buscar.
+-- Solo POST: PostgREST acepta GET (con la clave en la URL, que queda en registros) incluso para funciones VOLATILE
+-- —lo corre en una transacción de solo lectura—, así que se rechaza acá, antes de mirar la clave. Probado en producción.
 CREATE OR REPLACE FUNCTION public.agente__clave(p_clave TEXT, p_quien TEXT) RETURNS VOID
 LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = public, pg_temp AS $$
 BEGIN
+  IF upper(COALESCE(current_setting('request.method', true), '')) IN ('GET', 'HEAD')
+     OR current_setting('transaction_read_only') = 'on' THEN
+    RAISE EXCEPTION 'SOLO_POST: la ventanilla solo acepta pedidos POST (la clave nunca va en la URL)' USING ERRCODE = '0A000';
+  END IF;
   IF p_clave IS NULL OR length(p_clave) < 40 OR length(p_clave) > 200
      OR NOT EXISTS (SELECT 1 FROM public.agente_claves WHERE quien = p_quien AND hash = public.agente__hash(p_clave)) THEN
     RAISE EXCEPTION 'no autorizado' USING ERRCODE = '42501';
@@ -922,8 +928,9 @@ FROM (
          AND NOT has_function_privilege('authenticated', 'public.agente_api_generar_clave(text)', 'EXECUTE')
          AND NOT has_table_privilege('anon', 'public.agente_claves', 'SELECT')
          AND NOT has_table_privilege('authenticated', 'public.agente_claves', 'SELECT')
-         -- VOLATILE = la API solo las acepta por POST: la clave nunca viaja en una URL (que queda en registros)
+         -- solo POST: la clave nunca viaja en una URL (que queda en registros); agente__clave frena GET y solo lectura
          AND NOT EXISTS (SELECT 1 FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
                           WHERE n.nspname = 'public' AND p.proname LIKE 'agente\_api\_%' AND p.provolatile <> 'v')
+         AND (SELECT prosrc LIKE '%SOLO_POST%' FROM pg_proc WHERE oid = 'public.agente__clave(text,text)'::regprocedure)
 ) t
 ORDER BY id;

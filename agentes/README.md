@@ -18,7 +18,8 @@ Seis agentes (`.claude/agents/`) que corren solos en la nube con agenda fija. Si
    SELECT public.agente_api_generar_clave('agentes');   -- copiala a AGENTES_CLAVE del entorno de la nube
    SELECT public.agente_api_generar_clave('revisor');   -- copiala a REVISOR_CLAVE, SÓLO en la Mac
    ```
-   Cada clave se muestra **una sola vez** y en la base queda guardado sólo su hash. Las funciones de la ventanilla sólo aceptan pedidos POST: la clave nunca viaja en una URL, que quedaría en registros. Si se pierde o se filtra, se corre de nuevo y la anterior deja de valer.
+   Cada clave se muestra **una sola vez** y en la base queda guardado sólo su hash. Las funciones de la ventanilla sólo aceptan pedidos POST (la base frena los GET con `SOLO_POST`): la clave nunca viaja en una URL, que quedaría en registros.
+   - En el entorno de la nube, la única variable es `AGENTES_CLAVE`. **Ojo:** al reabrir "Variables de entorno" los valores se ven tapados (•••); si se guarda así, se guardan los puntitos. Para cambiar algo, borrar todo y volver a escribirlo. Si se pierde o se filtra, se corre de nuevo y la anterior deja de valer.
 3. Publicar este PR (la pantalla Agentes del CRM). Hasta que el script 26 esté corrido, la pantalla sólo avisa "Falta correr el script 26".
 
 ## Entorno de la nube (claude.ai/code → Entornos)
@@ -27,7 +28,7 @@ Un entorno "iphonemood-agentes" sobre el repo `iMGroupArg/iphonemood-crm`, con e
 
 | Variable | Para qué | Quién la usa |
 |---|---|---|
-| `SUPABASE_URL`, `SUPABASE_ANON_KEY` | Dirección del proyecto y clave pública (las mismas que usa la landing) | Todos |
+| `SUPABASE_URL`, `SUPABASE_ANON_KEY` | **No hace falta cargarlas**: son públicas y `mesa.mjs` las toma de `config.js`. Si se cargan y vienen rotas (por ejemplo, la anon copiada del chat sale tapada como `eyJhbGci•••`), se ignoran | — |
 | `AGENTES_CLAVE` | Clave de la ventanilla de los agentes | Todos |
 | `REVISOR_CLAVE` | **NO va en la nube.** Vive sólo en la Mac (llavero), donde se deja el veredicto de Codex | — |
 | `INBOX_USER`, `INBOX_PASSWORD` | Leer la Bandeja del bot. **Cargar sólo credenciales de SÓLO LECTURA** que dé el bot (las de Vercel permiten responder: esas no) | Bot |
@@ -66,7 +67,7 @@ Antes de agendar cada una, se dispara **una vez a mano** y se mira el resultado 
 - Las propuestas que piden Codex quedan con "Codex: pendiente", y una tarea programada en la Mac las completa. La Mac ya tiene Codex configurado.
   - La tarea corre de lunes a sábado a las 11:00 y 19:00.
   - Busca `revision_codex = 'pendiente'` y sigue la skill `segunda-opinion-codex`.
-  - Para eso la Mac necesita `REVISOR_CLAVE` (y `SUPABASE_URL`/`SUPABASE_ANON_KEY`), guardada en el llavero, no en el repo.
+  - Para eso la Mac necesita `REVISOR_CLAVE`, guardada en el llavero, no en el repo.
   - Con `REVISOR_CLAVE` sola, `mesa.mjs` puede leer (`leer`, `vistas`) y dejar el veredicto (`codex`), pero no proponer ni escribir en la bitácora.
 
 ## Límites conocidos (revisión de Codex, a propósito)

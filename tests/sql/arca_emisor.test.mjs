@@ -583,7 +583,10 @@ console.log('\n══ Emisor de facturas (base real + ARCA simulado) ══\n');
     check('ATRASADAS: si se corta la respuesta después de que ARCA aceptó, queda sin confirmar y la corrida se detiene', r.estado === 'detenido' && r.detenido.estado === 'pendiente_verificar' && a.st.emisiones === 1, JSON.stringify(r));
     await vencer(ctx.db);
     const r2 = await correr(ctx, a);
-    check('ATRASADAS: al reintentar se reconcilia con ARCA (no se emite otra) y queda autorizada con SU fecha de octubre', r2.estado === 'ok' && r2.emitidas === 1 && a.st.emisiones === 1 && (await comp(ctx.db, o1)).estado === 'autorizado' && String((await comp(ctx.db, o1)).fecha_cbte).includes('2026-10-31') || (await comp(ctx.db, o1)).estado === 'autorizado', JSON.stringify(r2));
+    const cr = await comp(ctx.db, o1), fechaCbte = cr.fecha_cbte instanceof Date ? cr.fecha_cbte.toISOString().slice(0, 10) : String(cr.fecha_cbte).slice(0, 10);
+    check('ATRASADAS: al reintentar se reconcilia con ARCA y devuelve emitida', r2.estado === 'ok' && r2.emitidas === 1, JSON.stringify(r2));
+    check('ATRASADAS: no se emitió otra factura (ARCA recibió un solo pedido)', a.st.emisiones === 1, String(a.st.emisiones));
+    check('ATRASADAS: queda autorizada con el CAE de ARCA y SU fecha de octubre', cr.estado === 'autorizado' && fechaCbte === '2026-10-31', JSON.stringify(cr));
   }
   { // una factura cargada a mano (control de facturas) no se emite en producción
     const ctx = await ctxA(); const a = arca(); const o = await venta(ctx, '2026-10-03T12:00:00-03:00');

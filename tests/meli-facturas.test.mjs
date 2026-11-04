@@ -123,6 +123,22 @@ await caso('Atrasadas: la tarjeta trae el mes anterior, el punto de venta 4 y mu
     State.meliFacturasAusente = true; assert.equal(M.tarjetaAtrasadas(), '');
   } finally { M.hoy = hoy; State.atrasadas = null; State.facturacionAnual = null; State.meliFacturasAusente = false; }
 });
+await caso('Atrasadas: el detalle lista cada venta con su importe y la suma de todas coincide con el total', () => {
+  const hoy = M.hoy; M.hoy = () => '2026-11-04'; State.facturacionAnual = null;
+  try {
+    const ventas = [{ orden: '2000001', fecha: '2026-10-02', centavos: 150000 }, { orden: '2000002', fecha: '2026-10-05', centavos: 250050 }, { orden: '2000003', fecha: '2026-10-31', centavos: 99950 }];
+    State.atrasadas = { modo: 'produccion', resumen: { cantidad: 3, total_centavos: 500000, por_mes: [{ mes: '2026-10', cantidad: 3, centavos: 500000 }], ventas } };
+    const h = M.tarjetaAtrasadas();
+    assert.match(h, /Ver el detalle de cada factura \(3\)/); assert.match(h, /una factura por venta/); assert.match(h, /Suma de todas/);
+    for (const v of ventas) { assert.ok(h.includes(v.orden)); assert.ok(h.includes(M._pesos(v.centavos))); }
+    assert.match(h, /02\/10\/2026/); assert.match(h, /31\/10\/2026/);
+    assert.equal(ventas.reduce((a, v) => a + v.centavos, 0), 500000);
+    assert.ok(h.includes('Suma de las 3 facturas')); assert.ok(h.includes(M._pesos(500000)));
+    State.atrasadas.resumen.cantidad = 700; assert.match(M.tarjetaAtrasadas(), /\(3 de 700\)/);
+    delete State.atrasadas.resumen.ventas; assert.doesNotMatch(M.tarjetaAtrasadas(), /Ver el detalle/);
+    State.atrasadas.resumen.ventas = [{ orden: '<b>x</b>', fecha: '<i>', centavos: 1 }]; assert.doesNotMatch(M.tarjetaAtrasadas(), /<b>x<\/b>|<i>/);
+  } finally { M.hoy = hoy; State.atrasadas = null; }
+});
 await caso('Atrasadas: los textos del servidor se muestran escapados (nada de HTML)', () => {
   State.atrasadas = { mensaje: '<img src=x onerror=alert(1)>', modo: '<b>x</b>', resumen: { cantidad: 1, total_centavos: 1, por_mes: [{ mes: '<i>', cantidad: 1, centavos: 1 }] } };
   const h = M.tarjetaAtrasadas(); State.atrasadas = null;
@@ -141,7 +157,7 @@ await caso('Atrasadas: emitir pide confirmar, escribir la cantidad (10 o más en
     await M.atrasadasEmitir({});
     const emisiones = pedidos.filter(p => p.accion === 'arca_atrasadas');
     assert.equal(emisiones.length, 3); assert.deepEqual({ ...emisiones[0] }, { accion: 'arca_atrasadas', desde: '2026-10-01', hasta: '2026-10-31', fecha: '2026-10-31', pto_venta: 4 });
-    assert.match(confirmaciones[0], /EMITIR 10 facturas/); assert.match(confirmaciones[0], /REALES/); assert.match(confirmaciones[0], /Punto de venta 4/); assert.equal(preguntas.length, 1);
+    assert.match(confirmaciones[0], /EMITIR 10 facturas/); assert.match(confirmaciones[0], /UNA POR CADA VENTA/); assert.match(confirmaciones[0], /importe de su propia venta/); assert.match(confirmaciones[0], /SUMA de las 10 facturas es/); assert.doesNotMatch(confirmaciones[0], /facturas por \$/); assert.match(confirmaciones[0], /REALES/); assert.match(confirmaciones[0], /Punto de venta 4/); assert.equal(preguntas.length, 1);
     assert.match(State.atrasadas.mensaje, /Listo: 9 facturas emitidas y 1 omitidas/); assert.equal(State.atrasadas.corriendo, false); assert.equal(State.atrasadas.resumen, null);
   } finally { State.atrasadas = null; delete ctx.fetch; delete ctx.prompt; ctx.confirm = () => true; delete ctx.document; }
 });

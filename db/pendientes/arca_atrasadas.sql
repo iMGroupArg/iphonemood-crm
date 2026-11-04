@@ -30,7 +30,7 @@ BEGIN;
 DROP FUNCTION IF EXISTS public.arca_atrasadas_resumen(DATE, DATE, TEXT);
 CREATE FUNCTION public.arca_atrasadas_resumen(p_desde DATE, p_hasta DATE, p_ambiente TEXT)
 RETURNS JSONB LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = public, pg_temp AS $$
-DECLARE v_cant INTEGER; v_total BIGINT; v_meses JSONB;
+DECLARE v_cant INTEGER; v_total BIGINT; v_meses JSONB; v_ventas JSONB;
 BEGIN
   IF public.is_authorized_user() IS NOT TRUE THEN RAISE EXCEPTION 'no autorizado' USING ERRCODE = '42501'; END IF;
   IF p_desde IS NULL OR p_hasta IS NULL OR p_desde > p_hasta OR p_hasta - p_desde > 800 THEN RAISE EXCEPTION 'RANGO_INVALIDO'; END IF;
@@ -53,7 +53,18 @@ BEGIN
              AND NOT EXISTS (SELECT 1 FROM public.meli_comprobantes c WHERE c.orden_id = o.meli_order_id AND c.ambiente = p_ambiente AND c.estado IN ('autorizado', 'reservado'))
              AND (p_ambiente <> 'produccion' OR NOT EXISTS (SELECT 1 FROM public.meli_facturas f WHERE f.orden_id = o.meli_order_id AND f.estado IN ('emitida', 'no_corresponde')))
            GROUP BY 1) m;
-  RETURN jsonb_build_object('desde', p_desde, 'hasta', p_hasta, 'ambiente', p_ambiente, 'cantidad', v_cant, 'total_centavos', v_total, 'por_mes', v_meses);
+  -- Detalle venta por venta (hasta 500), en el mismo orden en que se van a emitir: cada factura sale por el importe de SU venta.
+  SELECT COALESCE(jsonb_agg(jsonb_build_object('orden', x.meli_order_id, 'fecha', x.dia, 'centavos', x.centavos) ORDER BY x.f, x.id), '[]'::jsonb) INTO v_ventas
+    FROM (SELECT o.meli_order_id, o.id, COALESCE(o.fecha_orden, o.creado_en) AS f,
+                 (COALESCE(o.fecha_orden, o.creado_en) AT TIME ZONE 'America/Argentina/Buenos_Aires')::date AS dia, round(o.bruto * 100)::BIGINT AS centavos
+            FROM public.meli_ordenes o
+           WHERE o.estado = 'paid' AND COALESCE(o.moneda, 'ARS') = 'ARS' AND o.bruto > 0
+             AND o.revertida_en IS NULL AND o.cerrada_manual_en IS NULL AND o.revisar IS NOT TRUE
+             AND (COALESCE(o.fecha_orden, o.creado_en) AT TIME ZONE 'America/Argentina/Buenos_Aires')::date BETWEEN p_desde AND p_hasta
+             AND NOT EXISTS (SELECT 1 FROM public.meli_comprobantes c WHERE c.orden_id = o.meli_order_id AND c.ambiente = p_ambiente AND c.estado IN ('autorizado', 'reservado'))
+             AND (p_ambiente <> 'produccion' OR NOT EXISTS (SELECT 1 FROM public.meli_facturas f WHERE f.orden_id = o.meli_order_id AND f.estado IN ('emitida', 'no_corresponde')))
+           ORDER BY COALESCE(o.fecha_orden, o.creado_en), o.id LIMIT 500) x;
+  RETURN jsonb_build_object('desde', p_desde, 'hasta', p_hasta, 'ambiente', p_ambiente, 'cantidad', v_cant, 'total_centavos', v_total, 'por_mes', v_meses, 'ventas', v_ventas);
 END $$;
 
 -- Las próximas ventas a facturar, de la más vieja a la más nueva (solo el servidor, con la clave compartida).

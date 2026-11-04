@@ -61,6 +61,8 @@ const L = await orden(ctx, { cuando: '2026-10-18T12:00:00-03:00', moneda: 'USD' 
   check('Producción, octubre: cuenta solo A y B (pagadas, sin factura, en el rango)', r.cantidad === 2, JSON.stringify(r));
   check('Suma el importe en centavos (A 100.000 + B 250.000)', Number(r.total_centavos) === 35000000, JSON.stringify(r));
   check('Lo vendido a las 23:30 del 31/10 (hora argentina) cuenta como octubre; a las 00:30 del 1/11 no', r.por_mes.length === 1 && r.por_mes[0].mes === '2026-10', JSON.stringify(r.por_mes));
+  check('El detalle trae una fila por venta, de la más vieja a la más nueva (A, B)', Array.isArray(r.ventas) && r.ventas.length === 2 && r.ventas[0].orden === A && r.ventas[1].orden === B, JSON.stringify(r.ventas));
+  check('Cada fila trae su fecha (hora argentina) y su importe, y la suma de las filas es el total', r.ventas[0].fecha === '2026-10-10' && Number(r.ventas[0].centavos) === 10000000 && Number(r.ventas[1].centavos) === 25000000 && r.ventas.reduce((t, v) => t + Number(v.centavos), 0) === Number(r.total_centavos), JSON.stringify(r.ventas));
   const rn = await resumen(ctx, '2026-11-01', '2026-11-30');
   check('Noviembre: solo la venta del 1/11 a las 00:30', rn.cantidad === 1 && Number(rn.total_centavos) === 9000000, JSON.stringify(rn));
   const rt = await resumen(ctx, '2026-10-01', '2026-11-30');

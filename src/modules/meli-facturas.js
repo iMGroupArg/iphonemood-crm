@@ -192,8 +192,16 @@ const MeliFacturas = {
     if (r) {
       const margen = an && Number(an.limite_centavos) > 0 ? Number(an.limite_centavos) - Number(an.total_centavos) : null;
       const pasa = margen !== null && Number(r.total_centavos) > margen;
+      const ventas = Array.isArray(r.ventas) ? r.ventas : [];
+      const fmtDia = d => { const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(d || '')); return m ? `${m[3]}/${m[2]}/${m[1]}` : String(d || ''); };
+      const detalle = ventas.length ? `<details style="margin-top:6px"><summary style="cursor:pointer;font-size:11.5px">Ver el detalle de cada factura (${e(ventas.length)}${ventas.length < Number(r.cantidad) ? ' de ' + e(r.cantidad) : ''})</summary>
+        <div style="max-height:260px;overflow:auto;margin-top:4px;font-size:11.5px"><table style="width:100%;border-collapse:collapse">
+          <thead><tr style="text-align:left;color:var(--text-secondary)"><th style="padding:2px 6px">#</th><th style="padding:2px 6px">Fecha de la venta</th><th style="padding:2px 6px">Orden</th><th style="padding:2px 6px;text-align:right">Importe de la factura</th></tr></thead>
+          <tbody>${ventas.map((v, i) => `<tr><td style="padding:2px 6px">${i + 1}</td><td style="padding:2px 6px">${e(fmtDia(v.fecha))}</td><td style="padding:2px 6px">${e(v.orden)}</td><td style="padding:2px 6px;text-align:right"><b>${e(this._pesos(v.centavos))}</b></td></tr>`).join('')}</tbody>
+          <tfoot><tr style="border-top:1px solid var(--border)"><td colspan="3" style="padding:4px 6px"><b>Suma de las ${e(r.cantidad)} facturas</b></td><td style="padding:4px 6px;text-align:right"><b>${e(this._pesos(r.total_centavos))}</b></td></tr></tfoot>
+        </table></div></details>` : '';
       const meses = (r.por_mes || []).map(m => `${e(m.mes)}: <b>${e(this._pesos(m.centavos))}</b> (${e(m.cantidad)})`).join(' · ');
-      resumen = `<div id="atr-resumen" style="margin-top:10px"><b>${e(r.cantidad)}</b> ventas sin factura por <b>${e(this._pesos(r.total_centavos))}</b> en <b>${e(this.NOMBRE_MODO[a.modo] || a.modo)}</b>${meses ? `<div style="font-size:11.5px;color:var(--text-secondary);margin-top:2px">${meses}</div>` : ''}
+      resumen = `<div id="atr-resumen" style="margin-top:10px"><b>${e(r.cantidad)}</b> ventas sin factura (una factura por venta). Suma de todas: <b>${e(this._pesos(r.total_centavos))}</b> en <b>${e(this.NOMBRE_MODO[a.modo] || a.modo)}</b>${meses ? `<div style="font-size:11.5px;color:var(--text-secondary);margin-top:2px">${meses}</div>` : ''}${detalle}
         ${margen === null ? '<div style="font-size:11.5px;color:var(--text-secondary);margin-top:4px">No hay límite anual configurado: no puedo compararlo con tu categoría.</div>'
           : `<div style="font-size:11.5px;margin-top:4px;color:${pasa ? 'var(--red)' : 'var(--text-secondary)'}">${pasa ? '⚠ SUPERA' : 'Entra en'} el margen que te queda en el límite anual (${e(this._pesos(margen))}).</div>`}</div>`;
     }
@@ -259,7 +267,7 @@ const MeliFacturas = {
     const d = { desde: c.desde, hasta: c.hasta, fecha: c.fecha, pto_venta: Number(c.pto) };
     if (!d.fecha || d.fecha > this.hoy()) { toast('La fecha de los comprobantes no puede estar vacía ni ser futura.'); return; }
     const real = a.modo === 'produccion', n = Number(r.cantidad);
-    if (!confirm(`Vas a EMITIR ${n} facturas por ${this._pesos(r.total_centavos)} en ${this.NOMBRE_MODO[a.modo] || a.modo}.\nPunto de venta ${d.pto_venta}, con fecha ${d.fecha}.\n${real ? 'Son comprobantes REALES, con validez fiscal: no se pueden borrar, solo anular con una nota de crédito.' : 'Son comprobantes de prueba, sin valor fiscal.'}\n¿Seguís?`)) return;
+    if (!confirm(`Vas a EMITIR ${n} facturas, UNA POR CADA VENTA, cada una por el importe de su propia venta, en ${this.NOMBRE_MODO[a.modo] || a.modo}.\nLa SUMA de las ${n} facturas es ${this._pesos(r.total_centavos)}.\nPunto de venta ${d.pto_venta}, con fecha ${d.fecha}.\n${real ? 'Son comprobantes REALES, con validez fiscal: no se pueden borrar, solo anular con una nota de crédito.' : 'Son comprobantes de prueba, sin valor fiscal.'}\n¿Seguís?`)) return;
     if (real && n >= 10 && String(prompt(`Para confirmar escribí la cantidad de facturas (${n}):`) || '').trim() !== String(n)) { toast('No coincide la cantidad: no se emitió nada.'); return; }
     this._atrParar = false; a.corriendo = true; let emitidas = 0, omitidas = 0, final = '';
     if (window.MeliOrdenes && MeliOrdenes.pintar) MeliOrdenes.pintar();

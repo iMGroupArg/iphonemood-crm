@@ -640,3 +640,24 @@ select option { background: var(--bg-elevated); }
 .search-divider {
   height: 1px; background: var(--border); margin: 4px 0;
 }
+
+/* Diálogo nativo del CRM (p. ej. «Marcar emitida» de las facturas de Mercado Libre): centrado, con el ancho de la pantalla en el celular.
+   El reset global (margin: 0) le quita el centrado automático al <dialog>, por eso se lo damos acá. */
+dialog.dlg-crm {
+  margin: auto; padding: 20px; border: 1px solid var(--border); border-radius: 14px;
+  background: var(--bg-card); color: var(--text);
+  width: min(440px, calc(100vw - 32px)); max-height: calc(100vh - 32px); max-height: calc(100dvh - 32px); overflow-y: auto;
+  box-shadow: 0 20px 60px rgba(0,0,0,.25);
+}
+dialog.dlg-crm::backdrop { background: rgba(0,0,0,.45); }
+.dlg-crm form { display: flex; flex-direction: column; gap: 14px; }
+.dlg-crm h3 { font-size: 16px; font-weight: 600; }
+.dlg-crm p { font-size: 12.5px; line-height: 1.5; color: var(--text-secondary); }
+.dlg-crm label { display: flex; flex-direction: column; gap: 6px; font-size: 13px; font-weight: 500; }
+.dlg-crm input, .dlg-crm select { width: 100%; }
+.dlg-acciones { display: flex; gap: 8px; justify-content: flex-end; flex-wrap: wrap; margin-top: 4px; }
+@media (max-width: 480px) {
+  dialog.dlg-crm { padding: 16px; }
+  .dlg-acciones { flex-direction: column-reverse; }
+  .dlg-acciones .btn { width: 100%; justify-content: center; }
+}

@@ -14,9 +14,9 @@ const ENV = { ARCA_MODO: 'produccion', ARCA_CONFIRMA_PRODUCCION: 'SI', ARCA_CUIT
 const codigo = (e, c) => e instanceof ErrorArca && e.codigo === c;
 
 // rpc simulado: devuelve la lista pedida y registra los argumentos.
-const armar = ({ ordenes = ['1', '2', '3'], restantes = ordenes.length, resultados = {} } = {}) => {
+const armar = ({ ordenes = ['1', '2', '3'], restantes = ordenes.length, bloqueadas = 0, resultados = {} } = {}) => {
   const rpcs = [], emisiones = [];
-  const rpc = async (nombre, args) => { rpcs.push({ nombre, args }); return { ordenes, restantes }; };
+  const rpc = async (nombre, args) => { rpcs.push({ nombre, args }); return { ordenes, restantes, bloqueadas }; };
   const emitir = async (o) => {
     emisiones.push(o);
     const r = resultados[o.orden];
@@ -61,6 +61,8 @@ await caso('Pide a la base las ventas del rango en el ambiente del servidor y em
     assert.equal(o.env.ARCA_PTO_VTA, '4'); assert.equal(o.env.ARCA_MODO, 'produccion');
     assert.equal(o.fechaComprobante.toISOString(), '2026-10-31T15:00:00.000Z');
     assert.equal(o.ahora(), AHORA);                       // el login sigue usando la hora real, no la fecha del comprobante
+    assert.equal(o.reservarFn, 'arca_atrasada_reservar');  // la base REVALIDA la elegibilidad al reservar el número
+    assert.deepEqual({ ...o.reservarExtra }, { p_desde: '2026-10-01', p_hasta: '2026-10-31' });
   }
   assert.equal(r.estado, 'ok'); assert.equal(r.emitidas, 3); assert.equal(r.quedan, 7); assert.equal(r.ptoVenta, 4); assert.equal(r.fecha, '2026-10-31'); assert.equal(r.detenido, null);
 });
@@ -121,6 +123,27 @@ await caso('Un pedido inválido se corta ANTES de llamar a la base', async () =>
   const t = armar();
   await assert.rejects(() => correr({ rpc: t.rpc, emitir: t.emitir }, { ...PEDIDO, fecha: '2027-01-01' }), (e) => codigo(e, 'FECHA_FUTURA'));
   assert.equal(t.rpcs.length, 0);
+});
+await caso('Si hay ventas BLOQUEADAS (reservadas por otro proceso o rechazadas hace poco) no emite nada y se detiene explicándolo', async () => {
+  const t = armar({ ordenes: ['4', '5'], restantes: 2, bloqueadas: 1 });
+  const r = await correr({ rpc: t.rpc, emitir: t.emitir });
+  assert.equal(r.estado, 'detenido'); assert.equal(t.emisiones.length, 0); assert.equal(r.emitidas, 0); assert.equal(r.quedan, 3);
+  assert.equal(r.detenido.estado, 'bloqueadas'); assert.match(r.detenido.mensaje, /1 venta\(s\).*30 minutos/);
+});
+await caso('Con cero pendientes pero bloqueadas, NO informa «terminó»: queda detenido con la cuenta de las que faltan', async () => {
+  const t = armar({ ordenes: [], restantes: 0, bloqueadas: 2 });
+  const r = await correr({ rpc: t.rpc, emitir: t.emitir });
+  assert.equal(r.estado, 'detenido'); assert.equal(r.quedan, 2);
+});
+await caso('Una venta que dejó de ser elegible al reservar se cuenta como omitida (la base la rechazó con ATRASADA_NO_ELEGIBLE)', async () => {
+  const t = armar({ ordenes: ['1'], resultados: { 1: { estado: 'omitida', mensaje: 'La venta ya no es elegible para facturar.' } } });
+  const r = await correr({ rpc: t.rpc, emitir: t.emitir });
+  assert.equal(r.omitidas, 1); assert.equal(r.emitidas, 0); assert.equal(r.estado, 'ok');
+});
+await caso('Una venta que dejó de estar pagada (ORDEN_NO_FACTURABLE) se omite y se sigue con las demás', async () => {
+  const t = armar({ ordenes: ['1', '2'], restantes: 2, resultados: { 1: new Error('RPC: ORDEN_NO_FACTURABLE') } });
+  const r = await correr({ rpc: t.rpc, emitir: t.emitir });
+  assert.equal(r.estado, 'ok'); assert.equal(r.omitidas, 1); assert.equal(r.emitidas, 1); assert.equal(r.quedan, 0);
 });
 await caso('Con el ambiente de pruebas pide y emite en homologación', async () => {
   const t = armar({ ordenes: ['5'] });

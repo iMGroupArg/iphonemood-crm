@@ -135,7 +135,7 @@ await caso('Atrasadas: emitir pide confirmar, escribir la cantidad (10 o más en
   ctx.document = { getElementById: id => el[id] || null };
   ctx.fetch = async (url, o) => { pedidos.push(JSON.parse(o.body)); return { json: async () => (o.body.includes('arca_atrasadas') ? respuestas.shift() : {}) }; };
   const confirmaciones = [], preguntas = []; ctx.confirm = m => { confirmaciones.push(m); return true; }; ctx.prompt = m => { preguntas.push(m); return '10'; };
-  State.atrasadas = { desde: '2026-10-01', hasta: '2026-10-31', fecha: '2026-10-31', pto: 4, modo: 'produccion', resumen: { cantidad: 10, total_centavos: 100000 } };
+  State.atrasadas = { desde: '2026-10-01', hasta: '2026-10-31', fecha: '2026-10-31', pto: 4, consulta: { desde: '2026-10-01', hasta: '2026-10-31', fecha: '2026-10-31', pto: 4 }, modo: 'produccion', resumen: { cantidad: 10, total_centavos: 100000 } };
   lectura = []; mensajes.length = 0;
   try {
     await M.atrasadasEmitir({});
@@ -148,12 +148,12 @@ await caso('Atrasadas: emitir pide confirmar, escribir la cantidad (10 o más en
 await caso('Atrasadas: no emite si cambiaron los datos, si no confirman o si la cantidad escrita no coincide', async () => {
   let llamadasWorker = 0; const el = { 'atr-desde': { value: '2026-10-01' }, 'atr-hasta': { value: '2026-10-31' }, 'atr-fecha': { value: '2026-10-31' }, 'atr-pto': { value: '4' } };
   ctx.document = { getElementById: id => el[id] || null }; ctx.fetch = async () => { llamadasWorker++; return { json: async () => ({}) }; };
-  const base = () => ({ desde: '2026-10-01', hasta: '2026-10-31', fecha: '2026-10-31', pto: 4, modo: 'produccion', resumen: { cantidad: 12, total_centavos: 1 } });
+  const base = () => ({ desde: '2026-10-01', hasta: '2026-10-31', fecha: '2026-10-31', pto: 4, consulta: { desde: '2026-10-01', hasta: '2026-10-31', fecha: '2026-10-31', pto: 4 }, modo: 'produccion', resumen: { cantidad: 12, total_centavos: 1 } });
   try {
     State.atrasadas = base(); el['atr-pto'].value = '5'; await M.atrasadasEmitir({}); assert.equal(llamadasWorker, 0); assert.match(mensajes.at(-1), /Cambiaste los datos/); el['atr-pto'].value = '4';
     State.atrasadas = base(); ctx.confirm = () => false; await M.atrasadasEmitir({}); assert.equal(llamadasWorker, 0);
     State.atrasadas = base(); ctx.confirm = () => true; ctx.prompt = () => '11'; await M.atrasadasEmitir({}); assert.equal(llamadasWorker, 0); assert.match(mensajes.at(-1), /No coincide la cantidad/);
-    State.atrasadas = base(); State.atrasadas.fecha = '2999-01-01'; el['atr-fecha'].value = '2999-01-01'; await M.atrasadasEmitir({}); assert.equal(llamadasWorker, 0); assert.match(mensajes.at(-1), /fecha/i);
+    State.atrasadas = base(); State.atrasadas.fecha = '2999-01-01'; State.atrasadas.consulta.fecha = '2999-01-01'; el['atr-fecha'].value = '2999-01-01'; await M.atrasadasEmitir({}); assert.equal(llamadasWorker, 0); assert.match(mensajes.at(-1), /fecha/i);
   } finally { State.atrasadas = null; delete ctx.fetch; delete ctx.prompt; ctx.confirm = () => true; delete ctx.document; }
 });
 await caso('Atrasadas: se detiene y avisa en la orden problemática; ante «detenido», error o corte de red no sigue', async () => {
@@ -161,7 +161,7 @@ await caso('Atrasadas: se detiene y avisa en la orden problemática; ante «dete
   ctx.document = { getElementById: id => el[id] || null };
   const correr = async (respuestas, modo = 'homologacion') => {
     let k = 0; ctx.fetch = async () => ({ json: async () => { const r = respuestas[Math.min(k++, respuestas.length - 1)]; if (r === 'RED') throw new Error('red'); return r; } });
-    State.atrasadas = { desde: '2026-10-01', hasta: '2026-10-31', fecha: '2026-10-31', pto: 4, modo, resumen: { cantidad: 3, total_centavos: 1 } };
+    State.atrasadas = { desde: '2026-10-01', hasta: '2026-10-31', fecha: '2026-10-31', pto: 4, consulta: { desde: '2026-10-01', hasta: '2026-10-31', fecha: '2026-10-31', pto: 4 }, modo, resumen: { cantidad: 3, total_centavos: 1 } };
     await M.atrasadasEmitir({}); const msg = State.atrasadas.mensaje; State.atrasadas = null; return { msg, k };
   };
   try {
@@ -173,11 +173,40 @@ await caso('Atrasadas: se detiene y avisa en la orden problemática; ante «dete
     r = await correr([{ estado: 'simulacion' }]); assert.match(r.msg, /simulación/);
   } finally { State.atrasadas = null; delete ctx.fetch; delete ctx.document; }
 });
+await caso('Atrasadas: si cambiás un campo después de consultar, el resumen se oculta y NO se puede emitir lo viejo con datos nuevos', async () => {
+  const el = { 'atr-desde': { value: '2026-10-01' }, 'atr-hasta': { value: '2026-12-31' }, 'atr-fecha': { value: '2026-10-31' }, 'atr-pto': { value: '4' }, 'atr-emitir': { style: {} }, 'atr-resumen': { style: {} } };
+  ctx.document = { getElementById: id => el[id] || null }; let worker = 0; ctx.fetch = async () => { worker++; return { json: async () => ({}) }; };
+  State.atrasadas = { desde: '2026-10-01', hasta: '2026-10-31', fecha: '2026-10-31', pto: 4, modo: 'produccion', consulta: { desde: '2026-10-01', hasta: '2026-10-31', fecha: '2026-10-31', pto: 4 }, resumen: { cantidad: 1, total_centavos: 100 } };
+  try {
+    M.atrasadasCampo();                                      // el rango «hasta» pasó a fin de año: ya no es lo que se consultó
+    assert.equal(State.atrasadas.resumen, null); assert.equal(State.atrasadas.consulta, null); assert.equal(el['atr-emitir'].style.display, 'none'); assert.equal(el['atr-resumen'].style.display, 'none');
+    await M.atrasadasEmitir({}); assert.equal(worker, 0);
+    // Si todo vuelve a coincidir con lo consultado, no se oculta nada.
+    State.atrasadas = { consulta: { desde: '2026-10-01', hasta: '2026-12-31', fecha: '2026-10-31', pto: 4 }, resumen: { cantidad: 1 } }; el['atr-emitir'].style = {}; el['atr-resumen'].style = {};
+    M.atrasadasCampo(); assert.ok(State.atrasadas.resumen); assert.equal(el['atr-emitir'].style.display, undefined);
+  } finally { State.atrasadas = null; delete ctx.fetch; delete ctx.document; }
+});
+await caso('Atrasadas: se emite la copia FIJA de lo consultado, no lo que haya en los campos', async () => {
+  const el = { 'atr-desde': { value: '2026-10-01' }, 'atr-hasta': { value: '2026-10-31' }, 'atr-fecha': { value: '2026-10-31' }, 'atr-pto': { value: '4' } };
+  ctx.document = { getElementById: id => el[id] || null }; const pedidos = [];
+  ctx.fetch = async (u, o) => { pedidos.push(JSON.parse(o.body)); return { json: async () => ({ estado: 'ok', emitidas: 1, omitidas: 0, quedan: 0 }) }; };
+  State.atrasadas = { desde: 'X', hasta: 'Y', fecha: 'Z', pto: 99, modo: 'homologacion', consulta: { desde: '2026-10-01', hasta: '2026-10-31', fecha: '2026-10-31', pto: 4 }, resumen: { cantidad: 1, total_centavos: 1 } };
+  try { await M.atrasadasEmitir({}); assert.deepEqual({ ...pedidos[0] }, { accion: 'arca_atrasadas', desde: '2026-10-01', hasta: '2026-10-31', fecha: '2026-10-31', pto_venta: 4 }); }
+  finally { State.atrasadas = null; delete ctx.fetch; delete ctx.document; }
+});
+await caso('Atrasadas: una corrida «detenido» por ventas bloqueadas se muestra como detenida, no como «Listo»', async () => {
+  const el = { 'atr-desde': { value: '2026-10-01' }, 'atr-hasta': { value: '2026-10-31' }, 'atr-fecha': { value: '2026-10-31' }, 'atr-pto': { value: '4' } };
+  ctx.document = { getElementById: id => el[id] || null };
+  ctx.fetch = async () => ({ json: async () => ({ estado: 'detenido', emitidas: 0, omitidas: 0, quedan: 3, detenido: { orden: null, estado: 'bloqueadas', mensaje: '2 venta(s) del rango tienen una factura rechazada hace poco.' } }) });
+  State.atrasadas = { modo: 'homologacion', consulta: { desde: '2026-10-01', hasta: '2026-10-31', fecha: '2026-10-31', pto: 4 }, resumen: { cantidad: 3, total_centavos: 1 } };
+  try { await M.atrasadasEmitir({}); assert.match(State.atrasadas.mensaje, /SE DETUVO/); assert.match(State.atrasadas.mensaje, /rechazada hace poco/); assert.doesNotMatch(State.atrasadas.mensaje, /Listo/); }
+  finally { State.atrasadas = null; delete ctx.fetch; delete ctx.document; }
+});
 await caso('Atrasadas: «Detener» corta antes de la próxima tanda', async () => {
   const el = { 'atr-desde': { value: '2026-10-01' }, 'atr-hasta': { value: '2026-10-31' }, 'atr-fecha': { value: '2026-10-31' }, 'atr-pto': { value: '4' } };
   ctx.document = { getElementById: id => el[id] || null }; let tandas = 0;
   ctx.fetch = async () => ({ json: async () => { tandas++; M._atrParar = true; return { estado: 'ok', emitidas: 2, omitidas: 0, quedan: 5 }; } });
-  State.atrasadas = { desde: '2026-10-01', hasta: '2026-10-31', fecha: '2026-10-31', pto: 4, modo: 'homologacion', resumen: { cantidad: 7, total_centavos: 1 } };
+  State.atrasadas = { desde: '2026-10-01', hasta: '2026-10-31', fecha: '2026-10-31', pto: 4, consulta: { desde: '2026-10-01', hasta: '2026-10-31', fecha: '2026-10-31', pto: 4 }, modo: 'homologacion', resumen: { cantidad: 7, total_centavos: 1 } };
   try { await M.atrasadasEmitir({}); assert.equal(tandas, 1); assert.match(State.atrasadas.mensaje, /Detenido por vos\. Emitidas 2/); }
   finally { State.atrasadas = null; delete ctx.fetch; delete ctx.document; M._atrParar = false; }
 });

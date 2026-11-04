@@ -76,16 +76,43 @@ const L = await orden(ctx, { cuando: '2026-10-18T12:00:00-03:00', moneda: 'USD' 
   const un = await siguientes(ctx, '2026-10-01', '2026-10-31', 1);
   check('Respeta el límite y cuenta cuántas faltan', un.ordenes.length === 1 && un.restantes === s.restantes, JSON.stringify(un));
   check('La reservada por otro proceso hace poco (G) no se vuelve a ofrecer', !s.ordenes.includes(G));
+  check('...pero se cuenta como BLOQUEADA (no desaparece del conteo)', s.bloqueadas === 1, JSON.stringify(s));
   await q(db, `UPDATE public.meli_comprobantes SET trabajo_hasta = now() - interval '20 minutes' WHERE orden_id=$1`, [G]);
   const s2 = await siguientes(ctx, '2026-10-01', '2026-10-31');
   check('Una reserva abandonada (más de 8 minutos) vuelve a ofrecerse para resolverla', s2.ordenes.includes(G), JSON.stringify(s2));
   const Rr = await orden(ctx, { cuando: '2026-10-20T12:00:00-03:00' }); await comprobante(ctx, Rr, { estado: 'rechazado' });
   check('Una rechazada hace menos de 30 minutos no se ofrece (no se insiste en bucle)', !(await siguientes(ctx, '2026-10-01', '2026-10-31')).ordenes.includes(Rr));
+  const sb = await siguientes(ctx, '2026-10-01', '2026-10-31');
+  check('La rechazada reciente suma a las bloqueadas (G ya está liberada): 1', sb.bloqueadas === 1, JSON.stringify(sb));
   const Rv = await orden(ctx, { cuando: '2026-10-21T12:00:00-03:00' }); await comprobante(ctx, Rv, { estado: 'rechazado', actualizado: new Date(Date.now() - 2 * 3600e3).toISOString() });
   check('Una rechazada hace más de media hora se reintenta', (await siguientes(ctx, '2026-10-01', '2026-10-31')).ordenes.includes(Rv));
   await comprobante(ctx, A);
   check('Una vez autorizada la factura de A, deja de aparecer', !(await siguientes(ctx, '2026-10-01', '2026-10-31')).ordenes.includes(A));
   check('Una factura de producción no cuenta en pruebas: A sigue disponible en homologación', (await siguientes(ctx, '2026-10-01', '2026-10-31', 10, 'homologacion')).ordenes.includes(A));
+}
+{ // arca_atrasada_reservar: revalida la elegibilidad bajo bloqueo y después reserva con la misma función del botón
+  const reservar = (ord, d = '2026-10-01', h = '2026-10-31', sec = SECRETO, importe = 10000000, pto = 4, ult = 0) => q(db,
+    `SELECT public.arca_atrasada_reservar($1,$2,'homologacion',$3,$4,$5,99,'0',5,$6::date,$7::date) r`, [sec, ord, pto, ult, importe, d, h]).then((x) => x[0].r);
+  const ok1 = await orden(ctx, { cuando: '2026-10-22T12:00:00-03:00', bruto: 100000 });
+  const r = await reservar(ok1);
+  check('Reserva una venta elegible (mismo resultado que el botón: número y intento)', Number(r.numero) === 1 && !!r.intento, JSON.stringify(r));
+  check('La reserva queda guardada en el punto de venta pedido', (await q(db, `SELECT pto_venta, estado FROM public.meli_comprobantes WHERE orden_id=$1 AND ambiente='homologacion'`, [ok1]))[0].pto_venta === 4);
+  const casos = [
+    ['en revisión', `UPDATE public.meli_ordenes SET revisar=true WHERE meli_order_id=$1`], ['revertida', `UPDATE public.meli_ordenes SET revertida_en=now() WHERE meli_order_id=$1`],
+    ['cerrada a mano', `UPDATE public.meli_ordenes SET cerrada_manual_en=now(), cerrada_manual_motivo='descartada' WHERE meli_order_id=$1`], ['cancelada', `UPDATE public.meli_ordenes SET estado='cancelled' WHERE meli_order_id=$1`],
+    ['fuera del rango', `UPDATE public.meli_ordenes SET fecha_orden='2026-11-15T12:00:00-03:00' WHERE meli_order_id=$1`]];
+  for (const [mot, sql] of casos) {
+    const x = await orden(ctx, { cuando: '2026-10-23T12:00:00-03:00' }); await q(db, sql, [x]);
+    const e = await falla(() => reservar(x));
+    check(`No reserva una venta ${mot}`, /ATRASADA_NO_ELEGIBLE|ORDEN_NO_FACTURABLE/.test(e || '') && (await q(db, `SELECT 1 FROM public.meli_comprobantes WHERE orden_id=$1`, [x])).length === 0, String(e));
+  }
+  check('Una orden inexistente no se reserva', /ATRASADA_NO_ELEGIBLE/.test((await falla(() => reservar('9999999999')) || '')));
+  check('Rango inválido', /RANGO_INVALIDO/.test((await falla(() => reservar(ok1, '2026-10-31', '2026-10-01')) || '')));
+  check('Con una clave equivocada no responde', /no autorizado/.test((await falla(() => reservar(ok1, '2026-10-01', '2026-10-31', 'mala')) || '')));
+  check('El importe tiene que coincidir con la orden (lo valida la reserva del botón)', /IMPORTE_NO_COINCIDE/.test((await falla(async () => reservar(await orden(ctx, { cuando: '2026-10-24T12:00:00-03:00', bruto: 5000 }), '2026-10-01', '2026-10-31', SECRETO, 1)) || '')));
+  const viaAnon = await comoRol(db, 'anon', null, () => falla(() => reservar('9999999999')));
+  check('El servidor (anon + clave) puede llamarla; un usuario sin clave no', /ATRASADA_NO_ELEGIBLE/.test(viaAnon || '') && /no autorizado/.test((await comoRol(db, 'authenticated', 'franco@x.com', () => falla(() => reservar(ok1, '2026-10-01', '2026-10-31', 'otra')))) || ''));
+  check('service_role no la ejecuta', /permission denied/i.test(String(await falla(() => comoRol(db, 'service_role', null, () => reservar(ok1))))));
 }
 {
   for (const [d, h, cod] of [['2026-10-31', '2026-10-01', 'RANGO_INVALIDO'], ['2020-01-01', '2026-12-31', 'RANGO_INVALIDO'], [null, '2026-10-31', 'RANGO_INVALIDO']]) {

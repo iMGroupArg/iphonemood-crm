@@ -155,12 +155,12 @@ const topeDePedido = (limite) => () => {
 const TIEMPO_MINIMO_NUEVA_EMISION_MS = 14000;
 const TIEMPO_MINIMO_ANTES_DE_RESERVAR_MS = 12000;   // se vuelve a comprobar justo antes de reservar el número (la preparación pudo gastar tiempo)
 const TIEMPO_MINIMO_ANTES_DE_EMITIR_MS = 5000;
-const esNoElegible = (e) => !!(e && /AUTO_NO_ELEGIBLE/.test(String(e.message)));
+const esNoElegible = (e) => !!(e && /(AUTO|ATRASADA)_NO_ELEGIBLE/.test(String(e.message)));
 
 const textoError = (e) => (e && e.codigo ? `${e.codigo}: ${String(e.message).slice(0, 200)}` : 'error inesperado');
 const mismoNumero = (a, b) => Number(String(a).trim()) === Number(String(b).trim());
 
-async function emitirFacturaOrden({ orden, env = process.env, rpc, meliGet, fetchImpl = A.fetchArca, ahora = () => new Date(), pres, cache, esperaTicketMs, reservarFn = 'arca_comprobante_reservar', limite = Infinity, fechaComprobante = null } = {}) {
+async function emitirFacturaOrden({ orden, env = process.env, rpc, meliGet, fetchImpl = A.fetchArca, ahora = () => new Date(), pres, cache, esperaTicketMs, reservarFn = 'arca_comprobante_reservar', limite = Infinity, fechaComprobante = null, reservarExtra = {} } = {}) {
   const cfg = A.configuracion(env);
   if (!/^\d{1,20}$/.test(String(orden || ''))) throw new A.ErrorArca('ORDEN_INVALIDA', 'Número de orden inválido.');
   if (cfg.modo === 'simulacion') return { estado: 'simulacion', mensaje: 'ARCA está en modo simulación: no se emitió ni se guardó nada.' };
@@ -218,11 +218,11 @@ async function emitirFacturaOrden({ orden, env = process.env, rpc, meliGet, fetc
   try {
     res = primera(await rpc(reservarFn, {
       p_orden: ordenS, p_ambiente: cfg.modo, p_pto_venta: cfg.ptoVta, p_ultimo_arca: ultimo, p_importe_centavos: comprobante.importeCentavos,
-      p_doc_tipo: comprobante.docTipo, p_doc_nro: comprobante.docNro, p_cond_iva: comprobante.condicionIva,
+      p_doc_tipo: comprobante.docTipo, p_doc_nro: comprobante.docNro, p_cond_iva: comprobante.condicionIva, ...reservarExtra,
     }, pres));
   } catch (e) {
     if (e && /COMPROBANTE_YA_EXISTE/.test(String(e.message))) return { estado: 'en_curso', mensaje: 'Otro proceso está emitiendo esta factura.' };
-    if (esNoElegible(e)) return { estado: 'omitida', mensaje: 'La venta ya no es elegible para la facturación automática.' };
+    if (esNoElegible(e)) return { estado: 'omitida', mensaje: 'La venta ya no es elegible para facturar.' };
     throw e;
   }
 

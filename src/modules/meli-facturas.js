@@ -193,7 +193,7 @@ const MeliFacturas = {
       const margen = an && Number(an.limite_centavos) > 0 ? Number(an.limite_centavos) - Number(an.total_centavos) : null;
       const pasa = margen !== null && Number(r.total_centavos) > margen;
       const meses = (r.por_mes || []).map(m => `${e(m.mes)}: <b>${e(this._pesos(m.centavos))}</b> (${e(m.cantidad)})`).join(' · ');
-      resumen = `<div style="margin-top:10px"><b>${e(r.cantidad)}</b> ventas sin factura por <b>${e(this._pesos(r.total_centavos))}</b> en <b>${e(this.NOMBRE_MODO[a.modo] || a.modo)}</b>${meses ? `<div style="font-size:11.5px;color:var(--text-secondary);margin-top:2px">${meses}</div>` : ''}
+      resumen = `<div id="atr-resumen" style="margin-top:10px"><b>${e(r.cantidad)}</b> ventas sin factura por <b>${e(this._pesos(r.total_centavos))}</b> en <b>${e(this.NOMBRE_MODO[a.modo] || a.modo)}</b>${meses ? `<div style="font-size:11.5px;color:var(--text-secondary);margin-top:2px">${meses}</div>` : ''}
         ${margen === null ? '<div style="font-size:11.5px;color:var(--text-secondary);margin-top:4px">No hay límite anual configurado: no puedo compararlo con tu categoría.</div>'
           : `<div style="font-size:11.5px;margin-top:4px;color:${pasa ? 'var(--red)' : 'var(--text-secondary)'}">${pasa ? '⚠ SUPERA' : 'Entra en'} el margen que te queda en el límite anual (${e(this._pesos(margen))}).</div>`}</div>`;
     }
@@ -209,7 +209,7 @@ const MeliFacturas = {
       </div>
       <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px">
         <button class="btn btn-sm" onclick="MeliFacturas.atrasadasVer(this)"${a.corriendo ? ' disabled' : ''}>Ver cuántas son</button>
-        ${puedeEmitir ? `<button class="btn btn-sm btn-primary" onclick="MeliFacturas.atrasadasEmitir(this)">Emitir ${e(r.cantidad)} facturas</button>` : ''}
+        ${puedeEmitir ? `<button id="atr-emitir" class="btn btn-sm btn-primary" onclick="MeliFacturas.atrasadasEmitir(this)">Emitir ${e(r.cantidad)} facturas</button>` : ''}
         ${a.corriendo ? '<button class="btn btn-sm" onclick="MeliFacturas._atrParar = true">Detener</button>' : ''}
       </div>
       ${resumen}
@@ -219,6 +219,12 @@ const MeliFacturas = {
   atrasadasCampo() {
     const a = this._atr(), g = id => document.getElementById(id) && document.getElementById(id).value;
     a.desde = g('atr-desde'); a.hasta = g('atr-hasta'); a.fecha = g('atr-fecha'); a.pto = g('atr-pto');
+    // Si lo que está en pantalla ya no es lo que se consultó, el resumen deja de valer: se oculta y hay que volver a «Ver cuántas son».
+    const c = a.consulta;
+    if (c && (a.desde !== c.desde || a.hasta !== c.hasta || a.fecha !== c.fecha || Number(a.pto) !== Number(c.pto))) {
+      a.resumen = null; a.consulta = null;
+      for (const id of ['atr-emitir', 'atr-resumen']) { const el = document.getElementById(id); if (el && el.style) el.style.display = 'none'; }
+    }
   },
   _atrDatos() {
     const g = id => (document.getElementById(id) || {}).value;
@@ -241,14 +247,16 @@ const MeliFacturas = {
       if (!modo) { toast('La facturación con ARCA está en simulación o no responde.'); return; }
       const { data, error } = await supa.rpc('arca_atrasadas_resumen', { p_desde: d.desde, p_hasta: d.hasta, p_ambiente: modo });
       if (error || !data) { toast(error && /RANGO_INVALIDO/.test(error.message || '') ? 'El rango de fechas no es válido.' : 'No se pudo calcular. ¿Falta correr el script 25?'); return; }
-      Object.assign(a, { desde: d.desde, hasta: d.hasta, fecha: d.fecha, pto: d.pto_venta, modo, resumen: data, mensaje: '', abierta: true });
+      Object.assign(a, { desde: d.desde, hasta: d.hasta, fecha: d.fecha, pto: d.pto_venta, modo, resumen: data, consulta: { desde: d.desde, hasta: d.hasta, fecha: d.fecha, pto: d.pto_venta }, mensaje: '', abierta: true });
       if (window.MeliOrdenes && MeliOrdenes.pintar) MeliOrdenes.pintar();
     } catch { toast('No se pudo calcular. Probá de nuevo.'); } finally { if (btn) btn.disabled = false; }
   },
   async atrasadasEmitir(btn) {
-    const a = this._atr(), r = a.resumen, d = this._atrDatos();
-    if (!r || !(Number(r.cantidad) > 0) || a.corriendo) return;
-    if (d.desde !== a.desde || d.hasta !== a.hasta || d.fecha !== a.fecha || d.pto_venta !== Number(a.pto)) { toast('Cambiaste los datos: tocá «Ver cuántas son» otra vez antes de emitir.'); return; }
+    const a = this._atr(), r = a.resumen, c = a.consulta, ui = this._atrDatos();
+    if (!r || !c || !(Number(r.cantidad) > 0) || a.corriendo) return;
+    // Se emite EXACTAMENTE lo que se consultó (copia fija), y solo si lo que hay en pantalla coincide con eso.
+    if (ui.desde !== c.desde || ui.hasta !== c.hasta || ui.fecha !== c.fecha || ui.pto_venta !== Number(c.pto)) { toast('Cambiaste los datos: tocá «Ver cuántas son» otra vez antes de emitir.'); return; }
+    const d = { desde: c.desde, hasta: c.hasta, fecha: c.fecha, pto_venta: Number(c.pto) };
     if (!d.fecha || d.fecha > this.hoy()) { toast('La fecha de los comprobantes no puede estar vacía ni ser futura.'); return; }
     const real = a.modo === 'produccion', n = Number(r.cantidad);
     if (!confirm(`Vas a EMITIR ${n} facturas por ${this._pesos(r.total_centavos)} en ${this.NOMBRE_MODO[a.modo] || a.modo}.\nPunto de venta ${d.pto_venta}, con fecha ${d.fecha}.\n${real ? 'Son comprobantes REALES, con validez fiscal: no se pueden borrar, solo anular con una nota de crédito.' : 'Son comprobantes de prueba, sin valor fiscal.'}\n¿Seguís?`)) return;
@@ -269,7 +277,7 @@ const MeliFacturas = {
         if (!(Number(j.emitidas) + Number(j.omitidas) > 0)) { final = `No avanzó esta vez (poco tiempo del servidor). Emitidas ${emitidas}. Tocá «Ver cuántas son» y seguí.`; break; }
       }
     } finally {
-      a.corriendo = false; a.mensaje = final || a.mensaje; a.resumen = null;
+      a.corriendo = false; a.mensaje = final || a.mensaje; a.resumen = null; a.consulta = null;
       try { await this.cargar(supa); } catch { /* se actualiza al recargar */ }
       if (window.MeliOrdenes && MeliOrdenes.pintar) MeliOrdenes.pintar();
       toast(a.mensaje || 'Terminó.');

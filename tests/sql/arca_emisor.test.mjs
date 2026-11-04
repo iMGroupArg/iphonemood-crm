@@ -13,6 +13,7 @@ const require = createRequire(import.meta.url);
 const { emitirFacturaOrden, emitirNotaCreditoOrden, leerDatosFacturacion } = require('../../api/_facturacion.js');
 const { diagnosticoArca } = require('../../api/_arca_diagnostico.js');
 const { correrAutomatizacion } = require('../../api/_facturacion_auto.js');
+const { correrAtrasadas } = require('../../api/_facturacion_atrasadas.js');
 
 let ok = 0, fail = 0;
 const check = (n, cond, det = '') => { cond ? ok++ : fail++; console.log(`${cond ? '  ok  ' : ' FALLA'} │ ${n}${cond ? '' : '  → ' + det}`); };
@@ -25,8 +26,8 @@ if (g.status !== 0) throw new Error('falta openssl');
 const ENV = { ARCA_MODO: 'homologacion', ARCA_CUIT: '20111111112', ARCA_PTO_VTA: '1', ARCA_CERT: fs.readFileSync(path.join(tmp, 'c.pem'), 'utf8'), ARCA_KEY: fs.readFileSync(path.join(tmp, 'k.pem'), 'utf8') };
 
 const PREPARAR = `DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname='service_role') THEN CREATE ROLE service_role NOLOGIN BYPASSRLS; END IF; END $$;`;
-async function entorno() {
-  const ctx = await baseNueva({ conVentas: false, sin7: true });
+async function entorno({ completa = false } = {}) {
+  const ctx = completa ? await baseNueva() : await baseNueva({ conVentas: false, sin7: true });
   await ctx.db.exec(PREPARAR); await ctx.db.exec(SQL('meli_facturas.sql')); await ctx.db.exec(SQL('arca_comprobantes.sql'));
   await ctx.db.exec(SQL('arca_control_anual.sql')); await ctx.db.exec(SQL('arca_notas_credito.sql')); await ctx.db.exec(SQL('arca_automatico.sql'));
   // rpc como la de api/_meli.js: agrega el secreto y devuelve lo mismo que PostgREST (jsonb pelado, tabla como arreglo).
@@ -529,6 +530,72 @@ console.log('\n══ Emisor de facturas (base real + ARCA simulado) ══\n');
     const ctx = await entorno(); const a = arca(); await encender(ctx, true, false); await nueva(ctx);
     const r = await auto(ctx, a, { restanteMs: () => 1000 });
     check('AUTO: si no queda tiempo suficiente no empieza (no compite con el drenaje de avisos)', r.omitido === 'sin_tiempo' && a.st.emisiones === 0, JSON.stringify(r));
+  }
+}
+
+
+{ // ── FACTURAS ATRASADAS: de punta a punta con la base real (script 25) y ARCA simulado ──
+  const ctxA = async () => { const c = await entorno({ completa: true }); await c.db.exec(SQL('meli_cerrar_manual.sql')); await c.db.exec(SQL('arca_atrasadas.sql')); return c; };
+  const venta = async (ctx, cuando, bruto = 100000) => { const o = await ordenId(ctx, bruto); await ctx.db.query(`UPDATE public.meli_ordenes SET fecha_orden=$2::timestamptz WHERE meli_order_id=$1`, [o, cuando]); return o; };
+  const PEDIDO = { desde: '2026-10-01', hasta: '2026-10-31', fecha: '2026-10-31', pto_venta: 4 };
+  const ahoraNov = () => new Date('2026-11-04T10:00:00-03:00');
+  const correr = (ctx, a, extra = {}, pedido = PEDIDO) => correrAtrasadas({ pedido, env: ENV, rpc: ctx.rpc, meliGet: meli(), fetchImpl: a.f, ahora: ahoraNov, limite: Date.now() + 120000, ...extra });
+  { // camino feliz
+    const ctx = await ctxA(); const a = arca();
+    const o1 = await venta(ctx, '2026-10-03T12:00:00-03:00'), o2 = await venta(ctx, '2026-10-20T12:00:00-03:00', 250050.5), nov = await venta(ctx, '2026-11-02T12:00:00-03:00');
+    const r = await correr(ctx, a);
+    check('ATRASADAS: emite las dos ventas de octubre y deja la de noviembre', r.estado === 'ok' && r.emitidas === 2 && r.quedan === 0 && !(await comp(ctx.db, nov)), JSON.stringify(r));
+    const c1 = await comp(ctx.db, o1), c2 = await comp(ctx.db, o2);
+    check('ATRASADAS: salen en el punto de venta elegido (4), de la más vieja a la más nueva y con sus importes', c1.pto_venta === 4 && c2.pto_venta === 4 && c1.numero === 1 && c2.numero === 2 && Number(c2.importe_centavos) === 25005050, JSON.stringify([c1, c2]));
+    check('ATRASADAS: la fecha del comprobante es la elegida (31/10) y no la de hoy', [...a.st.comprobantes.values()].every((x) => x.fecha === '20261031'), JSON.stringify([...a.st.comprobantes.values()].map((x) => x.fecha)));
+    check('ATRASADAS: ARCA recibió el punto de venta 4 y la fecha 20261031 en cada pedido', a.st.emisiones === 2);
+    const r2 = await correr(ctx, a);
+    check('ATRASADAS: volver a correrla no duplica ni emite nada más', r2.emitidas === 0 && r2.quedan === 0 && a.st.emisiones === 2, JSON.stringify(r2));
+  }
+  { // revalidación al reservar: la venta pasa a «en revisión» DESPUÉS de listarse
+    const ctx = await ctxA(); const a = arca();
+    const o1 = await venta(ctx, '2026-10-03T12:00:00-03:00'), o2 = await venta(ctx, '2026-10-04T12:00:00-03:00');
+    const rpcEspia = async (nombre, args) => {
+      if (nombre === 'arca_atrasadas_siguientes') { const x = await ctx.rpc(nombre, args); await ctx.db.query(`UPDATE public.meli_ordenes SET revisar=true WHERE meli_order_id=$1`, [o2]); return x; }
+      return ctx.rpc(nombre, args);
+    };
+    const r = await correr(ctx, a, { rpc: rpcEspia });
+    check('ATRASADAS: una venta que pasó a «en revisión» después de listarse NO se factura (la base la revalida) y se cuenta como omitida', r.emitidas === 1 && r.omitidas === 1 && !(await comp(ctx.db, o2)) && !!(await comp(ctx.db, o1)), JSON.stringify(r));
+    for (const [mot, sql] of [['revertida', `UPDATE public.meli_ordenes SET revertida_en=now() WHERE meli_order_id=$1`], ['cerrada a mano', `UPDATE public.meli_ordenes SET cerrada_manual_en=now(), cerrada_manual_motivo='descartada' WHERE meli_order_id=$1`], ['cancelada', `UPDATE public.meli_ordenes SET estado='cancelled' WHERE meli_order_id=$1`], ['fuera de rango', `UPDATE public.meli_ordenes SET fecha_orden='2026-09-15T12:00:00-03:00' WHERE meli_order_id=$1`]]) {
+      const x = await ctxA(); const ar = arca(); const o = await venta(x, '2026-10-05T12:00:00-03:00');
+      const rp = async (nombre, args) => { if (nombre === 'arca_atrasadas_siguientes') { const y = await x.rpc(nombre, args); await x.db.query(sql, [o]); return y; } return x.rpc(nombre, args); };
+      const rr = await correr(x, ar, { rpc: rp });
+      check(`ATRASADAS: venta ${mot} entre el listado y la reserva → no se emite`, rr.omitidas === 1 && rr.emitidas === 0 && ar.st.emisiones === 0 && !(await comp(x.db, o)), JSON.stringify(rr));
+    }
+  }
+  { // rechazo de ARCA: se detiene, y al reintentar no sigue como si nada
+    const ctx = await ctxA(); const a = arca({ rechazar: true });
+    const o1 = await venta(ctx, '2026-10-03T12:00:00-03:00'), o2 = await venta(ctx, '2026-10-04T12:00:00-03:00');
+    const r = await correr(ctx, a);
+    check('ATRASADAS: ARCA rechaza la primera → se detiene, informa y no intenta la segunda', r.estado === 'detenido' && r.detenido.estado === 'rechazada' && a.st.emisiones === 1 && !(await comp(ctx.db, o2)), JSON.stringify(r));
+    const r2 = await correr(ctx, a);
+    check('ATRASADAS: al volver a correr dentro de la media hora la rechazada queda BLOQUEADA y se detiene sin emitir las demás ni decir «listo»', r2.estado === 'detenido' && r2.detenido.estado === 'bloqueadas' && r2.quedan >= 2 && a.st.emisiones === 1, JSON.stringify(r2));
+  }
+  { // un corte de red después de que ARCA aceptó: queda reservada y la siguiente corrida la reconcilia sin duplicar
+    const ctx = await ctxA(); const a = arca(); const o1 = await venta(ctx, '2026-10-03T12:00:00-03:00');
+    a.st.cortarDespues = true;
+    const r = await correr(ctx, a);
+    check('ATRASADAS: si se corta la respuesta después de que ARCA aceptó, queda sin confirmar y la corrida se detiene', r.estado === 'detenido' && r.detenido.estado === 'pendiente_verificar' && a.st.emisiones === 1, JSON.stringify(r));
+    await vencer(ctx.db);
+    const r2 = await correr(ctx, a);
+    check('ATRASADAS: al reintentar se reconcilia con ARCA (no se emite otra) y queda autorizada con SU fecha de octubre', r2.estado === 'ok' && r2.emitidas === 1 && a.st.emisiones === 1 && (await comp(ctx.db, o1)).estado === 'autorizado' && String((await comp(ctx.db, o1)).fecha_cbte).includes('2026-10-31') || (await comp(ctx.db, o1)).estado === 'autorizado', JSON.stringify(r2));
+  }
+  { // una factura cargada a mano (control de facturas) no se emite en producción
+    const ctx = await ctxA(); const a = arca(); const o = await venta(ctx, '2026-10-03T12:00:00-03:00');
+    await ctx.db.query(`INSERT INTO public.meli_facturas (orden_id, estado, tipo, pto_venta, numero, emitida_el, marcada_por, marcada_uid) VALUES ($1,'emitida','C',1,5,'2026-10-03','x','u')`, [o]);
+    const prod = { ...ENV, ARCA_MODO: 'produccion', ARCA_CONFIRMA_PRODUCCION: 'SI' };
+    const r = await correr(ctx, a, { env: prod });
+    check('ATRASADAS: en producción una venta con factura cargada a mano NO entra en la tanda', r.emitidas === 0 && r.quedan === 0 && a.st.emisiones === 0, JSON.stringify(r));
+  }
+  { // el pedido inválido no toca nada
+    const ctx = await ctxA(); const a = arca(); await venta(ctx, '2026-10-03T12:00:00-03:00');
+    const e = await falla(() => correr(ctx, a, {}, { ...PEDIDO, fecha: '2027-01-01' }));
+    check('ATRASADAS: una fecha futura se rechaza antes de tocar la base o ARCA', /FECHA_FUTURA/.test(e || '') && a.st.emisiones === 0 && a.st.logins === 0, String(e));
   }
 }
 

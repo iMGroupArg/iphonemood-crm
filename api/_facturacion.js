@@ -160,7 +160,7 @@ const esNoElegible = (e) => !!(e && /AUTO_NO_ELEGIBLE/.test(String(e.message)));
 const textoError = (e) => (e && e.codigo ? `${e.codigo}: ${String(e.message).slice(0, 200)}` : 'error inesperado');
 const mismoNumero = (a, b) => Number(String(a).trim()) === Number(String(b).trim());
 
-async function emitirFacturaOrden({ orden, env = process.env, rpc, meliGet, fetchImpl = fetch, ahora = () => new Date(), pres, cache, esperaTicketMs, reservarFn = 'arca_comprobante_reservar', limite = Infinity } = {}) {
+async function emitirFacturaOrden({ orden, env = process.env, rpc, meliGet, fetchImpl = A.fetchArca, ahora = () => new Date(), pres, cache, esperaTicketMs, reservarFn = 'arca_comprobante_reservar', limite = Infinity } = {}) {
   const cfg = A.configuracion(env);
   if (!/^\d{1,20}$/.test(String(orden || ''))) throw new A.ErrorArca('ORDEN_INVALIDA', 'Número de orden inválido.');
   if (cfg.modo === 'simulacion') return { estado: 'simulacion', mensaje: 'ARCA está en modo simulación: no se emitió ni se guardó nada.' };
@@ -267,7 +267,7 @@ const MOTIVOS_NC = ['devolucion', 'cancelacion', 'error_de_facturacion'];
 // La nota de ARCA tiene que estar asociada EXACTAMENTE a la factura esperada (tipo 11, punto de venta, número y CUIT del emisor): importe y documento
 // iguales no alcanzan (con consumidor final 99/0 es fácil que coincidan en notas de OTRAS facturas).
 const asociadaA = (c, ptoVta, facturaNumero, cuit) => Array.isArray(c.asoc) && c.asoc.length === 1 && c.asoc[0].tipo === 11 && c.asoc[0].ptoVta === Number(ptoVta) && c.asoc[0].nro === Number(facturaNumero) && c.asoc[0].cuit === String(cuit);
-async function emitirNotaCreditoOrden({ orden, motivo, usuario, env = process.env, rpc, fetchImpl = fetch, ahora = () => new Date(), pres, cache, esperaTicketMs, reservarFn = 'arca_nc_reservar', limite = Infinity } = {}) {
+async function emitirNotaCreditoOrden({ orden, motivo, usuario, env = process.env, rpc, fetchImpl = A.fetchArca, ahora = () => new Date(), pres, cache, esperaTicketMs, reservarFn = 'arca_nc_reservar', limite = Infinity } = {}) {
   const cfg = A.configuracion(env);
   if (!/^\d{1,20}$/.test(String(orden || ''))) throw new A.ErrorArca('ORDEN_INVALIDA', 'Número de orden inválido.');
   if (!MOTIVOS_NC.includes(motivo)) throw new A.ErrorArca('MOTIVO_INVALIDO', 'Elegí un motivo de la lista.');

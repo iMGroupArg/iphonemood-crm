@@ -39,7 +39,7 @@ const resumirError = (e) => ({ codigo: e && e.codigo ? String(e.codigo) : 'ERROR
 
 // Con `rpc` el ticket se guarda y se lee de la base, igual que en la emisión: así el diagnóstico NO deja a la emisión sin ticket (ARCA no da otro
 // mientras hay uno vigente) ni entre instancias distintas. Sin `rpc` (pruebas) se usa la caché que se pase o la de memoria.
-async function diagnosticoArca({ env = process.env, fetchImpl: fetchBase = fetch, ahora = () => new Date(), cache, rpc, pres } = {}) {
+async function diagnosticoArca({ env = process.env, fetchImpl: fetchBase = A.fetchArca, ahora = () => new Date(), cache, rpc, pres } = {}) {
   const fetchImpl = conTiempo(fetchBase, 12000);
   const salida = { modo: null, pasos: [], resumen: null };
   const paso = (nombre, ok, detalle) => salida.pasos.push({ paso: nombre, ok, ...detalle });

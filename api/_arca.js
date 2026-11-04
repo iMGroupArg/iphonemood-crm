@@ -19,6 +19,34 @@
 'use strict';
 
 const crypto = require('crypto');
+const https = require('https');
+
+// El servidor de producción de ARCA (servicios1.afip.gov.ar) usa un intercambio DH débil que Node (OpenSSL 3) rechaza por defecto
+// (ERR_SSL_DH_KEY_TOO_SMALL). SOLO para los servidores de ARCA (*.afip.gov.ar) se baja el nivel de seguridad a 1; todo lo demás sigue con fetch normal.
+const TIMEOUT_ARCA_MS = 25000;
+const agenteArca = new https.Agent({ ciphers: 'DEFAULT@SECLEVEL=1', keepAlive: false });
+function fetchArca(url, opciones = {}) {
+  let u;
+  try { u = new URL(url); } catch { return fetch(url, opciones); }
+  if (u.protocol !== 'https:' || !/(^|\.)afip\.gov\.ar$/i.test(u.hostname)) return fetch(url, opciones);
+  return new Promise((resolve, reject) => {
+    const cuerpo = opciones.body == null ? null : Buffer.from(String(opciones.body));
+    const req = https.request(u, { method: opciones.method || 'GET', agent: agenteArca, headers: { ...(opciones.headers || {}), ...(cuerpo ? { 'Content-Length': cuerpo.length } : {}) } }, (res) => {
+      const partes = [];
+      res.on('data', d => partes.push(d));
+      res.on('end', () => { const texto = Buffer.concat(partes).toString('utf8'); resolve({ ok: res.statusCode >= 200 && res.statusCode < 300, status: res.statusCode, text: async () => texto }); });
+      res.on('error', reject);
+    });
+    req.setTimeout(TIMEOUT_ARCA_MS, () => req.destroy(new Error('Tiempo agotado hablando con ARCA.')));
+    req.on('error', reject);
+    const { signal } = opciones;
+    if (signal) {
+      const cortar = () => req.destroy(new Error('Llamada a ARCA cancelada.'));
+      if (signal.aborted) cortar(); else signal.addEventListener('abort', cortar, { once: true });
+    }
+    req.end(cuerpo);
+  });
+}
 
 const MODOS = ['simulacion', 'homologacion', 'produccion'];
 const URLS = {
@@ -182,7 +210,7 @@ const pedidosEnVuelo = new WeakMap();
 // El ticket sirve hasta que vence (con un margen corto de seguridad): mientras tanto NO se pide otro, porque ARCA lo rechaza.
 const MARGEN_TICKET_MS = 30e3;
 
-function obtenerTicket({ cfg, cache = cacheCompartida(cfg), fetchImpl = fetch, ahora = () => new Date() }) {
+function obtenerTicket({ cfg, cache = cacheCompartida(cfg), fetchImpl = fetchArca, ahora = () => new Date() }) {
   // Si ya hay un pedido de ticket en curso para esta caché, todos esperan ese mismo (leer–pedir–guardar es una sola secuencia).
   if (pedidosEnVuelo.has(cache)) return pedidosEnVuelo.get(cache);
   const pedido = (async () => {
@@ -220,11 +248,11 @@ const authXmlValida = (cfg, t) => {
 const erroresDe = xml => todas(etiqueta(xml, 'Errors') || '', 'Err').map(e => ({ codigo: etiqueta(e, 'Code'), mensaje: desescapar(etiqueta(e, 'Msg') || '') }));
 const observacionesDe = xml => todas(etiqueta(xml, 'Observaciones') || '', 'Obs').map(e => ({ codigo: etiqueta(e, 'Code'), mensaje: desescapar(etiqueta(e, 'Msg') || '') }));
 
-async function feDummy({ cfg, fetchImpl = fetch }) {
+async function feDummy({ cfg, fetchImpl = fetchArca }) {
   const xml = await llamarFe(cfg, 'FEDummy', '', fetchImpl);
   return { app: etiqueta(xml, 'AppServer'), db: etiqueta(xml, 'DbServer'), auth: etiqueta(xml, 'AuthServer') };
 }
-async function ultimoAutorizado({ cfg, ticket, ptoVta, cbteTipo = CBTE_FACTURA_C, fetchImpl = fetch }) {
+async function ultimoAutorizado({ cfg, ticket, ptoVta, cbteTipo = CBTE_FACTURA_C, fetchImpl = fetchArca }) {
   const pv = enteroEn(ptoVta, 1, 99999, 'Punto de venta'), tipo = enteroEn(cbteTipo, 1, 999, 'Tipo de comprobante');
   const xml = await llamarFe(cfg, 'FECompUltimoAutorizado', `${authXmlValida(cfg, ticket)}<ar:PtoVta>${pv}</ar:PtoVta><ar:CbteTipo>${tipo}</ar:CbteTipo>`, fetchImpl);
   const errores = erroresDe(xml);
@@ -235,7 +263,7 @@ async function ultimoAutorizado({ cfg, ticket, ptoVta, cbteTipo = CBTE_FACTURA_C
   return Number(crudo.trim());
 }
 // Puntos de venta habilitados para el emisor (solo lectura). Sin ninguno ARCA responde el error 602 ("sin resultados"): es lista vacía. [NO VERIFICADO]
-async function puntosDeVenta({ cfg, ticket, fetchImpl = fetch }) {
+async function puntosDeVenta({ cfg, ticket, fetchImpl = fetchArca }) {
   const xml = await llamarFe(cfg, 'FEParamGetPtosVenta', authXmlValida(cfg, ticket), fetchImpl);
   const errores = erroresDe(xml);
   if (errores.length) {
@@ -247,7 +275,7 @@ async function puntosDeVenta({ cfg, ticket, fetchImpl = fetch }) {
 }
 // Solo el error 602 ("no existe") significa que el comprobante no existe; cualquier otro error (autenticación, servicio, datos) deja el
 // estado DESCONOCIDO y se propaga: concluir "no existe" por un problema de infraestructura llevaría a emitir dos veces.
-async function consultarComprobante({ cfg, ticket, ptoVta, cbteTipo = CBTE_FACTURA_C, numero, fetchImpl = fetch }) {
+async function consultarComprobante({ cfg, ticket, ptoVta, cbteTipo = CBTE_FACTURA_C, numero, fetchImpl = fetchArca }) {
   const pv = enteroEn(ptoVta, 1, 99999, 'Punto de venta'), tipo = enteroEn(cbteTipo, 1, 999, 'Tipo de comprobante'), nro = enteroEn(numero, 1, 99999999, 'Número');
   const xml = await llamarFe(cfg, 'FECompConsultar', `${authXmlValida(cfg, ticket)}<ar:FeCompConsReq><ar:CbteTipo>${tipo}</ar:CbteTipo><ar:CbteNro>${nro}</ar:CbteNro><ar:PtoVta>${pv}</ar:PtoVta></ar:FeCompConsReq>`, fetchImpl);
   const errores = erroresDe(xml);
@@ -340,7 +368,7 @@ function armarSolicitud(cfg, ticket, ptoVta, numero, comp) {
 // Pide el CAE del número `numero` (que reserva la base; ver docs). No elige el número ni reintenta: lo hace el orquestador.
 // Una respuesta incompleta, de OTRO número o aprobada sin CAE NO se interpreta: se devuelve como estado DESCONOCIDO (error)
 // para que el orquestador reconcilie con FECompConsultar antes de volver a emitir.
-async function solicitarCAE({ cfg, ticket, ptoVta, numero, comprobante, fetchImpl = fetch }) {
+async function solicitarCAE({ cfg, ticket, ptoVta, numero, comprobante, fetchImpl = fetchArca }) {
   const xml = await llamarFe(cfg, 'FECAESolicitar', armarSolicitud(cfg, ticket, ptoVta, numero, comprobante), fetchImpl);
   const bloque = etiqueta(xml, 'FECAESolicitarResult');
   if (bloque === null) throw new ErrorArca('WSFE_ESTADO_DESCONOCIDO', 'La respuesta de ARCA no trae el resultado de la solicitud: hay que consultar el comprobante.');
@@ -380,7 +408,7 @@ function armarNotaCreditoC(datos, { cfg, ahora = new Date() } = {}) {
     asociado: { tipo: CBTE_FACTURA_C, ptoVta: f.ptoVta, numero: f.numero, cuit: cfg.cuit, fecha: String(f.fecha || '').replace(/-/g, '') },
   };
 }
-async function emitirNotaCreditoC({ datos, numeroReservado, env = process.env, cache, fetchImpl = fetch, ahora = () => new Date() }) {
+async function emitirNotaCreditoC({ datos, numeroReservado, env = process.env, cache, fetchImpl = fetchArca, ahora = () => new Date() }) {
   const cfg = configuracion(env);
   const comprobante = armarNotaCreditoC(datos, { cfg, ahora: ahora() });
   if (cfg.modo === 'simulacion') return { simulado: true, modo: cfg.modo, comprobante, resultado: 'A', numero: numeroReservado || 0, cae: 'SIMULADO', caeVto: null, observaciones: [], errores: [] };
@@ -392,7 +420,7 @@ async function emitirNotaCreditoC({ datos, numeroReservado, env = process.env, c
 }
 
 // Emisión de punta a punta para el modo configurado. En 'simulacion' NO toca la red y devuelve un CAE falso marcado `simulado`.
-async function emitirFacturaC({ orden, comprador, numeroReservado, env = process.env, cache, fetchImpl = fetch, ahora = () => new Date() }) {
+async function emitirFacturaC({ orden, comprador, numeroReservado, env = process.env, cache, fetchImpl = fetchArca, ahora = () => new Date() }) {
   const cfg = configuracion(env);
   const comprobante = armarComprobanteC(orden, comprador, { cfg, ahora: ahora() });
   if (cfg.modo === 'simulacion') {
@@ -408,7 +436,7 @@ async function emitirFacturaC({ orden, comprador, numeroReservado, env = process
 }
 
 module.exports = {
-  MODOS, URLS, CBTE_FACTURA_C, CBTE_NOTA_CREDITO_C, DOC_TIPOS, ErrorArca, configuracion,
+  MODOS, URLS, fetchArca, CBTE_FACTURA_C, CBTE_NOTA_CREDITO_C, DOC_TIPOS, ErrorArca, configuracion,
   // criptografía y login
   oid, firmarCms, armarTra, parsearRespuestaLogin, obtenerTicket, cacheEnMemoria,
   // servicios de factura electrónica

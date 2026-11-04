@@ -308,6 +308,58 @@ await caso('CMS con SHA-1 (por si WSAA lo exigiera) también lo verifica openssl
   assert.equal(A.configuracion({ ARCA_CMS_HASH: 'SHA1' }).cmsHash, 'sha1');
 });
 
+// ── Conexión a los servidores de ARCA (DH débil de servicios1.afip.gov.ar) ─────────────────────────────
+import https from 'node:https';
+import { EventEmitter } from 'node:events';
+function respuestaFalsa(estado, texto) {
+  const res = new EventEmitter(); res.statusCode = estado;
+  return { res, emitir() { res.emit('data', Buffer.from(texto)); res.emit('end'); } };
+}
+await caso('fetchArca: para *.afip.gov.ar usa https con nivel de seguridad 1, manda método, cabeceras y cuerpo, y devuelve ok/status/text', async () => {
+  const original = https.request; const vistos = [];
+  https.request = (url, opts, cb) => {
+    const req = new EventEmitter(); const f = respuestaFalsa(200, '<soap:Envelope><soap:Body>ok</soap:Body></soap:Envelope>');
+    req.setTimeout = () => {}; req.destroy = () => {};
+    req.end = (cuerpo) => { vistos.push({ url: String(url), opts, cuerpo: cuerpo && cuerpo.toString() }); setImmediate(() => { cb(f.res); f.emitir(); }); };
+    return req;
+  };
+  try {
+    const r = await A.fetchArca('https://servicios1.afip.gov.ar/wsfev1/service.asmx', { method: 'POST', headers: { SOAPAction: 'x' }, body: '<a/>' });
+    assert.equal(r.ok, true); assert.equal(r.status, 200); assert.match(await r.text(), /Envelope/);
+    assert.equal(vistos.length, 1); assert.equal(vistos[0].opts.method, 'POST'); assert.equal(vistos[0].opts.headers.SOAPAction, 'x');
+    assert.equal(vistos[0].opts.headers['Content-Length'], 4); assert.equal(vistos[0].cuerpo, '<a/>');
+    assert.equal(vistos[0].opts.agent.options.ciphers, 'DEFAULT@SECLEVEL=1');
+  } finally { https.request = original; }
+});
+await caso('fetchArca: un 500 de ARCA llega como ok=false con su status', async () => {
+  const original = https.request;
+  https.request = (url, opts, cb) => { const req = new EventEmitter(); const f = respuestaFalsa(500, 'x'); req.setTimeout = () => {}; req.destroy = () => {}; req.end = () => setImmediate(() => { cb(f.res); f.emitir(); }); return req; };
+  try { const r = await A.fetchArca('https://wsaa.afip.gov.ar/ws/services/LoginCms', { method: 'POST', body: 'x' }); assert.equal(r.ok, false); assert.equal(r.status, 500); }
+  finally { https.request = original; }
+});
+await caso('fetchArca: un error de red de https se propaga (no se traga)', async () => {
+  const original = https.request;
+  https.request = () => { const req = new EventEmitter(); req.setTimeout = () => {}; req.destroy = () => {}; req.end = () => setImmediate(() => req.emit('error', new Error('boom'))); return req; };
+  try { await assert.rejects(() => A.fetchArca('https://servicios1.afip.gov.ar/x', { method: 'POST', body: 'x' }), /boom/); }
+  finally { https.request = original; }
+});
+await caso('fetchArca: cualquier otro dominio (o http) va por el fetch normal, sin bajar la seguridad', async () => {
+  const original = https.request, fetchOriginal = globalThis.fetch; let usoHttps = false, urlFetch = null;
+  https.request = () => { usoHttps = true; throw new Error('no debería'); };
+  globalThis.fetch = async (u) => { urlFetch = String(u); return { ok: true, status: 200, text: async () => 'x' }; };
+  try {
+    await A.fetchArca('https://api.mercadolibre.com/orders/1');
+    await A.fetchArca('https://afip.gov.ar.malo.com/x');
+    await A.fetchArca('http://wsaa.afip.gov.ar/x');
+    assert.equal(usoHttps, false); assert.equal(urlFetch, 'http://wsaa.afip.gov.ar/x');
+  } finally { https.request = original; globalThis.fetch = fetchOriginal; }
+});
+await caso('Las funciones de ARCA usan fetchArca por defecto (no el fetch global)', () => {
+  const fuente = fs.readFileSync(new URL('../api/_arca.js', import.meta.url), 'utf8') + fs.readFileSync(new URL('../api/_facturacion.js', import.meta.url), 'utf8')
+    + fs.readFileSync(new URL('../api/_facturacion_auto.js', import.meta.url), 'utf8') + fs.readFileSync(new URL('../api/_arca_diagnostico.js', import.meta.url), 'utf8');
+  assert.equal(/fetchImpl(: fetchBase)? = fetch\b(?!Arca)/.test(fuente), false);
+});
+
 fs.rmSync(tmp, { recursive: true, force: true });
 console.log(fallos ? `${fallos} fallan de ${n}` : `${n} casos pasan`);
 process.exit(fallos ? 1 : 0);

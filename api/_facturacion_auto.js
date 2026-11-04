@@ -20,7 +20,7 @@ const primera = (x) => (Array.isArray(x) ? x[0] : x);
 const TEXTO_NOTA = 'automático: cancelación en Mercado Libre';
 const textoError = (e) => (e && e.codigo ? `${e.codigo}: ${String(e.message).slice(0, 200)}` : 'error inesperado');
 
-async function correrAutomatizacion({ rpc, meliGet, env = process.env, fetchImpl = fetch, ahora = () => new Date(), pres, maxPorCorrida = 2, restanteMs = () => Infinity, minimoMs = 14000, limite = Infinity,
+async function correrAutomatizacion({ rpc, meliGet, env = process.env, fetchImpl = A.fetchArca, ahora = () => new Date(), pres, maxPorCorrida = 2, restanteMs = () => Infinity, minimoMs = 14000, limite = Infinity,
   emitirFactura = emitirFacturaOrden, emitirNota = emitirNotaCreditoOrden } = {}) {
   const resumen = { omitido: null, hechas: 0, emitidas: 0, pendientes: 0, fallas: 0 };
   let cfg;

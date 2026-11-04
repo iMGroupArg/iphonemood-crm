@@ -202,6 +202,19 @@ await caso('Homologación completa con ARCA simulado: login una vez, factura apr
   assert.equal(llamadas.filter(c => c.url === A.URLS.homologacion.wsfe).length, 2);
 });
 
+await caso('fechaComprobante fija la fecha de la factura (CbteFch) sin tocar la hora real del login; sin ella se usa la de «ahora»', async () => {
+  const llamadas = [];
+  const f = fakeFetch((url, o) => (url === A.URLS.homologacion.wsaa ? respuestaLogin(TA) : respuestaCae('A', '<CAE>74000000000009</CAE><CAEFchVto>20261103</CAEFchVto>', numeroPedido(o.body))), llamadas);
+  const env = { ARCA_MODO: 'homologacion', ARCA_CUIT: '20301234567', ARCA_PTO_VTA: '4', ARCA_CERT: certPem, ARCA_KEY: keyPem };
+  const cache = A.cacheEnMemoria();
+  const r1 = await A.emitirFacturaC({ orden: { bruto: 1000 }, comprador: { docTipo: 'DNI', docNro: '30123456' }, numeroReservado: 1, env, cache, fetchImpl: f, ahora: ahoraFija, fechaComprobante: new Date('2026-10-31T15:00:00.000Z') });
+  assert.equal(r1.comprobante.fecha, '20261031');
+  const fe = llamadas.filter(c => c.url === A.URLS.homologacion.wsfe).at(-1);
+  assert.match(fe.opciones.body, /<ar:CbteFch>20261031<\/ar:CbteFch>/); assert.match(fe.opciones.body, /<ar:PtoVta>4<\/ar:PtoVta>/);
+  const r2 = await A.emitirFacturaC({ orden: { bruto: 1000 }, comprador: { docTipo: 'DNI', docNro: '30123456' }, numeroReservado: 2, env, cache, fetchImpl: f, ahora: ahoraFija });
+  assert.equal(r2.comprobante.fecha, A._util.fechaAR(ahoraFija()));
+});
+
 await caso('Los secretos no se filtran: ningún mensaje de error contiene la clave ni el certificado', async () => {
   const env = { ARCA_MODO: 'homologacion', ARCA_CUIT: '20301234567', ARCA_PTO_VTA: '3', ARCA_CERT: certPem, ARCA_KEY: keyPem };
   try {

@@ -420,9 +420,10 @@ async function emitirNotaCreditoC({ datos, numeroReservado, env = process.env, c
 }
 
 // Emisión de punta a punta para el modo configurado. En 'simulacion' NO toca la red y devuelve un CAE falso marcado `simulado`.
-async function emitirFacturaC({ orden, comprador, numeroReservado, env = process.env, cache, fetchImpl = fetchArca, ahora = () => new Date() }) {
+// `fechaComprobante` (opcional) fija la fecha del comprobante (facturas atrasadas); el login y los plazos siguen usando la hora real de `ahora`.
+async function emitirFacturaC({ orden, comprador, numeroReservado, env = process.env, cache, fetchImpl = fetchArca, ahora = () => new Date(), fechaComprobante = null }) {
   const cfg = configuracion(env);
-  const comprobante = armarComprobanteC(orden, comprador, { cfg, ahora: ahora() });
+  const comprobante = armarComprobanteC(orden, comprador, { cfg, ahora: fechaComprobante || ahora() });
   if (cfg.modo === 'simulacion') {
     if (numeroReservado !== undefined && numeroReservado !== null) enteroEn(numeroReservado, 1, 99999999, 'Número de comprobante');
     return { simulado: true, modo: cfg.modo, comprobante, resultado: 'A', numero: numeroReservado || 0, cae: 'SIMULADO', caeVto: null, observaciones: [], errores: [] };

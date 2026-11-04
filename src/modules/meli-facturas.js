@@ -177,6 +177,104 @@ const MeliFacturas = {
     const pct = Math.round((total / limite) * 1000) / 10;
     return { pct, clase: pct >= 90 ? 'b-red' : pct >= 70 ? 'b-amber' : 'b-green', txt: pct >= 100 ? 'Límite superado' : pct >= 90 ? 'Cerca del límite' : pct >= 70 ? 'Atención' : 'En rango' };
   },
+  // ── Facturas atrasadas: ponerse al día con las ventas pagadas que nunca se facturaron (script 25 + acción 'arca_atrasadas' del worker) ──
+  _atr() { return State.atrasadas || (State.atrasadas = {}); },
+  _mesAnterior() {
+    const [y, m] = this.hoy().split('-').map(Number), ultimo = new Date(Date.UTC(y, m - 1, 0)), pm = String(ultimo.getUTCMonth() + 1).padStart(2, '0');
+    return { desde: `${ultimo.getUTCFullYear()}-${pm}-01`, hasta: `${ultimo.getUTCFullYear()}-${pm}-${String(ultimo.getUTCDate()).padStart(2, '0')}` };
+  },
+  tarjetaAtrasadas() {
+    if (State.meliFacturasAusente || State.meliFacturasError) return '';
+    const e = s => State.esc(String(s ?? '')), a = this._atr(), mes = this._mesAnterior();
+    const v = { desde: a.desde || mes.desde, hasta: a.hasta || mes.hasta, fecha: a.fecha || mes.hasta, pto: a.pto || 4 };
+    const r = a.resumen, an = State.facturacionAnual;
+    let resumen = '';
+    if (r) {
+      const margen = an && Number(an.limite_centavos) > 0 ? Number(an.limite_centavos) - Number(an.total_centavos) : null;
+      const pasa = margen !== null && Number(r.total_centavos) > margen;
+      const meses = (r.por_mes || []).map(m => `${e(m.mes)}: <b>${e(this._pesos(m.centavos))}</b> (${e(m.cantidad)})`).join(' · ');
+      resumen = `<div style="margin-top:10px"><b>${e(r.cantidad)}</b> ventas sin factura por <b>${e(this._pesos(r.total_centavos))}</b> en <b>${e(this.NOMBRE_MODO[a.modo] || a.modo)}</b>${meses ? `<div style="font-size:11.5px;color:var(--text-secondary);margin-top:2px">${meses}</div>` : ''}
+        ${margen === null ? '<div style="font-size:11.5px;color:var(--text-secondary);margin-top:4px">No hay límite anual configurado: no puedo compararlo con tu categoría.</div>'
+          : `<div style="font-size:11.5px;margin-top:4px;color:${pasa ? 'var(--red)' : 'var(--text-secondary)'}">${pasa ? '⚠ SUPERA' : 'Entra en'} el margen que te queda en el límite anual (${e(this._pesos(margen))}).</div>`}</div>`;
+    }
+    const puedeEmitir = r && Number(r.cantidad) > 0 && !a.corriendo;
+    return `<div class="card" style="margin-bottom:10px;font-size:12.5px"><details${a.abierta || r || a.corriendo || a.mensaje ? ' open' : ''} ontoggle="MeliFacturas._atr().abierta = this.open">
+      <summary style="cursor:pointer;font-weight:600">Emitir facturas atrasadas</summary>
+      <div style="font-size:11.5px;color:var(--text-secondary);margin:6px 0 10px;line-height:1.5">Emite la factura de las ventas pagadas que nunca se facturaron, de la más vieja a la más nueva, con el punto de venta y la fecha que elijas (por ejemplo un punto de venta aparte con el último día del mes). Solo toma ventas pagadas, sin factura, no canceladas ni «en revisión». Si algo falla se detiene y te avisa; volver a empezar no duplica nada.</div>
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px">
+        <label style="display:flex;flex-direction:column;gap:4px">Ventas desde<input id="atr-desde" type="date" value="${e(v.desde)}" oninput="MeliFacturas.atrasadasCampo()"></label>
+        <label style="display:flex;flex-direction:column;gap:4px">Ventas hasta<input id="atr-hasta" type="date" value="${e(v.hasta)}" oninput="MeliFacturas.atrasadasCampo()"></label>
+        <label style="display:flex;flex-direction:column;gap:4px">Punto de venta<input id="atr-pto" type="number" min="1" max="99999" step="1" value="${e(v.pto)}" oninput="MeliFacturas.atrasadasCampo()"></label>
+        <label style="display:flex;flex-direction:column;gap:4px">Fecha de los comprobantes<input id="atr-fecha" type="date" max="${this.hoy()}" value="${e(v.fecha)}" oninput="MeliFacturas.atrasadasCampo()"></label>
+      </div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px">
+        <button class="btn btn-sm" onclick="MeliFacturas.atrasadasVer(this)"${a.corriendo ? ' disabled' : ''}>Ver cuántas son</button>
+        ${puedeEmitir ? `<button class="btn btn-sm btn-primary" onclick="MeliFacturas.atrasadasEmitir(this)">Emitir ${e(r.cantidad)} facturas</button>` : ''}
+        ${a.corriendo ? '<button class="btn btn-sm" onclick="MeliFacturas._atrParar = true">Detener</button>' : ''}
+      </div>
+      ${resumen}
+      <div id="atr-estado" style="margin-top:8px;font-size:12px;line-height:1.5">${a.mensaje ? e(a.mensaje) : ''}</div>
+    </details></div>`;
+  },
+  atrasadasCampo() {
+    const a = this._atr(), g = id => document.getElementById(id) && document.getElementById(id).value;
+    a.desde = g('atr-desde'); a.hasta = g('atr-hasta'); a.fecha = g('atr-fecha'); a.pto = g('atr-pto');
+  },
+  _atrDatos() {
+    const g = id => (document.getElementById(id) || {}).value;
+    return { desde: g('atr-desde'), hasta: g('atr-hasta'), fecha: g('atr-fecha'), pto_venta: Number(g('atr-pto')) };
+  },
+  _atrEstado(texto) { const a = this._atr(); a.mensaje = texto; const el = document.getElementById('atr-estado'); if (el) el.textContent = texto; },
+  async _worker(cuerpo) {
+    try {
+      const token = await window.Meli?._token?.();
+      const r = await fetch('/api/meli/worker', { method: 'POST', headers: { 'x-crm-token': token || '', 'Content-Type': 'application/json' }, body: JSON.stringify(cuerpo) });
+      return await r.json();
+    } catch { return null; }
+  },
+  async atrasadasVer(btn) {
+    const d = this._atrDatos(), a = this._atr();
+    if (!d.desde || !d.hasta || d.desde > d.hasta) { toast('Revisá el rango de fechas de las ventas.'); return; }
+    if (btn) btn.disabled = true;
+    try {
+      const modo = await this._modoArca();
+      if (!modo) { toast('La facturación con ARCA está en simulación o no responde.'); return; }
+      const { data, error } = await supa.rpc('arca_atrasadas_resumen', { p_desde: d.desde, p_hasta: d.hasta, p_ambiente: modo });
+      if (error || !data) { toast(error && /RANGO_INVALIDO/.test(error.message || '') ? 'El rango de fechas no es válido.' : 'No se pudo calcular. ¿Falta correr el script 25?'); return; }
+      Object.assign(a, { desde: d.desde, hasta: d.hasta, fecha: d.fecha, pto: d.pto_venta, modo, resumen: data, mensaje: '', abierta: true });
+      if (window.MeliOrdenes && MeliOrdenes.pintar) MeliOrdenes.pintar();
+    } catch { toast('No se pudo calcular. Probá de nuevo.'); } finally { if (btn) btn.disabled = false; }
+  },
+  async atrasadasEmitir(btn) {
+    const a = this._atr(), r = a.resumen, d = this._atrDatos();
+    if (!r || !(Number(r.cantidad) > 0) || a.corriendo) return;
+    if (d.desde !== a.desde || d.hasta !== a.hasta || d.fecha !== a.fecha || d.pto_venta !== Number(a.pto)) { toast('Cambiaste los datos: tocá «Ver cuántas son» otra vez antes de emitir.'); return; }
+    if (!d.fecha || d.fecha > this.hoy()) { toast('La fecha de los comprobantes no puede estar vacía ni ser futura.'); return; }
+    const real = a.modo === 'produccion', n = Number(r.cantidad);
+    if (!confirm(`Vas a EMITIR ${n} facturas por ${this._pesos(r.total_centavos)} en ${this.NOMBRE_MODO[a.modo] || a.modo}.\nPunto de venta ${d.pto_venta}, con fecha ${d.fecha}.\n${real ? 'Son comprobantes REALES, con validez fiscal: no se pueden borrar, solo anular con una nota de crédito.' : 'Son comprobantes de prueba, sin valor fiscal.'}\n¿Seguís?`)) return;
+    if (real && n >= 10 && String(prompt(`Para confirmar escribí la cantidad de facturas (${n}):`) || '').trim() !== String(n)) { toast('No coincide la cantidad: no se emitió nada.'); return; }
+    this._atrParar = false; a.corriendo = true; let emitidas = 0, omitidas = 0, final = '';
+    if (window.MeliOrdenes && MeliOrdenes.pintar) MeliOrdenes.pintar();
+    try {
+      for (;;) {
+        if (this._atrParar) { final = `Detenido por vos. Emitidas ${emitidas}. Cuando quieras, «Ver cuántas son» y seguís desde donde quedó.`; break; }
+        const j = await this._worker({ accion: 'arca_atrasadas', ...d });
+        if (!j) { final = `No se pudo conectar con el servidor. Emitidas ${emitidas}. Volvé a tocar «Ver cuántas son» y seguí (no se duplica nada).`; break; }
+        if (j.estado === 'simulacion') { final = 'ARCA está en modo simulación: no se emitió nada.'; break; }
+        if (j.estado === 'error') { final = `No se pudo emitir (${j.codigo || 'error'})${j.mensaje ? ': ' + j.mensaje : ''}. Emitidas ${emitidas}.`; break; }
+        emitidas += Number(j.emitidas) || 0; omitidas += Number(j.omitidas) || 0;
+        if (j.estado === 'detenido') { const dt = j.detenido || {}; final = `SE DETUVO en la orden ${dt.orden || '?'}: ${dt.mensaje || dt.estado || 'problema'}. Emitidas ${emitidas}. Revisalo antes de seguir.`; break; }
+        this._atrEstado(`Emitiendo… ${emitidas} emitidas, quedan ${Number(j.quedan) || 0}.`);
+        if (!(Number(j.quedan) > 0)) { final = `Listo: ${emitidas} facturas emitidas${omitidas ? ` y ${omitidas} omitidas (ya no correspondían)` : ''}.`; break; }
+        if (!(Number(j.emitidas) + Number(j.omitidas) > 0)) { final = `No avanzó esta vez (poco tiempo del servidor). Emitidas ${emitidas}. Tocá «Ver cuántas son» y seguí.`; break; }
+      }
+    } finally {
+      a.corriendo = false; a.mensaje = final || a.mensaje; a.resumen = null;
+      try { await this.cargar(supa); } catch { /* se actualiza al recargar */ }
+      if (window.MeliOrdenes && MeliOrdenes.pintar) MeliOrdenes.pintar();
+      toast(a.mensaje || 'Terminó.');
+    }
+  },
   tarjetaAnual() {
     const a = State.facturacionAnual;
     if (State.facturacionAnualError) return '<div class="card" style="margin-bottom:10px;font-size:12px">Control de facturación anual no disponible. Probá actualizar.</div>';
@@ -224,7 +322,7 @@ const MeliFacturas = {
   cabecera(ordenes) {
     if (State.meliFacturasAusente) return this.tarjetaAuto() + this.tarjetaAnual();
     const n = State.meliFacturasError ? 0 : this.contar(ordenes);
-    return this.tarjetaAuto() + this.tarjetaAnual() + `<div class="card" style="margin-bottom:10px;font-size:12px">${State.esc(this.TEXTO)}<p>${State.esc(this.REABRIR)}</p><p>Cancelar o revertir la orden no cambia su factura.</p>${State.meliFacturasError ? '<p>Control de facturas no disponible. Probá actualizar.</p>' : `${n > 0 ? `<p>${n} ventas de Mercado Libre sin factura <button class="btn btn-sm" onclick="MeliFacturas.filtrar(true)">Ver</button></p>` : ''}<button class="btn btn-sm ${this._soloSinFactura ? 'btn-primary' : ''}" onclick="MeliFacturas.filtrar()">Sin factura</button>`}</div>`;
+    return this.tarjetaAuto() + this.tarjetaAnual() + this.tarjetaAtrasadas() + `<div class="card" style="margin-bottom:10px;font-size:12px">${State.esc(this.TEXTO)}<p>${State.esc(this.REABRIR)}</p><p>Cancelar o revertir la orden no cambia su factura.</p>${State.meliFacturasError ? '<p>Control de facturas no disponible. Probá actualizar.</p>' : `${n > 0 ? `<p>${n} ventas de Mercado Libre sin factura <button class="btn btn-sm" onclick="MeliFacturas.filtrar(true)">Ver</button></p>` : ''}<button class="btn btn-sm ${this._soloSinFactura ? 'btn-primary' : ''}" onclick="MeliFacturas.filtrar()">Sin factura</button>`}</div>`;
   },
   filtrar(ver) { this._soloSinFactura = ver === true || !this._soloSinFactura; MeliOrdenes.filtrar('todas'); },
   async accion(btn) {

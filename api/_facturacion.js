@@ -160,7 +160,7 @@ const esNoElegible = (e) => !!(e && /AUTO_NO_ELEGIBLE/.test(String(e.message)));
 const textoError = (e) => (e && e.codigo ? `${e.codigo}: ${String(e.message).slice(0, 200)}` : 'error inesperado');
 const mismoNumero = (a, b) => Number(String(a).trim()) === Number(String(b).trim());
 
-async function emitirFacturaOrden({ orden, env = process.env, rpc, meliGet, fetchImpl = A.fetchArca, ahora = () => new Date(), pres, cache, esperaTicketMs, reservarFn = 'arca_comprobante_reservar', limite = Infinity } = {}) {
+async function emitirFacturaOrden({ orden, env = process.env, rpc, meliGet, fetchImpl = A.fetchArca, ahora = () => new Date(), pres, cache, esperaTicketMs, reservarFn = 'arca_comprobante_reservar', limite = Infinity, fechaComprobante = null } = {}) {
   const cfg = A.configuracion(env);
   if (!/^\d{1,20}$/.test(String(orden || ''))) throw new A.ErrorArca('ORDEN_INVALIDA', 'Número de orden inválido.');
   if (cfg.modo === 'simulacion') return { estado: 'simulacion', mensaje: 'ARCA está en modo simulación: no se emitió ni se guardó nada.' };
@@ -206,7 +206,7 @@ async function emitirFacturaOrden({ orden, env = process.env, rpc, meliGet, fetc
   if (!Number.isSafeInteger(cuentaId) || !(bruto > 0)) throw new A.ErrorArca('ORDEN_INVALIDA', 'La orden no tiene los datos necesarios para facturar.');
   const billing = await pedirDatosFacturacion({ meliGet, cuentaId, orden: ordenS, billingInfoId: datos.billing_info_id, pres });
   const comprador = billing ? { docTipo: billing.docTipo, docNro: billing.docNro, ...(billing.condicionIva ? { condicionIva: billing.condicionIva } : {}) } : {};
-  const comprobante = A.armarComprobanteC({ bruto, moneda: 'ARS' }, comprador, { cfg, ahora: ahora() });
+  const comprobante = A.armarComprobanteC({ bruto, moneda: 'ARS' }, comprador, { cfg, ahora: fechaComprobante || ahora() });
   // Con CUIT/CUIL la condición frente al IVA no se supone: tiene que venir de Mercado Libre.
   if ((comprobante.docTipo === 80 || comprobante.docTipo === 86) && !(billing && billing.condicionIva)) {
     throw new A.ErrorArca('CONDICION_IVA_FALTANTE', 'Mercado Libre no informó la condición frente al IVA del comprador (CUIT/CUIL).');
@@ -231,7 +231,7 @@ async function emitirFacturaOrden({ orden, env = process.env, rpc, meliGet, fetc
   if (limite - Date.now() < TIEMPO_MINIMO_ANTES_DE_EMITIR_MS) return { estado: 'pendiente_verificar', numero: res.numero, ptoVenta: cfg.ptoVta, error: 'SIN_TIEMPO: quedó reservada sin emitir; se resuelve en la próxima corrida' };
   let em;
   try {
-    em = await A.emitirFacturaC({ orden: { bruto, moneda: 'ARS' }, comprador, numeroReservado: res.numero, env, cache: cacheTicket, fetchImpl: f, ahora });
+    em = await A.emitirFacturaC({ orden: { bruto, moneda: 'ARS' }, comprador, numeroReservado: res.numero, env, cache: cacheTicket, fetchImpl: f, ahora, fechaComprobante });
   } catch (e) {
     return { estado: 'pendiente_verificar', numero: res.numero, ptoVenta: cfg.ptoVta, error: textoError(e) };
   }

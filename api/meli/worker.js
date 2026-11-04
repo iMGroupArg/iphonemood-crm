@@ -19,6 +19,7 @@ const { sonda, conciliar } = require('../_meli_sonda.js');
 const { diagnosticoArca } = require('../_arca_diagnostico.js');
 const { emitirFacturaOrden, emitirNotaCreditoOrden } = require('../_facturacion.js');
 const { correrAutomatizacion } = require('../_facturacion_auto.js');
+const { correrAtrasadas } = require('../_facturacion_atrasadas.js');
 const { ErrorArca } = require('../_arca.js');
 const { barrer, barrerTodas } = require('../_meli_barrido.js');
 
@@ -202,6 +203,20 @@ module.exports = async function handler(req, res) {
     } catch (e) {
       const codigo = e && e.codigo === 'RPC' ? ((String(e.message).match(/\b[A-Z][A-Z_]{5,}\b/) || ['RPC'])[0]) : ((e && e.codigo) || 'ERROR');
       console.error('meli/worker (arca_nc):', codigo);
+      res.status(200).json({ estado: 'error', codigo, mensaje: e instanceof ErrorArca ? e.message : null });
+    }
+    return;
+  }
+
+  // Facturas ATRASADAS (api/_facturacion_atrasadas.js): emite de a pocas las facturas de las ventas pagadas que nunca se facturaron, con el punto de venta y la fecha
+  // del comprobante que eligió la persona. Solo por POST con sesión. Ante el primer problema se detiene y lo informa; volver a llamarla no duplica nada.
+  if (req.method === 'POST' && req.body && typeof req.body === 'object' && req.body.accion === 'arca_atrasadas') {
+    try {
+      const pres = M.presupuestoHasta(t0 + PRESUPUESTO_MS - RESERVA_MS, t0 + PRESUPUESTO_MS);
+      res.status(200).json(await correrAtrasadas({ pedido: req.body, rpc: M.rpc, meliGet: M.meliGet, pres, limite: t0 + PRESUPUESTO_MS }));
+    } catch (e) {
+      const codigo = e && e.codigo === 'RPC' ? ((String(e.message).match(/\b[A-Z][A-Z_]{5,}\b/) || ['RPC'])[0]) : ((e && e.codigo) || 'ERROR');
+      console.error('meli/worker (arca_atrasadas):', codigo);
       res.status(200).json({ estado: 'error', codigo, mensaje: e instanceof ErrorArca ? e.message : null });
     }
     return;

@@ -96,6 +96,91 @@ await caso('Con la hoja del CRM (Sheet): usa su título, el formulario y el pie,
     assert.equal(abierta.titulo, 'La factura no corresponde'); assert.match(abierta.cuerpo, /<select name="motivo"/);
   } finally { delete ctx.Sheet; }
 });
+await caso('Atrasadas: el mes anterior se calcula desde la fecha de hoy (Argentina), también al cambiar de año', () => {
+  const hoy = M.hoy; try {
+    M.hoy = () => '2026-11-04'; assert.deepEqual({ ...M._mesAnterior() }, { desde: '2026-10-01', hasta: '2026-10-31' });
+    M.hoy = () => '2027-01-15'; assert.deepEqual({ ...M._mesAnterior() }, { desde: '2026-12-01', hasta: '2026-12-31' });
+    M.hoy = () => '2026-03-01'; assert.deepEqual({ ...M._mesAnterior() }, { desde: '2026-02-01', hasta: '2026-02-28' });
+  } finally { M.hoy = hoy; }
+});
+await caso('Atrasadas: la tarjeta trae el mes anterior, el punto de venta 4 y muestra el resumen con el margen del límite anual', () => {
+  const hoy = M.hoy; M.hoy = () => '2026-11-04'; State.atrasadas = null;
+  try {
+    let h = M.tarjetaAtrasadas();
+    assert.match(h, /Emitir facturas atrasadas/); assert.match(h, /id="atr-desde"[^>]*value="2026-10-01"/); assert.match(h, /id="atr-hasta"[^>]*value="2026-10-31"/);
+    assert.match(h, /id="atr-fecha"[^>]*max="2026-11-04"[^>]*value="2026-10-31"/); assert.match(h, /id="atr-pto"[^>]*value="4"/); assert.doesNotMatch(h, /Emitir \d+ facturas/);
+    State.facturacionAnual = { limite_centavos: 4500000000, total_centavos: 3100000000 };
+    State.atrasadas = { modo: 'produccion', resumen: { cantidad: 95, total_centavos: 900000000, por_mes: [{ mes: '2026-10', cantidad: 95, centavos: 900000000 }] } };
+    h = M.tarjetaAtrasadas();
+    assert.match(h, /<b>95<\/b> ventas sin factura/); assert.match(h, /Emitir 95 facturas/); assert.match(h, /PRODUCCIÓN/); assert.match(h, /Entra en el margen/); assert.doesNotMatch(h, /SUPERA/);
+    State.atrasadas.resumen.total_centavos = 2000000000; h = M.tarjetaAtrasadas();
+    assert.match(h, /⚠ SUPERA/);
+    State.facturacionAnual = { limite_centavos: 0, total_centavos: 0 }; h = M.tarjetaAtrasadas();
+    assert.match(h, /No hay límite anual configurado/);
+    State.atrasadas.resumen = { cantidad: 0, total_centavos: 0, por_mes: [] }; assert.doesNotMatch(M.tarjetaAtrasadas(), /Emitir \d+ facturas/);
+    State.atrasadas = { corriendo: true, resumen: { cantidad: 5, total_centavos: 100 }, modo: 'homologacion' };
+    h = M.tarjetaAtrasadas(); assert.match(h, /Detener/); assert.doesNotMatch(h, /Emitir 5 facturas/);
+    State.meliFacturasAusente = true; assert.equal(M.tarjetaAtrasadas(), '');
+  } finally { M.hoy = hoy; State.atrasadas = null; State.facturacionAnual = null; State.meliFacturasAusente = false; }
+});
+await caso('Atrasadas: los textos del servidor se muestran escapados (nada de HTML)', () => {
+  State.atrasadas = { mensaje: '<img src=x onerror=alert(1)>', modo: '<b>x</b>', resumen: { cantidad: 1, total_centavos: 1, por_mes: [{ mes: '<i>', cantidad: 1, centavos: 1 }] } };
+  const h = M.tarjetaAtrasadas(); State.atrasadas = null;
+  assert.doesNotMatch(h, /<img|<i>|<b>x<\/b>/);
+});
+await caso('Atrasadas: emitir pide confirmar, escribir la cantidad (10 o más en producción) y recorre el servidor hasta terminar', async () => {
+  const pedidos = [], respuestas = [
+    { estado: 'ok', emitidas: 4, omitidas: 0, quedan: 6 }, { estado: 'ok', emitidas: 4, omitidas: 1, quedan: 1 }, { estado: 'ok', emitidas: 1, omitidas: 0, quedan: 0 }];
+  const el = { 'atr-desde': { value: '2026-10-01' }, 'atr-hasta': { value: '2026-10-31' }, 'atr-fecha': { value: '2026-10-31' }, 'atr-pto': { value: '4' }, 'atr-estado': { textContent: '' } };
+  ctx.document = { getElementById: id => el[id] || null };
+  ctx.fetch = async (url, o) => { pedidos.push(JSON.parse(o.body)); return { json: async () => (o.body.includes('arca_atrasadas') ? respuestas.shift() : {}) }; };
+  const confirmaciones = [], preguntas = []; ctx.confirm = m => { confirmaciones.push(m); return true; }; ctx.prompt = m => { preguntas.push(m); return '10'; };
+  State.atrasadas = { desde: '2026-10-01', hasta: '2026-10-31', fecha: '2026-10-31', pto: 4, modo: 'produccion', resumen: { cantidad: 10, total_centavos: 100000 } };
+  lectura = []; mensajes.length = 0;
+  try {
+    await M.atrasadasEmitir({});
+    const emisiones = pedidos.filter(p => p.accion === 'arca_atrasadas');
+    assert.equal(emisiones.length, 3); assert.deepEqual({ ...emisiones[0] }, { accion: 'arca_atrasadas', desde: '2026-10-01', hasta: '2026-10-31', fecha: '2026-10-31', pto_venta: 4 });
+    assert.match(confirmaciones[0], /EMITIR 10 facturas/); assert.match(confirmaciones[0], /REALES/); assert.match(confirmaciones[0], /Punto de venta 4/); assert.equal(preguntas.length, 1);
+    assert.match(State.atrasadas.mensaje, /Listo: 9 facturas emitidas y 1 omitidas/); assert.equal(State.atrasadas.corriendo, false); assert.equal(State.atrasadas.resumen, null);
+  } finally { State.atrasadas = null; delete ctx.fetch; delete ctx.prompt; ctx.confirm = () => true; delete ctx.document; }
+});
+await caso('Atrasadas: no emite si cambiaron los datos, si no confirman o si la cantidad escrita no coincide', async () => {
+  let llamadasWorker = 0; const el = { 'atr-desde': { value: '2026-10-01' }, 'atr-hasta': { value: '2026-10-31' }, 'atr-fecha': { value: '2026-10-31' }, 'atr-pto': { value: '4' } };
+  ctx.document = { getElementById: id => el[id] || null }; ctx.fetch = async () => { llamadasWorker++; return { json: async () => ({}) }; };
+  const base = () => ({ desde: '2026-10-01', hasta: '2026-10-31', fecha: '2026-10-31', pto: 4, modo: 'produccion', resumen: { cantidad: 12, total_centavos: 1 } });
+  try {
+    State.atrasadas = base(); el['atr-pto'].value = '5'; await M.atrasadasEmitir({}); assert.equal(llamadasWorker, 0); assert.match(mensajes.at(-1), /Cambiaste los datos/); el['atr-pto'].value = '4';
+    State.atrasadas = base(); ctx.confirm = () => false; await M.atrasadasEmitir({}); assert.equal(llamadasWorker, 0);
+    State.atrasadas = base(); ctx.confirm = () => true; ctx.prompt = () => '11'; await M.atrasadasEmitir({}); assert.equal(llamadasWorker, 0); assert.match(mensajes.at(-1), /No coincide la cantidad/);
+    State.atrasadas = base(); State.atrasadas.fecha = '2999-01-01'; el['atr-fecha'].value = '2999-01-01'; await M.atrasadasEmitir({}); assert.equal(llamadasWorker, 0); assert.match(mensajes.at(-1), /fecha/i);
+  } finally { State.atrasadas = null; delete ctx.fetch; delete ctx.prompt; ctx.confirm = () => true; delete ctx.document; }
+});
+await caso('Atrasadas: se detiene y avisa en la orden problemática; ante «detenido», error o corte de red no sigue', async () => {
+  const el = { 'atr-desde': { value: '2026-10-01' }, 'atr-hasta': { value: '2026-10-31' }, 'atr-fecha': { value: '2026-10-31' }, 'atr-pto': { value: '4' } };
+  ctx.document = { getElementById: id => el[id] || null };
+  const correr = async (respuestas, modo = 'homologacion') => {
+    let k = 0; ctx.fetch = async () => ({ json: async () => { const r = respuestas[Math.min(k++, respuestas.length - 1)]; if (r === 'RED') throw new Error('red'); return r; } });
+    State.atrasadas = { desde: '2026-10-01', hasta: '2026-10-31', fecha: '2026-10-31', pto: 4, modo, resumen: { cantidad: 3, total_centavos: 1 } };
+    await M.atrasadasEmitir({}); const msg = State.atrasadas.mensaje; State.atrasadas = null; return { msg, k };
+  };
+  try {
+    let r = await correr([{ estado: 'ok', emitidas: 1, omitidas: 0, quedan: 2 }, { estado: 'detenido', emitidas: 0, omitidas: 0, quedan: 2, detenido: { orden: '77', estado: 'rechazada', mensaje: '10016: fecha' } }]);
+    assert.match(r.msg, /SE DETUVO en la orden 77: 10016: fecha\. Emitidas 1/); assert.equal(r.k, 2);
+    r = await correr([{ estado: 'error', codigo: 'FECHA_FUTURA', mensaje: 'La fecha no puede ser futura.' }]); assert.match(r.msg, /FECHA_FUTURA.*futura/); assert.equal(r.k, 1);
+    r = await correr(['RED']); assert.match(r.msg, /No se pudo conectar/); assert.equal(r.k, 1);
+    r = await correr([{ estado: 'ok', emitidas: 0, omitidas: 0, quedan: 3 }]); assert.match(r.msg, /No avanzó/); assert.equal(r.k, 1);
+    r = await correr([{ estado: 'simulacion' }]); assert.match(r.msg, /simulación/);
+  } finally { State.atrasadas = null; delete ctx.fetch; delete ctx.document; }
+});
+await caso('Atrasadas: «Detener» corta antes de la próxima tanda', async () => {
+  const el = { 'atr-desde': { value: '2026-10-01' }, 'atr-hasta': { value: '2026-10-31' }, 'atr-fecha': { value: '2026-10-31' }, 'atr-pto': { value: '4' } };
+  ctx.document = { getElementById: id => el[id] || null }; let tandas = 0;
+  ctx.fetch = async () => ({ json: async () => { tandas++; M._atrParar = true; return { estado: 'ok', emitidas: 2, omitidas: 0, quedan: 5 }; } });
+  State.atrasadas = { desde: '2026-10-01', hasta: '2026-10-31', fecha: '2026-10-31', pto: 4, modo: 'homologacion', resumen: { cantidad: 7, total_centavos: 1 } };
+  try { await M.atrasadasEmitir({}); assert.equal(tandas, 1); assert.match(State.atrasadas.mensaje, /Detenido por vos\. Emitidas 2/); }
+  finally { State.atrasadas = null; delete ctx.fetch; delete ctx.document; M._atrParar = false; }
+});
 await caso('Formulario convierte campos numéricos y conserva versión al abrir', async () => {
   State.meliFacturas = [{ orden_id: '123', estado: 'pendiente', version: 4 }];
   const submit = {}, cancel = {}, form = { querySelector: () => submit };

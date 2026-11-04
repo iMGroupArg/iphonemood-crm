@@ -646,18 +646,22 @@ select option { background: var(--bg-elevated); }
 dialog.dlg-crm {
   margin: auto; padding: 20px; border: 1px solid var(--border); border-radius: 14px;
   background: var(--bg-card); color: var(--text);
-  width: min(440px, calc(100vw - 32px)); max-height: calc(100vh - 32px); max-height: calc(100dvh - 32px); overflow-y: auto;
+  width: min(520px, calc(100vw - 32px)); max-height: calc(100vh - 32px); max-height: calc(100dvh - 32px); overflow-y: auto;
   box-shadow: 0 20px 60px rgba(0,0,0,.25);
 }
 dialog.dlg-crm::backdrop { background: rgba(0,0,0,.45); }
 .dlg-crm form { display: flex; flex-direction: column; gap: 14px; }
-.dlg-crm h3 { font-size: 16px; font-weight: 600; }
+.dlg-crm h3 { font-size: 16px; font-weight: 600; display: flex; align-items: center; gap: 8px; }
+.dlg-crm h3 i { color: var(--blue); font-size: 18px; }
+.dlg-campos { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
 .dlg-crm p { font-size: 12.5px; line-height: 1.5; color: var(--text-secondary); }
 .dlg-crm label { display: flex; flex-direction: column; gap: 6px; font-size: 13px; font-weight: 500; }
 .dlg-crm input, .dlg-crm select { width: 100%; }
 .dlg-acciones { display: flex; gap: 8px; justify-content: flex-end; flex-wrap: wrap; margin-top: 4px; }
 @media (max-width: 480px) {
   dialog.dlg-crm { padding: 16px; }
+  .dlg-campos { grid-template-columns: 1fr; }
   .dlg-acciones { flex-direction: column-reverse; }
   .dlg-acciones .btn { width: 100%; justify-content: center; }
 }
+.m-sheet:has(.dlg-crm) { overflow: hidden; }   /* que el pie respete las esquinas redondeadas de la hoja */

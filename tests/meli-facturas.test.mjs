@@ -58,6 +58,44 @@ await caso('Motivos cerrados, traducidos y desplegable sin texto libre', async (
   assert.match(dialog.innerHTML, /<select name="motivo"/); assert.doesNotMatch(dialog.innerHTML, /<input|<textarea/);
   for (const motivo of Object.keys(M.MOTIVOS)) assert.match(dialog.innerHTML, new RegExp(`value="${motivo}"`));
 });
+await caso('«Marcar emitida» viene completo: Factura C, punto de venta 3 y el número siguiente al último registrado en ese punto', async () => {
+  State.meliFacturas = [];
+  assert.deepEqual({ ...M.sugerida() }, { tipo: 'C', pto_venta: 3, numero: '' });
+  State.meliFacturas = [
+    { orden_id: 'a', estado: 'emitida', tipo: 'C', pto_venta: 3, numero: 5 }, { orden_id: 'b', estado: 'emitida', tipo: 'C', pto_venta: 3, numero: 10 },
+    { orden_id: 'c', estado: 'emitida', tipo: 'C', pto_venta: 1, numero: 900 }, { orden_id: 'd', estado: 'pendiente' }, { orden_id: 'e', estado: 'no_corresponde', motivo: 'x' },
+  ];
+  assert.deepEqual({ ...M.sugerida() }, { tipo: 'C', pto_venta: 3, numero: 11 });
+  let dialog;
+  ctx.document = { createElement: () => (dialog = { innerHTML: '', querySelector: () => ({}), showModal() {}, remove() {}, close() {} }), body: { append() {} } };
+  await M.accion({ dataset: { orden: '123', estado: 'emitida' } });
+  assert.match(dialog.innerHTML, /<option value="C" selected>Factura C<\/option>/); assert.match(dialog.innerHTML, /name="pto_venta"[^>]*value="3"/); assert.match(dialog.innerHTML, /name="numero"[^>]*value="11"/);
+  assert.equal((dialog.innerHTML.match(/ selected>/g) || []).length, 1);
+  State.meliFacturas = [{ orden_id: 'z', estado: 'emitida', tipo: 'C', pto_venta: 3, numero: 99999999 }];
+  assert.equal(M.sugerida().numero, '');
+});
+await caso('Con la hoja del CRM (Sheet): usa su título, el formulario y el pie, envía el formulario y cierra al registrar', async () => {
+  State.meliFacturas = [{ orden_id: '123', estado: 'pendiente', version: 4 }];
+  const submit = {}, cancelar = {}, form = {}; let cerrada = false, abierta = null;
+  const el = { querySelector: sel => sel === 'form' ? form : sel === '[data-cancelar]' ? cancelar : submit };
+  ctx.Sheet = { abrir: o => { abierta = o; return { el, cerrar: () => { cerrada = true; } }; } };
+  ctx.document = { createElement: () => { throw new Error('no debería crear un dialog'); } };
+  ctx.FormData = class { *[Symbol.iterator]() { yield* Object.entries({ tipo: 'C', pto_venta: '3', numero: '12', emitida_el: '2020-01-01' }); } };
+  respuesta = { data: { ok: true, orden_id: '123', estado: 'emitida', version: 5 } };
+  lectura = [{ orden_id: '123', estado: 'emitida', ...datos, version: 5 }];
+  try {
+    await M.accion({ dataset: { orden: '123', estado: 'emitida' } });
+    assert.equal(abierta.titulo, 'Marcar factura como emitida');
+    assert.match(abierta.cuerpo, /<form id="dlg-factura">/); assert.match(abierta.cuerpo, /name="pto_venta"/);
+    assert.match(abierta.pie, /type="submit" form="dlg-factura"/); assert.match(abierta.pie, /data-cancelar/);
+    cancelar.onclick(); assert.equal(cerrada, true); cerrada = false;
+    await form.onsubmit({ preventDefault() {}, currentTarget: form });
+    assert.equal(llamadas.at(-1).p_pto_venta, 3); assert.equal(llamadas.at(-1).p_numero, 12); assert.equal(llamadas.at(-1).p_version_esperada, 4);
+    assert.equal(cerrada, true); assert.equal(submit.disabled, false);
+    await M.accion({ dataset: { orden: '123', estado: 'no_corresponde' } });
+    assert.equal(abierta.titulo, 'La factura no corresponde'); assert.match(abierta.cuerpo, /<select name="motivo"/);
+  } finally { delete ctx.Sheet; }
+});
 await caso('Formulario convierte campos numéricos y conserva versión al abrir', async () => {
   State.meliFacturas = [{ orden_id: '123', estado: 'pendiente', version: 4 }];
   const submit = {}, cancel = {}, form = { querySelector: () => submit };

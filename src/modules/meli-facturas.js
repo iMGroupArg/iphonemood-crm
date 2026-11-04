@@ -20,6 +20,13 @@ const MeliFacturas = {
     return `${p('year')}-${p('month')}-${p('day')}`;
   },
   numero(f) { return `${f.tipo} ${String(f.pto_venta).padStart(4, '0')}-${String(f.numero).padStart(8, '0')}`; },
+  // Valores que ya vienen completos en «Marcar emitida» (se pueden corregir): Factura C, el punto de venta 3 y el número siguiente al último ya registrado en ese punto.
+  PTO_VENTA_HABITUAL: 3,
+  sugerida() {
+    const pto = this.PTO_VENTA_HABITUAL;
+    const ultimo = (State.meliFacturas || []).filter(f => f.estado === 'emitida' && Number(f.pto_venta) === pto && Number.isInteger(Number(f.numero))).reduce((m, f) => Math.max(m, Number(f.numero)), 0);
+    return { tipo: 'C', pto_venta: pto, numero: ultimo > 0 && ultimo < 99999999 ? ultimo + 1 : '' };
+  },
   validar(estado, datos = {}, hoy = this.hoy()) {
     const { tipo, pto_venta, numero, emitida_el, motivo } = datos;
     if (!['pendiente', 'emitida', 'no_corresponde'].includes(estado)) return 'El estado de factura no es válido.';
@@ -227,17 +234,31 @@ const MeliFacturas = {
       if (confirm(`¿Reabrir la factura como pendiente? ${this.REABRIR}`)) await this.marcar(orden, estado, {}, btn, version);
       return;
     }
-    const dialog = document.createElement('dialog'); dialog.className = 'dlg-crm';
     const e = s => State.esc(String(s));
-    dialog.innerHTML = `<form><h3>${estado === 'emitida' ? 'Marcar factura como emitida' : 'La factura no corresponde'}</h3><p>${e(this.TEXTO)}</p>${estado === 'emitida' ? `<label>Tipo de comprobante <select name="tipo">${['A', 'B', 'C', 'E', 'M'].map(t => `<option value="${t}">Factura ${t}</option>`).join('')}</select></label><label>Punto de venta <input name="pto_venta" type="number" min="1" max="99999" step="1" required></label><label>Número <input name="numero" type="number" min="1" max="99999999" step="1" required></label><label>Fecha de emisión <input name="emitida_el" type="date" max="${this.hoy()}" value="${this.hoy()}" required></label>` : `<label>Motivo <select name="motivo" required><option value="">Elegí un motivo</option>${Object.entries(this.MOTIVOS).map(([k, v]) => `<option value="${e(k)}">${e(v)}</option>`).join('')}</select></label>`}<div class="dlg-acciones"><button type="button" class="btn">Cancelar</button><button type="submit" class="btn btn-primary">Registrar</button></div></form>`;
-    dialog.querySelector('button[type="button"]').onclick = () => dialog.close();
-    dialog.onclose = () => dialog.remove();
-    dialog.querySelector('form').onsubmit = async event => {
+    const sug = this.sugerida();
+    const campos = estado === 'emitida'
+      ? `<label>Tipo de comprobante <select name="tipo">${['A', 'B', 'C', 'E', 'M'].map(t => `<option value="${t}"${t === sug.tipo ? ' selected' : ''}>Factura ${t}</option>`).join('')}</select></label><label>Punto de venta <input name="pto_venta" type="number" min="1" max="99999" step="1" value="${e(sug.pto_venta)}" required></label><label>Número <input name="numero" type="number" min="1" max="99999999" step="1" value="${e(sug.numero)}" required></label><label>Fecha de emisión <input name="emitida_el" type="date" max="${this.hoy()}" value="${this.hoy()}" required></label>`
+      : `<label>Motivo <select name="motivo" required><option value="">Elegí un motivo</option>${Object.entries(this.MOTIVOS).map(([k, v]) => `<option value="${e(k)}">${e(v)}</option>`).join('')}</select></label>`;
+    const titulo = estado === 'emitida' ? 'Marcar factura como emitida' : 'La factura no corresponde';
+    const enviar = (cerrar, boton) => async event => {
       event.preventDefault();
       const form = event.currentTarget, datos = Object.fromEntries(new FormData(form));
       if (estado === 'emitida') { datos.pto_venta = Number(datos.pto_venta); datos.numero = Number(datos.numero); }
-      if (await this.marcar(orden, estado, datos, form.querySelector('button[type="submit"]'), version)) dialog.close();
+      if (await this.marcar(orden, estado, datos, boton(form), version)) cerrar();
     };
+    // Con la hoja del CRM (la misma de «Filtros» y «Período»): hoja inferior en el celular y ventana centrada en escritorio.
+    if (typeof Sheet !== 'undefined') {
+      const h = Sheet.abrir({ titulo, cuerpo: `<div class="dlg-crm"><form id="dlg-factura"><p>${e(this.TEXTO)}</p><div class="dlg-campos">${campos}</div></form></div>`,
+        pie: '<button type="button" class="btn" data-cancelar>Cancelar</button><button type="submit" form="dlg-factura" class="btn btn-primary">Registrar</button>' });
+      h.el.querySelector('[data-cancelar]').onclick = () => h.cerrar();
+      h.el.querySelector('form').onsubmit = enviar(() => h.cerrar(), () => h.el.querySelector('button[type="submit"]'));
+      return;
+    }
+    const dialog = document.createElement('dialog'); dialog.className = 'dlg-crm';
+    dialog.innerHTML = `<form><h3><i class="ti ti-file-invoice"></i> ${titulo}</h3><p>${e(this.TEXTO)}</p><div class="dlg-campos">${campos}</div><div class="dlg-acciones"><button type="button" class="btn">Cancelar</button><button type="submit" class="btn btn-primary">Registrar</button></div></form>`;
+    dialog.querySelector('button[type="button"]').onclick = () => dialog.close();
+    dialog.onclose = () => dialog.remove();
+    dialog.querySelector('form').onsubmit = enviar(() => dialog.close(), form => form.querySelector('button[type="submit"]'));
     document.body.append(dialog); dialog.showModal();
   },
   async marcar(orden, estado, datos = {}, btn, version = this.de({ orderId: orden }).version ?? null) {

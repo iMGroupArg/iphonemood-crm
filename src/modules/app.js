@@ -26,6 +26,7 @@ import './meli-ordenes.js';
 import './meli-adelantos.js';
 import './meli-facturas.js';
 import './meli-emitidas.js';
+import './meli-pdf.js';
 import './liberaciones.js';
 import './actividades.js';
 import './agentes.js';

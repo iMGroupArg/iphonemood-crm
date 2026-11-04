@@ -93,7 +93,7 @@ const MeliEmitidas = {
     if (d.error) return `<div class="card" style="margin-bottom:10px;font-size:12.5px">${cab}<div class="mf-nota">No se pudo leer la lista. Probá actualizar.</div><div class="mf-acciones"><button class="btn btn-sm" onclick="MeliEmitidas.actualizar()">Actualizar</button><span></span></div></div>`;
     const lista = this.filtradas(), visibles = lista.slice(0, this._limite);
     const total = lista.reduce((t, f) => t + (f.importeCentavos || 0), 0);
-    const filas = visibles.map(f => `<tr><td class="c-fecha">${e(this._dia(f.fecha))}</td><td class="c-fact">${e(String(f.pto).padStart(5, '0'))}-${e(String(f.numero).padStart(8, '0'))}</td><td class="c-id" data-l="Compra ">${e(f.orden)}</td><td class="c-nom">${e(f.nombre || '—')}</td><td class="mf-der c-imp"><b>${f.importeCentavos === null ? '—' : e(this._pesos(f.importeCentavos))}</b></td><td class="c-org">${e(f.origen)}</td></tr>`).join('');
+    const filas = visibles.map(f => `<tr><td class="c-fecha">${e(this._dia(f.fecha))}</td><td class="c-fact">${e(String(f.pto).padStart(5, '0'))}-${e(String(f.numero).padStart(8, '0'))}</td><td class="c-id" data-l="Compra ">${e(f.orden)}<span class="mf-solo-movil"> · ${e(f.origen)}</span></td><td class="c-nom">${e(f.nombre || '—')}</td><td class="mf-der c-imp"><b>${f.importeCentavos === null ? '—' : e(this._pesos(f.importeCentavos))}</b></td><td class="c-org">${e(f.origen)}</td><td class="c-pdf">${f.tipo === 'C' && f.pto > 0 && f.numero > 0 ? `<button class="btn btn-sm" title="Descargar la factura en PDF" aria-label="Descargar PDF de la factura ${e(String(f.pto).padStart(5, '0'))}-${e(String(f.numero).padStart(8, '0'))}" onclick="MeliEmitidas.pdf('${e(f.pto)}-${e(f.numero)}', this)"><i class="ti ti-file-download"></i> PDF</button>` : ''}</td></tr>`).join('');
     return `<div class="card" style="margin-bottom:10px;font-size:12.5px">
       <div class="mf-cab"><b>Facturas emitidas</b><span><b>${e(lista.length)}</b> · ${e(this._pesos(total))}</span></div>
       <div class="mf-filtros">
@@ -102,10 +102,28 @@ const MeliEmitidas = {
         <label>Buscar<input id="fe-q" type="search" placeholder="Nombre, ID de compra o producto" value="${e(this._f.q)}" oninput="MeliEmitidas.filtrar()"></label>
       </div>
       <div class="mf-acciones"><button class="btn btn-sm" onclick="MeliEmitidas.actualizar()"><i class="ti ti-refresh"></i> Actualizar</button><button class="btn btn-sm btn-primary" onclick="MeliEmitidas.descargar()"${lista.length ? '' : ' disabled'}><i class="ti ti-download"></i> Descargar CSV</button></div>
-      ${lista.length ? `<div class="mf-tabla"><table><thead><tr><th>Fecha</th><th>Factura</th><th>ID de compra</th><th>Nombre</th><th class="mf-der">Importe</th><th>Origen</th></tr></thead><tbody>${filas}</tbody></table></div>
+      ${lista.length ? `<div class="mf-tabla"><table><thead><tr><th>Fecha</th><th>Factura</th><th>ID de compra</th><th>Nombre</th><th class="mf-der">Importe</th><th>Origen</th><th class="mf-der">PDF</th></tr></thead><tbody>${filas}</tbody></table></div>
         ${lista.length > visibles.length ? `<div class="mf-acciones"><button class="btn btn-sm" onclick="MeliEmitidas.verMas()">Ver más (${e(lista.length - visibles.length)})</button><span></span></div>` : ''}`
         : '<div class="mf-nota">No hay facturas con ese filtro.</div>'}
     </div>`;
+  },
+
+  ERRORES_PDF: { no_existe: 'ARCA no tiene ese comprobante.', simulacion: 'ARCA está en modo simulación: no hay comprobantes reales.', PARAMETRO_INVALIDO: 'Los datos de la factura no son válidos.' },
+  // PDF de UNA factura: se le pregunta a ARCA por ese comprobante (así lo que se ve es lo que ARCA tiene) y se arma el archivo en el navegador.
+  async pdf(clave, btn) {
+    const [pto, numero] = String(clave || '').split('-').map(Number);
+    const fila = ((this._datos && this._datos.filas) || []).find(f => f.pto === pto && f.numero === numero);
+    if (!fila || !(pto > 0) || !(numero > 0)) { toast('No se encontró esa factura.'); return; }
+    if (btn) btn.disabled = true;
+    try {
+      const token = await window.Meli?._token?.();
+      const r = await fetch('/api/meli/worker', { method: 'POST', headers: { 'x-crm-token': token || '', 'Content-Type': 'application/json' }, body: JSON.stringify({ accion: 'arca_comprobante', pto, numero, tipo: 11 }) });
+      let j = null; try { j = await r.json(); } catch { /* sin cuerpo */ }
+      if (!r.ok || !j) { toast('No se pudo consultar a ARCA. Probá de nuevo.'); return; }
+      if (j.estado !== 'ok') { toast(this.ERRORES_PDF[j.estado] || this.ERRORES_PDF[j.codigo] || j.mensaje || 'No se pudo consultar a ARCA. Probá de nuevo.'); return; }
+      if (!window.MeliPdf) { toast('Falta el módulo de PDF: recargá el CRM.'); return; }
+      await window.MeliPdf.descargar(j, { orden: fila.orden, nombre: fila.nombre, producto: fila.producto });
+    } catch { toast('No se pudo armar el PDF. Probá de nuevo.'); } finally { if (btn) btn.disabled = false; }
   },
 
   // CSV para Excel en español: separador «;», coma decimal, UTF-8 con BOM. Los textos que empiezan con = + - @ se neutralizan (nada de fórmulas).

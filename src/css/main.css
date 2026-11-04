@@ -726,3 +726,20 @@ dialog.dlg-crm::backdrop { background: rgba(0,0,0,.45); }
   .mf-tabla .c-org { grid-area: org; text-align: right; color: var(--text-secondary); }
 }
 @media (prefers-reduced-motion: reduce) { .mf-pista, .mf-pista::after { transition: none; } }
+
+/* ── Facturación: botoncito de información con llamada (el texto chico no queda escrito en la tarjeta) ── */
+.mf-seccion .card { position: relative; }
+.mf-tit { display: inline-flex; align-items: center; gap: 8px; flex-wrap: wrap; min-width: 0; }
+.mf-info-w { position: relative; display: inline-flex; }
+.mf-info { width: 28px; height: 28px; min-height: 28px !important; padding: 0; border-radius: 50%; border: 1px solid var(--border); background: var(--bg-elevated); color: var(--text-secondary); display: inline-flex; align-items: center; justify-content: center; cursor: pointer; font-size: 16px; line-height: 1; -webkit-tap-highlight-color: transparent; }
+.mf-info:hover { color: var(--blue); border-color: var(--blue); }
+.mf-info[aria-expanded="true"] { background: var(--blue-light); color: var(--blue); border-color: var(--blue); }
+.mf-info:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; }
+.mf-llamada { position: absolute; z-index: 30; left: 0; top: calc(100% + 10px); width: min(360px, 78vw); padding: 10px 12px; border-radius: 12px; background: var(--bg); border: 1px solid var(--border); box-shadow: var(--shadow-md); font-size: 12px; line-height: 1.55; font-weight: 400; color: var(--text); text-align: left; }
+.mf-llamada::before { content: ''; position: absolute; top: -6px; left: 9px; width: 10px; height: 10px; background: var(--bg); border-left: 1px solid var(--border); border-top: 1px solid var(--border); transform: rotate(45deg); }
+.mf-llamada[hidden] { display: none; }
+@media (max-width: 560px) {
+  .mf-info-w { position: static; }
+  .mf-llamada { left: 12px; right: 12px; top: auto; width: auto; margin-top: 10px; }
+  .mf-llamada::before { display: none; }
+}

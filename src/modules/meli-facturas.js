@@ -121,11 +121,9 @@ const MeliFacturas = {
     const on = !!(a.factura_auto || a.nota_auto);
     const sw = (id, texto, marcado, fn) => `<label class="mf-sw mf-fila"><span>${texto}</span><input type="checkbox" role="switch" id="${id}"${marcado ? ' checked' : ''} onchange="${fn}"><span class="mf-pista"></span></label>`;
     return `<div class="card mf-card">
-      <div class="mf-cab"><b>Facturación automática</b>
+      <div class="mf-cab"><span class="mf-tit"><b>Facturación automática</b>${a.ambiente ? `<span class="badge ${a.ambiente === 'produccion' ? 'b-green' : 'b-amber'}">${a.ambiente === 'produccion' ? 'PRODUCCIÓN' : 'PRUEBAS'}</span>` : ''}${this.info(`Factura sola cada venta pagada <b>desde que la encendés</b> (no las anteriores) y emite la nota de crédito si se cancela. Reembolsos parciales y reclamos siguen manuales. Si falla, reintenta y te avisa acá.${a.ambiente ? `<br>Encendida para: <b>${e(this.NOMBRE_MODO[a.ambiente] || a.ambiente)}</b>${a.desde && a.factura_auto ? ' · factura sola desde ' + e(new Date(a.desde).toLocaleString('es-AR')) : ''}. Si cambia el ambiente de ARCA, hay que volver a encenderla.` : ''}`, 'Cómo funciona la facturación automática')}</span>
         <label class="mf-sw"><span class="mf-estado">${on ? 'Encendida' : 'Apagada'}</span><input type="checkbox" role="switch" id="fauto-master" aria-label="Facturación automática"${on ? ' checked' : ''} onchange="MeliFacturas.maestroAuto(this)"><span class="mf-pista"></span></label></div>
-      <div class="mf-nota">Factura sola cada venta pagada <b>desde que la encendés</b> (no las anteriores) y emite la nota de crédito si se cancela. Reembolsos parciales y reclamos siguen manuales. Si falla, reintenta y te avisa acá.</div>
       <div class="mf-filas">${sw('fauto-factura', 'Facturas de ventas nuevas', a.factura_auto, 'MeliFacturas.guardarAuto(this)')}${sw('fauto-nota', 'Notas de crédito al cancelar', a.nota_auto, 'MeliFacturas.guardarAuto(this)')}</div>
-      ${a.ambiente ? `<div class="mf-nota">Encendida para: <b>${e(this.NOMBRE_MODO[a.ambiente] || a.ambiente)}</b>${a.desde && a.factura_auto ? ' · factura sola desde ' + e(new Date(a.desde).toLocaleString('es-AR')) : ''}. Si cambia el ambiente de ARCA, hay que volver a encenderla.</div>` : ''}
       ${avisos}
       ${pend ? `<div style="margin-top:8px;font-size:12px"><b>Pendientes con problemas</b>${pend}</div>` : ''}
     </div>`;
@@ -215,9 +213,8 @@ const MeliFacturas = {
     const puedeEmitir = r && Number(r.cantidad) > 0 && !a.corriendo;
     const abierta = a.abierta !== undefined ? !!a.abierta : !!(r || a.corriendo || a.mensaje);
     return `<div class="card" style="margin-bottom:10px;font-size:12.5px">
-      <div class="mf-cab"><b>Emitir facturas atrasadas</b><button class="btn btn-sm ${abierta ? 'btn-primary' : ''}" onclick="MeliFacturas.alternarAtr()">${abierta ? 'Cerrar' : 'Abrir'}</button></div>
-      ${abierta ? `<div class="mf-nota">Factura las ventas pagadas que nunca se facturaron, de la más vieja a la más nueva, con el punto de venta y la fecha que elijas. Si algo falla, se detiene; repetir no duplica.</div>
-      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px">
+      <div class="mf-cab"><span class="mf-tit"><b>Emitir facturas atrasadas</b>${this.info('Factura las ventas pagadas que nunca se facturaron, de la más vieja a la más nueva, con el punto de venta y la fecha que elijas. Si algo falla, se detiene; repetir no duplica.', 'Cómo funcionan las facturas atrasadas')}</span><button class="btn btn-sm ${abierta ? 'btn-primary' : ''}" onclick="MeliFacturas.alternarAtr()">${abierta ? 'Cerrar' : 'Abrir'}</button></div>
+      ${abierta ? `      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px">
         <label style="display:flex;flex-direction:column;gap:4px">Ventas desde<input id="atr-desde" type="date" value="${e(v.desde)}" oninput="MeliFacturas.atrasadasCampo()"></label>
         <label style="display:flex;flex-direction:column;gap:4px">Ventas hasta<input id="atr-hasta" type="date" value="${e(v.hasta)}" oninput="MeliFacturas.atrasadasCampo()"></label>
         <label style="display:flex;flex-direction:column;gap:4px">Punto de venta<input id="atr-pto" type="number" min="1" max="99999" step="1" value="${e(v.pto)}" oninput="MeliFacturas.atrasadasCampo()"></label>
@@ -313,6 +310,25 @@ const MeliFacturas = {
   categoriaDe(limiteCentavos) { const c = this.CATEGORIAS.find(x => x[1] === Number(limiteCentavos)); return c ? c[0] : null; },
   _verCategorias: false,
   verCategorias() { this._verCategorias = !this._verCategorias; this.pintarSeccion(); },
+  // Botoncito de información: el texto chico va en una llamada que se abre al tocarlo (no queda escrito en la tarjeta). `html` ya viene escapado.
+  info(html, etiqueta = 'Más información') {
+    return `<span class="mf-info-w"><button type="button" class="mf-info" aria-label="${State.esc(etiqueta)}" aria-expanded="false" onclick="MeliFacturas.infoAlternar(this)"><i class="ti ti-info-circle"></i></button><span class="mf-llamada" role="note" hidden>${html}</span></span>`;
+  },
+  infoCerrar(salvo) {
+    if (typeof document === 'undefined' || !document.querySelectorAll) return;
+    document.querySelectorAll('.mf-info-w').forEach(w => {
+      if (w === salvo) return;
+      const l = w.querySelector('.mf-llamada'), b = w.querySelector('.mf-info');
+      if (l) l.hidden = true; if (b) b.setAttribute('aria-expanded', 'false');
+    });
+  },
+  infoAlternar(btn) {
+    const w = btn && btn.closest ? btn.closest('.mf-info-w') : null, l = w && w.querySelector('.mf-llamada');
+    if (!l) return;
+    const abrir = l.hidden;
+    this.infoCerrar(w);
+    l.hidden = !abrir; btn.setAttribute('aria-expanded', abrir ? 'true' : 'false');
+  },
   // Paneles que se abren y cierran con un botón (detalle por mes, límite, reglas).
   _ui: {},
   alternar(k) { this._ui[k] = !this._ui[k]; this.pintarSeccion(); },
@@ -352,7 +368,7 @@ const MeliFacturas = {
       </table><div style="font-size:11px;color:var(--text-secondary);margin-top:4px">Valores de ARCA vigentes desde el 1/08/2026.</div></div>` : '';
     return `<div class="card" style="margin-bottom:10px;font-size:12.5px">
       <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;justify-content:space-between">
-        <div style="font-size:16px"><b>Facturación electrónica</b> <span style="font-size:12px;color:var(--text-secondary)">| ${e(fmtDia(a.desde))} al ${e(fmtDia(a.hasta))}</span> <span class="badge ${est.clase}" style="vertical-align:middle">${e(est.txt)}</span></div>
+        <div style="font-size:16px"><b>Facturación electrónica</b> <span style="font-size:12px;color:var(--text-secondary)">| ${e(fmtDia(a.desde))} al ${e(fmtDia(a.hasta))}</span> <span class="badge ${est.clase}" style="vertical-align:middle">${e(est.txt)}</span>${this.info(`Seguimiento interno: no bloquea ninguna factura. Suma las facturas reales (producción) autorizadas por ARCA desde el CRM y resta las notas de crédito.<br>Última actualización: ${e(fmtDia(a.hasta))}.`, 'Cómo se calcula')}</div>
         <button class="btn btn-sm" onclick="MeliFacturas.verCategorias()">${this._verCategorias ? 'OCULTAR CATEGORÍAS' : 'VER CATEGORÍAS'}</button>
       </div>
       ${categorias}
@@ -363,8 +379,6 @@ const MeliFacturas = {
         <div style="display:flex;gap:8px;align-items:flex-start">${icono('3 7 9 13 13 9 21 17')}<div><div style="font-size:16px;font-weight:700">${e(this._pesos(-nc))}</div><div style="color:var(--text-secondary)">${e(ncCant)} notas de crédito</div></div></div>
         ${fuera > 0 ? `<div style="display:flex;gap:8px;align-items:flex-start">${icono('4 12 10 18 20 6')}<div><div style="font-size:16px;font-weight:700">${e(this._pesos(fuera))}</div><div style="color:var(--text-secondary)">facturado fuera del CRM</div></div></div>` : ''}
       </div>
-      <div style="text-align:right;font-size:11.5px;color:var(--text-secondary);margin-top:8px">Última actualización: ${e(fmtDia(a.hasta))}</div>
-      <div class="mf-nota">Seguimiento interno: no bloquea ninguna factura. Suma las facturas reales (producción) autorizadas por ARCA desde el CRM y resta las notas de crédito.</div>
       <div class="mf-acciones">
         <button class="btn btn-sm ${this._ui.meses ? 'btn-primary' : ''}" onclick="MeliFacturas.alternar('meses')">Detalle por mes</button>
         <button class="btn btn-sm ${this._ui.limite ? 'btn-primary' : ''}" onclick="MeliFacturas.alternar('limite')">Límite y fuera del CRM</button>
@@ -425,8 +439,7 @@ const MeliFacturas = {
     const e = s => State.esc(String(s ?? ''));
     return `<div class="mf-seccion">${this.cabecera(State.meliOrdenes || [])}
       <div class="card" style="margin-bottom:10px;font-size:12.5px">
-        <div class="mf-cab"><b>Conexión con ARCA</b><button class="btn btn-sm" id="meli-btn-arca" onclick="Meli.arcaDiagnostico()" title="Prueba de solo lectura contra ARCA: no emite facturas"><i class="ti ti-file-certificate"></i> Probar conexión</button></div>
-        <div class="mf-nota">Solo lectura: revisa el servicio, el certificado y el último número de cada punto de venta. No emite nada.</div>
+        <div class="mf-cab"><span class="mf-tit"><b>Conexión con ARCA</b>${this.info('Solo lectura: revisa el servicio, el certificado y el último número de cada punto de venta. No emite nada.', 'Qué hace la prueba de ARCA')}</span><button class="btn btn-sm" id="meli-btn-arca" onclick="Meli.arcaDiagnostico()" title="Prueba de solo lectura contra ARCA: no emite facturas"><i class="ti ti-file-certificate"></i> Probar conexión</button></div>
         <div id="meli-arca-salida" style="margin-top:10px"></div>
       </div>${window.MeliEmitidas ? window.MeliEmitidas.vista() : ''}</div>`;
   },
@@ -500,3 +513,7 @@ const MeliFacturas = {
   },
 };
 window.MeliFacturas = MeliFacturas;
+if (typeof document !== 'undefined' && document.addEventListener) {
+  document.addEventListener('click', e => { if (!(e.target && e.target.closest && e.target.closest('.mf-info-w'))) MeliFacturas.infoCerrar(); });
+  document.addEventListener('keydown', e => { if (e.key === 'Escape') MeliFacturas.infoCerrar(); });
+}

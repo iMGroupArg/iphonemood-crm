@@ -31,6 +31,15 @@ await caso('Interruptores on/off: general y uno por función, con textos cortos 
   assert.match(h, />Encendida</); assert.match(h, /fauto-master"[^>]*checked/); assert.match(h, /fauto-factura"[^>]*checked/); assert.doesNotMatch(h, /fauto-nota"[^>]*checked/);
   assert.match(h, /onchange="MeliFacturas\.maestroAuto\(this\)"/); assert.match(h, /id="fauto-factura"[^>]*onchange="MeliFacturas\.guardarAuto\(this\)"/);
 });
+await caso('Cada interruptor va con su texto a la izquierda y pegado a él (no flotando al otro extremo de la fila)', () => {
+  const css = fs.readFileSync(new URL('../src/css/main.css', import.meta.url), 'utf8');
+  const fila = /\.mf-sw\.mf-fila \{([^}]*)\}/.exec(css)[1], filas = /\.mf-filas \{([^}]*)\}/.exec(css)[1];
+  assert.match(fila, /justify-content: flex-start/); assert.doesNotMatch(fila, /space-between/); assert.match(fila, /display: inline-flex/);
+  assert.match(filas, /display: flex/); assert.match(filas, /flex-wrap: wrap/); assert.doesNotMatch(filas, /grid/);
+  const { M } = cargar({ estado: base }); const h = M.tarjetaAuto();
+  assert.match(h, /<label class="mf-sw mf-fila"><span>Facturas de ventas nuevas<\/span><input type="checkbox" role="switch" id="fauto-factura"/);
+  assert.match(h, /<label class="mf-sw mf-fila"><span>Notas de crédito al cancelar<\/span><input type="checkbox" role="switch" id="fauto-nota"/);
+});
 await caso('Interruptor general: al encender prende los dos y guarda; al apagar apaga los dos y guarda sin pedir confirmación', async () => {
   const on = cargar({ estado: base, checks: { 'fauto-master': true, 'fauto-factura': false, 'fauto-nota': false } });
   const mOn = { checked: true }; await on.M.maestroAuto(mOn);

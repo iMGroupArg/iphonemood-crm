@@ -1,0 +1,3 @@
+Montserrat — The Montserrat Project Authors (https://github.com/JulietaUla/Montserrat).
+Licencia: SIL Open Font License 1.1 (https://openfontlicense.org). Se puede usar, copiar y redistribuir libremente.
+Archivo local para no depender de servidores externos (la política de seguridad del CRM solo permite fuentes propias).

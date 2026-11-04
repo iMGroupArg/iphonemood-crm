@@ -665,3 +665,15 @@ dialog.dlg-crm::backdrop { background: rgba(0,0,0,.45); }
   .dlg-acciones .btn { width: 100%; justify-content: center; }
 }
 .m-sheet:has(.dlg-crm) { overflow: hidden; }   /* que el pie respete las esquinas redondeadas de la hoja */
+
+/* Tipografía Montserrat para el cuadro de facturas (archivo propio: la política de seguridad solo permite fuentes del mismo sitio). */
+@font-face {
+  font-family: 'Montserrat'; src: url('/assets/vendor/montserrat/Montserrat-VariableFont_wght.ttf') format('truetype');
+  font-weight: 100 900; font-style: normal; font-display: swap;
+}
+.m-sheet:has(.dlg-crm), .m-sheet:has(.dlg-crm) :is(h2, p, label, input, select, button, span) { font-family: 'Montserrat', var(--font); }
+/* En escritorio: centrado exacto (arriba/abajo/izquierda/derecha) sin depender de transform. */
+@media (min-width: 1024px) {
+  .m-sheet:has(.dlg-crm) { top: 0; bottom: 0; left: 0; right: 0; margin: auto; width: min(560px, 92vw); height: fit-content; max-height: 84vh; transform: scale(.98); }
+  .m-sheet.visible:has(.dlg-crm) { transform: none; }
+}

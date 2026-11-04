@@ -26,6 +26,7 @@
 --     puede inventarse el JWT (request.jwt.claims) y pasar is_authorized_user(). Este script le saca a PUBLIC la
 --     ejecución de las funciones de `public` y se la devuelve a cada rol que ya la tenía, MENOS a los dos roles de
 --     agentes. Volver a correr este script después de cualquier migración que cree funciones nuevas.
+--   · Lo mismo con los esquemas internos de Supabase a los que PUBLIC entra (en producción: `net`, el de pg_net).
 --
 --  REQUISITOS: is_authorized_user() y usuarios_autorizados (RLS base). blog_posts es opcional (sin ella, el
 --  borrador de blog avisa). Idempotente: se puede correr de nuevo. No cambia ningún dato existente.
@@ -641,6 +642,80 @@ BEGIN
   END IF;
 END $$;
 
+-- ── 9 · Esquemas internos de Supabase: misma receta ──────────────────────────
+-- En Supabase, `net` (pg_net: la base manda pedidos a internet) nace abierto a PUBLIC. Un agente manipulado podría usarlo
+-- para mandar datos afuera. Para cada esquema interno al que entran los agentes: el permiso de USO y el de EJECUTAR sus
+-- funciones se otorga EXPLÍCITO a cada rol que ya lo tenía (postgres —el reloj de facturación con pg_cron—, anon,
+-- authenticated, service_role, …: nada cambia para ellos) y recién después se revoca de PUBLIC. Si Supabase no deja
+-- tocarlo (otro dueño) o queda algo abierto, el script se deshace entero (FUNCIONES_SIN_CERRAR / ESQUEMA_SIN_CERRAR).
+DO $$
+DECLARE e RECORD; f RECORD; r RECORD; t RECORD; pr TEXT; v_abiertos TEXT; v_tocados TEXT[] := '{}';
+BEGIN
+  FOR e IN
+    SELECT n.oid, n.nspname FROM pg_namespace n
+     WHERE n.nspname IN ('auth', 'storage', 'vault', 'net', 'cron', 'supabase_functions', 'graphql', 'realtime')
+       AND (has_schema_privilege('agentes_ro', n.oid, 'USAGE') OR has_schema_privilege('agentes_revisor', n.oid, 'USAGE'))
+  LOOP
+    v_tocados := v_tocados || e.nspname::text;
+    BEGIN
+      -- Tablas y secuencias del esquema (en net: la cola de pedidos y las respuestas): cada privilegio por separado.
+      FOR t IN SELECT c.oid, c.relkind, format('%I.%I', e.nspname, c.relname) AS nombre FROM pg_class c
+                WHERE c.relnamespace = e.oid AND c.relkind IN ('r', 'p', 'v', 'm', 'f', 'S')
+      LOOP
+        FOREACH pr IN ARRAY CASE WHEN t.relkind = 'S' THEN ARRAY['USAGE', 'SELECT', 'UPDATE']
+                                 ELSE ARRAY['SELECT', 'INSERT', 'UPDATE', 'DELETE', 'TRUNCATE', 'REFERENCES', 'TRIGGER'] END
+        LOOP
+          CONTINUE WHEN NOT (CASE WHEN t.relkind = 'S' THEN has_sequence_privilege('agentes_ro', t.oid, pr) OR has_sequence_privilege('agentes_revisor', t.oid, pr)
+                                  ELSE has_table_privilege('agentes_ro', t.oid, pr) OR has_table_privilege('agentes_revisor', t.oid, pr) END);
+          FOR r IN SELECT rolname FROM pg_roles
+                    WHERE rolname NOT LIKE 'pg\_%' AND rolname NOT IN ('agentes_ro', 'agentes_revisor')
+                      AND CASE WHEN t.relkind = 'S' THEN has_sequence_privilege(oid, t.oid, pr) ELSE has_table_privilege(oid, t.oid, pr) END
+          LOOP
+            EXECUTE format('GRANT %s ON %s %s TO %I', pr, CASE WHEN t.relkind = 'S' THEN 'SEQUENCE' ELSE 'TABLE' END, t.nombre, r.rolname);
+          END LOOP;
+          EXECUTE format('REVOKE %s ON %s %s FROM PUBLIC', pr, CASE WHEN t.relkind = 'S' THEN 'SEQUENCE' ELSE 'TABLE' END, t.nombre);
+        END LOOP;
+      END LOOP;
+      -- Funciones del esquema (has_function_privilege no depende del USO del esquema: el orden no importa).
+      FOR f IN SELECT p.oid, p.oid::regprocedure AS firma FROM pg_proc p
+                WHERE p.pronamespace = e.oid AND p.prokind IN ('f', 'p')
+                  AND (has_function_privilege('agentes_ro', p.oid, 'EXECUTE') OR has_function_privilege('agentes_revisor', p.oid, 'EXECUTE'))
+      LOOP
+        FOR r IN SELECT rolname FROM pg_roles
+                  WHERE rolname NOT LIKE 'pg\_%' AND rolname NOT IN ('agentes_ro', 'agentes_revisor')
+                    AND has_function_privilege(oid, f.oid, 'EXECUTE')
+        LOOP
+          EXECUTE format('GRANT EXECUTE ON ROUTINE %s TO %I', f.firma, r.rolname);
+        END LOOP;
+        EXECUTE format('REVOKE EXECUTE ON ROUTINE %s FROM PUBLIC', f.firma);
+      END LOOP;
+      FOR r IN SELECT rolname FROM pg_roles
+                WHERE rolname NOT LIKE 'pg\_%' AND rolname NOT IN ('agentes_ro', 'agentes_revisor')
+                  AND has_schema_privilege(oid, e.oid, 'USAGE')
+      LOOP
+        EXECUTE format('GRANT USAGE ON SCHEMA %I TO %I', e.nspname, r.rolname);
+      END LOOP;
+      EXECUTE format('REVOKE USAGE ON SCHEMA %I FROM PUBLIC', e.nspname);
+    EXCEPTION WHEN insufficient_privilege THEN
+      RAISE WARNING 'No se pudo cerrar el esquema % (otro dueño)', e.nspname;
+    END;
+  END LOOP;
+  -- Se controla TODO lo que se tocó: el uso de cualquier esquema interno y, en los que se cerraron, también sus funciones,
+  -- tablas y secuencias (en los que los agentes nunca entraron —p. ej. auth— sus funciones son inalcanzables igual).
+  SELECT string_agg(DISTINCT n.nspname, ', ') INTO v_abiertos
+    FROM pg_namespace n CROSS JOIN (VALUES ('agentes_ro'), ('agentes_revisor')) AS x(rol)
+   WHERE n.nspname IN ('auth', 'storage', 'vault', 'net', 'cron', 'supabase_functions', 'graphql', 'realtime')
+     AND (has_schema_privilege(x.rol, n.oid, 'USAGE')
+          OR n.nspname = ANY (v_tocados) AND EXISTS (SELECT 1 FROM pg_proc p WHERE p.pronamespace = n.oid AND p.prokind IN ('f', 'p') AND has_function_privilege(x.rol, p.oid, 'EXECUTE'))
+          OR n.nspname = ANY (v_tocados) AND EXISTS (SELECT 1 FROM pg_class c WHERE c.relnamespace = n.oid AND c.relkind IN ('r', 'p', 'v', 'm', 'f')
+                       AND has_table_privilege(x.rol, c.oid, 'SELECT,INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER'))
+          OR n.nspname = ANY (v_tocados) AND EXISTS (SELECT 1 FROM pg_class c WHERE c.relnamespace = n.oid AND c.relkind = 'S'
+                       AND has_sequence_privilege(x.rol, c.oid, 'USAGE,SELECT,UPDATE')));
+  IF v_abiertos IS NOT NULL THEN
+    RAISE EXCEPTION 'ESQUEMA_SIN_CERRAR: %. Supabase no dejó cerrarlo para los agentes: avisar (no se instaló nada nuevo).', v_abiertos;
+  END IF;
+END $$;
+
 COMMIT;
 
 -- ============================================================================
@@ -694,9 +769,14 @@ FROM (
                       AND (public.agente__columna_sensible(column_name)
                            OR (public.agente__texto_libre(column_name) AND table_name NOT LIKE 'agente\_%' AND table_name NOT IN ('pauta_config', 'blog_posts'))
                            OR (data_type IN ('json', 'jsonb') AND table_name NOT LIKE 'agente\_%' AND table_name <> 'pauta_config')))
-  UNION ALL SELECT '24.11', 'Los agentes no entran a los esquemas internos (auth, storage, vault, net, cron, supabase_functions)',
+  UNION ALL SELECT '24.11', 'Los agentes no entran a los esquemas internos (auth, storage, vault, net, cron…) ni usan net (pedidos a internet)',
          NOT EXISTS (SELECT 1 FROM pg_namespace n CROSS JOIN (VALUES ('agentes_ro'), ('agentes_revisor')) r(rol)
                       WHERE n.nspname IN ('auth', 'storage', 'vault', 'net', 'cron', 'supabase_functions', 'graphql', 'realtime')
-                        AND has_schema_privilege(r.rol, n.oid, 'USAGE'))
+                        AND (has_schema_privilege(r.rol, n.oid, 'USAGE')
+                             OR n.nspname = 'net' AND EXISTS (SELECT 1 FROM pg_proc p WHERE p.pronamespace = n.oid AND p.prokind IN ('f', 'p') AND has_function_privilege(r.rol, p.oid, 'EXECUTE'))
+                             OR n.nspname = 'net' AND EXISTS (SELECT 1 FROM pg_class c WHERE c.relnamespace = n.oid AND c.relkind IN ('r', 'p', 'v', 'm', 'f')
+                                          AND has_table_privilege(r.rol, c.oid, 'SELECT,INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER'))
+                             OR n.nspname = 'net' AND EXISTS (SELECT 1 FROM pg_class c WHERE c.relnamespace = n.oid AND c.relkind = 'S'
+                                          AND has_sequence_privilege(r.rol, c.oid, 'USAGE,SELECT,UPDATE'))))
 ) t
 ORDER BY id;

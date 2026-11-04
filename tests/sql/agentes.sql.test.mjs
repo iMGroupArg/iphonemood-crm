@@ -24,6 +24,13 @@ const HEREDADO = `
   CREATE TABLE public.reparaciones (id BIGSERIAL PRIMARY KEY, cliente TEXT, cliente_telefono TEXT, token_seguimiento TEXT,
     clave_desbloqueo TEXT, total_usd NUMERIC, notas TEXT, datos_meli JSONB);
   CREATE PROCEDURE public.procedimiento_viejo() LANGUAGE sql AS $p$ SELECT 1 $p$;
+  -- Como pg_net en Supabase: esquema net abierto a PUBLIC, y un rol que lo usa (el reloj de facturación con pg_cron).
+  CREATE SCHEMA net; GRANT USAGE ON SCHEMA net TO PUBLIC;
+  CREATE FUNCTION net.http_post(url TEXT) RETURNS BIGINT LANGUAGE sql AS $n$ SELECT 42::bigint $n$;
+  CREATE TABLE net.http_request_queue (id BIGSERIAL PRIMARY KEY, url TEXT); CREATE TABLE net._http_response (id BIGINT, content TEXT);
+  INSERT INTO net._http_response VALUES (1, 'respuesta con datos');
+  GRANT ALL ON ALL TABLES IN SCHEMA net TO PUBLIC; GRANT ALL ON ALL SEQUENCES IN SCHEMA net TO PUBLIC;
+  CREATE ROLE reloj_facturacion NOLOGIN;
   INSERT INTO public.reparaciones (cliente, cliente_telefono, token_seguimiento, clave_desbloqueo, total_usd) VALUES ('Ana', '341555', 'tok-secreto', '1234', 50);
   CREATE FUNCTION public.rpc_vieja_crea_caja() RETURNS TEXT LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $f$
   BEGIN
@@ -306,6 +313,20 @@ console.log('\n══ Mesa de control de los agentes (Postgres en WebAssembly) �
   check('El libro de caja no muestra la descripción libre (sí referencia, tipo y montos)', !lib.includes('descripcion') && lib.includes('referencia') && lib.includes('delta'), lib.join(','));
   const mesa = (await q(db, `SELECT column_name FROM information_schema.columns WHERE table_schema='agentes' AND table_name='agente_bitacora'`)).map(x => x.column_name);
   check('En la mesa de los agentes el texto sí se ve (mensaje y datos de la bitácora)', mesa.includes('mensaje') && mesa.includes('datos'), mesa.join(','));
+  const eNet = await falla(() => comoAgente(db, () => q(db, `SELECT net.http_post('https://afuera.example/robo')`)));
+  check('Un agente NO puede mandar pedidos a internet desde la base (net.http_post)', eNet && /permission denied/.test(eNet), eNet);
+  const eNetR = await falla(() => comoRevisor(db, () => q(db, `SELECT net.http_post('https://afuera.example')`)));
+  check('El revisor tampoco', eNetR && /permission denied/.test(eNetR), eNetR);
+  const reloj = await comoRol(db, 'reloj_facturacion', null, () => q(db, `SELECT net.http_post('https://iphonemood.com/api/meli/worker') AS r`));
+  check('El reloj de facturación (y cualquier otro rol que lo usaba) sigue pudiendo', Number(reloj[0].r) === 42, JSON.stringify(reloj));
+  const eCola = await falla(() => comoAgente(db, () => q(db, `INSERT INTO net.http_request_queue (url) VALUES ('https://afuera')`)));
+  check('Un agente NO puede escribir en la cola de pedidos de net', eCola && /permission denied/.test(eCola), eCola);
+  const eResp = await falla(() => comoAgente(db, () => q(db, `SELECT * FROM net._http_response`)));
+  check('Ni leer las respuestas guardadas', eResp && /permission denied/.test(eResp), eResp);
+  const colaReloj = await comoRol(db, 'reloj_facturacion', null, () => q(db, `INSERT INTO net.http_request_queue (url) VALUES ('https://iphonemood.com') RETURNING id`));
+  check('El reloj sigue pudiendo encolar (tabla y secuencia)', colaReloj.length === 1, JSON.stringify(colaReloj));
+  const crmNet = await comoFranco(db, () => q(db, `SELECT net.http_post('https://x') AS r`));
+  check('authenticated conserva lo que tenía', Number(crmNet[0].r) === 42);
   const eProc = await falla(() => comoAgente(db, () => q(db, `CALL public.procedimiento_viejo()`)));
   check('Un procedimiento viejo de public también queda cerrado para los agentes (y no rompe la instalación)', eProc && /permission denied/.test(eProc), eProc);
   const rep = await comoAgente(db, () => q(db, `SELECT * FROM agentes.reparaciones`));

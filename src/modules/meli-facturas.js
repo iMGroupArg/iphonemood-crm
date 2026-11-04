@@ -291,25 +291,67 @@ const MeliFacturas = {
       toast(a.mensaje || 'Terminó.');
     }
   },
+  // Topes anuales de ingresos brutos de cada categoría del Monotributo, en centavos (https://www.arca.gob.ar/monotributo/categorias.asp, valores desde el 1/08/2026).
+  // Son datos de referencia: si ARCA los actualiza, hay que cambiarlos acá. El límite que usa el control sigue siendo el que se guarda en la configuración.
+  CATEGORIAS: [['A', 1200941045], ['B', 1759518274], ['C', 2467049431], ['D', 3062865143], ['E', 3602823133], ['F', 4515165941], ['G', 5399579887], ['H', 8192466037], ['I', 9169976190], ['J', 10501251920], ['K', 12661083875]],
+  categoriaDe(limiteCentavos) { const c = this.CATEGORIAS.find(x => x[1] === Number(limiteCentavos)); return c ? c[0] : null; },
+  _verCategorias: false,
+  verCategorias() { this._verCategorias = !this._verCategorias; if (window.MeliOrdenes && MeliOrdenes.pintar) MeliOrdenes.pintar(); },
+  elegirCategoria(letra) {
+    const c = this.CATEGORIAS.find(x => x[0] === letra), campo = document.getElementById('fa-limite');
+    if (c && campo) campo.value = (c[1] / 100).toFixed(2);
+  },
   tarjetaAnual() {
     const a = State.facturacionAnual;
     if (State.facturacionAnualError) return '<div class="card" style="margin-bottom:10px;font-size:12px">Control de facturación anual no disponible. Probá actualizar.</div>';
     if (!a) return '';
     const e = s => State.esc(String(s ?? ''));
     const est = this.estadoAnual(a);
-    const barra = est.pct === null ? '' : `<div style="height:8px;border-radius:4px;background:var(--border);margin:8px 0;overflow:hidden"><div style="height:100%;width:${Math.min(est.pct, 100)}%;background:var(--${est.clase === 'b-red' ? 'red' : est.clase === 'b-amber' ? 'amber' : 'green'})"></div></div>`;
+    const limite = Number(a.limite_centavos || 0), total = Number(a.total_centavos || 0), cat = this.categoriaDe(limite);
+    const fmtDia = d => { const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(d || '')); return m ? `${m[3]}/${m[2]}/${m[1]}` : ''; };
+    const pct = limite > 0 ? Math.max(0, Math.min(100, (total / limite) * 100)) : null;
+    const color = est.clase === 'b-red' ? 'var(--red)' : '#22506F';
+    const triangulo = (pos, col) => `<div style="position:absolute;${pos};width:0;height:0;border-left:8px solid transparent;border-right:8px solid transparent;border-bottom:10px solid ${col}"></div>`;
+    const barra = pct === null ? '<div style="margin:10px 0;font-size:12px;color:var(--text-secondary)">No hay un límite anual configurado: elegí tu categoría abajo, en «Configurar límite».</div>'
+      : `<div style="position:relative;height:30px;margin:18px 0 0">
+          <div style="position:absolute;left:0;right:0;top:4px;bottom:4px;border-radius:11px;background:var(--bg-secondary)"></div>
+          <div id="fa-barra" style="position:absolute;left:0;top:4px;bottom:4px;width:${pct.toFixed(2)}%;border-radius:11px;background:${color}"></div>
+          <div style="position:absolute;right:0;top:0;width:30px;height:30px;border-radius:50%;background:#2C6188;color:#fff;font-weight:700;font-size:14px;display:flex;align-items:center;justify-content:center">${e(cat || '?')}</div>
+        </div>
+        <div style="position:relative;height:12px">${triangulo(`left:calc(${pct.toFixed(2)}% - 8px);top:2px`, color)}${triangulo('right:7px;top:2px', '#2C6188')}</div>
+        <div style="display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-top:2px">
+          <div><div style="font-size:16px;font-weight:700;color:#22506F">${e(this._pesos(total))}</div><div>Monto facturado${pct !== null ? ` · ${e(String(Math.round(pct * 10) / 10).replace('.', ','))} %` : ''}</div></div>
+          <div style="text-align:right"><div style="font-size:16px;font-weight:700;color:#22506F">${e(this._pesos(limite))}</div><div>${cat ? `Tope categoría <b>${e(cat)}</b>` : 'Tope configurado'}</div></div>
+        </div>`;
+    const icono = d => `<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex:none;color:var(--text-secondary)" aria-hidden="true"><polyline points="${d}"/></svg>`;
+    const nc = Number(a.notas_credito_centavos || 0), ncCant = Number(a.notas_credito_cantidad || 0), fuera = Number(a.fuera_crm_centavos || 0);
     const meses = (a.por_mes || []).map(m => `<span style="white-space:nowrap">${e(m.mes)}: <b>${e(this._pesos(m.centavos))}</b> (${e(m.cantidad)})</span>`).join(' · ');
     const pesos = c => (Number(c || 0) / 100).toFixed(2);
+    const categorias = this._verCategorias ? `<div style="margin-top:10px;overflow-x:auto;max-width:460px"><table style="border-collapse:collapse;font-size:12px;min-width:280px;width:100%">
+        <thead><tr style="text-align:left;color:var(--text-secondary)"><th style="padding:3px 8px">Categoría</th><th style="padding:3px 8px;text-align:right">Ingresos brutos anuales (tope)</th></tr></thead>
+        <tbody>${this.CATEGORIAS.map(([l, c]) => `<tr${l === cat ? ' style="font-weight:700;background:var(--bg-elevated)"' : ''}><td style="padding:3px 8px">${e(l)}${l === cat ? ' · la tuya' : ''}</td><td style="padding:3px 8px;text-align:right">${e(this._pesos(c))}</td></tr>`).join('')}</tbody>
+      </table><div style="font-size:11px;color:var(--text-secondary);margin-top:4px">Valores de ARCA vigentes desde el 1/08/2026.</div></div>` : '';
     return `<div class="card" style="margin-bottom:10px;font-size:12.5px">
-      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center"><b>Facturación de los últimos 12 meses</b><span class="badge ${est.clase}">${e(est.txt)}${est.pct === null ? '' : ' · ' + e(String(est.pct).replace('.', ',')) + ' %'}</span></div>
-      <div style="margin-top:4px">Total <b>${e(this._pesos(a.total_centavos))}</b>${Number(a.limite_centavos) > 0 ? ` de <b>${e(this._pesos(a.limite_centavos))}</b>` : ''} · desde el CRM ${e(this._pesos(a.facturado_crm_centavos))} (${e(a.cantidad)} facturas)${Number(a.notas_credito_centavos) > 0 ? ` menos notas de crédito ${e(this._pesos(a.notas_credito_centavos))}` : ''} · fuera del CRM ${e(this._pesos(a.fuera_crm_centavos))}</div>
+      <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;justify-content:space-between">
+        <div style="font-size:16px"><b>Facturación electrónica</b> <span style="font-size:12px;color:var(--text-secondary)">| ${e(fmtDia(a.desde))} al ${e(fmtDia(a.hasta))}</span> <span class="badge ${est.clase}" style="vertical-align:middle">${e(est.txt)}</span></div>
+        <button class="btn btn-sm" onclick="MeliFacturas.verCategorias()">${this._verCategorias ? 'OCULTAR CATEGORÍAS' : 'VER CATEGORÍAS'}</button>
+      </div>
+      ${categorias}
       ${barra}
-      ${meses ? `<div style="font-size:11.5px;color:var(--text-secondary);line-height:1.6">${meses}</div>` : ''}
+      <div style="margin-top:14px;color:var(--text-secondary)">Comprobantes emitidos:</div>
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:12px;margin-top:6px">
+        <div style="display:flex;gap:8px;align-items:flex-start">${icono('3 17 9 11 13 15 21 7')}<div><div style="font-size:16px;font-weight:700">${e(this._pesos(a.facturado_crm_centavos))}</div><div style="color:var(--text-secondary)">${e(a.cantidad)} facturas desde el CRM</div></div></div>
+        <div style="display:flex;gap:8px;align-items:flex-start">${icono('3 7 9 13 13 9 21 17')}<div><div style="font-size:16px;font-weight:700">${e(this._pesos(-nc))}</div><div style="color:var(--text-secondary)">${e(ncCant)} notas de crédito</div></div></div>
+        ${fuera > 0 ? `<div style="display:flex;gap:8px;align-items:flex-start">${icono('4 12 10 18 20 6')}<div><div style="font-size:16px;font-weight:700">${e(this._pesos(fuera))}</div><div style="color:var(--text-secondary)">facturado fuera del CRM</div></div></div>` : ''}
+      </div>
+      <div style="text-align:right;font-size:11.5px;color:var(--text-secondary);margin-top:8px">Última actualización: ${e(fmtDia(a.hasta))}</div>
+      ${meses ? `<details style="margin-top:6px"><summary style="cursor:pointer;font-size:11.5px">Ver el detalle por mes</summary><div style="font-size:11.5px;color:var(--text-secondary);line-height:1.6;margin-top:4px">${meses}</div></details>` : ''}
       <div style="font-size:11.5px;color:var(--text-secondary);margin-top:6px">Es un seguimiento interno: no bloquea ninguna factura. Cuenta solo las facturas reales (producción) autorizadas por ARCA desde el CRM; las de prueba no suman. Las notas de crédito autorizadas se restan.</div>
       <details style="margin-top:8px"><summary style="cursor:pointer">Configurar límite y facturado fuera del CRM</summary>
         <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px;align-items:flex-end">
-          <label style="font-size:11.5px">Límite anual (ARS)<br><input type="number" id="fa-limite" min="0" step="0.01" value="${pesos(a.limite_centavos)}" style="width:160px;padding:6px 8px;border:1px solid var(--border-strong);border-radius:8px"></label>
-          <label style="font-size:11.5px">Facturado fuera del CRM, últimos 12 meses (ARS)<br><input type="number" id="fa-fuera" min="0" step="0.01" value="${pesos(a.fuera_crm_centavos)}" style="width:160px;padding:6px 8px;border:1px solid var(--border-strong);border-radius:8px"></label>
+          <label style="font-size:11.5px">Categoría<br><select id="fa-cat" onchange="MeliFacturas.elegirCategoria(this.value)" style="width:160px;padding:6px 8px;border:1px solid var(--border);border-radius:6px"><option value="">Elegir categoría…</option>${this.CATEGORIAS.map(([l, c]) => `<option value="${e(l)}"${l === cat ? ' selected' : ''}>${e(l)} · ${e(this._pesos(c))}</option>`).join('')}</select></label>
+          <label style="font-size:11.5px">Límite anual (ARS)<br><input type="number" id="fa-limite" min="0" step="0.01" value="${pesos(a.limite_centavos)}" style="width:160px;padding:6px 8px;border:1px solid var(--border);border-radius:6px"></label>
+          <label style="font-size:11.5px">Facturado fuera del CRM, últimos 12 meses (ARS)<br><input type="number" id="fa-fuera" min="0" step="0.01" value="${pesos(a.fuera_crm_centavos)}" style="width:160px;padding:6px 8px;border:1px solid var(--border);border-radius:6px"></label>
           <button class="btn btn-sm btn-primary" onclick="MeliFacturas.guardarAnual(this)">Guardar</button>
         </div>
         ${a.actualizado_por ? `<div style="font-size:11px;color:var(--text-secondary);margin-top:4px">Última actualización: ${e(a.actualizado_por)}</div>` : ''}

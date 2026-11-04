@@ -139,6 +139,29 @@ await caso('Atrasadas: el detalle lista cada venta con su importe y la suma de t
     State.atrasadas.resumen.ventas = [{ orden: '<b>x</b>', fecha: '<i>', centavos: 1 }]; assert.doesNotMatch(M.tarjetaAtrasadas(), /<b>x<\/b>|<i>/);
   } finally { M.hoy = hoy; State.atrasadas = null; }
 });
+await caso('Facturación anual: tarjeta al estilo de ARCA con barra, tope de la categoría, comprobantes y notas de crédito', () => {
+  try {
+    State.facturacionAnualError = false;
+    State.facturacionAnual = { desde: '2026-01-01', hasta: '2026-11-03', limite_centavos: 4515165941, total_centavos: 3220119832, facturado_crm_centavos: 3363451982, notas_credito_centavos: 143332150, notas_credito_cantidad: 11, fuera_crm_centavos: 0, cantidad: 193, por_mes: [{ mes: '2026-10', cantidad: 5, centavos: 100 }] };
+    assert.equal(M.categoriaDe(4515165941), 'F'); assert.equal(M.categoriaDe(1), null); assert.equal(M.CATEGORIAS.length, 11);
+    assert.deepEqual(M.CATEGORIAS.map(c => c[0]).join(''), 'ABCDEFGHIJK');
+    assert.ok(M.CATEGORIAS.every((c, i, v) => i === 0 || c[1] > v[i - 1][1]), 'los topes crecen de la A a la K');
+    let h = M.tarjetaAnual();
+    assert.match(h, /Facturación electrónica/); assert.match(h, /01\/01\/2026 al 03\/11\/2026/); assert.match(h, /VER CATEGORÍAS/);
+    assert.match(h, /Monto facturado/); assert.match(h, /Tope categoría <b>F<\/b>/); assert.ok(h.includes(M._pesos(4515165941))); assert.ok(h.includes(M._pesos(3220119832)));
+    assert.match(h, /id="fa-barra"[^>]*width:71\.32%/); assert.match(h, />F<\/div>/);
+    assert.match(h, /Comprobantes emitidos/); assert.match(h, /193 facturas/); assert.match(h, /11 notas de crédito/); assert.ok(h.includes(M._pesos(-143332150)));
+    assert.match(h, /id="fa-cat"/); assert.match(h, /<option value="F" selected>/); assert.doesNotMatch(h, /Valores de ARCA vigentes/);
+    M.verCategorias(); h = M.tarjetaAnual(); assert.match(h, /OCULTAR CATEGORÍAS/); assert.match(h, /Valores de ARCA vigentes desde el 1\/08\/2026/); assert.match(h, /F · la tuya/); assert.ok(h.includes(M._pesos(12661083875)));
+    M.verCategorias(); assert.doesNotMatch(M.tarjetaAnual(), /la tuya/);
+    State.facturacionAnual.limite_centavos = 5000000000; h = M.tarjetaAnual(); assert.match(h, /Tope configurado/); assert.match(h, />\?<\/div>/);
+    State.facturacionAnual.limite_centavos = 0; h = M.tarjetaAnual(); assert.match(h, /No hay un límite anual configurado/); assert.doesNotMatch(h, /id="fa-barra"/);
+    State.facturacionAnual.limite_centavos = 4515165941; State.facturacionAnual.total_centavos = 5000000000; assert.match(M.tarjetaAnual(), /id="fa-barra"[^>]*width:100\.00%/);
+    State.facturacionAnual.total_centavos = -5; assert.match(M.tarjetaAnual(), /id="fa-barra"[^>]*width:0\.00%/);
+    State.facturacionAnual.actualizado_por = '<img src=x>'; State.facturacionAnual.por_mes = [{ mes: '<i>', cantidad: 1, centavos: 1 }]; assert.doesNotMatch(M.tarjetaAnual(), /<img|<i>/);
+    State.facturacionAnualError = true; assert.match(M.tarjetaAnual(), /no disponible/);
+  } finally { State.facturacionAnual = null; State.facturacionAnualError = false; M._verCategorias = false; }
+});
 await caso('Atrasadas: los textos del servidor se muestran escapados (nada de HTML)', () => {
   State.atrasadas = { mensaje: '<img src=x onerror=alert(1)>', modo: '<b>x</b>', resumen: { cantidad: 1, total_centavos: 1, por_mes: [{ mes: '<i>', cantidad: 1, centavos: 1 }] } };
   const h = M.tarjetaAtrasadas(); State.atrasadas = null;

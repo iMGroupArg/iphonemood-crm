@@ -20,6 +20,7 @@ const { diagnosticoArca } = require('../_arca_diagnostico.js');
 const { emitirFacturaOrden, emitirNotaCreditoOrden } = require('../_facturacion.js');
 const { correrAutomatizacion } = require('../_facturacion_auto.js');
 const { correrAtrasadas } = require('../_facturacion_atrasadas.js');
+const { datosComprobante } = require('../_arca_comprobante.js');
 const { ErrorArca } = require('../_arca.js');
 const { barrer, barrerTodas } = require('../_meli_barrido.js');
 
@@ -178,6 +179,19 @@ module.exports = async function handler(req, res) {
       // Los errores de la base llegan como "RPC: <CODIGO>…": se devuelve solo el código. Los de ARCA traen un mensaje pensado para mostrarse.
       const codigo = e && e.codigo === 'RPC' ? ((String(e.message).match(/\b[A-Z][A-Z_]{5,}\b/) || ['RPC'])[0]) : ((e && e.codigo) || 'ERROR');
       console.error('meli/worker (arca_emitir):', codigo);
+      res.status(200).json({ estado: 'error', codigo, mensaje: e instanceof ErrorArca ? e.message : null });
+    }
+    return;
+  }
+
+  // Datos de UN comprobante tal como los tiene ARCA, para armar el PDF en el navegador (api/_arca_comprobante.js). Solo consulta; solo con sesión.
+  if (req.method === 'POST' && req.body && typeof req.body === 'object' && req.body.accion === 'arca_comprobante') {
+    try {
+      const pres = M.presupuestoHasta(t0 + PRESUPUESTO_MS - RESERVA_MS, t0 + PRESUPUESTO_MS);
+      res.status(200).json(await datosComprobante({ pto: req.body.pto, numero: req.body.numero, tipo: req.body.tipo === undefined ? 11 : req.body.tipo, rpc: M.rpc, pres }));
+    } catch (e) {
+      const codigo = (e && e.codigo) || 'ERROR';
+      console.error('meli/worker (arca_comprobante):', codigo);
       res.status(200).json({ estado: 'error', codigo, mensaje: e instanceof ErrorArca ? e.message : null });
     }
     return;

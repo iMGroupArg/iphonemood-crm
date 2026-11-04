@@ -215,7 +215,8 @@ const MeliPdf = {
     const avisos = [];
     if (datos.modo === 'homologacion') avisos.push('COMPROBANTE DE PRUEBA (homologación): sin valor fiscal');
     if (e.completo === false) avisos.push(`FALTAN DATOS DEL EMISOR (${(e.faltan || []).map(k => this.CAMPOS_EMISOR[k] || k).join(', ') || 'configuración'}): es una constancia de consulta, no una factura completa para entregar.`);
-    avisos.forEach((t, i) => d.texto(X, 826 - (avisos.length - 1 - i) * 10, this._acotar(t, ANCHO, 8, true, 1, 160)[0], { tam: 8, negrita: true, ancho: ANCHO, alinear: 'centro' }));
+    const lineasAviso = avisos.flatMap(t => this._acotar(t, ANCHO, 8, true, 2, 260));          // cada aviso entra completo, en una o dos líneas
+    lineasAviso.forEach((l, i) => d.texto(X, 836 - (lineasAviso.length - 1 - i) * 10, l, { tam: 8, negrita: true, ancho: ANCHO, alinear: 'centro' }));
 
     const nombre = this.nombreArchivo(c, extra);
     return { bytes: this._pdf(d.contenido(), nombre.replace(/\.pdf$/, '')), nombre };

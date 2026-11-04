@@ -309,6 +309,8 @@ console.log('\n══ Mesa de control de los agentes (Postgres en WebAssembly) �
   check('anon sigue teniendo exactamente lo que tenía (la función lo frena por dentro, no por permisos)', eAnon && eAnon.includes('no autorizado'), eAnon);
   const cols = (await q(db, `SELECT column_name FROM information_schema.columns WHERE table_schema='agentes' AND table_name='reparaciones' ORDER BY ordinal_position`)).map(x => x.column_name);
   check('La vista de reparaciones no trae token, clave, teléfono, notas libres ni JSON', cols.join(',') === 'id,cliente,total_usd', cols.join(','));
+  const sens = await q(db, `SELECT public.agente__columna_sensible('contacto') a, public.agente__columna_sensible('contactos') b, public.agente__columna_sensible('cuota_mensual_usd') c, public.agente__columna_sensible('creado_por') d`);
+  check('El contacto de un inversor y quién cargó un movimiento son datos personales (no van a las vistas); la cuota sí', sens[0].a && sens[0].b && !sens[0].c && sens[0].d, JSON.stringify(sens));
   const lib = (await q(db, `SELECT column_name FROM information_schema.columns WHERE table_schema='agentes' AND table_name='caja_ledger'`)).map(x => x.column_name);
   check('El libro de caja no muestra la descripción libre (sí referencia, tipo y montos)', !lib.includes('descripcion') && lib.includes('referencia') && lib.includes('delta'), lib.join(','));
   const mesa = (await q(db, `SELECT column_name FROM information_schema.columns WHERE table_schema='agentes' AND table_name='agente_bitacora'`)).map(x => x.column_name);

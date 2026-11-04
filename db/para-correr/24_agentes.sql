@@ -8,7 +8,7 @@
 --       agente_bitacora    qué hizo cada corrida de cada agente.
 --       agente_directivas  las prioridades de la semana que escribe el CEO y leen los demás.
 --       pauta_config       el tope mensual de pauta (fila única) y el último gasto que reportó el agente de Pauta.
---   · Dos roles sin login (Franco les pone contraseña aparte, NUNCA en el repo):
+--   · Dos roles SIN LOGIN y sin contraseña, para siempre (nunca se les da; ver sección 9):
 --       agentes_revisor  el de Codex: solo lee y deja su veredicto (revision_codex). Nada más.
 --   · Rol `agentes_ro`:
 --       - LEE el negocio solo a través de las vistas del esquema `agentes` (lista cerrada, sin secretos: no ve

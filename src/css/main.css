@@ -686,9 +686,9 @@ dialog.dlg-crm::backdrop { background: rgba(0,0,0,.45); }
 .mf-panel { margin-top: 10px; padding: 10px 12px; border-radius: var(--radius-md, 10px); background: var(--bg-elevated); font-size: 12px; line-height: 1.6; color: var(--text-secondary); }
 .mf-panel p { margin: 6px 0 0; }
 .mf-acciones { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-top: 12px; }
-.mf-filas { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 10px 28px; margin-top: 4px; }
+.mf-filas { display: flex; flex-wrap: wrap; gap: 6px 40px; margin-top: 8px; }
 .mf-sw { display: inline-flex; align-items: center; gap: 10px; cursor: pointer; font-size: 13px; position: relative; -webkit-tap-highlight-color: transparent; }
-.mf-sw.mf-fila { display: flex; justify-content: space-between; min-height: 36px; }
+.mf-sw.mf-fila { display: inline-flex; justify-content: flex-start; gap: 12px; min-height: 36px; }   /* el texto a la izquierda y el interruptor pegado a su derecha */
 .mf-sw input { position: absolute; opacity: 0; width: 1px; height: 1px; margin: 0; }
 .mf-sw .mf-estado { font-weight: 600; }
 .mf-pista { position: relative; flex: none; width: 44px; height: 26px; border-radius: 13px; background: var(--border-strong); transition: background .18s; }
@@ -708,7 +708,7 @@ dialog.dlg-crm::backdrop { background: rgba(0,0,0,.45); }
 @media (max-width: 560px) {
   .mf-acciones { flex-direction: column; align-items: stretch; }
   .mf-acciones .btn { width: 100%; justify-content: center; }
-  .mf-filas { grid-template-columns: 1fr; }
+  .mf-filas { flex-direction: column; gap: 4px; }
   .mf-cab { align-items: center; }
   /* La lista de facturas emitidas pasa de tabla a tarjetas: nombre e importe arriba, fecha y número, ID de compra y origen. */
   .mf-tabla table, .mf-tabla tbody { display: block; width: 100%; min-width: 0; }

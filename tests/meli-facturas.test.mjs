@@ -206,6 +206,43 @@ await caso('Facturación: el diseño de pestañas — Meli tiene la pestaña y e
   assert.doesNotMatch(meli, /id="meli-btn-arca"/); assert.match(meli, /getElementById\('meli-arca-salida'\)/);
   assert.match(ord, /MeliFacturas\.franja\(todas\)/); assert.doesNotMatch(ord, /MeliFacturas\.cabecera\(/); assert.match(ord, /MeliFacturas\.pintarSeccion\(\)/);
 });
+await caso('Textos chicos en un botoncito de información: la sección no deja texto explicativo escrito, todo va en llamadas que se abren al tocar', () => {
+  const hoy = M.hoy; M.hoy = () => '2026-11-04'; const antes = { ord: State.meliOrdenes, fact: State.meliFacturas };
+  try {
+    State.meliOrdenes = []; State.meliFacturas = [];
+    State.facturacionAnual = { desde: '2026-01-01', hasta: '2026-11-03', limite_centavos: 4515165941, total_centavos: 100, facturado_crm_centavos: 100, notas_credito_centavos: 0, notas_credito_cantidad: 0, fuera_crm_centavos: 0, cantidad: 1, por_mes: [] };
+    State.facturacionAuto = { factura_auto: true, nota_auto: false, ambiente: 'produccion', desde: '2026-11-04T02:58:00Z', pendientes: [], avisos: [] };
+    const h = M.vistaSeccion();
+    assert.doesNotMatch(h, /class="mf-nota"/, 'ningún texto chico escrito en las tarjetas');
+    const botones = h.match(/<button type="button" class="mf-info" aria-label="[^"]+" aria-expanded="false" onclick="MeliFacturas\.infoAlternar\(this\)"><i class="ti ti-info-circle"><\/i><\/button>/g) || [];
+    assert.equal(botones.length, 4, 'automática, facturación electrónica, atrasadas y ARCA');
+    const llamadas = h.match(/<span class="mf-llamada" role="note" hidden>/g) || []; assert.equal(llamadas.length, 4);
+    // El contenido sigue ahí, pero dentro de la llamada (oculta).
+    const dentro = [...h.matchAll(/<span class="mf-llamada" role="note" hidden>(.*?)<\/span><\/span>/gs)].map(m => m[1]).join('|');
+    assert.match(dentro, /desde que la encendés/); assert.match(dentro, /siguen manuales/); assert.match(dentro, /Encendida para: <b>PRODUCCIÓN/); assert.match(dentro, /volver a encenderla/);
+    assert.match(dentro, /Seguimiento interno/); assert.match(dentro, /Última actualización: 03\/11\/2026/); assert.match(dentro, /nunca se facturaron/); assert.match(dentro, /Solo lectura/);
+    const fuera = h.replace(/<span class="mf-llamada"[^>]*>.*?<\/span><\/span>/gs, '');
+    assert.doesNotMatch(fuera, /desde que la encendés|Seguimiento interno|Última actualización|nunca se facturaron|Solo lectura/, 'nada de eso queda a la vista');
+    assert.match(fuera, />PRODUCCIÓN</); assert.match(fuera, /class="badge b-green"/);
+    State.facturacionAuto.ambiente = 'homologacion'; assert.match(M.tarjetaAuto().replace(/<span class="mf-llamada"[^>]*>.*?<\/span><\/span>/gs, ''), /class="badge b-amber">PRUEBAS</);
+  } finally { M.hoy = hoy; State.meliOrdenes = antes.ord; State.meliFacturas = antes.fact; State.facturacionAnual = null; State.facturacionAuto = null; State.atrasadas = null; }
+});
+await caso('Llamada de información: se abre al tocar el botoncito, cierra las demás, se cierra al tocar de nuevo y las etiquetas van escapadas', () => {
+  const mk = () => { const l = { hidden: true }, b = { attrs: { 'aria-expanded': 'false' }, setAttribute(k, v) { this.attrs[k] = v; } }; const w = { querySelector: q => (q === '.mf-llamada' ? l : b), l, b }; b.closest = () => w; return { w, l, b }; };
+  const a = mk(), c = mk();
+  ctx.document = { querySelectorAll: () => [a.w, c.w] };
+  try {
+    M.infoAlternar(a.b); assert.equal(a.l.hidden, false); assert.equal(a.b.attrs['aria-expanded'], 'true'); assert.equal(c.l.hidden, true);
+    M.infoAlternar(c.b); assert.equal(c.l.hidden, false); assert.equal(a.l.hidden, true); assert.equal(a.b.attrs['aria-expanded'], 'false');
+    M.infoAlternar(c.b); assert.equal(c.l.hidden, true); assert.equal(c.b.attrs['aria-expanded'], 'false');
+    M.infoAlternar(a.b); M.infoCerrar(); assert.equal(a.l.hidden, true); assert.equal(a.b.attrs['aria-expanded'], 'false');
+    assert.doesNotThrow(() => M.infoAlternar(null)); assert.doesNotThrow(() => M.infoAlternar({ closest: () => null }));
+    assert.doesNotMatch(M.info('texto', '"><img src=x onerror=alert(1)>'), /<img/); assert.match(M.info('<b>ok</b>'), /<span class="mf-llamada" role="note" hidden><b>ok<\/b><\/span>/);
+  } finally { delete ctx.document; }
+  const css = leer('src/css/main.css');
+  assert.match(css, /\.mf-llamada\[hidden\] \{ display: none; \}/); assert.match(css, /\.mf-info\[aria-expanded="true"\]/);
+  assert.match(fuente, /document\.addEventListener\('click'/); assert.match(fuente, /e\.key === 'Escape'/);
+});
 await caso('Atrasadas: los textos del servidor se muestran escapados (nada de HTML)', () => {
   State.atrasadas = { mensaje: '<img src=x onerror=alert(1)>', modo: '<b>x</b>', resumen: { cantidad: 1, total_centavos: 1, por_mes: [{ mes: '<i>', cantidad: 1, centavos: 1 }] } };
   const h = M.tarjetaAtrasadas(); State.atrasadas = null;

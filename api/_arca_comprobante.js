@@ -44,11 +44,13 @@ async function datosComprobante({ pto, numero, tipo = 11, env = process.env, rpc
   if (cfg.modo === 'simulacion') return { estado: 'simulacion', mensaje: 'ARCA está en modo simulación: no hay comprobantes reales para consultar.' };
   const quedan = () => limite - Date.now();
   if (quedan() < 3000) throw new A.ErrorArca('SIN_TIEMPO', 'No queda tiempo para consultar a ARCA: probá de nuevo.');
-  const fetchImpl = conTiempo(fetchBase, Math.max(1500, Math.min(12000, quedan() - 1500)));
+  // El tiempo de cada llamada se calcula en el momento de hacerla, con lo que queda de plazo (el login puede haber gastado parte).
+  const fetchImpl = (url, opciones) => conTiempo(fetchBase, Math.max(1500, Math.min(12000, quedan() - 1500)))(url, opciones);
   const cacheTicket = cache || (rpc ? cacheEnBase({ rpc, ambiente: cfg.modo, cuit: cfg.cuit, pres, limite }) : null);
   let ticket;
   try { ticket = await A.obtenerTicket({ cfg, fetchImpl, ahora, ...(cacheTicket ? { cache: cacheTicket } : {}) }); }
   catch (e) { if (cacheTicket && cacheTicket.soltar) await cacheTicket.soltar(); throw e; }
+  if (quedan() < 3000) throw new A.ErrorArca('SIN_TIEMPO', 'No queda tiempo para consultar a ARCA: probá de nuevo.');   // el login gastó el plazo
   const c = await A.consultarComprobante({ cfg, ticket, ptoVta, cbteTipo, numero: nro, fetchImpl });
   if (!c.existe) return { estado: 'no_existe', mensaje: 'ARCA no tiene ese comprobante.' };
   // El QR y el PDF solo contemplan pesos (cotización 1): otra moneda se rechaza en vez de mostrar un comprobante mal armado.

@@ -51,8 +51,8 @@ test('Tope inválido no llama RPC; cero sí es válido', async () => {
   for (const v of ['', '-1', 'NaN', 'Infinity', '10000000001']) { input.value = v; await M.guardarTope(); }
   assert.equal(llamadas.length, 0); input.value = '0'; await M.guardarTope(); assert.equal(llamadas[0].args.p_tope, 0);
 });
-test('Tabla ausente muestra el aviso del script 24 para ambos códigos', async () => {
-  for (const code of ['42P01', 'PGRST205']) { const { M, root } = cargar({ error: { code } }); await M.recargar(); assert.match(root.innerHTML, /Falta correr el script 24 en Supabase/); }
+test('Tabla ausente muestra el aviso del script 26 para ambos códigos', async () => {
+  for (const code of ['42P01', 'PGRST205']) { const { M, root } = cargar({ error: { code } }); await M.recargar(); assert.match(root.innerHTML, /Falta correr el script 26 en Supabase/); }
 });
 test('Automáticas sólo permiten frenar y el badge cuenta pendientes e informes no leídos', async () => {
   const { M, root, badge, llamadas } = cargar({ filas: [{ ...base, estado: 'auto' }, { ...base, id: 10 }, { ...base, id: 11, estado: 'informativa' }] });

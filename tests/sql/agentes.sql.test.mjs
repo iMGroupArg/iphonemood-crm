@@ -1,4 +1,4 @@
-// Banco de pruebas de db/pendientes/agentes.sql (script 24, mesa de control de la red de agentes) contra un Postgres REAL (pglite).
+// Banco de pruebas de db/pendientes/agentes.sql (script 26, mesa de control de la red de agentes) contra un Postgres REAL (pglite).
 //
 //   cd tests/sql && node agentes.sql.test.mjs
 //
@@ -68,7 +68,7 @@ console.log('\n══ Mesa de control de los agentes (Postgres en WebAssembly) �
 {
   const db = await nueva();
   const e2 = await falla(() => db.exec(SQL('agentes.sql')));
-  check('El script 24 corre dos veces seguidas sin romper (idempotente)', !e2, e2);
+  check('El script 26 corre dos veces seguidas sin romper (idempotente)', !e2, e2);
   const tabla = (await db.exec(SQL('agentes.sql'))).pop().rows;
   check('La tabla de verificación sale toda en ✅ (12 controles)', tabla.length === 12 && tabla.every(x => x.resultado === '✅'),
     JSON.stringify(tabla.map(x => [x.id, x.resultado])));

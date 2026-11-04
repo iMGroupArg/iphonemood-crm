@@ -1,4 +1,4 @@
-// Mesa de control: lectura directa; todas las decisiones pasan por las RPC del script 24.
+// Mesa de control: lectura directa; todas las decisiones pasan por las RPC del script 26.
 const Agentes = {
   _tab: 'aprobar', _historial: false, _lista: [], _bitacora: [], _directiva: null, _pauta: {},
   _sinTabla: false, _error: false, _seq: 0, _ocupada: false, _editor: null, _vistas: [],
@@ -74,7 +74,7 @@ const Agentes = {
   historial(v) { this._historial = v; this.pintar(); },
   _vista() {
     this._vistas = this._lista.map(p => ({ ...p }));
-    if (this._sinTabla) return '<div class="card">Falta correr el script 24 en Supabase</div>';
+    if (this._sinTabla) return '<div class="card">Falta correr el script 26 en Supabase</div>';
     if (this._error) return '<div class="card">No se pudieron cargar los agentes. Revisá la conexión. <button class="btn" onclick="Agentes.recargar()">Reintentar</button></div>';
     const noLeidas = this._lista.filter(p => p.estado === 'informativa' && !p.leida_en).length;
     const tabs = [['aprobar', 'Para aprobar'], ['informes', `Informes${noLeidas ? ` (${noLeidas})` : ''}`], ['pauta', 'Pauta'], ['bitacora', 'Bitácora']];

@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Puente ÚNICO entre los agentes y la base: la "ventanilla" del script 24 por la API REST de Supabase.
+// Puente ÚNICO entre los agentes y la base: la "ventanilla" del script 26 por la API REST de Supabase.
 // Los agentes NO tienen conexión SQL (en Supabase el esquema net —pedidos a internet— no se puede cerrar): cada acción
 // es una función fija que exige la clave del agente. No hay forma de mandar SQL.
 //

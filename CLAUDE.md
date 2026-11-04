@@ -21,7 +21,7 @@ iPhoneMood es una tienda de iPhones, otros equipos, perfumería y accesorios en 
    - Tienen que ser idempotentes y terminar con una verificación ✅/❌.
    - Se prueban contra Postgres real en `tests/sql/` (pglite).
    - Franco los corre a mano en Supabase, y **antes** de deployar el código que los usa.
-   - Toda función nueva tiene que hacer `REVOKE ... FROM PUBLIC` y otorgarse sólo a quien la usa. Después de una migración con funciones nuevas, se vuelve a correr el script 24 (control 24.9): así los agentes no heredan permisos.
+   - Toda función nueva tiene que hacer `REVOKE ... FROM PUBLIC` y otorgarse sólo a quien la usa. Después de una migración con funciones nuevas, se vuelve a correr el script 26 (control 26.9): así los agentes no heredan permisos.
 5. **Las columnas `modelo`, `color` y `storage` de `stock` cambian de significado según el rubro.**
    - En perfumería/decant son marca, familia olfativa y concentración. En repuestos, el modelo compatible.
    - En esos rubros la identidad del producto es `nombre`.
@@ -39,7 +39,7 @@ iPhoneMood es una tienda de iPhones, otros equipos, perfumería y accesorios en 
 
 Hay seis agentes, definidos en `.claude/agents/`: `ceo`, `bot`, `landing`, `contenido`, `pauta` y `finanzas`.
 - Corren en la nube con agenda fija.
-- Comparten la **mesa de control** de Supabase (script 24: `db/pendientes/agentes.sql`).
+- Comparten la **mesa de control** de Supabase (script 26: `db/pendientes/agentes.sql`).
 - Las rutinas, los horarios y los secretos que necesitan están en `agentes/README.md`.
 
 Reglas de la red:

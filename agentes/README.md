@@ -12,14 +12,14 @@ Seis agentes (`.claude/agents/`) que corren solos en la nube con agenda fija. Si
 
 ## Fase 0: lo que hace Franco una sola vez
 
-1. **Correr el script 24** en Supabase → SQL Editor: `db/para-correr/24_agentes.sql`. El final tiene que mostrar los 12 controles en ✅. Si aborta con FUNCIONES_SIN_CERRAR, no se instaló nada: avisar.
-2. **Generar las dos claves de la ventanilla.** Los agentes NO se conectan a la base: en Supabase el esquema `net` (pedidos a internet) no se puede cerrar, así que el script 24 les saca a los usuarios de base de los agentes el permiso de entrar y cualquier contraseña vieja, y corta las conexiones que hubieran quedado abiertas (control 24.11). **No hay que darles contraseña nunca.** En el SQL Editor:
+1. **Correr el script 26** en Supabase → SQL Editor: `db/para-correr/26_agentes.sql`. El final tiene que mostrar los 12 controles en ✅. Si aborta con FUNCIONES_SIN_CERRAR, no se instaló nada: avisar.
+2. **Generar las dos claves de la ventanilla.** Los agentes NO se conectan a la base: en Supabase el esquema `net` (pedidos a internet) no se puede cerrar, así que el script 26 les saca a los usuarios de base de los agentes el permiso de entrar y cualquier contraseña vieja, y corta las conexiones que hubieran quedado abiertas (control 26.11). **No hay que darles contraseña nunca.** En el SQL Editor:
    ```sql
    SELECT public.agente_api_generar_clave('agentes');   -- copiala a AGENTES_CLAVE del entorno de la nube
    SELECT public.agente_api_generar_clave('revisor');   -- copiala a REVISOR_CLAVE, SÓLO en la Mac
    ```
    Cada clave se muestra **una sola vez** y en la base queda guardado sólo su hash. Las funciones de la ventanilla sólo aceptan pedidos POST: la clave nunca viaja en una URL, que quedaría en registros. Si se pierde o se filtra, se corre de nuevo y la anterior deja de valer.
-3. Publicar este PR (la pantalla Agentes del CRM). Hasta que el script 24 esté corrido, la pantalla sólo avisa "Falta correr el script 24".
+3. Publicar este PR (la pantalla Agentes del CRM). Hasta que el script 26 esté corrido, la pantalla sólo avisa "Falta correr el script 26".
 
 ## Entorno de la nube (claude.ai/code → Entornos)
 
@@ -73,7 +73,7 @@ Antes de agendar cada una, se dispara **una vez a mano** y se mira el resultado 
 - **Hasta la Fase 2 no hay aumentos automáticos de pauta.** El gasto que informa el propio agente no autoriza gastar: sólo habilita el automático una medición hecha por el ejecutor con su propio token de Meta. Las bajadas sí pueden ser automáticas.
 - **La Bandeja necesita un usuario de sólo lectura del bot.** Las credenciales de Vercel permiten responder a clientes. Hasta tenerlo (se pide cuando Franco pase el repo del bot), el agente del Bot no lee conversaciones: trabaja con el contrato y el catálogo.
 - Las vistas no muestran texto libre (notas, observaciones), JSON de negocio ni columnas con nombre de secreto o dato personal. Si un agente necesita alguna de esas columnas, se agrega a mano y revisada, nunca con un `SELECT *`.
-- **Volver a correr el script 24 después de cada migración que cree funciones nuevas**: en Supabase nacen ejecutables por PUBLIC, y el script se las saca a los agentes. El control 24.9 lo avisa con ❌.
+- **Volver a correr el script 26 después de cada migración que cree funciones nuevas**: en Supabase nacen ejecutables por PUBLIC, y el script se las saca a los agentes. El control 26.9 lo avisa con ❌.
 - Las columnas `jsonb` de negocio (por ejemplo `datos`) pueden traer información que el filtro por nombre de columna no ve.
 
 ## Fase 2 (Meta), pendiente

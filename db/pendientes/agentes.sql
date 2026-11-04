@@ -1,5 +1,5 @@
 -- ============================================================================
---  agentes.sql  (script 24) — MESA DE CONTROL DE LA RED DE AGENTES
+--  agentes.sql  (script 26) — MESA DE CONTROL DE LA RED DE AGENTES
 --
 --  QUÉ HACE
 --   · Cuatro tablas nuevas, de solo lectura para el CRM (escritura SOLO por funciones):
@@ -244,7 +244,7 @@ GRANT USAGE ON SCHEMA agentes TO agentes_ro, agentes_revisor;
 
 -- Vistas de lectura (lista cerrada de tablas). Las que no existen en esta base se saltean.
 -- Las columnas se listan una por una y se DEJAN AFUERA las que por su nombre son secretos o datos personales
--- (tokens, claves, contraseñas, DNI/CUIT, teléfonos, emails, direcciones, IMEI, CBU). La verificación 24.10 lo controla.
+-- (tokens, claves, contraseñas, DNI/CUIT, teléfonos, emails, direcciones, IMEI, CBU). La verificación 26.10 lo controla.
 -- Afuera A PROPÓSITO: usuarios_autorizados, configuracion entera, meli_cuentas*/meli_config (tokens), arca_* (certificados),
 -- presupuestos (el token es lo único que protege cada presupuesto), clientes y turnos (datos personales), seguimiento_comentarios.
 DO $$
@@ -610,7 +610,7 @@ GRANT EXECUTE ON FUNCTION agentes.blog_borrador(TEXT, TEXT, TEXT, TEXT, TEXT[], 
 -- ── 8 · Funciones heredadas: PUBLIC → cada rol que ya las ejecutaba, menos los agentes ──
 -- Toda función de `public` (salvo las de extensiones) que hoy ejecutan los agentes por herencia de PUBLIC: se otorga
 -- EXPLÍCITAMENTE a cada rol que ya podía (anon, authenticated, service_role, postgres, …: nada cambia para ellos) y
--- recién después se revoca de PUBLIC. Una función de otro dueño que no se pueda tocar queda marcada por el control 24.9.
+-- recién después se revoca de PUBLIC. Una función de otro dueño que no se pueda tocar queda marcada por el control 26.9.
 DO $$
 DECLARE f RECORD; r RECORD; v_abiertas TEXT;
 BEGIN
@@ -647,11 +647,11 @@ END $$;
 -- ── 9 · La ventanilla de los agentes (API con clave, sin conexión directa) ────
 -- En Supabase el esquema `net` (pg_net: pedidos a internet) está abierto a PUBLIC y NO se puede cerrar (es de un rol
 -- interno). Por eso los agentes NUNCA tienen conexión SQL: agentes_ro y agentes_revisor quedan SIN LOGIN para siempre
--- (control 24.11). Los agentes entran por estas funciones, llamadas por la API REST de Supabase con la clave pública
+-- (control 26.11). Los agentes entran por estas funciones, llamadas por la API REST de Supabase con la clave pública
 -- (anon) MÁS una clave propia. Cada función hace UNA cosa fija: no hay forma de mandar SQL. La clave solo se guarda
 -- como hash; se genera en el SQL Editor con agente_api_generar_clave() y se muestra UNA vez.
 -- Si alguien les dio login o contraseña (por la guía vieja), se les quita, y se cortan las conexiones que hayan
--- quedado abiertas (NOLOGIN solo frena las nuevas). Si quedara alguna, el control 24.11 sale ❌.
+-- quedado abiertas (NOLOGIN solo frena las nuevas). Si quedara alguna, el control 26.11 sale ❌.
 DO $$
 DECLARE r RECORD;
 BEGIN
@@ -668,7 +668,7 @@ BEGIN
     EXCEPTION WHEN OTHERS THEN RAISE NOTICE 'No se pudo cortar la conexión %: %', r.pid, SQLERRM;
     END;
   END LOOP;
-  PERFORM pg_stat_clear_snapshot();                          -- que el control 24.11 vea el estado de ahora
+  PERFORM pg_stat_clear_snapshot();                          -- que el control 26.11 vea el estado de ahora
 END $$;
 
 CREATE TABLE IF NOT EXISTS public.agente_claves (
@@ -866,56 +866,56 @@ COMMIT;
 -- ============================================================================
 SELECT id, control, CASE WHEN ok THEN '✅' ELSE '❌' END AS resultado
 FROM (
-  SELECT '24.1' AS id, 'Existen las 4 tablas de la mesa de control, con seguridad por filas' AS control,
+  SELECT '26.1' AS id, 'Existen las 4 tablas de la mesa de control, con seguridad por filas' AS control,
          (SELECT count(*) = 4 FROM pg_class WHERE relrowsecurity AND oid IN (
             to_regclass('public.agente_propuestas'), to_regclass('public.agente_bitacora'),
             to_regclass('public.agente_directivas'), to_regclass('public.pauta_config'))) AS ok
-  UNION ALL SELECT '24.2', 'El CRM (authenticated) solo LEE la mesa; anon no ve nada',
+  UNION ALL SELECT '26.2', 'El CRM (authenticated) solo LEE la mesa; anon no ve nada',
          has_table_privilege('authenticated', 'public.agente_propuestas', 'SELECT')
          AND NOT has_table_privilege('authenticated', 'public.agente_propuestas', 'INSERT')
          AND NOT has_table_privilege('authenticated', 'public.agente_propuestas', 'UPDATE')
          AND NOT has_table_privilege('authenticated', 'public.pauta_config', 'UPDATE')
          AND NOT has_table_privilege('anon', 'public.agente_propuestas', 'SELECT')
-  UNION ALL SELECT '24.3', 'El rol agentes_ro existe y NO puede leer ni escribir directo cajas, ventas ni la mesa',
+  UNION ALL SELECT '26.3', 'El rol agentes_ro existe y NO puede leer ni escribir directo cajas, ventas ni la mesa',
          EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'agentes_ro')
          AND NOT has_table_privilege('agentes_ro', 'public.agente_propuestas', 'UPDATE')
          AND NOT has_table_privilege('agentes_ro', 'public.agente_propuestas', 'SELECT')
          AND (to_regclass('public.cajas') IS NULL OR NOT has_table_privilege('agentes_ro', 'public.cajas', 'SELECT,UPDATE'))
          AND (to_regclass('public.ventas') IS NULL OR NOT has_table_privilege('agentes_ro', 'public.ventas', 'SELECT,UPDATE'))
-  UNION ALL SELECT '24.4', 'agentes_ro NO puede aprobar, rechazar ni cambiar el tope',
+  UNION ALL SELECT '26.4', 'agentes_ro NO puede aprobar, rechazar ni cambiar el tope',
          NOT has_function_privilege('agentes_ro', 'public.agente_aprobar(bigint,integer,text,timestamptz)', 'EXECUTE')
          AND NOT has_function_privilege('agentes_ro', 'public.agente_rechazar(bigint,integer,text)', 'EXECUTE')
          AND NOT has_function_privilege('agentes_ro', 'public.agente_pauta_tope(numeric)', 'EXECUTE')
-  UNION ALL SELECT '24.5', 'Las funciones de los agentes las ejecuta SOLO agentes_ro (ni anon ni el CRM)',
+  UNION ALL SELECT '26.5', 'Las funciones de los agentes las ejecuta SOLO agentes_ro (ni anon ni el CRM)',
          has_function_privilege('agentes_ro', 'agentes.proponer(text,text,text,text,jsonb,timestamptz,text,boolean,boolean)', 'EXECUTE')
          AND NOT has_function_privilege('authenticated', 'agentes.proponer(text,text,text,text,jsonb,timestamptz,text,boolean,boolean)', 'EXECUTE')
          AND NOT has_function_privilege('anon', 'agentes.registrar(text,text,text,text,jsonb)', 'EXECUTE')
          AND NOT has_function_privilege('agentes_ro', 'agentes.revision_codex(bigint,text,text)', 'EXECUTE')
          AND has_function_privilege('agentes_revisor', 'agentes.revision_codex(bigint,text,text)', 'EXECUTE')
          AND NOT has_function_privilege('agentes_revisor', 'agentes.proponer(text,text,text,text,jsonb,timestamptz,text,boolean,boolean)', 'EXECUTE')
-  UNION ALL SELECT '24.6', 'El trigger que exige persona autorizada para aprobar o rechazar existe',
+  UNION ALL SELECT '26.6', 'El trigger que exige persona autorizada para aprobar o rechazar existe',
          EXISTS (SELECT 1 FROM pg_trigger WHERE tgrelid = 'public.agente_propuestas'::regclass AND tgname = 'agente_guardia' AND NOT tgisinternal)
-  UNION ALL SELECT '24.7', 'Las vistas del esquema agentes existen y ninguna expone tablas con secretos',
+  UNION ALL SELECT '26.7', 'Las vistas del esquema agentes existen y ninguna expone tablas con secretos',
          (SELECT count(*) >= 10 FROM pg_views WHERE schemaname = 'agentes')
          AND NOT EXISTS (SELECT 1 FROM pg_views WHERE schemaname = 'agentes'
                           AND (viewname IN ('usuarios_autorizados', 'configuracion', 'presupuestos', 'clientes')
                                OR viewname LIKE 'meli_cuenta%' OR viewname LIKE 'meli_config%' OR viewname LIKE 'arca%'))
-  UNION ALL SELECT '24.8', 'El tope de pauta tiene su fila (arranca en 0 = sin ajustes automáticos)',
+  UNION ALL SELECT '26.8', 'El tope de pauta tiene su fila (arranca en 0 = sin ajustes automáticos)',
          EXISTS (SELECT 1 FROM public.pauta_config WHERE id = 1)
-  UNION ALL SELECT '24.9', 'Los agentes no ejecutan NINGUNA función de public (ni las viejas del CRM con un JWT inventado)',
+  UNION ALL SELECT '26.9', 'Los agentes no ejecutan NINGUNA función de public (ni las viejas del CRM con un JWT inventado)',
          NOT EXISTS (SELECT 1 FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
                       WHERE n.nspname = 'public' AND p.prokind IN ('f', 'p')
                         AND NOT EXISTS (SELECT 1 FROM pg_depend d WHERE d.classid = 'pg_proc'::regclass AND d.objid = p.oid AND d.deptype = 'e')
                         AND (has_function_privilege('agentes_ro', p.oid, 'EXECUTE') OR has_function_privilege('agentes_revisor', p.oid, 'EXECUTE')))
-  UNION ALL SELECT '24.10', 'Ninguna vista del esquema agentes muestra columnas de secretos o datos personales',
+  UNION ALL SELECT '26.10', 'Ninguna vista del esquema agentes muestra columnas de secretos o datos personales',
          NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'agentes'
                       AND (public.agente__columna_sensible(column_name)
                            OR (public.agente__texto_libre(column_name) AND table_name NOT LIKE 'agente\_%' AND table_name NOT IN ('pauta_config', 'blog_posts'))
                            OR (data_type IN ('json', 'jsonb') AND table_name NOT LIKE 'agente\_%' AND table_name <> 'pauta_config')))
-  UNION ALL SELECT '24.11', 'Los roles de los agentes NO pueden iniciar sesión ni tienen conexiones abiertas: entran solo por la ventanilla con clave',
+  UNION ALL SELECT '26.11', 'Los roles de los agentes NO pueden iniciar sesión ni tienen conexiones abiertas: entran solo por la ventanilla con clave',
          NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname IN ('agentes_ro', 'agentes_revisor') AND rolcanlogin)
          AND NOT EXISTS (SELECT 1 FROM pg_stat_activity WHERE usename IN ('agentes_ro', 'agentes_revisor'))
-  UNION ALL SELECT '24.12', 'La ventanilla existe: anon la llama (con clave y solo por POST); la tabla de claves y el generador no los toca nadie por la API',
+  UNION ALL SELECT '26.12', 'La ventanilla existe: anon la llama (con clave y solo por POST); la tabla de claves y el generador no los toca nadie por la API',
          has_function_privilege('anon', 'public.agente_api_leer(text,text,text[],jsonb,text,timestamptz,timestamptz,text,boolean,integer)', 'EXECUTE')
          AND has_function_privilege('anon', 'public.agente_api_codex(text,bigint,text,text)', 'EXECUTE')
          AND NOT has_function_privilege('anon', 'public.agente_api_generar_clave(text)', 'EXECUTE')

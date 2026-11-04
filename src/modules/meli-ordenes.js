@@ -113,6 +113,7 @@ const MeliOrdenes = {
   },
 
   pintar() {
+    if (window.MeliFacturas && MeliFacturas.pintarSeccion) MeliFacturas.pintarSeccion();   // la sección Facturación sale de los mismos datos
     const root = document.getElementById('meli-ordenes-root');
     if (!root) return;
     root.innerHTML = this._vista();
@@ -244,7 +245,7 @@ const MeliOrdenes = {
           Plata ya vendida que Mercado Libre todavía no depositó. No está en las cajas hasta que confirmes la acreditación.
           «Procesar» descuenta el stock y crea la venta; «Confirmar acreditación» mueve la plata a la caja cuando Mercado Libre la libera.</div>
       </div>
-      ${window.MeliFacturas ? window.MeliFacturas.cabecera(todas) : ''}
+      ${window.MeliFacturas && MeliFacturas.franja ? MeliFacturas.franja(todas) : ''}
       <div class="mo-tabs" style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px">${tabs}</div>
       ${tarjetas || '<div class="card" style="font-size:13px;color:var(--text-secondary)">No hay órdenes en esta vista.</div>'}
       ${lista.length > visibles.length ? `<button class="btn btn-sm" onclick="MeliOrdenes.verMas()">Ver más (${lista.length - visibles.length} más)</button>` : ''}`;

@@ -162,6 +162,44 @@ await caso('Facturación anual: tarjeta al estilo de ARCA con barra, tope de la 
     State.facturacionAnualError = true; assert.match(M.tarjetaAnual(), /no disponible/);
   } finally { State.facturacionAnual = null; State.facturacionAnualError = false; M._verCategorias = false; }
 });
+await caso('Mercado Libre → Facturación: la sección reúne automática, control anual, atrasadas, reglas y prueba de ARCA; Órdenes solo trae una franja', () => {
+  const hoy = M.hoy; M.hoy = () => '2026-11-04';
+  const antes = { ord: State.meliOrdenes, fact: State.meliFacturas };
+  try {
+    State.meliOrdenes = [{ id: 1, orderId: '501', estado: 'paid' }, { id: 2, orderId: '502', estado: 'paid' }];
+    State.meliFacturas = [{ orden_id: '502', estado: 'emitida', tipo: 'C', pto_venta: 4, numero: 1, emitida_el: '2026-10-31', version: 1 }];
+    State.facturacionAnual = { desde: '2026-01-01', hasta: '2026-11-03', limite_centavos: 4515165941, total_centavos: 100, facturado_crm_centavos: 100, notas_credito_centavos: 0, notas_credito_cantidad: 0, fuera_crm_centavos: 0, cantidad: 1, por_mes: [] };
+    const h = M.vistaSeccion();
+    assert.match(h, /Facturación electrónica/); assert.match(h, /Emitir facturas atrasadas/); assert.match(h, /id="meli-btn-arca"/); assert.match(h, /id="meli-arca-salida"/);
+    assert.match(h, /1 ventas de Mercado Libre sin factura/); assert.match(h, /MeliFacturas\.verSinFactura\(\)/); assert.doesNotMatch(h, /MeliFacturas\.filtrar\(/);
+    assert.match(h, /Cancelar o revertir la orden no cambia su factura/);
+    const f = M.franja(State.meliOrdenes);
+    assert.match(f, /<b>1<\/b> venta sin factura/); assert.match(f, /MeliFacturas\.filtrar\(\)/); assert.match(f, /Meli\.tabMovil\('facturacion'\)/); assert.doesNotMatch(f, /Emitir facturas atrasadas|Facturación electrónica/);
+    State.meliFacturas = [{ orden_id: '501', estado: 'emitida', tipo: 'C', pto_venta: 4, numero: 2, emitida_el: '2026-10-31', version: 1 }, ...State.meliFacturas];
+    assert.match(M.franja(State.meliOrdenes), /No hay ventas sin factura/);
+    State.meliFacturasError = true; assert.match(M.franja(State.meliOrdenes), /no disponible/); assert.doesNotMatch(M.franja(State.meliOrdenes), /Sin factura<\/button>/);
+    State.meliFacturasError = false; State.meliFacturasAusente = true; assert.equal(M.franja(State.meliOrdenes), ''); State.meliFacturasAusente = false;
+  } finally { M.hoy = hoy; State.meliOrdenes = antes.ord; State.meliFacturas = antes.fact; State.facturacionAnual = null; State.atrasadas = null; State.meliFacturasError = false; State.meliFacturasAusente = false; }
+});
+await caso('Facturación: pintarSeccion escribe en su contenedor, repintar actualiza sección y órdenes, y verSinFactura lleva a Órdenes con el filtro', () => {
+  const raiz = { innerHTML: '' }, llamadas = [];
+  ctx.document = { getElementById: id => (id === 'meli-facturacion-root' ? raiz : null) };
+  ctx.Meli = { tabMovil: k => llamadas.push('tab:' + k), _arcaPintar: () => llamadas.push('arca') };
+  ctx.MeliOrdenes = { pintar: () => llamadas.push('ordenes'), filtrar: k => llamadas.push('filtro:' + k) };
+  try {
+    M.pintarSeccion(); assert.match(raiz.innerHTML, /id="meli-btn-arca"/); assert.deepEqual(llamadas, ['arca']);
+    llamadas.length = 0; M.repintar(); assert.deepEqual(llamadas, ['arca', 'ordenes']);
+    llamadas.length = 0; M._soloSinFactura = false; M.verSinFactura(); assert.equal(M._soloSinFactura, true); assert.deepEqual(llamadas, ['tab:ordenes', 'filtro:todas']);
+    ctx.document = { getElementById: () => null }; assert.doesNotThrow(() => M.pintarSeccion());
+  } finally { M._soloSinFactura = false; delete ctx.document; delete ctx.Meli; ctx.MeliOrdenes = { pintar() {}, filtrar(k) { this.filtro = k; } }; }
+});
+await caso('Facturación: el diseño de pestañas — Meli tiene la pestaña y el panel, la prueba de ARCA salió de Cuenta y Órdenes ya no trae las tarjetas', () => {
+  const meli = leer('src/modules/meli.js'), ord = leer('src/modules/meli-ordenes.js');
+  assert.match(meli, /data-t="facturacion" onclick="Meli\.tabMovil\('facturacion'\)">Facturación</); assert.match(meli, /id="meli-facturacion-root" class="m-meli-pane" data-p="facturacion"/);
+  assert.ok(meli.indexOf('data-t="publicaciones"') < meli.indexOf('data-t="facturacion"') && meli.indexOf('data-t="facturacion"') < meli.indexOf('data-t="cuenta"'), 'orden: Órdenes, Publicaciones, Facturación, Cuenta');
+  assert.doesNotMatch(meli, /id="meli-btn-arca"/); assert.match(meli, /getElementById\('meli-arca-salida'\)/);
+  assert.match(ord, /MeliFacturas\.franja\(todas\)/); assert.doesNotMatch(ord, /MeliFacturas\.cabecera\(/); assert.match(ord, /MeliFacturas\.pintarSeccion\(\)/);
+});
 await caso('Atrasadas: los textos del servidor se muestran escapados (nada de HTML)', () => {
   State.atrasadas = { mensaje: '<img src=x onerror=alert(1)>', modo: '<b>x</b>', resumen: { cantidad: 1, total_centavos: 1, por_mes: [{ mes: '<i>', cantidad: 1, centavos: 1 }] } };
   const h = M.tarjetaAtrasadas(); State.atrasadas = null;

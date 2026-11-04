@@ -64,16 +64,18 @@ const Meli = {
         <div class="m-meli-seg m-seg" role="tablist" aria-label="Mercado Libre">
           <button type="button" role="tab" data-t="ordenes" onclick="Meli.tabMovil('ordenes')">Órdenes</button>
           ${conPub ? '<button type="button" role="tab" data-t="publicaciones" onclick="Meli.tabMovil(\'publicaciones\')">Publicaciones</button>' : ''}
+          <button type="button" role="tab" data-t="facturacion" onclick="Meli.tabMovil('facturacion')">Facturación</button>
           <button type="button" role="tab" data-t="cuenta" onclick="Meli.tabMovil('cuenta')">Cuenta</button>
         </div>
         <div id="meli-ordenes-root" class="m-meli-pane" data-p="ordenes"></div>
         ${conPub ? '<div id="meli-vincular-root" class="m-meli-pane" data-p="publicaciones"></div>' : ''}
+        <div id="meli-facturacion-root" class="m-meli-pane" data-p="facturacion"></div>
         <div id="meli-root" class="m-meli-pane" data-p="cuenta"></div>`;
       this.tabMovil(this._tabM || 'ordenes', c);
     } else {
-      c.innerHTML = '<div id="meli-root"></div><div id="meli-vincular-root" style="margin-top:24px"></div><div id="meli-ordenes-root" style="margin-top:24px"></div>';
+      c.innerHTML = '<div id="meli-root"></div><div id="meli-vincular-root" style="margin-top:24px"></div><div id="meli-ordenes-root" style="margin-top:24px"></div><div id="meli-facturacion-root" style="margin-top:24px"></div>';
     }
-    setTimeout(() => { this.cargar(); if (window.MeliVincular && document.getElementById('meli-vincular-root')) MeliVincular.cargar(); if (window.MeliOrdenes) MeliOrdenes.cargar(); }, 0);
+    setTimeout(() => { this.cargar(); if (window.MeliFacturas && MeliFacturas.pintarSeccion) MeliFacturas.pintarSeccion(); if (window.MeliVincular && document.getElementById('meli-vincular-root')) MeliVincular.cargar(); if (window.MeliOrdenes) MeliOrdenes.cargar(); }, 0);
     return c;
   },
 
@@ -223,7 +225,6 @@ ${herr('Diagnóstico de datos', `      <div class="card" style="margin-top:14px"
             "Conciliar importes" muestra además los importes de las últimas 6 ventas, sin datos de compradores.</div>
           <button class="btn btn-sm" id="meli-btn-sonda" onclick="Meli.sonda()"><i class="ti ti-stethoscope"></i> Ejecutar diagnóstico</button>
           <button class="btn btn-sm" id="meli-btn-conciliar" onclick="Meli.sonda('conciliar')" title="Importes de las últimas 6 ventas y si la cuenta cierra"><i class="ti ti-calculator"></i> Conciliar importes</button>
-          <button class="btn btn-sm" id="meli-btn-arca" onclick="Meli.arcaDiagnostico()" title="Prueba de solo lectura contra ARCA: no emite facturas"><i class="ti ti-file-certificate"></i> Probar conexión con ARCA</button>
         </div>
         <div id="meli-sonda-salida" style="margin-top:10px"></div>
       </div>`)}`;
@@ -258,11 +259,30 @@ ${herr('Diagnóstico de datos', `      <div class="card" style="margin-top:14px"
     }
   },
 
-  // Prueba de solo lectura contra ARCA (api/_arca_diagnostico.js): estado, login con el certificado y puntos de venta. No emite nada.
+  // Prueba de solo lectura contra ARCA (api/_arca_diagnostico.js): estado, login con el certificado, puntos de venta y último número de cada uno. No emite nada.
+  // Vive en Mercado Libre → Facturación. El último resultado se guarda para que un repintado de la pantalla no lo borre mientras se lo lee o se lo copia.
+  _arcaJson: null,
+  _arcaPintar() {
+    const out = document.getElementById('meli-arca-salida');
+    const json = this._arcaJson;
+    if (!out || !json) return;
+    const e = (s) => State.esc(s == null ? '' : String(s));
+    const filas = (json.pasos || []).map((p) => {
+      const { paso, ok, ...resto } = p;
+      const aviso = ok && resto.aviso;
+      return `<div style="font-size:12.5px;margin-top:6px"><b style="color:${!ok ? 'var(--red)' : aviso ? 'var(--amber)' : 'var(--green)'}">${!ok ? '✘' : aviso ? '⚠' : '✔'}</b> <b>${e(paso)}</b>`
+        + `<div style="font-size:11.5px;color:var(--text-secondary);margin-left:18px;white-space:pre-wrap">${e(JSON.stringify(resto))}</div></div>`;
+    }).join('');
+    out.innerHTML = `<div style="font-size:12.5px;margin-bottom:4px"><b>Modo:</b> ${e(json.modo)} · ${e(json.resumen)}</div>${filas}`
+      + '<div style="font-size:11.5px;color:var(--text-secondary);margin:8px 0 4px">Si hace falta pasarlo, copiá este texto (no incluye certificado, clave ni CUIT):</div>'
+      + '<textarea readonly style="width:100%;height:160px;font-family:monospace;font-size:11px;padding:8px;border:1px solid var(--border);border-radius:8px"></textarea>';
+    out.querySelector('textarea').value = JSON.stringify(json, null, 2);
+  },
   async arcaDiagnostico() {
-    const out = document.getElementById('meli-sonda-salida');
+    const out = document.getElementById('meli-arca-salida');
     const btn = document.getElementById('meli-btn-arca');
     if (btn) btn.disabled = true;
+    this._arcaJson = null;
     if (out) out.textContent = 'Consultando a ARCA…';
     try {
       const token = await this._token();
@@ -272,23 +292,17 @@ ${herr('Diagnóstico de datos', `      <div class="card" style="margin-top:14px"
       });
       let json = null;
       try { json = await r.json(); } catch { /* sin cuerpo */ }
-      if (!out) return;
-      if (!r.ok || !json) { out.textContent = 'No se pudo ejecutar la prueba (HTTP ' + r.status + ').'; return; }
-      const e = (s) => State.esc(s == null ? '' : String(s));
-      const filas = (json.pasos || []).map((p) => {
-        const { paso, ok, ...resto } = p;
-        const aviso = ok && resto.aviso;
-        return `<div style="font-size:12.5px;margin-top:6px"><b style="color:${!ok ? 'var(--red)' : aviso ? 'var(--amber)' : 'var(--green)'}">${!ok ? '✘' : aviso ? '⚠' : '✔'}</b> <b>${e(paso)}</b>`
-          + `<div style="font-size:11.5px;color:var(--text-secondary);margin-left:18px;white-space:pre-wrap">${e(JSON.stringify(resto))}</div></div>`;
-      }).join('');
-      out.innerHTML = `<div style="font-size:12.5px;margin-bottom:4px"><b>Modo:</b> ${e(json.modo)} · ${e(json.resumen)}</div>${filas}`
-        + '<div style="font-size:11.5px;color:var(--text-secondary);margin:8px 0 4px">Si hace falta pasarlo, copiá este texto (no incluye certificado, clave ni CUIT):</div>'
-        + '<textarea readonly style="width:100%;height:160px;font-family:monospace;font-size:11px;padding:8px;border:1px solid var(--border);border-radius:8px"></textarea>';
-      out.querySelector('textarea').value = JSON.stringify(json, null, 2);
+      const salida = document.getElementById('meli-arca-salida');
+      if (!salida) return;
+      if (!r.ok || !json) { salida.textContent = 'No se pudo ejecutar la prueba (HTTP ' + r.status + ').'; return; }
+      this._arcaJson = json;
+      this._arcaPintar();
     } catch {
-      if (out) out.textContent = 'No se pudo ejecutar la prueba.';
+      const salida = document.getElementById('meli-arca-salida');
+      if (salida) salida.textContent = 'No se pudo ejecutar la prueba.';
     } finally {
-      if (btn) btn.disabled = false;
+      const b2 = document.getElementById('meli-btn-arca');
+      if (b2) b2.disabled = false;
     }
   },
 

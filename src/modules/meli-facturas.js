@@ -156,7 +156,7 @@ const MeliFacturas = {
       if (error || !data || data.ok !== true) { toast('No se pudo guardar. Probá de nuevo.'); return; }
       await this.cargarAuto(supa);
       toast('Facturación automática actualizada.');
-      if (window.MeliOrdenes && MeliOrdenes.pintar) MeliOrdenes.pintar();
+      this.repintar();
     } catch { toast('No se pudo guardar. Probá de nuevo.'); } finally { if (btn) btn.disabled = false; }
   },
   async avisoVisto(btn) {
@@ -165,7 +165,7 @@ const MeliFacturas = {
       const { data, error } = await supa.rpc('arca_auto_aviso_visto', { p_orden: d.orden, p_tipo: d.tipo, p_ambiente: d.amb });
       if (error || !data || data.ok !== true) { toast('No se pudo marcar como visto.'); return; }
       await this.cargarAuto(supa);
-      if (window.MeliOrdenes && MeliOrdenes.pintar) MeliOrdenes.pintar();
+      this.repintar();
     } catch { toast('No se pudo marcar como visto.'); }
   },
   _pesos(centavos) { return new Intl.NumberFormat('es-AR', { style: 'currency', currency: 'ARS', maximumFractionDigits: 2 }).format(Number(centavos || 0) / 100); },
@@ -256,7 +256,7 @@ const MeliFacturas = {
       const { data, error } = await supa.rpc('arca_atrasadas_resumen', { p_desde: d.desde, p_hasta: d.hasta, p_ambiente: modo });
       if (error || !data) { toast(error && /RANGO_INVALIDO/.test(error.message || '') ? 'El rango de fechas no es válido.' : 'No se pudo calcular. ¿Falta correr el script 25?'); return; }
       Object.assign(a, { desde: d.desde, hasta: d.hasta, fecha: d.fecha, pto: d.pto_venta, modo, resumen: data, consulta: { desde: d.desde, hasta: d.hasta, fecha: d.fecha, pto: d.pto_venta }, mensaje: '', abierta: true });
-      if (window.MeliOrdenes && MeliOrdenes.pintar) MeliOrdenes.pintar();
+      this.repintar();
     } catch { toast('No se pudo calcular. Probá de nuevo.'); } finally { if (btn) btn.disabled = false; }
   },
   async atrasadasEmitir(btn) {
@@ -270,7 +270,7 @@ const MeliFacturas = {
     if (!confirm(`Vas a EMITIR ${n} facturas, UNA POR CADA VENTA, cada una por el importe de su propia venta, en ${this.NOMBRE_MODO[a.modo] || a.modo}.\nLa SUMA de las ${n} facturas es ${this._pesos(r.total_centavos)}.\nPunto de venta ${d.pto_venta}, con fecha ${d.fecha}.\n${real ? 'Son comprobantes REALES, con validez fiscal: no se pueden borrar, solo anular con una nota de crédito.' : 'Son comprobantes de prueba, sin valor fiscal.'}\n¿Seguís?`)) return;
     if (real && n >= 10 && String(prompt(`Para confirmar escribí la cantidad de facturas (${n}):`) || '').trim() !== String(n)) { toast('No coincide la cantidad: no se emitió nada.'); return; }
     this._atrParar = false; a.corriendo = true; let emitidas = 0, omitidas = 0, final = '';
-    if (window.MeliOrdenes && MeliOrdenes.pintar) MeliOrdenes.pintar();
+    this.repintar();
     try {
       for (;;) {
         if (this._atrParar) { final = `Detenido por vos. Emitidas ${emitidas}. Cuando quieras, «Ver cuántas son» y seguís desde donde quedó.`; break; }
@@ -287,7 +287,7 @@ const MeliFacturas = {
     } finally {
       a.corriendo = false; a.mensaje = final || a.mensaje; a.resumen = null; a.consulta = null;
       try { await this.cargar(supa); } catch { /* se actualiza al recargar */ }
-      if (window.MeliOrdenes && MeliOrdenes.pintar) MeliOrdenes.pintar();
+      this.repintar();
       toast(a.mensaje || 'Terminó.');
     }
   },
@@ -296,7 +296,7 @@ const MeliFacturas = {
   CATEGORIAS: [['A', 1200941045], ['B', 1759518274], ['C', 2467049431], ['D', 3062865143], ['E', 3602823133], ['F', 4515165941], ['G', 5399579887], ['H', 8192466037], ['I', 9169976190], ['J', 10501251920], ['K', 12661083875]],
   categoriaDe(limiteCentavos) { const c = this.CATEGORIAS.find(x => x[1] === Number(limiteCentavos)); return c ? c[0] : null; },
   _verCategorias: false,
-  verCategorias() { this._verCategorias = !this._verCategorias; if (window.MeliOrdenes && MeliOrdenes.pintar) MeliOrdenes.pintar(); },
+  verCategorias() { this._verCategorias = !this._verCategorias; this.repintar(); },
   elegirCategoria(letra) {
     const c = this.CATEGORIAS.find(x => x[0] === letra), campo = document.getElementById('fa-limite');
     if (c && campo) campo.value = (c[1] / 100).toFixed(2);
@@ -374,15 +374,52 @@ const MeliFacturas = {
       if (error || !data || data.ok !== true) { toast('No se pudo guardar. Probá de nuevo.'); return; }
       await this.cargarAnual(supa);
       toast('Control de facturación actualizado.');
-      if (window.MeliOrdenes && MeliOrdenes.pintar) MeliOrdenes.pintar();
+      this.repintar();
     } catch { toast('No se pudo guardar. Probá de nuevo.'); } finally { if (btn) btn.disabled = false; }
   },
   cabecera(ordenes) {
     if (State.meliFacturasAusente) return this.tarjetaAuto() + this.tarjetaAnual();
     const n = State.meliFacturasError ? 0 : this.contar(ordenes);
-    return this.tarjetaAuto() + this.tarjetaAnual() + this.tarjetaAtrasadas() + `<div class="card" style="margin-bottom:10px;font-size:12px">${State.esc(this.TEXTO)}<p>${State.esc(this.REABRIR)}</p><p>Cancelar o revertir la orden no cambia su factura.</p>${State.meliFacturasError ? '<p>Control de facturas no disponible. Probá actualizar.</p>' : `${n > 0 ? `<p>${n} ventas de Mercado Libre sin factura <button class="btn btn-sm" onclick="MeliFacturas.filtrar(true)">Ver</button></p>` : ''}<button class="btn btn-sm ${this._soloSinFactura ? 'btn-primary' : ''}" onclick="MeliFacturas.filtrar()">Sin factura</button>`}</div>`;
+    return this.tarjetaAuto() + this.tarjetaAnual() + this.tarjetaAtrasadas() + `<div class="card" style="margin-bottom:10px;font-size:12px">${State.esc(this.TEXTO)}<p>${State.esc(this.REABRIR)}</p><p>Cancelar o revertir la orden no cambia su factura.</p>${State.meliFacturasError ? '<p>Control de facturas no disponible. Probá actualizar.</p>' : `${n > 0 ? `<p>${n} ventas de Mercado Libre sin factura <button class="btn btn-sm" onclick="MeliFacturas.verSinFactura()">Ver</button></p>` : ''}<button class="btn btn-sm ${this._soloSinFactura ? 'btn-primary' : ''}" onclick="MeliFacturas.verSinFactura()">Ver ventas sin factura</button>`}</div>`;
   },
   filtrar(ver) { this._soloSinFactura = ver === true || !this._soloSinFactura; MeliOrdenes.filtrar('todas'); },
+  // Desde la sección Facturación: ir a Órdenes ya filtrado por «sin factura».
+  verSinFactura() {
+    this._soloSinFactura = true;
+    if (window.Meli && Meli.tabMovil) Meli.tabMovil('ordenes');
+    if (window.MeliOrdenes && MeliOrdenes.filtrar) MeliOrdenes.filtrar('todas');
+  },
+  // Repinta la sección Facturación y las órdenes (cada una muestra el estado de su factura).
+  repintar() {
+    this.pintarSeccion();
+    if (window.MeliOrdenes && MeliOrdenes.pintar) MeliOrdenes.pintar();
+  },
+  // Mercado Libre → Facturación: todo lo de facturación junto (automática, control anual, atrasadas, reglas y la prueba de conexión con ARCA).
+  vistaSeccion() {
+    const e = s => State.esc(String(s ?? ''));
+    return `<div class="mf-seccion">${this.cabecera(State.meliOrdenes || [])}
+      <div class="card" style="margin-bottom:10px;font-size:12px">
+        <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+          <div style="flex:1;min-width:220px;color:var(--text-secondary);line-height:1.5"><b style="color:var(--text)">Conexión con ARCA (solo lectura).</b> Comprueba el servicio, el certificado, los puntos de venta y el último número de cada uno. No emite nada.</div>
+          <button class="btn btn-sm" id="meli-btn-arca" onclick="Meli.arcaDiagnostico()" title="Prueba de solo lectura contra ARCA: no emite facturas"><i class="ti ti-file-certificate"></i> Probar conexión con ARCA</button>
+        </div>
+        <div id="meli-arca-salida" style="margin-top:10px"></div>
+      </div></div>`;
+  },
+  pintarSeccion() {
+    if (typeof document === 'undefined' || !document.getElementById) return;
+    const raiz = document.getElementById('meli-facturacion-root');
+    if (!raiz) return;
+    raiz.innerHTML = this.vistaSeccion();
+    if (window.Meli && Meli._arcaPintar) Meli._arcaPintar();
+  },
+  // Franja chica en Órdenes: cuántas ventas están sin factura, el filtro y el atajo a la sección Facturación.
+  franja(ordenes) {
+    if (State.meliFacturasAusente) return '';
+    const n = State.meliFacturasError ? 0 : this.contar(ordenes);
+    const texto = State.meliFacturasError ? 'Control de facturas no disponible. Probá actualizar.' : n > 0 ? `<b>${n}</b> venta${n === 1 ? '' : 's'} sin factura` : 'No hay ventas sin factura';
+    return `<div class="card" style="margin-bottom:10px;font-size:12.5px;display:flex;gap:8px;align-items:center;flex-wrap:wrap"><span style="flex:1;min-width:150px"><b>Facturas:</b> ${texto}</span>${State.meliFacturasError ? '' : `<button class="btn btn-sm ${this._soloSinFactura ? 'btn-primary' : ''}" onclick="MeliFacturas.filtrar()">Sin factura</button>`}<button class="btn btn-sm" onclick="Meli.tabMovil('facturacion')">Ir a Facturación</button></div>`;
+  },
   async accion(btn) {
     const orden = btn.dataset.orden, estado = btn.dataset.estado;
     const version = this.de({ orderId: orden }).version ?? null;
@@ -429,7 +466,7 @@ const MeliFacturas = {
       const r = await DB.marcarFactura({ p_orden: String(orden), p_estado: estado, p_tipo: emitida ? datos.tipo : null, p_pto_venta: emitida ? datos.pto_venta : null, p_numero: emitida ? datos.numero : null, p_emitida_el: emitida ? datos.emitida_el : null, p_motivo: estado === 'no_corresponde' ? datos.motivo : null, p_version_esperada: version });
       if (r.error || r.data?.ok !== true) { alert(this.error(r.error || {})); return false; }
       const leida = await this.cargar(supa);
-      MeliOrdenes.pintar();
+      this.repintar();
       toast(leida ? 'Estado de factura registrado.' : 'La factura se registró, pero no se pudo actualizar la pantalla. Probá actualizar.');
       return true;
     } catch {

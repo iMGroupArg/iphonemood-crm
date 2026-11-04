@@ -54,7 +54,13 @@ await caso('Detalle honesto: solo descripción e importe de ARCA (sin cantidad n
 await caso('Emisor incompleto: el PDF lo avisa abajo con los datos que faltan; con el emisor completo no hay aviso; sin razón social lo dice', () => {
   const { P } = entorno(); const d = datos(); d.emisor = { ...d.emisor, razonSocial: '', domicilio: '', ingresosBrutos: '', faltan: ['razonSocial', 'domicilio', 'ingresosBrutos'], completo: false };
   const t = texto(P.generar(d, {}).bytes);
-  assert.ok(t.includes('FALTAN DATOS DEL EMISOR \\(raz\xf3n social, domicilio, ingresos brutos\\)') && t.includes('constancia de consulta') && t.includes('\\(falta la raz\xf3n social\\)'));
+  const visible = [...t.matchAll(/\((.*?)\) Tj/g)].map(m => m[1]).join(' ').replace(/\\([()\\])/g, '$1');     // lo que se dibuja, unido
+  assert.ok(visible.includes('FALTAN DATOS DEL EMISOR (raz\xf3n social, domicilio, ingresos brutos)') && /es una constancia de consulta, no una factura completa para entregar\./.test(visible), 'el aviso completo, sin cortar con puntos suspensivos');
+  assert.ok(visible.includes('(falta la raz\xf3n social)'));
+  const largo = datos(); largo.emisor = { ...largo.emisor, completo: false, faltan: ['razonSocial', 'domicilio', 'inicioActividades', 'ingresosBrutos'] }; largo.modo = 'homologacion';
+  const v2 = [...texto(P.generar(largo, {}).bytes).matchAll(/\((.*?)\) Tj/g)].map(m => m[1]).join(' ').replace(/\\([()\\])/g, '$1');
+  assert.ok(/FALTAN DATOS DEL EMISOR \(raz\xf3n social, domicilio, inicio de actividades, ingresos brutos\)/.test(v2) && /no una factura completa para entregar\./.test(v2) && v2.includes('COMPROBANTE DE PRUEBA'), 'con los cuatro datos faltantes y el cartel de prueba, todo completo');
+  assert.ok([...texto(P.generar(largo, {}).bytes).matchAll(/ ([\d.]+) ([\d.]+) Td/g)].every(m => Number(m[2]) > 0 && Number(m[2]) < 842));
   assert.ok(!texto(P.generar(datos(), {}).bytes).includes('FALTAN DATOS DEL EMISOR'));
 });
 await caso('Entradas enormes no rompen la página: textos recortados con «...», líneas acotadas y todo dentro del A4', () => {

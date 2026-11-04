@@ -1,0 +1,9 @@
+{
+  "name": "iphonemood-agentes",
+  "private": true,
+  "type": "module",
+  "description": "Herramientas de la red de agentes (ventanilla de la mesa de control y lectura de la bandeja). Sin dependencias. Ver agentes/README.md.",
+  "scripts": {
+    "test": "node mesa.test.mjs"
+  }
+}

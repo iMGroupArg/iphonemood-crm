@@ -26,6 +26,7 @@ import './meli-ordenes.js';
 import './meli-facturas.js';
 import './liberaciones.js';
 import './actividades.js';
+import './agentes.js';
 import Bandeja from './bandeja.js';
 
 const App = {
@@ -50,6 +51,7 @@ const App = {
     blog: { title: 'Blog', module: Blog },
     meli: { title: 'Mercado Libre', module: Meli },
     actividades: { title: 'Actividades', module: Actividades },
+    agentes: { title: 'Agentes', module: Agentes },
     panel: { title: 'Panel de control', module: Panel },
   },
 
@@ -133,6 +135,7 @@ const App = {
     document.getElementById('topbar-usdt').textContent = State.refUsdt.toLocaleString('es-AR');
     Panel.cargarMarcaAlInicio();
     this.goTo('dashboard');
+    Promise.resolve(window.Agentes?.cargar?.()).catch(() => {}).then(() => window.Agentes?.actualizarBadge?.());
     // Las actividades se leen primero: el aviso de apertura las incluye («tenés N transferencias pendientes»).
     Promise.resolve(window.Actividades?.cargar?.()).catch(() => {}).then(() => {
       window.Actividades?.actualizarBadge?.();
@@ -303,6 +306,7 @@ const App = {
     }
     window.Liberaciones?.actualizarBadge?.();
     window.Actividades?.actualizarBadge?.();
+    window.Agentes?.actualizarBadge?.();
   }
 };
 

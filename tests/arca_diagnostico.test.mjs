@@ -32,7 +32,7 @@ const fe = cuerpo => `<soap:Envelope xmlns:soap="http://schemas.xmlsoap.org/soap
 const ptos = nros => fe(`<FEParamGetPtosVentaResponse><FEParamGetPtosVentaResult><ResultGet>${nros.map(x => `<PtoVenta><Nro>${x}</Nro><EmisionTipo>CAE</EmisionTipo><Bloqueado>N</Bloqueado><FchBaja>NULL</FchBaja></PtoVenta>`).join('')}</ResultGet></FEParamGetPtosVentaResult></FEParamGetPtosVentaResponse>`);
 const dummy = fe('<FEDummyResponse><FEDummyResult><AppServer>OK</AppServer><DbServer>OK</DbServer><AuthServer>OK</AuthServer></FEDummyResult></FEDummyResponse>');
 const ultimo = n2 => fe(`<FECompUltimoAutorizadoResponse><FECompUltimoAutorizadoResult><PtoVta>1</PtoVta><CbteTipo>11</CbteTipo><CbteNro>${n2}</CbteNro></FECompUltimoAutorizadoResult></FECompUltimoAutorizadoResponse>`);
-function servidor({ puntos = [1], ultimoNro = 7, loginRta = login } = {}) {
+function servidor({ puntos = [1], ultimoNro = 7, loginRta = login, ultimoPorPunto = null, consulta = null } = {}) {
   const llamadas = [];
   const f = async (url, op) => {
     llamadas.push({ url, soap: op && op.headers && op.headers.SOAPAction, cuerpo: String(op && op.body) });
@@ -40,7 +40,8 @@ function servidor({ puntos = [1], ultimoNro = 7, loginRta = login } = {}) {
     if (/LoginCms/.test(url)) r = loginRta;
     else if (/FEDummy/.test(op.headers.SOAPAction)) r = dummy;
     else if (/FEParamGetPtosVenta/.test(op.headers.SOAPAction)) r = ptos(puntos);
-    else if (/FECompUltimoAutorizado/.test(op.headers.SOAPAction)) r = ultimo(ultimoNro);
+    else if (/FECompUltimoAutorizado/.test(op.headers.SOAPAction)) { const pv = Number((/<ar:PtoVta>(\d+)<\/ar:PtoVta>/.exec(String(op.body)) || [])[1]); r = ultimo(ultimoPorPunto && ultimoPorPunto[pv] !== undefined ? ultimoPorPunto[pv] : ultimoNro); }
+    else if (/FECompConsultar/.test(op.headers.SOAPAction)) { const nro = Number((/<ar:CbteNro>(\d+)<\/ar:CbteNro>/.exec(String(op.body)) || [])[1]); r = consulta ? consulta(nro) : '<x/>'; }
     else r = '<x/>';
     return { ok: true, status: 200, text: async () => r };
   };
@@ -60,6 +61,31 @@ await caso('Todo bien: todos los pasos OK, sin ninguna llamada de emisión y sin
   assert.match(r.resumen, /No se emitió ningún comprobante/);
   const ult = r.pasos.find(p => /Último comprobante/.test(p.paso));
   assert.equal(ult.ultimoNumero, 7); assert.equal(ult.proximo, 8);
+});
+
+await caso('Otros puntos de venta: informa el último autorizado y el primero y el último comprobante, sin el documento del receptor', async () => {
+  const comp = nro => fe(`<FECompConsultarResponse><FECompConsultarResult><ResultGet><CodAutorizacion>7000000000000${nro}</CodAutorizacion><FchVto>20261114</FchVto><ImpTotal>${nro === 1 ? '100.00' : '250.50'}</ImpTotal><DocTipo>96</DocTipo><DocNro>30111222</DocNro><CbteFch>20261031</CbteFch></ResultGet></FECompConsultarResult></FECompConsultarResponse>`);
+  const s = servidor({ puntos: [1, 4], ultimoPorPunto: { 1: 7, 4: 66 }, consulta: comp });
+  const r = await diagnosticoArca({ env: ENV, fetchImpl: s.f, ahora, cache: cacheNueva() });
+  const p4 = r.pasos.find(p => /punto de venta 4/.test(p.paso));
+  assert.ok(p4 && p4.ok, JSON.stringify(r.pasos));
+  assert.equal(p4.ultimoNumero, 66); assert.equal(p4.primero.fecha, '20261031'); assert.equal(p4.primero.importe, '100.00'); assert.equal(p4.ultimo.importe, '250.50');
+  assert.match(p4.ultimo.cae, /^\d{10,20}$/); assert.equal(p4.ultimo.tipoDocReceptor, '96');
+  assert.ok(!JSON.stringify(r).includes('30111222'), 'no devuelve el número de documento del receptor');
+  assert.ok(!r.pasos.some(p => /punto de venta 1\b/.test(p.paso)), 'el punto configurado no se repite');
+  assert.ok(!s.llamadas.some(c => /FECAESolicitar/.test(c.soap || '')), 'no emite');
+  assert.ok(r.pasos.every(p => p.ok));
+});
+await caso('Otro punto de venta sin facturas: último 0 y sin consultar comprobantes; si ARCA falla con ese punto, lo marca sin tumbar lo demás', async () => {
+  const s = servidor({ puntos: [1, 4], ultimoPorPunto: { 4: 0 } });
+  const r = await diagnosticoArca({ env: ENV, fetchImpl: s.f, ahora, cache: cacheNueva() });
+  const p4 = r.pasos.find(p => /punto de venta 4/.test(p.paso));
+  assert.equal(p4.ok, true); assert.equal(p4.ultimoNumero, 0); assert.equal(p4.primero, undefined);
+  assert.ok(!s.llamadas.some(c => /FECompConsultar/.test(c.soap || '')));
+  const f = async (url, op) => (/FECompConsultar/.test((op.headers || {}).SOAPAction || '') ? { ok: true, status: 200, text: async () => fe('<FECompConsultarResponse><FECompConsultarResult><Errors><Err><Code>600</Code><Msg>No autorizado</Msg></Err></Errors></FECompConsultarResult></FECompConsultarResponse>') } : servidor({ puntos: [1, 4], ultimoPorPunto: { 4: 5 } }).f(url, op));
+  const r2 = await diagnosticoArca({ env: ENV, fetchImpl: f, ahora, cache: cacheNueva() });
+  const q4 = r2.pasos.find(p => /punto de venta 4/.test(p.paso));
+  assert.equal(q4.ok, false); assert.ok(r2.pasos.find(p => /Login/.test(p.paso)).ok);
 });
 
 await caso('Punto de venta configurado que no existe en ARCA: lo avisa con los válidos', async () => {

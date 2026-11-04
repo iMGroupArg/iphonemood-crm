@@ -107,6 +107,8 @@ await caso('Atrasadas: la tarjeta trae el mes anterior, el punto de venta 4 y mu
   const hoy = M.hoy; M.hoy = () => '2026-11-04'; State.atrasadas = null;
   try {
     let h = M.tarjetaAtrasadas();
+    assert.match(h, /Emitir facturas atrasadas/); assert.match(h, /alternarAtr\(\)">Abrir</); assert.doesNotMatch(h, /id="atr-desde"/, 'cerrada: solo el título y el botón');
+    State.atrasadas = { abierta: true }; h = M.tarjetaAtrasadas(); assert.match(h, />Cerrar</);
     assert.match(h, /Emitir facturas atrasadas/); assert.match(h, /id="atr-desde"[^>]*value="2026-10-01"/); assert.match(h, /id="atr-hasta"[^>]*value="2026-10-31"/);
     assert.match(h, /id="atr-fecha"[^>]*max="2026-11-04"[^>]*value="2026-10-31"/); assert.match(h, /id="atr-pto"[^>]*value="4"/); assert.doesNotMatch(h, /Emitir \d+ facturas/);
     State.facturacionAnual = { limite_centavos: 4500000000, total_centavos: 3100000000 };
@@ -151,7 +153,10 @@ await caso('Facturación anual: tarjeta al estilo de ARCA con barra, tope de la 
     assert.match(h, /Monto facturado/); assert.match(h, /Tope categoría <b>F<\/b>/); assert.ok(h.includes(M._pesos(4515165941))); assert.ok(h.includes(M._pesos(3220119832)));
     assert.match(h, /id="fa-barra"[^>]*width:71\.32%/); assert.match(h, />F<\/div>/);
     assert.match(h, /Comprobantes emitidos/); assert.match(h, /193 facturas/); assert.match(h, /11 notas de crédito/); assert.ok(h.includes(M._pesos(-143332150)));
-    assert.match(h, /id="fa-cat"/); assert.match(h, /<option value="F" selected>/); assert.doesNotMatch(h, /Valores de ARCA vigentes/);
+    assert.match(h, /alternar\('meses'\)">Detalle por mes</); assert.match(h, /alternar\('limite'\)">Límite y fuera del CRM</); assert.match(h, /class="mf-acciones"/);
+    assert.doesNotMatch(h, /id="fa-cat"/, 'el panel del límite está cerrado'); assert.doesNotMatch(h, /<details/);
+    M.alternar('limite'); h = M.tarjetaAnual(); assert.match(h, /id="fa-cat"/); assert.match(h, /<option value="F" selected>/); assert.match(h, /id="fa-limite"/); assert.match(h, /guardarAnual/);
+    M.alternar('meses'); assert.match(M.tarjetaAnual(), /Todavía no hay facturas en el período|2026-10/); M.alternar('meses'); M.alternar('limite'); assert.doesNotMatch(h, /Valores de ARCA vigentes/);
     M.verCategorias(); h = M.tarjetaAnual(); assert.match(h, /OCULTAR CATEGORÍAS/); assert.match(h, /Valores de ARCA vigentes desde el 1\/08\/2026/); assert.match(h, /F · la tuya/); assert.ok(h.includes(M._pesos(12661083875)));
     M.verCategorias(); assert.doesNotMatch(M.tarjetaAnual(), /la tuya/);
     State.facturacionAnual.limite_centavos = 5000000000; h = M.tarjetaAnual(); assert.match(h, /Tope configurado/); assert.match(h, />\?<\/div>/);
@@ -171,15 +176,16 @@ await caso('Mercado Libre → Facturación: la sección reúne automática, cont
     State.facturacionAnual = { desde: '2026-01-01', hasta: '2026-11-03', limite_centavos: 4515165941, total_centavos: 100, facturado_crm_centavos: 100, notas_credito_centavos: 0, notas_credito_cantidad: 0, fuera_crm_centavos: 0, cantidad: 1, por_mes: [] };
     const h = M.vistaSeccion();
     assert.match(h, /Facturación electrónica/); assert.match(h, /Emitir facturas atrasadas/); assert.match(h, /id="meli-btn-arca"/); assert.match(h, /id="meli-arca-salida"/);
-    assert.match(h, /1 ventas de Mercado Libre sin factura/); assert.match(h, /MeliFacturas\.verSinFactura\(\)/); assert.doesNotMatch(h, /MeliFacturas\.filtrar\(/);
-    assert.match(h, /Cancelar o revertir la orden no cambia su factura/);
+    assert.match(h, /Control de facturas/); assert.match(h, /<b>1<\/b> venta sin factura/); assert.match(h, /MeliFacturas\.verSinFactura\(\)">Ver ventas sin factura/); assert.doesNotMatch(h, /MeliFacturas\.filtrar\(/);
+    assert.match(h, /alternar\('reglas'\)">Reglas</); assert.doesNotMatch(h, /Cancelar o revertir la orden no cambia su factura/, 'las reglas están plegadas');
+    M.alternar('reglas'); assert.match(M.vistaSeccion(), /Cancelar o revertir la orden no cambia su factura/); M.alternar('reglas');
     const f = M.franja(State.meliOrdenes);
     assert.match(f, /<b>1<\/b> venta sin factura/); assert.match(f, /MeliFacturas\.filtrar\(\)/); assert.match(f, /Meli\.tabMovil\('facturacion'\)/); assert.doesNotMatch(f, /Emitir facturas atrasadas|Facturación electrónica/);
     State.meliFacturas = [{ orden_id: '501', estado: 'emitida', tipo: 'C', pto_venta: 4, numero: 2, emitida_el: '2026-10-31', version: 1 }, ...State.meliFacturas];
     assert.match(M.franja(State.meliOrdenes), /No hay ventas sin factura/);
     State.meliFacturasError = true; assert.match(M.franja(State.meliOrdenes), /no disponible/); assert.doesNotMatch(M.franja(State.meliOrdenes), /Sin factura<\/button>/);
     State.meliFacturasError = false; State.meliFacturasAusente = true; assert.equal(M.franja(State.meliOrdenes), ''); State.meliFacturasAusente = false;
-  } finally { M.hoy = hoy; State.meliOrdenes = antes.ord; State.meliFacturas = antes.fact; State.facturacionAnual = null; State.atrasadas = null; State.meliFacturasError = false; State.meliFacturasAusente = false; }
+  } finally { M.hoy = hoy; State.meliOrdenes = antes.ord; State.meliFacturas = antes.fact; State.facturacionAnual = null; State.atrasadas = null; State.meliFacturasError = false; State.meliFacturasAusente = false; M._ui = {}; }
 });
 await caso('Facturación: pintarSeccion escribe en su contenedor, repintar actualiza sección y órdenes, y verSinFactura lleva a Órdenes con el filtro', () => {
   const raiz = { innerHTML: '' }, llamadas = [];
@@ -340,7 +346,7 @@ await caso('Revertidas, canceladas y ambas formas de cierre manual excluidas', (
 });
 await caso('Contador y filtro sin factura', () => {
   assert.equal(M.contar([o, { ...o, revertidaEn: 'x' }]), 1);
-  assert.match(M.cabecera([o]), /1 ventas de Mercado Libre sin factura/); assert.doesNotMatch(M.cabecera([]), /0 ventas/);
+  assert.match(M.cabecera([o]), /<b>1<\/b> venta sin factura/); assert.match(M.cabecera([]), /Todo al día/); assert.doesNotMatch(M.cabecera([]), /0 venta/);
   M.filtrar(true); assert.equal(ctx.MeliOrdenes.filtro, 'todas');
 });
 const errores = {
@@ -386,8 +392,11 @@ await caso('Escape HTML en motivo, comprobante e identificador', () => {
   assert.match(M.tarjeta({ orderId: '" onclick="evil' }), /&quot;/);
 });
 await caso('Emisor fijo, textos v2, sin campos fiscales ajenos ni datos de identidad', () => {
+  M._ui = { reglas: true };
+  try {
   assert.match(M.cabecera([]), /Franco Ezequiel Velas/); assert.match(M.cabecera([]), /Reabrir NO anula el comprobante ante ARCA; el número queda en el historial./);
   assert.match(M.cabecera([]), /Cancelar o revertir la orden no cambia su factura./);
+  } finally { M._ui = {}; }
   assert.doesNotMatch(fuente, /p_importe|p_emisor|name="(?:importe|emisor)"|comprador|dni|cuit|direccion|dirección/i);
   assert.deepEqual(Object.keys(llamadas[0]).sort(), ['p_emitida_el','p_estado','p_motivo','p_numero','p_orden','p_pto_venta','p_tipo','p_version_esperada']);
 });

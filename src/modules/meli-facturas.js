@@ -118,15 +118,14 @@ const MeliFacturas = {
     const TIPO = { factura: 'Factura', nota: 'Nota de crédito' };
     const pend = (a.pendientes || []).map(p => `<div style="margin-top:4px">${e(TIPO[p.tipo] || p.tipo)} de la orden <b>${e(p.orden)}</b>${p.ambiente === 'homologacion' ? ' (prueba)' : ''}: ${p.sin_mas_intentos ? 'dejó de intentar solo' : `reintenta solo (intento ${e(p.intentos)})`} · ${e(p.error || 'sin detalle')}</div>`).join('');
     const avisos = (a.avisos || []).map(v => `<div style="margin-top:6px;display:flex;gap:8px;flex-wrap:wrap;align-items:center"><span class="badge ${v.aviso === 'fallo' ? 'b-red' : 'b-amber'}">${e(TIPO[v.tipo] || v.tipo)} · orden ${e(v.orden)}</span><span>${e(this.AVISOS[v.aviso] || '')}${v.aviso === 'fallo' && v.error ? ' ' + e(v.error) : ''}</span><button class="btn btn-sm" data-orden="${e(v.orden)}" data-tipo="${e(v.tipo)}" data-amb="${e(v.ambiente)}" onclick="MeliFacturas.avisoVisto(this)">Entendido</button></div>`).join('');
-    return `<div class="card" style="margin-bottom:10px;font-size:12.5px">
-      <b>Facturación automática</b> <span class="badge ${a.factura_auto || a.nota_auto ? 'b-green' : 'b-gray'}">${a.factura_auto || a.nota_auto ? 'Encendida' : 'Apagada'}</span>
-      <div style="font-size:11.5px;color:var(--text-secondary);margin:4px 0 8px;line-height:1.5">Apagada por defecto. Con el interruptor de facturas, el sistema emite solo la factura de cada venta <b>pagada desde el momento en que lo encendés</b> (no las anteriores), sin procesar la venta. Con el de notas, emite solo la nota de crédito total cuando una venta ya facturada se cancela en Mercado Libre. Reembolsos parciales, devoluciones y reclamos siguen manuales. Si falla, reintenta unas pocas veces y te avisa acá. En producción emite facturas reales.</div>
-      <div style="display:flex;gap:18px;flex-wrap:wrap">
-        <label><input type="checkbox" id="fauto-factura" ${a.factura_auto ? 'checked' : ''}> Facturar solas las ventas nuevas</label>
-        <label><input type="checkbox" id="fauto-nota" ${a.nota_auto ? 'checked' : ''}> Emitir sola la nota de crédito al cancelarse</label>
-        <button class="btn btn-sm btn-primary" onclick="MeliFacturas.guardarAuto(this)">Guardar</button>
-      </div>
-      ${a.ambiente ? `<div style="font-size:11px;color:var(--text-secondary);margin-top:4px">Encendida para: <b>${e(this.NOMBRE_MODO[a.ambiente] || a.ambiente)}</b>${a.desde && a.factura_auto ? ' · factura sola desde ' + e(new Date(a.desde).toLocaleString('es-AR')) : ''}${a.actualizado_por ? ' · ' + e(a.actualizado_por) : ''}. Si el ambiente de ARCA cambia, hay que volver a encenderla.</div>` : ''}
+    const on = !!(a.factura_auto || a.nota_auto);
+    const sw = (id, texto, marcado, fn) => `<label class="mf-sw mf-fila"><span>${texto}</span><input type="checkbox" role="switch" id="${id}"${marcado ? ' checked' : ''} onchange="${fn}"><span class="mf-pista"></span></label>`;
+    return `<div class="card mf-card">
+      <div class="mf-cab"><b>Facturación automática</b>
+        <label class="mf-sw"><span class="mf-estado">${on ? 'Encendida' : 'Apagada'}</span><input type="checkbox" role="switch" id="fauto-master" aria-label="Facturación automática"${on ? ' checked' : ''} onchange="MeliFacturas.maestroAuto(this)"><span class="mf-pista"></span></label></div>
+      <div class="mf-nota">Factura sola cada venta pagada <b>desde que la encendés</b> (no las anteriores) y emite la nota de crédito si se cancela. Reembolsos parciales y reclamos siguen manuales. Si falla, reintenta y te avisa acá.</div>
+      <div class="mf-filas">${sw('fauto-factura', 'Facturas de ventas nuevas', a.factura_auto, 'MeliFacturas.guardarAuto(this)')}${sw('fauto-nota', 'Notas de crédito al cancelar', a.nota_auto, 'MeliFacturas.guardarAuto(this)')}</div>
+      ${a.ambiente ? `<div class="mf-nota">Encendida para: <b>${e(this.NOMBRE_MODO[a.ambiente] || a.ambiente)}</b>${a.desde && a.factura_auto ? ' · factura sola desde ' + e(new Date(a.desde).toLocaleString('es-AR')) : ''}. Si cambia el ambiente de ARCA, hay que volver a encenderla.</div>` : ''}
       ${avisos}
       ${pend ? `<div style="margin-top:8px;font-size:12px"><b>Pendientes con problemas</b>${pend}</div>` : ''}
     </div>`;
@@ -140,7 +139,14 @@ const MeliFacturas = {
     } catch { return null; }
   },
   NOMBRE_MODO: { homologacion: 'PRUEBAS (homologación, sin valor fiscal)', produccion: 'PRODUCCIÓN (comprobantes reales ante ARCA)' },
+  // Interruptor general: enciende o apaga los dos de una vez (se confirma igual al encender) y guarda.
+  maestroAuto(el) {
+    const on = !!(el && el.checked);
+    for (const id of ['fauto-factura', 'fauto-nota']) { const c = document.getElementById(id); if (c) c.checked = on; }
+    return this.guardarAuto(el);
+  },
   async guardarAuto(btn) {
+    let guardado = false;
     const f = !!document.getElementById('fauto-factura')?.checked, n = !!document.getElementById('fauto-nota')?.checked;
     const actual = State.facturacionAuto || {};
     if (btn) btn.disabled = true;
@@ -155,9 +161,10 @@ const MeliFacturas = {
       const { data, error } = await supa.rpc('arca_auto_config_guardar', { p_factura: f, p_nota: n, p_ambiente: modo });
       if (error || !data || data.ok !== true) { toast('No se pudo guardar. Probá de nuevo.'); return; }
       await this.cargarAuto(supa);
+      guardado = true;
       toast('Facturación automática actualizada.');
       this.repintar();
-    } catch { toast('No se pudo guardar. Probá de nuevo.'); } finally { if (btn) btn.disabled = false; }
+    } catch { toast('No se pudo guardar. Probá de nuevo.'); } finally { if (btn) btn.disabled = false; if (!guardado) this.pintarSeccion(); }
   },
   async avisoVisto(btn) {
     const d = btn && btn.dataset ? btn.dataset : {};
@@ -206,9 +213,10 @@ const MeliFacturas = {
           : `<div style="font-size:11.5px;margin-top:4px;color:${pasa ? 'var(--red)' : 'var(--text-secondary)'}">${pasa ? '⚠ SUPERA' : 'Entra en'} el margen que te queda en el límite anual (${e(this._pesos(margen))}).</div>`}</div>`;
     }
     const puedeEmitir = r && Number(r.cantidad) > 0 && !a.corriendo;
-    return `<div class="card" style="margin-bottom:10px;font-size:12.5px"><details${a.abierta || r || a.corriendo || a.mensaje ? ' open' : ''} ontoggle="MeliFacturas._atr().abierta = this.open">
-      <summary style="cursor:pointer;font-weight:600">Emitir facturas atrasadas</summary>
-      <div style="font-size:11.5px;color:var(--text-secondary);margin:6px 0 10px;line-height:1.5">Emite la factura de las ventas pagadas que nunca se facturaron, de la más vieja a la más nueva, con el punto de venta y la fecha que elijas (por ejemplo un punto de venta aparte con el último día del mes). Solo toma ventas pagadas, sin factura, no canceladas ni «en revisión». Si algo falla se detiene y te avisa; volver a empezar no duplica nada.</div>
+    const abierta = a.abierta !== undefined ? !!a.abierta : !!(r || a.corriendo || a.mensaje);
+    return `<div class="card" style="margin-bottom:10px;font-size:12.5px">
+      <div class="mf-cab"><b>Emitir facturas atrasadas</b><button class="btn btn-sm ${abierta ? 'btn-primary' : ''}" onclick="MeliFacturas.alternarAtr()">${abierta ? 'Cerrar' : 'Abrir'}</button></div>
+      ${abierta ? `<div class="mf-nota">Factura las ventas pagadas que nunca se facturaron, de la más vieja a la más nueva, con el punto de venta y la fecha que elijas. Si algo falla, se detiene; repetir no duplica.</div>
       <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px">
         <label style="display:flex;flex-direction:column;gap:4px">Ventas desde<input id="atr-desde" type="date" value="${e(v.desde)}" oninput="MeliFacturas.atrasadasCampo()"></label>
         <label style="display:flex;flex-direction:column;gap:4px">Ventas hasta<input id="atr-hasta" type="date" value="${e(v.hasta)}" oninput="MeliFacturas.atrasadasCampo()"></label>
@@ -222,7 +230,7 @@ const MeliFacturas = {
       </div>
       ${resumen}
       <div id="atr-estado" style="margin-top:8px;font-size:12px;line-height:1.5">${a.mensaje ? e(a.mensaje) : ''}</div>
-    </details></div>`;
+    `: ''}</div>`;
   },
   atrasadasCampo() {
     const a = this._atr(), g = id => document.getElementById(id) && document.getElementById(id).value;
@@ -233,6 +241,14 @@ const MeliFacturas = {
       a.resumen = null; a.consulta = null;
       for (const id of ['atr-emitir', 'atr-resumen']) { const el = document.getElementById(id); if (el && el.style) el.style.display = 'none'; }
     }
+  },
+  // Abre o cierra la tarjeta conservando lo que ya escribiste en los campos.
+  alternarAtr() {
+    const a = this._atr(), d = this._atrDatos(), r = a.resumen;
+    if (d.desde || d.hasta) Object.assign(a, { desde: d.desde, hasta: d.hasta, fecha: d.fecha, pto: d.pto_venta });
+    const abierta = a.abierta !== undefined ? !!a.abierta : !!(r || a.corriendo || a.mensaje);
+    a.abierta = !abierta;
+    this.pintarSeccion();
   },
   _atrDatos() {
     const g = id => (document.getElementById(id) || {}).value;
@@ -296,7 +312,10 @@ const MeliFacturas = {
   CATEGORIAS: [['A', 1200941045], ['B', 1759518274], ['C', 2467049431], ['D', 3062865143], ['E', 3602823133], ['F', 4515165941], ['G', 5399579887], ['H', 8192466037], ['I', 9169976190], ['J', 10501251920], ['K', 12661083875]],
   categoriaDe(limiteCentavos) { const c = this.CATEGORIAS.find(x => x[1] === Number(limiteCentavos)); return c ? c[0] : null; },
   _verCategorias: false,
-  verCategorias() { this._verCategorias = !this._verCategorias; this.repintar(); },
+  verCategorias() { this._verCategorias = !this._verCategorias; this.pintarSeccion(); },
+  // Paneles que se abren y cierran con un botón (detalle por mes, límite, reglas).
+  _ui: {},
+  alternar(k) { this._ui[k] = !this._ui[k]; this.pintarSeccion(); },
   elegirCategoria(letra) {
     const c = this.CATEGORIAS.find(x => x[0] === letra), campo = document.getElementById('fa-limite');
     if (c && campo) campo.value = (c[1] / 100).toFixed(2);
@@ -345,17 +364,20 @@ const MeliFacturas = {
         ${fuera > 0 ? `<div style="display:flex;gap:8px;align-items:flex-start">${icono('4 12 10 18 20 6')}<div><div style="font-size:16px;font-weight:700">${e(this._pesos(fuera))}</div><div style="color:var(--text-secondary)">facturado fuera del CRM</div></div></div>` : ''}
       </div>
       <div style="text-align:right;font-size:11.5px;color:var(--text-secondary);margin-top:8px">Última actualización: ${e(fmtDia(a.hasta))}</div>
-      ${meses ? `<details style="margin-top:6px"><summary style="cursor:pointer;font-size:11.5px">Ver el detalle por mes</summary><div style="font-size:11.5px;color:var(--text-secondary);line-height:1.6;margin-top:4px">${meses}</div></details>` : ''}
-      <div style="font-size:11.5px;color:var(--text-secondary);margin-top:6px">Es un seguimiento interno: no bloquea ninguna factura. Cuenta solo las facturas reales (producción) autorizadas por ARCA desde el CRM; las de prueba no suman. Las notas de crédito autorizadas se restan.</div>
-      <details style="margin-top:8px"><summary style="cursor:pointer">Configurar límite y facturado fuera del CRM</summary>
-        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px;align-items:flex-end">
+      <div class="mf-nota">Seguimiento interno: no bloquea ninguna factura. Suma las facturas reales (producción) autorizadas por ARCA desde el CRM y resta las notas de crédito.</div>
+      <div class="mf-acciones">
+        <button class="btn btn-sm ${this._ui.meses ? 'btn-primary' : ''}" onclick="MeliFacturas.alternar('meses')">Detalle por mes</button>
+        <button class="btn btn-sm ${this._ui.limite ? 'btn-primary' : ''}" onclick="MeliFacturas.alternar('limite')">Límite y fuera del CRM</button>
+      </div>
+      ${this._ui.meses ? `<div class="mf-panel">${meses || 'Todavía no hay facturas en el período.'}</div>` : ''}
+      ${this._ui.limite ? `<div class="mf-panel"><div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end">
           <label style="font-size:11.5px">Categoría<br><select id="fa-cat" onchange="MeliFacturas.elegirCategoria(this.value)" style="width:160px;padding:6px 8px;border:1px solid var(--border);border-radius:6px"><option value="">Elegir categoría…</option>${this.CATEGORIAS.map(([l, c]) => `<option value="${e(l)}"${l === cat ? ' selected' : ''}>${e(l)} · ${e(this._pesos(c))}</option>`).join('')}</select></label>
           <label style="font-size:11.5px">Límite anual (ARS)<br><input type="number" id="fa-limite" min="0" step="0.01" value="${pesos(a.limite_centavos)}" style="width:160px;padding:6px 8px;border:1px solid var(--border);border-radius:6px"></label>
-          <label style="font-size:11.5px">Facturado fuera del CRM, últimos 12 meses (ARS)<br><input type="number" id="fa-fuera" min="0" step="0.01" value="${pesos(a.fuera_crm_centavos)}" style="width:160px;padding:6px 8px;border:1px solid var(--border);border-radius:6px"></label>
+          <label style="font-size:11.5px">Facturado fuera del CRM, 12 meses (ARS)<br><input type="number" id="fa-fuera" min="0" step="0.01" value="${pesos(a.fuera_crm_centavos)}" style="width:160px;padding:6px 8px;border:1px solid var(--border);border-radius:6px"></label>
           <button class="btn btn-sm btn-primary" onclick="MeliFacturas.guardarAnual(this)">Guardar</button>
         </div>
-        ${a.actualizado_por ? `<div style="font-size:11px;color:var(--text-secondary);margin-top:4px">Última actualización: ${e(a.actualizado_por)}</div>` : ''}
-      </details></div>`;
+        ${a.actualizado_por ? `<div style="font-size:11px;color:var(--text-secondary);margin-top:4px">Última actualización: ${e(a.actualizado_por)}</div>` : ''}</div>` : ''}
+    </div>`;
   },
   // Pesos con hasta dos decimales → centavos enteros, sin errores de coma flotante. null si no es un monto válido.
   aCentavos(v) {
@@ -380,7 +402,11 @@ const MeliFacturas = {
   cabecera(ordenes) {
     if (State.meliFacturasAusente) return this.tarjetaAuto() + this.tarjetaAnual();
     const n = State.meliFacturasError ? 0 : this.contar(ordenes);
-    return this.tarjetaAuto() + this.tarjetaAnual() + this.tarjetaAtrasadas() + `<div class="card" style="margin-bottom:10px;font-size:12px">${State.esc(this.TEXTO)}<p>${State.esc(this.REABRIR)}</p><p>Cancelar o revertir la orden no cambia su factura.</p>${State.meliFacturasError ? '<p>Control de facturas no disponible. Probá actualizar.</p>' : `${n > 0 ? `<p>${n} ventas de Mercado Libre sin factura <button class="btn btn-sm" onclick="MeliFacturas.verSinFactura()">Ver</button></p>` : ''}<button class="btn btn-sm ${this._soloSinFactura ? 'btn-primary' : ''}" onclick="MeliFacturas.verSinFactura()">Ver ventas sin factura</button>`}</div>`;
+    return this.tarjetaAuto() + this.tarjetaAnual() + this.tarjetaAtrasadas() + `<div class="card" style="margin-bottom:10px;font-size:12.5px">
+      <div class="mf-cab"><b>Control de facturas</b><span>${State.meliFacturasError ? 'Control no disponible. Probá actualizar.' : n > 0 ? `<b>${n}</b> venta${n === 1 ? '' : 's'} sin factura` : 'Todo al día'}</span></div>
+      <div class="mf-acciones">${State.meliFacturasError ? '<span></span>' : '<button class="btn btn-sm" onclick="MeliFacturas.verSinFactura()">Ver ventas sin factura</button>'}<button class="btn btn-sm ${this._ui.reglas ? 'btn-primary' : ''}" onclick="MeliFacturas.alternar('reglas')">Reglas</button></div>
+      ${this._ui.reglas ? `<div class="mf-panel">${State.esc(this.TEXTO)}<p>${State.esc(this.REABRIR)}</p><p>Cancelar o revertir la orden no cambia su factura.</p></div>` : ''}
+    </div>`;
   },
   filtrar(ver) { this._soloSinFactura = ver === true || !this._soloSinFactura; MeliOrdenes.filtrar('todas'); },
   // Desde la sección Facturación: ir a Órdenes ya filtrado por «sin factura».
@@ -398,13 +424,11 @@ const MeliFacturas = {
   vistaSeccion() {
     const e = s => State.esc(String(s ?? ''));
     return `<div class="mf-seccion">${this.cabecera(State.meliOrdenes || [])}
-      <div class="card" style="margin-bottom:10px;font-size:12px">
-        <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
-          <div style="flex:1;min-width:220px;color:var(--text-secondary);line-height:1.5"><b style="color:var(--text)">Conexión con ARCA (solo lectura).</b> Comprueba el servicio, el certificado, los puntos de venta y el último número de cada uno. No emite nada.</div>
-          <button class="btn btn-sm" id="meli-btn-arca" onclick="Meli.arcaDiagnostico()" title="Prueba de solo lectura contra ARCA: no emite facturas"><i class="ti ti-file-certificate"></i> Probar conexión con ARCA</button>
-        </div>
+      <div class="card" style="margin-bottom:10px;font-size:12.5px">
+        <div class="mf-cab"><b>Conexión con ARCA</b><button class="btn btn-sm" id="meli-btn-arca" onclick="Meli.arcaDiagnostico()" title="Prueba de solo lectura contra ARCA: no emite facturas"><i class="ti ti-file-certificate"></i> Probar conexión</button></div>
+        <div class="mf-nota">Solo lectura: revisa el servicio, el certificado y el último número de cada punto de venta. No emite nada.</div>
         <div id="meli-arca-salida" style="margin-top:10px"></div>
-      </div></div>`;
+      </div>${window.MeliEmitidas ? window.MeliEmitidas.vista() : ''}</div>`;
   },
   pintarSeccion() {
     if (typeof document === 'undefined' || !document.getElementById) return;

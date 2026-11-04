@@ -188,7 +188,7 @@ module.exports = async function handler(req, res) {
   if (req.method === 'POST' && req.body && typeof req.body === 'object' && req.body.accion === 'arca_comprobante') {
     try {
       const pres = M.presupuestoHasta(t0 + PRESUPUESTO_MS - RESERVA_MS, t0 + PRESUPUESTO_MS);
-      res.status(200).json(await datosComprobante({ pto: req.body.pto, numero: req.body.numero, tipo: req.body.tipo === undefined ? 11 : req.body.tipo, rpc: M.rpc, pres }));
+      res.status(200).json(await datosComprobante({ pto: req.body.pto, numero: req.body.numero, tipo: req.body.tipo === undefined ? 11 : req.body.tipo, rpc: M.rpc, pres, limite: t0 + PRESUPUESTO_MS }));
     } catch (e) {
       const codigo = (e && e.codigo) || 'ERROR';
       console.error('meli/worker (arca_comprobante):', codigo);

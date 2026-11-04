@@ -108,7 +108,7 @@ const MeliEmitidas = {
     </div>`;
   },
 
-  ERRORES_PDF: { no_existe: 'ARCA no tiene ese comprobante.', simulacion: 'ARCA está en modo simulación: no hay comprobantes reales.', PARAMETRO_INVALIDO: 'Los datos de la factura no son válidos.' },
+  ERRORES_PDF: { moneda_no_soportada: 'Solo se arman PDF de comprobantes en pesos.', SIN_TIEMPO: 'No hubo tiempo para consultar a ARCA: probá de nuevo.', no_existe: 'ARCA no tiene ese comprobante.', simulacion: 'ARCA está en modo simulación: no hay comprobantes reales.', PARAMETRO_INVALIDO: 'Los datos de la factura no son válidos.' },
   // PDF de UNA factura: se le pregunta a ARCA por ese comprobante (así lo que se ve es lo que ARCA tiene) y se arma el archivo en el navegador.
   async pdf(clave, btn) {
     const [pto, numero] = String(clave || '').split('-').map(Number);
@@ -120,7 +120,7 @@ const MeliEmitidas = {
       const r = await fetch('/api/meli/worker', { method: 'POST', headers: { 'x-crm-token': token || '', 'Content-Type': 'application/json' }, body: JSON.stringify({ accion: 'arca_comprobante', pto, numero, tipo: 11 }) });
       let j = null; try { j = await r.json(); } catch { /* sin cuerpo */ }
       if (!r.ok || !j) { toast('No se pudo consultar a ARCA. Probá de nuevo.'); return; }
-      if (j.estado !== 'ok') { toast(this.ERRORES_PDF[j.estado] || this.ERRORES_PDF[j.codigo] || j.mensaje || 'No se pudo consultar a ARCA. Probá de nuevo.'); return; }
+      if (j.estado !== 'ok') { toast(State.esc(String(this.ERRORES_PDF[j.estado] || this.ERRORES_PDF[j.codigo] || j.mensaje || 'No se pudo consultar a ARCA. Probá de nuevo.'))); return; }   // toast() escribe HTML: el texto de ARCA se escapa
       if (!window.MeliPdf) { toast('Falta el módulo de PDF: recargá el CRM.'); return; }
       await window.MeliPdf.descargar(j, { orden: fila.orden, nombre: fila.nombre, producto: fila.producto });
     } catch { toast('No se pudo armar el PDF. Probá de nuevo.'); } finally { if (btn) btn.disabled = false; }

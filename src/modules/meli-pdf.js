@@ -47,6 +47,17 @@ const MeliPdf = {
     return out.length ? out : [''];
   },
 
+  // Recorta un texto a `max` caracteres y deja como mucho `maxLineas` líneas (la última termina en «...»): nada puede salirse de la página.
+  _acotar(t, ancho, tam, negrita, maxLineas, max = 600) {
+    let txt = this._limpio(t).replace(/\s+/g, ' ').trim();
+    if (txt.length > max) txt = txt.slice(0, max - 3).trimEnd() + '...';
+    const ls = this._lineas(txt, ancho, tam, negrita);
+    if (ls.length <= maxLineas) return ls;
+    const r = ls.slice(0, maxLineas); let ult = r[maxLineas - 1];
+    while (ult.length > 1 && this._ancho(ult + '...', tam, negrita) > ancho) ult = ult.slice(0, -1);
+    r[maxLineas - 1] = ult.trimEnd() + '...'; return r;
+  },
+
   // ── Documento: página A4 con coordenadas desde arriba a la izquierda, en puntos ──
   _doc() {
     const H = this.A4.h, partes = [], self = this;
@@ -98,6 +109,7 @@ const MeliPdf = {
   // ── Datos para mostrar ──
   DOC_TIPOS: { 80: 'CUIT', 86: 'CUIL', 87: 'CDI', 89: 'LE', 90: 'LC', 91: 'CI Extranjera', 92: 'En trámite', 93: 'Acta de nacimiento', 94: 'Pasaporte', 95: 'CI Buenos Aires', 96: 'DNI', 99: 'Doc. (Otro)' },
   COND_IVA: { 1: 'IVA Responsable Inscripto', 4: 'IVA Sujeto Exento', 5: 'Consumidor Final', 6: 'Responsable Monotributo', 7: 'Sujeto No Categorizado', 8: 'Proveedor del Exterior', 9: 'Cliente del Exterior', 10: 'IVA Liberado - Ley 19.640', 13: 'Monotributista Social', 15: 'IVA No Alcanzado', 16: 'Monotributo Trabajador Independiente Promovido' },
+  CAMPOS_EMISOR: { razonSocial: 'razón social', domicilio: 'domicilio', inicioActividades: 'inicio de actividades', ingresosBrutos: 'ingresos brutos' },
   _dia(f) { const m = /^(\d{4})(\d{2})(\d{2})$/.exec(String(f || '')); return m ? `${m[3]}/${m[2]}/${m[1]}` : ''; },
   _iso(f) { const m = /^(\d{4})(\d{2})(\d{2})$/.exec(String(f || '')); return m ? `${m[1]}-${m[2]}-${m[3]}` : ''; },
   _pesos(imp) {
@@ -113,7 +125,7 @@ const MeliPdf = {
     const importe = Number(c.importe);
     const datos = {
       ver: 1, fecha: this._iso(c.fecha), cuit: Number(emisor.cuit), ptoVta: Number(c.pto), tipoCmp: Number(c.tipo), nroCmp: Number(c.numero), importe: Number.isFinite(importe) ? importe : 0,
-      moneda: c.moneda || 'PES', ctz: 1, tipoDocRec: Number(c.docTipo) || 99, nroDocRec: Number(c.docNro) || 0, tipoCodAut: 'E', codAut: Number(c.cae),
+      moneda: c.moneda || 'PES', ctz: Number(c.cotiz) > 0 ? Number(c.cotiz) : 1, tipoDocRec: Number(c.docTipo) || 99, nroDocRec: Number(c.docNro) || 0, tipoCodAut: 'E', codAut: Number(c.cae),
     };
     return 'https://www.afip.gob.ar/fe/qr/?p=' + btoa(JSON.stringify(datos));
   },
@@ -154,10 +166,10 @@ const MeliPdf = {
     d.rect(X + ANCHO / 2 - 25, 46, 50, 46, { relleno: 1 }); d.texto(X + ANCHO / 2 - 25, 76, letra, { tam: 30, negrita: true, ancho: 50, alinear: 'centro' });
     d.texto(X + ANCHO / 2 - 25, 88, `COD. ${cod}`, { tam: 7, negrita: true, ancho: 50, alinear: 'centro' });
     let y = 66;
-    for (const l of this._lineas(e.razonSocial || '', ANCHO / 2 - 40, 14, true)) { d.texto(X + 10, y, l, { tam: 14, negrita: true }); y += 16; }
+    for (const l of this._acotar(e.razonSocial || '(falta la razón social)', ANCHO / 2 - 40, 14, true, 2, 80)) { d.texto(X + 10, y, l, { tam: 14, negrita: true }); y += 16; }
     y += 6;
     const izq = [['Domicilio comercial: ', e.domicilio], ['Condición frente al IVA: ', e.condicionIva]].filter(f => f[1]);
-    for (const [k, v] of izq) { const t = this._lineas(k + v, ANCHO / 2 - 40, 8.5, false); for (const l of t) { d.texto(X + 10, y, l, { tam: 8.5 }); y += 11; } }
+    for (const [k, v] of izq) { for (const l of this._acotar(k + v, ANCHO / 2 - 40, 8.5, false, 2, 140)) { d.texto(X + 10, y, l, { tam: 8.5 }); y += 11; } }
     d.texto(X + ANCHO / 2 + 40, 66, c.nombreTipo ? c.nombreTipo.toUpperCase() : 'FACTURA', { tam: 15, negrita: true });
     const der = [[`Punto de venta: ${this._cero(c.pto, 5)}      Comp. Nro: ${this._cero(c.numero, 8)}`, true], [`Fecha de emisión: ${this._dia(c.fecha)}`, true], [`CUIT: ${e.cuit || ''}`, false], e.ingresosBrutos ? [`Ingresos Brutos: ${e.ingresosBrutos}`, false] : null, e.inicioActividades ? [`Fecha de inicio de actividades: ${e.inicioActividades}`, false] : null].filter(Boolean);
     y = 86; for (const [t, neg] of der) { d.texto(X + ANCHO / 2 + 40, y, t, { tam: 8.5, negrita: neg }); y += 14; }
@@ -166,29 +178,29 @@ const MeliPdf = {
     const docNombre = c.docTipo === '99' || !Number(c.docNro) ? 'Consumidor Final' : `${this.DOC_TIPOS[Number(c.docTipo)] || 'Documento'}: ${c.docNro}`;
     d.rect(X, 182, ANCHO, 62);
     d.texto(X + 10, 198, docNombre === 'Consumidor Final' ? 'Documento: Consumidor Final (sin identificar)' : docNombre, { tam: 9, negrita: true });
-    if (extra.nombre) d.texto(X + 10, 212, `Apellido y nombre / Razón social: ${extra.nombre}`, { tam: 9 });
+    if (extra.nombre) d.texto(X + 10, 212, this._acotar(`Comprador en Mercado Libre: ${extra.nombre}`, ANCHO - 20, 9, false, 1, 100)[0], { tam: 9 });
     const cond = this.COND_IVA[Number(c.condIvaReceptor)] || (c.condIvaReceptor ? `Código ${c.condIvaReceptor}` : '');
     if (cond) d.texto(X + 10, 226, `Condición frente al IVA: ${cond}`, { tam: 9 });
     d.texto(X + 10, 240, 'Condición de venta: Otra', { tam: 9 });
 
-    // Detalle (una línea con el total: ARCA no guarda el detalle de la factura C)
-    const cols = [{ t: 'Código', x: 0, w: 52 }, { t: 'Producto / Servicio', x: 52, w: 238 }, { t: 'Cantidad', x: 290, w: 52, der: true }, { t: 'U. medida', x: 342, w: 60 }, { t: 'Precio unit.', x: 402, w: 66, der: true }, { t: 'Subtotal', x: 468, w: ANCHO - 468, der: true }];
+    // Detalle: ARCA no guarda el detalle de una factura C; acá va solo la descripción de la venta y el importe que autorizó ARCA (sin cantidades ni precios inventados).
+    const cols = [{ t: 'Código', x: 0, w: 52 }, { t: 'Descripción', x: 52, w: ANCHO - 52 - 110 }, { t: 'Importe', x: ANCHO - 110, w: 110, der: true }];
     d.rect(X, 254, ANCHO, 18, { relleno: 0.92 });
     for (const k of cols) d.texto(X + k.x + 5, 266, k.t, { tam: 8, negrita: true, ancho: k.w - 10, alinear: k.der ? 'der' : 'izq' });
     const desc = [`Venta de Mercado Libre - Orden ${extra.orden || ''}`.trim(), extra.producto || ''].filter(Boolean).join(': ');
-    const lineas = this._lineas(c.tipo === 13 ? `Anulación de la factura asociada${c.asociados && c.asociados[0] ? ' ' + this._cero(c.asociados[0].pto, 5) + '-' + this._cero(c.asociados[0].numero, 8) : ''}. ${desc}` : desc, cols[1].w - 10, 8.5, false);
+    const asociada = c.tipo === 13 && c.asociados && c.asociados[0] ? ` ${this._cero(c.asociados[0].pto, 5)}-${this._cero(c.asociados[0].numero, 8)}` : '';
+    const lineas = this._acotar(c.tipo === 13 ? `Anulación de la factura asociada${asociada}. ${desc}` : desc, cols[1].w - 10, 8.5, false, 8, 700);
     const alto = Math.max(34, 14 + lineas.length * 11);
     d.rect(X, 272, ANCHO, alto);
     const imp = this._pesos(c.importe);
     d.texto(X + 5, 286, '-', { tam: 8.5 }); lineas.forEach((l, i) => d.texto(X + cols[1].x + 5, 286 + i * 11, l, { tam: 8.5 }));
-    d.texto(X + cols[2].x + 5, 286, '1,00', { tam: 8.5, ancho: cols[2].w - 10, alinear: 'der' }); d.texto(X + cols[3].x + 5, 286, 'unidades', { tam: 8.5 });
-    d.texto(X + cols[4].x + 5, 286, imp, { tam: 8.5, ancho: cols[4].w - 10, alinear: 'der' }); d.texto(X + cols[5].x + 5, 286, imp, { tam: 8.5, ancho: cols[5].w - 10, alinear: 'der' });
+    d.texto(X + cols[2].x + 5, 286, imp, { tam: 8.5, ancho: cols[2].w - 10, alinear: 'der' });
 
-    // Totales
-    const yt = 272 + alto + 10;
-    d.rect(X + ANCHO - 200, yt, 200, 40);
-    d.texto(X + ANCHO - 192, yt + 15, 'Importe otros tributos: $', { tam: 8.5 }); d.texto(X + ANCHO - 200, yt + 15, '0,00', { tam: 8.5, ancho: 192, alinear: 'der' });
-    d.texto(X + ANCHO - 192, yt + 32, 'Importe total: $', { tam: 10, negrita: true }); d.texto(X + ANCHO - 200, yt + 32, imp, { tam: 10, negrita: true, ancho: 192, alinear: 'der' });
+    // Totales (los otros tributos, solo si ARCA informó alguno)
+    const yt = 272 + alto + 10, trib = Number(c.impTrib) > 0;
+    d.rect(X + ANCHO - 200, yt, 200, trib ? 40 : 24);
+    if (trib) { d.texto(X + ANCHO - 192, yt + 15, 'Importe otros tributos: $', { tam: 8.5 }); d.texto(X + ANCHO - 200, yt + 15, this._pesos(c.impTrib), { tam: 8.5, ancho: 192, alinear: 'der' }); }
+    d.texto(X + ANCHO - 192, yt + (trib ? 32 : 16), 'Importe total: $', { tam: 10, negrita: true }); d.texto(X + ANCHO - 200, yt + (trib ? 32 : 16), imp, { tam: 10, negrita: true, ancho: 192, alinear: 'der' });
 
     // Pie: QR, estado y CAE
     const yp = 700, lado = 96;
@@ -200,7 +212,10 @@ const MeliPdf = {
     d.texto(X + lado + 24, yp + 52, `Fecha de vto. de CAE: ${this._dia(c.caeVto)}`, { tam: 10 });
     const aviso = 'Documento armado por el CRM con los datos que devolvió ARCA al consultar este comprobante. Se puede comparar con el de Mis Comprobantes. El comprobante oficial es el de ARCA.';
     this._lineas(aviso, ANCHO - lado - 40, 7.5, false).forEach((l, i) => d.texto(X + lado + 24, yp + 72 + i * 9, l, { tam: 7.5 }));
-    if (datos.modo === 'homologacion') d.texto(X, 24, 'COMPROBANTE DE PRUEBA (homologación): sin valor fiscal', { tam: 9, negrita: true, ancho: ANCHO, alinear: 'centro' });
+    const avisos = [];
+    if (datos.modo === 'homologacion') avisos.push('COMPROBANTE DE PRUEBA (homologación): sin valor fiscal');
+    if (e.completo === false) avisos.push(`FALTAN DATOS DEL EMISOR (${(e.faltan || []).map(k => this.CAMPOS_EMISOR[k] || k).join(', ') || 'configuración'}): es una constancia de consulta, no una factura completa para entregar.`);
+    avisos.forEach((t, i) => d.texto(X, 826 - (avisos.length - 1 - i) * 10, this._acotar(t, ANCHO, 8, true, 1, 160)[0], { tam: 8, negrita: true, ancho: ANCHO, alinear: 'centro' }));
 
     const nombre = this.nombreArchivo(c, extra);
     return { bytes: this._pdf(d.contenido(), nombre.replace(/\.pdf$/, '')), nombre };

@@ -105,6 +105,24 @@ async function diagnosticoArca({ env = process.env, fetchImpl: fetchBase = A.fet
     } catch (e) { paso('Último comprobante Factura C del punto de venta configurado', false, { puntoDeVenta: cfg.ptoVta, ...resumirError(e) }); }
   }
 
+  // Otros puntos de venta habilitados (por ejemplo el de las facturas atrasadas): último Factura C autorizado por ARCA y datos del primero y del último
+  // comprobante (fecha, importe, CAE, tipo de documento del receptor; NUNCA el número de documento). Sirve para comprobar de verdad, sin esperar a «Mis Comprobantes»,
+  // que ARCA tiene lo que el CRM dice haber emitido. Solo consultas (FECompUltimoAutorizado y FECompConsultar).
+  const otros = (puntos || []).filter((p) => p.numero !== cfg.ptoVta && !p.bloqueado && !p.baja).slice(0, 3);
+  for (const pv of otros) {
+    const nombre = `Facturas C del punto de venta ${pv.numero}`;
+    try {
+      const ultimoNumero = await A.ultimoAutorizado({ cfg, ticket, ptoVta: pv.numero, fetchImpl });
+      const resumir = (c) => (c && c.existe ? { fecha: c.fecha, importe: c.importe, cae: c.cae, tipoDocReceptor: c.docTipo } : 'no existe en ARCA');
+      const detalle = { puntoDeVenta: pv.numero, ultimoNumero };
+      if (ultimoNumero > 0) {
+        detalle.primero = resumir(await A.consultarComprobante({ cfg, ticket, ptoVta: pv.numero, numero: 1, fetchImpl }));
+        if (ultimoNumero > 1) detalle.ultimo = resumir(await A.consultarComprobante({ cfg, ticket, ptoVta: pv.numero, numero: ultimoNumero, fetchImpl }));
+      }
+      paso(nombre, true, detalle);
+    } catch (e) { paso(nombre, false, { puntoDeVenta: pv.numero, ...resumirError(e) }); }
+  }
+
   const todoBien = salida.pasos.every((p) => p.ok);
   const sugerencia = puntos && puntos.length && hay.puntoDeVenta && !puntos.some((p) => p.numero === cfg.ptoVta)
     ? ` El punto de venta configurado (${cfg.ptoVta}) no está entre los habilitados (${puntos.map((p) => p.numero).join(', ')}): corregí ARCA_PTO_VTA.` : '';

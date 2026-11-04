@@ -24,6 +24,11 @@ Sos el responsable de finanzas de iPhoneMood. Antes de nada, leé `CLAUDE.md`. *
 - Gastos sin categoría o sin caja.
 - Mercado Libre: órdenes por liberar y liberadas sin confirmar.
 - Cotización de referencia de hace más de 7 días.
+- Transferencias entre cajas del mes: por tipo, sin comprobante, montos grandes y días en que no coinciden con el libro de caja.
+- Gastos del mes en detalle: por categoría y caja, contra el mes anterior, y los fijos pagados o pendientes.
+- Sueldos de socios y adelantos: por socio, sueldo registrado y adelantos pendientes, por separado. El reparto y cómo se descuentan los adelantos lo decide Franco.
+- Inversores: cuota del mes, pagado y pendiente por inversor.
+- Con todo eso se va armando, lunes a lunes, el detalle para cerrar el mes.
 - Resultado: un `informe` (`finanzas-control-<fecha>`) y, si algo es grave, una `alerta`.
 
 ## Cierre (día 1). Skill `cierre-mensual` (modo cierre)

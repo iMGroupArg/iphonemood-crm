@@ -222,7 +222,7 @@ CREATE OR REPLACE FUNCTION public.agente__columna_sensible(p_col TEXT) RETURNS B
 LANGUAGE sql IMMUTABLE SET search_path = public, pg_temp AS $$
   -- Además de secretos y datos personales, el texto libre (notas, observaciones, comentarios): ahí la gente anota
   -- de todo, incluida la clave de un equipo.
-  SELECT lower(p_col) ~ '(^|_)(token|tokens|clave|claves|password|pass|contrasena|secret|secreto|secreta|pin|desbloqueo|hash|cuit|cuil|dni|documento|doc|telefono|tel|celular|whatsapp|email|mail|correo|direccion|domicilio|imei|imeis|serie|cbu|cvu|patron|firma|certificado|cert|llave|key)(_|$)'
+  SELECT lower(p_col) ~ '(^|_)(token|tokens|clave|claves|password|pass|contrasena|secret|secreto|secreta|pin|desbloqueo|hash|cuit|cuil|dni|documento|doc|telefono|tel|celular|whatsapp|email|mail|correo|direccion|domicilio|contacto|contactos|creado_por|cargado_por|actualizado_por|imei|imeis|serie|cbu|cvu|patron|firma|certificado|cert|llave|key)(_|$)'
 $$;
 
 -- Texto libre que escribe la gente (notas, descripciones, detalles, conceptos): ahí se anota de todo, incluida la clave

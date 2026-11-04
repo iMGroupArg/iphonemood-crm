@@ -26,7 +26,9 @@
 --     puede inventarse el JWT (request.jwt.claims) y pasar is_authorized_user(). Este script le saca a PUBLIC la
 --     ejecución de las funciones de `public` y se la devuelve a cada rol que ya la tenía, MENOS a los dos roles de
 --     agentes. Volver a correr este script después de cualquier migración que cree funciones nuevas.
---   · Lo mismo con los esquemas internos de Supabase a los que PUBLIC entra (en producción: `net`, el de pg_net).
+--   · LOS AGENTES NO SE CONECTAN A LA BASE. En Supabase `net` (pg_net) está abierto a todos y no se puede cerrar, así
+--     que una conexión SQL de un agente manipulado podría mandar datos a internet. Los roles quedan sin login y los
+--     agentes usan la "ventanilla" (sección 9): funciones fijas por la API REST, con una clave propia guardada como hash.
 --
 --  REQUISITOS: is_authorized_user() y usuarios_autorizados (RLS base). blog_posts es opcional (sin ella, el
 --  borrador de blog avisa). Idempotente: se puede correr de nuevo. No cambia ningún dato existente.
@@ -642,77 +644,218 @@ BEGIN
   END IF;
 END $$;
 
--- ── 9 · Esquemas internos de Supabase: misma receta ──────────────────────────
--- En Supabase, `net` (pg_net: la base manda pedidos a internet) nace abierto a PUBLIC. Un agente manipulado podría usarlo
--- para mandar datos afuera. Para cada esquema interno al que entran los agentes: el permiso de USO y el de EJECUTAR sus
--- funciones se otorga EXPLÍCITO a cada rol que ya lo tenía (postgres —el reloj de facturación con pg_cron—, anon,
--- authenticated, service_role, …: nada cambia para ellos) y recién después se revoca de PUBLIC. Si Supabase no deja
--- tocarlo (otro dueño) o queda algo abierto, el script se deshace entero (FUNCIONES_SIN_CERRAR / ESQUEMA_SIN_CERRAR).
+-- ── 9 · La ventanilla de los agentes (API con clave, sin conexión directa) ────
+-- En Supabase el esquema `net` (pg_net: pedidos a internet) está abierto a PUBLIC y NO se puede cerrar (es de un rol
+-- interno). Por eso los agentes NUNCA tienen conexión SQL: agentes_ro y agentes_revisor quedan SIN LOGIN para siempre
+-- (control 24.11). Los agentes entran por estas funciones, llamadas por la API REST de Supabase con la clave pública
+-- (anon) MÁS una clave propia. Cada función hace UNA cosa fija: no hay forma de mandar SQL. La clave solo se guarda
+-- como hash; se genera en el SQL Editor con agente_api_generar_clave() y se muestra UNA vez.
+-- Si alguien les dio login o contraseña (por la guía vieja), se les quita, y se cortan las conexiones que hayan
+-- quedado abiertas (NOLOGIN solo frena las nuevas). Si quedara alguna, el control 24.11 sale ❌.
 DO $$
-DECLARE e RECORD; f RECORD; r RECORD; t RECORD; pr TEXT; v_abiertos TEXT; v_tocados TEXT[] := '{}';
+DECLARE r RECORD;
 BEGIN
-  FOR e IN
-    SELECT n.oid, n.nspname FROM pg_namespace n
-     WHERE n.nspname IN ('auth', 'storage', 'vault', 'net', 'cron', 'supabase_functions', 'graphql', 'realtime')
-       AND (has_schema_privilege('agentes_ro', n.oid, 'USAGE') OR has_schema_privilege('agentes_revisor', n.oid, 'USAGE'))
-  LOOP
-    v_tocados := v_tocados || e.nspname::text;
-    BEGIN
-      -- Tablas y secuencias del esquema (en net: la cola de pedidos y las respuestas): cada privilegio por separado.
-      FOR t IN SELECT c.oid, c.relkind, format('%I.%I', e.nspname, c.relname) AS nombre FROM pg_class c
-                WHERE c.relnamespace = e.oid AND c.relkind IN ('r', 'p', 'v', 'm', 'f', 'S')
-      LOOP
-        FOREACH pr IN ARRAY CASE WHEN t.relkind = 'S' THEN ARRAY['USAGE', 'SELECT', 'UPDATE']
-                                 ELSE ARRAY['SELECT', 'INSERT', 'UPDATE', 'DELETE', 'TRUNCATE', 'REFERENCES', 'TRIGGER'] END
-        LOOP
-          CONTINUE WHEN NOT (CASE WHEN t.relkind = 'S' THEN has_sequence_privilege('agentes_ro', t.oid, pr) OR has_sequence_privilege('agentes_revisor', t.oid, pr)
-                                  ELSE has_table_privilege('agentes_ro', t.oid, pr) OR has_table_privilege('agentes_revisor', t.oid, pr) END);
-          FOR r IN SELECT rolname FROM pg_roles
-                    WHERE rolname NOT LIKE 'pg\_%' AND rolname NOT IN ('agentes_ro', 'agentes_revisor')
-                      AND CASE WHEN t.relkind = 'S' THEN has_sequence_privilege(oid, t.oid, pr) ELSE has_table_privilege(oid, t.oid, pr) END
-          LOOP
-            EXECUTE format('GRANT %s ON %s %s TO %I', pr, CASE WHEN t.relkind = 'S' THEN 'SEQUENCE' ELSE 'TABLE' END, t.nombre, r.rolname);
-          END LOOP;
-          EXECUTE format('REVOKE %s ON %s %s FROM PUBLIC', pr, CASE WHEN t.relkind = 'S' THEN 'SEQUENCE' ELSE 'TABLE' END, t.nombre);
-        END LOOP;
-      END LOOP;
-      -- Funciones del esquema (has_function_privilege no depende del USO del esquema: el orden no importa).
-      FOR f IN SELECT p.oid, p.oid::regprocedure AS firma FROM pg_proc p
-                WHERE p.pronamespace = e.oid AND p.prokind IN ('f', 'p')
-                  AND (has_function_privilege('agentes_ro', p.oid, 'EXECUTE') OR has_function_privilege('agentes_revisor', p.oid, 'EXECUTE'))
-      LOOP
-        FOR r IN SELECT rolname FROM pg_roles
-                  WHERE rolname NOT LIKE 'pg\_%' AND rolname NOT IN ('agentes_ro', 'agentes_revisor')
-                    AND has_function_privilege(oid, f.oid, 'EXECUTE')
-        LOOP
-          EXECUTE format('GRANT EXECUTE ON ROUTINE %s TO %I', f.firma, r.rolname);
-        END LOOP;
-        EXECUTE format('REVOKE EXECUTE ON ROUTINE %s FROM PUBLIC', f.firma);
-      END LOOP;
-      FOR r IN SELECT rolname FROM pg_roles
-                WHERE rolname NOT LIKE 'pg\_%' AND rolname NOT IN ('agentes_ro', 'agentes_revisor')
-                  AND has_schema_privilege(oid, e.oid, 'USAGE')
-      LOOP
-        EXECUTE format('GRANT USAGE ON SCHEMA %I TO %I', e.nspname, r.rolname);
-      END LOOP;
-      EXECUTE format('REVOKE USAGE ON SCHEMA %I FROM PUBLIC', e.nspname);
-    EXCEPTION WHEN insufficient_privilege THEN
-      RAISE WARNING 'No se pudo cerrar el esquema % (otro dueño)', e.nspname;
+  EXECUTE 'ALTER ROLE agentes_ro NOLOGIN';
+  EXECUTE 'ALTER ROLE agentes_revisor NOLOGIN';
+  BEGIN
+    EXECUTE 'ALTER ROLE agentes_ro PASSWORD NULL';
+    EXECUTE 'ALTER ROLE agentes_revisor PASSWORD NULL';
+  EXCEPTION WHEN OTHERS THEN RAISE NOTICE 'No se pudo borrar la contraseña vieja: %', SQLERRM;
+  END;
+  FOR r IN SELECT pid FROM pg_stat_activity
+            WHERE usename IN ('agentes_ro', 'agentes_revisor') AND pid <> pg_backend_pid() LOOP
+    BEGIN PERFORM pg_terminate_backend(r.pid, 5000);        -- espera hasta 5 s a que se cierre
+    EXCEPTION WHEN OTHERS THEN RAISE NOTICE 'No se pudo cortar la conexión %: %', r.pid, SQLERRM;
     END;
   END LOOP;
-  -- Se controla TODO lo que se tocó: el uso de cualquier esquema interno y, en los que se cerraron, también sus funciones,
-  -- tablas y secuencias (en los que los agentes nunca entraron —p. ej. auth— sus funciones son inalcanzables igual).
-  SELECT string_agg(DISTINCT n.nspname, ', ') INTO v_abiertos
-    FROM pg_namespace n CROSS JOIN (VALUES ('agentes_ro'), ('agentes_revisor')) AS x(rol)
-   WHERE n.nspname IN ('auth', 'storage', 'vault', 'net', 'cron', 'supabase_functions', 'graphql', 'realtime')
-     AND (has_schema_privilege(x.rol, n.oid, 'USAGE')
-          OR n.nspname = ANY (v_tocados) AND EXISTS (SELECT 1 FROM pg_proc p WHERE p.pronamespace = n.oid AND p.prokind IN ('f', 'p') AND has_function_privilege(x.rol, p.oid, 'EXECUTE'))
-          OR n.nspname = ANY (v_tocados) AND EXISTS (SELECT 1 FROM pg_class c WHERE c.relnamespace = n.oid AND c.relkind IN ('r', 'p', 'v', 'm', 'f')
-                       AND has_table_privilege(x.rol, c.oid, 'SELECT,INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER'))
-          OR n.nspname = ANY (v_tocados) AND EXISTS (SELECT 1 FROM pg_class c WHERE c.relnamespace = n.oid AND c.relkind = 'S'
-                       AND has_sequence_privilege(x.rol, c.oid, 'USAGE,SELECT,UPDATE')));
-  IF v_abiertos IS NOT NULL THEN
-    RAISE EXCEPTION 'ESQUEMA_SIN_CERRAR: %. Supabase no dejó cerrarlo para los agentes: avisar (no se instaló nada nuevo).', v_abiertos;
+  PERFORM pg_stat_clear_snapshot();                          -- que el control 24.11 vea el estado de ahora
+END $$;
+
+CREATE TABLE IF NOT EXISTS public.agente_claves (
+  quien      TEXT PRIMARY KEY,
+  hash       TEXT NOT NULL,
+  creada_en  TIMESTAMPTZ NOT NULL DEFAULT now(),
+  CONSTRAINT agente_claves_quien_ck CHECK (quien IN ('agentes', 'revisor')),
+  CONSTRAINT agente_claves_hash_ck  CHECK (hash ~ '^[0-9a-f]{64}$')
+);
+ALTER TABLE public.agente_claves ENABLE ROW LEVEL SECURITY;          -- sin políticas: nadie la lee por la API
+REVOKE ALL ON public.agente_claves FROM PUBLIC;
+DO $$ BEGIN
+  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'anon') THEN EXECUTE 'REVOKE ALL ON public.agente_claves FROM anon'; END IF;
+  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'authenticated') THEN EXECUTE 'REVOKE ALL ON public.agente_claves FROM authenticated'; END IF;
+END $$;
+
+CREATE OR REPLACE FUNCTION public.agente__hash(p TEXT) RETURNS TEXT
+LANGUAGE sql IMMUTABLE SET search_path = public, pg_temp AS $$
+  SELECT encode(sha256(convert_to(COALESCE(p, ''), 'UTF8')), 'hex')
+$$;
+
+-- Devuelve quién es el dueño de la clave ('agentes' | 'revisor') o frena. Clave corta = rechazo sin buscar.
+CREATE OR REPLACE FUNCTION public.agente__clave(p_clave TEXT, p_quien TEXT) RETURNS VOID
+LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = public, pg_temp AS $$
+BEGIN
+  IF p_clave IS NULL OR length(p_clave) < 40 OR length(p_clave) > 200
+     OR NOT EXISTS (SELECT 1 FROM public.agente_claves WHERE quien = p_quien AND hash = public.agente__hash(p_clave)) THEN
+    RAISE EXCEPTION 'no autorizado' USING ERRCODE = '42501';
+  END IF;
+END $$;
+
+-- La corre Franco en el SQL Editor (solo el dueño de la base puede: no se otorga a nadie). Rota la clave anterior.
+DROP FUNCTION IF EXISTS public.agente_api_generar_clave(TEXT);
+CREATE FUNCTION public.agente_api_generar_clave(p_quien TEXT) RETURNS TEXT
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp AS $$
+DECLARE v TEXT := 'ag_' || replace(gen_random_uuid()::text, '-', '') || replace(gen_random_uuid()::text, '-', '');
+BEGIN
+  IF p_quien IS NULL OR p_quien NOT IN ('agentes', 'revisor') THEN RAISE EXCEPTION 'QUIEN_INVALIDO (agentes | revisor)'; END IF;
+  INSERT INTO public.agente_claves (quien, hash) VALUES (p_quien, public.agente__hash(v))
+  ON CONFLICT (quien) DO UPDATE SET hash = EXCLUDED.hash, creada_en = now();
+  RETURN v;   -- se muestra UNA vez: copiarla al entorno y no guardarla en otro lado
+END $$;
+
+-- Leer una vista del esquema agentes, con columnas, filtros por igualdad, rango de fechas, orden y límite. Todo validado
+-- contra el catálogo: los nombres nunca se pegan sin chequear y los valores van como parámetros.
+DROP FUNCTION IF EXISTS public.agente_api_leer(TEXT, TEXT, TEXT[], JSONB, TEXT, TIMESTAMPTZ, TIMESTAMPTZ, TEXT, BOOLEAN, INTEGER);
+CREATE FUNCTION public.agente_api_leer(
+  p_clave TEXT, p_vista TEXT, p_columnas TEXT[] DEFAULT NULL, p_filtros JSONB DEFAULT NULL,
+  p_columna_fecha TEXT DEFAULT NULL, p_desde TIMESTAMPTZ DEFAULT NULL, p_hasta TIMESTAMPTZ DEFAULT NULL,
+  p_orden TEXT DEFAULT NULL, p_desc BOOLEAN DEFAULT true, p_limite INTEGER DEFAULT 500
+) RETURNS JSONB
+LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path = public, pg_temp SET statement_timeout = '20s' AS $$
+DECLARE
+  v_cols TEXT[]; v_sel TEXT; v_where TEXT := 'true'; v_k TEXT; v_res JSONB; v_lim INTEGER := LEAST(GREATEST(COALESCE(p_limite, 500), 1), 2000);
+  v_tipo TEXT;
+BEGIN
+  BEGIN PERFORM public.agente__clave(p_clave, 'agentes');
+  EXCEPTION WHEN insufficient_privilege THEN PERFORM public.agente__clave(p_clave, 'revisor');   -- Codex también lee
+  END;
+  IF p_vista IS NULL OR NOT EXISTS (SELECT 1 FROM pg_views WHERE schemaname = 'agentes' AND viewname = p_vista) THEN
+    RAISE EXCEPTION 'VISTA_INEXISTENTE';
+  END IF;
+  SELECT array_agg(column_name::text ORDER BY ordinal_position) INTO v_cols
+    FROM information_schema.columns WHERE table_schema = 'agentes' AND table_name = p_vista;
+  IF p_columnas IS NOT NULL AND cardinality(p_columnas) > 0 THEN
+    IF EXISTS (SELECT 1 FROM unnest(p_columnas) c WHERE c <> ALL (v_cols)) THEN RAISE EXCEPTION 'COLUMNA_INEXISTENTE'; END IF;
+    SELECT string_agg(format('%I', c), ', ') INTO v_sel FROM unnest(p_columnas) c;
+  ELSE
+    v_sel := '*';
+  END IF;
+  IF p_filtros IS NOT NULL THEN
+    IF jsonb_typeof(p_filtros) <> 'object' THEN RAISE EXCEPTION 'FILTROS_INVALIDOS'; END IF;
+    FOR v_k IN SELECT jsonb_object_keys(p_filtros) LOOP
+      IF v_k <> ALL (v_cols) THEN RAISE EXCEPTION 'COLUMNA_INEXISTENTE'; END IF;
+      IF jsonb_typeof(p_filtros -> v_k) = 'null' THEN
+        v_where := v_where || format(' AND %I IS NULL', v_k);
+      ELSE
+        v_where := v_where || format(' AND %I::text = ($1 ->> %L)', v_k, v_k);
+      END IF;
+    END LOOP;
+  END IF;
+  IF p_columna_fecha IS NOT NULL THEN
+    SELECT data_type INTO v_tipo FROM information_schema.columns
+     WHERE table_schema = 'agentes' AND table_name = p_vista AND column_name = p_columna_fecha;
+    IF v_tipo IS NULL OR v_tipo NOT IN ('date', 'timestamp with time zone', 'timestamp without time zone') THEN
+      RAISE EXCEPTION 'COLUMNA_FECHA_INVALIDA';
+    END IF;
+    IF p_desde IS NOT NULL THEN v_where := v_where || format(' AND %I >= $2', p_columna_fecha); END IF;
+    IF p_hasta IS NOT NULL THEN v_where := v_where || format(' AND %I < $3', p_columna_fecha); END IF;
+  END IF;
+  IF p_orden IS NOT NULL AND p_orden <> ALL (v_cols) THEN RAISE EXCEPTION 'COLUMNA_INEXISTENTE'; END IF;
+  EXECUTE format('SELECT COALESCE(jsonb_agg(to_jsonb(t)), ''[]''::jsonb) FROM (SELECT %s FROM agentes.%I WHERE %s %s LIMIT %s) t',
+                 v_sel, p_vista, v_where,
+                 CASE WHEN p_orden IS NULL THEN '' ELSE format('ORDER BY %I %s NULLS LAST', p_orden, CASE WHEN p_desc THEN 'DESC' ELSE 'ASC' END) END,
+                 v_lim)
+    INTO v_res USING p_filtros, p_desde, p_hasta;
+  IF pg_column_size(v_res) > 4000000 THEN RAISE EXCEPTION 'RESULTADO_GRANDE: pedí menos columnas o filas'; END IF;
+  RETURN jsonb_build_object('filas', v_res, 'cantidad', jsonb_array_length(v_res), 'limite', v_lim);
+END $$;
+
+-- Qué vistas y columnas hay (para que el agente no adivine).
+DROP FUNCTION IF EXISTS public.agente_api_vistas(TEXT);
+CREATE FUNCTION public.agente_api_vistas(p_clave TEXT) RETURNS JSONB
+LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path = public, pg_temp AS $$
+DECLARE v JSONB;
+BEGIN
+  BEGIN PERFORM public.agente__clave(p_clave, 'agentes');
+  EXCEPTION WHEN insufficient_privilege THEN PERFORM public.agente__clave(p_clave, 'revisor');
+  END;
+  SELECT jsonb_object_agg(table_name, cols) INTO v FROM (
+    SELECT table_name, jsonb_agg(jsonb_build_object('columna', column_name, 'tipo', data_type) ORDER BY ordinal_position) cols
+      FROM information_schema.columns WHERE table_schema = 'agentes' GROUP BY table_name) x;
+  RETURN COALESCE(v, '{}'::jsonb);
+END $$;
+
+DROP FUNCTION IF EXISTS public.agente_api_proponer(TEXT, TEXT, TEXT, TEXT, TEXT, JSONB, TIMESTAMPTZ, TEXT, BOOLEAN, BOOLEAN);
+CREATE FUNCTION public.agente_api_proponer(p_clave TEXT, p_agente TEXT, p_tipo TEXT, p_titulo TEXT, p_resumen TEXT, p_payload JSONB,
+  p_programada_para TIMESTAMPTZ DEFAULT NULL, p_clave_unica TEXT DEFAULT NULL, p_auto BOOLEAN DEFAULT false, p_pedir_codex BOOLEAN DEFAULT false)
+RETURNS JSONB LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp AS $$
+BEGIN
+  PERFORM public.agente__clave(p_clave, 'agentes');
+  RETURN agentes.proponer(p_agente, p_tipo, p_titulo, p_resumen, p_payload, p_programada_para, p_clave_unica, p_auto, p_pedir_codex);
+END $$;
+
+DROP FUNCTION IF EXISTS public.agente_api_registrar(TEXT, TEXT, TEXT, TEXT, TEXT, JSONB);
+CREATE FUNCTION public.agente_api_registrar(p_clave TEXT, p_agente TEXT, p_corrida TEXT, p_nivel TEXT, p_mensaje TEXT, p_datos JSONB DEFAULT NULL)
+RETURNS BIGINT LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp AS $$
+BEGIN
+  PERFORM public.agente__clave(p_clave, 'agentes');
+  RETURN agentes.registrar(p_agente, p_corrida, p_nivel, p_mensaje, p_datos);
+END $$;
+
+DROP FUNCTION IF EXISTS public.agente_api_directiva(TEXT, DATE, TEXT, JSONB);
+CREATE FUNCTION public.agente_api_directiva(p_clave TEXT, p_semana DATE, p_texto TEXT, p_prioridades JSONB DEFAULT '[]'::jsonb)
+RETURNS JSONB LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp AS $$
+BEGIN
+  PERFORM public.agente__clave(p_clave, 'agentes');
+  RETURN agentes.directiva(p_semana, p_texto, p_prioridades);
+END $$;
+
+DROP FUNCTION IF EXISTS public.agente_api_pauta(TEXT, NUMERIC, NUMERIC);
+CREATE FUNCTION public.agente_api_pauta(p_clave TEXT, p_gasto_al_dia NUMERIC, p_gasto_proyectado NUMERIC)
+RETURNS JSONB LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp AS $$
+BEGIN
+  PERFORM public.agente__clave(p_clave, 'agentes');
+  RETURN agentes.pauta_reporte(p_gasto_al_dia, p_gasto_proyectado);
+END $$;
+
+DROP FUNCTION IF EXISTS public.agente_api_blog(TEXT, TEXT, TEXT, TEXT, TEXT, TEXT[], TEXT);
+CREATE FUNCTION public.agente_api_blog(p_clave TEXT, p_slug TEXT, p_titulo TEXT, p_bajada TEXT, p_cuerpo TEXT, p_etiquetas TEXT[], p_fuentes TEXT)
+RETURNS JSONB LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp AS $$
+BEGIN
+  PERFORM public.agente__clave(p_clave, 'agentes');
+  RETURN agentes.blog_borrador(p_slug, p_titulo, p_bajada, p_cuerpo, p_etiquetas, p_fuentes);
+END $$;
+
+-- El veredicto de Codex: SOLO con la clave del revisor (que vive en la Mac, nunca en la nube).
+DROP FUNCTION IF EXISTS public.agente_api_codex(TEXT, BIGINT, TEXT, TEXT);
+CREATE FUNCTION public.agente_api_codex(p_clave TEXT, p_id BIGINT, p_veredicto TEXT, p_texto TEXT)
+RETURNS JSONB LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp AS $$
+BEGIN
+  PERFORM public.agente__clave(p_clave, 'revisor');
+  RETURN agentes.revision_codex(p_id, p_veredicto, p_texto);
+END $$;
+
+REVOKE ALL ON FUNCTION public.agente__hash(TEXT), public.agente__clave(TEXT, TEXT), public.agente_api_generar_clave(TEXT),
+  public.agente_api_leer(TEXT, TEXT, TEXT[], JSONB, TEXT, TIMESTAMPTZ, TIMESTAMPTZ, TEXT, BOOLEAN, INTEGER), public.agente_api_vistas(TEXT),
+  public.agente_api_proponer(TEXT, TEXT, TEXT, TEXT, TEXT, JSONB, TIMESTAMPTZ, TEXT, BOOLEAN, BOOLEAN),
+  public.agente_api_registrar(TEXT, TEXT, TEXT, TEXT, TEXT, JSONB), public.agente_api_directiva(TEXT, DATE, TEXT, JSONB),
+  public.agente_api_pauta(TEXT, NUMERIC, NUMERIC), public.agente_api_blog(TEXT, TEXT, TEXT, TEXT, TEXT, TEXT[], TEXT),
+  public.agente_api_codex(TEXT, BIGINT, TEXT, TEXT) FROM PUBLIC;
+DO $$
+DECLARE r TEXT;
+BEGIN
+  FOREACH r IN ARRAY ARRAY['anon', 'authenticated'] LOOP
+    IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = r) THEN
+      EXECUTE format('REVOKE ALL ON FUNCTION public.agente__hash(TEXT), public.agente__clave(TEXT, TEXT), public.agente_api_generar_clave(TEXT) FROM %I', r);
+    END IF;
+  END LOOP;
+  -- La ventanilla se llama con la clave pública (anon) + la clave del agente: el permiso es de anon, la llave es la clave.
+  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'anon') THEN
+    GRANT EXECUTE ON FUNCTION public.agente_api_leer(TEXT, TEXT, TEXT[], JSONB, TEXT, TIMESTAMPTZ, TIMESTAMPTZ, TEXT, BOOLEAN, INTEGER),
+      public.agente_api_vistas(TEXT),
+      public.agente_api_proponer(TEXT, TEXT, TEXT, TEXT, TEXT, JSONB, TIMESTAMPTZ, TEXT, BOOLEAN, BOOLEAN),
+      public.agente_api_registrar(TEXT, TEXT, TEXT, TEXT, TEXT, JSONB), public.agente_api_directiva(TEXT, DATE, TEXT, JSONB),
+      public.agente_api_pauta(TEXT, NUMERIC, NUMERIC), public.agente_api_blog(TEXT, TEXT, TEXT, TEXT, TEXT, TEXT[], TEXT),
+      public.agente_api_codex(TEXT, BIGINT, TEXT, TEXT) TO anon;
   END IF;
 END $$;
 
@@ -769,14 +912,18 @@ FROM (
                       AND (public.agente__columna_sensible(column_name)
                            OR (public.agente__texto_libre(column_name) AND table_name NOT LIKE 'agente\_%' AND table_name NOT IN ('pauta_config', 'blog_posts'))
                            OR (data_type IN ('json', 'jsonb') AND table_name NOT LIKE 'agente\_%' AND table_name <> 'pauta_config')))
-  UNION ALL SELECT '24.11', 'Los agentes no entran a los esquemas internos (auth, storage, vault, net, cron…) ni usan net (pedidos a internet)',
-         NOT EXISTS (SELECT 1 FROM pg_namespace n CROSS JOIN (VALUES ('agentes_ro'), ('agentes_revisor')) r(rol)
-                      WHERE n.nspname IN ('auth', 'storage', 'vault', 'net', 'cron', 'supabase_functions', 'graphql', 'realtime')
-                        AND (has_schema_privilege(r.rol, n.oid, 'USAGE')
-                             OR n.nspname = 'net' AND EXISTS (SELECT 1 FROM pg_proc p WHERE p.pronamespace = n.oid AND p.prokind IN ('f', 'p') AND has_function_privilege(r.rol, p.oid, 'EXECUTE'))
-                             OR n.nspname = 'net' AND EXISTS (SELECT 1 FROM pg_class c WHERE c.relnamespace = n.oid AND c.relkind IN ('r', 'p', 'v', 'm', 'f')
-                                          AND has_table_privilege(r.rol, c.oid, 'SELECT,INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER'))
-                             OR n.nspname = 'net' AND EXISTS (SELECT 1 FROM pg_class c WHERE c.relnamespace = n.oid AND c.relkind = 'S'
-                                          AND has_sequence_privilege(r.rol, c.oid, 'USAGE,SELECT,UPDATE'))))
+  UNION ALL SELECT '24.11', 'Los roles de los agentes NO pueden iniciar sesión ni tienen conexiones abiertas: entran solo por la ventanilla con clave',
+         NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname IN ('agentes_ro', 'agentes_revisor') AND rolcanlogin)
+         AND NOT EXISTS (SELECT 1 FROM pg_stat_activity WHERE usename IN ('agentes_ro', 'agentes_revisor'))
+  UNION ALL SELECT '24.12', 'La ventanilla existe: anon la llama (con clave y solo por POST); la tabla de claves y el generador no los toca nadie por la API',
+         has_function_privilege('anon', 'public.agente_api_leer(text,text,text[],jsonb,text,timestamptz,timestamptz,text,boolean,integer)', 'EXECUTE')
+         AND has_function_privilege('anon', 'public.agente_api_codex(text,bigint,text,text)', 'EXECUTE')
+         AND NOT has_function_privilege('anon', 'public.agente_api_generar_clave(text)', 'EXECUTE')
+         AND NOT has_function_privilege('authenticated', 'public.agente_api_generar_clave(text)', 'EXECUTE')
+         AND NOT has_table_privilege('anon', 'public.agente_claves', 'SELECT')
+         AND NOT has_table_privilege('authenticated', 'public.agente_claves', 'SELECT')
+         -- VOLATILE = la API solo las acepta por POST: la clave nunca viaja en una URL (que queda en registros)
+         AND NOT EXISTS (SELECT 1 FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
+                          WHERE n.nspname = 'public' AND p.proname LIKE 'agente\_api\_%' AND p.provolatile <> 'v')
 ) t
 ORDER BY id;

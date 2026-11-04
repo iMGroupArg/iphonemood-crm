@@ -19,7 +19,7 @@ Codex es un modelo distinto que revisa **sin ver tu razonamiento**. Sólo ve los
    echo '{"id": 123, "veredicto": "objeciones", "texto": "<resumen de 3-10 líneas de lo que objetó>"}' | node agentes/mesa.mjs codex -
    ```
    Una objeción sobre un ajuste `auto` lo devuelve a `pendiente` sola.
-   La acción `codex` se conecta con `REVISOR_DB_URL` (rol `agentes_revisor`), que **existe sólo en la Mac**. En la nube, este paso no se puede hacer: dejá `pedir_codex: true` y la opinión de Codex como texto en el `resumen`.
+   La acción `codex` usa `REVISOR_CLAVE`, que **existe sólo en la Mac**. En la nube, este paso no se puede hacer: dejá `pedir_codex: true` y la opinión de Codex como texto en el `resumen`.
 4. **Si no estás de acuerdo con Codex, no lo pises.** Agregá tu postura en `resumen` o en la bitácora. Franco ve las dos.
 
 ## Para código (Landing, Bot)

@@ -5,7 +5,7 @@ description: Escribir la tanda semanal de 4 notas del blog (novedades de Apple, 
 
 # Tanda de blog (4 notas)
 
-1. Mirá qué hay ya publicado: `SELECT slug, titulo, publicado_en FROM blog_posts ORDER BY creado_en DESC LIMIT 40`. No repitas temas.
+1. Mirá qué hay ya publicado: `leer` con `{"vista":"blog_posts","columnas":["slug","titulo","estado","publicado_en"],"orden":"creado_en","limite":40}`. No repitas temas.
 2. Buscá en la web las novedades de la semana (Apple Newsroom, soporte de Apple, medios serios).
    - **Cada dato lleva su fuente.**
    - Los rumores se escriben como rumores ("según reportes de…").

@@ -3,7 +3,7 @@
 Seis agentes (`.claude/agents/`) que corren solos en la nube con agenda fija. Siguen las recetas de `.claude/skills/` y hablan con la base sólo a través de `agentes/mesa.mjs`. Franco decide todo lo importante desde **CRM → Agentes**.
 
 ```
- Rutinas en la nube ──► mesa.mjs (rol agentes_ro) ──► Supabase: agente_propuestas / bitácora / directivas / pauta_config
+ Rutinas en la nube ──► mesa.mjs (ventanilla con clave) ──► Supabase: agente_propuestas / bitácora / directivas / pauta_config
         │                                                              │
         └── Codex (segunda opinión)                     CRM → Agentes: Franco aprueba / rechaza / edita
                                                                        │
@@ -12,18 +12,14 @@ Seis agentes (`.claude/agents/`) que corren solos en la nube con agenda fija. Si
 
 ## Fase 0: lo que hace Franco una sola vez
 
-1. **Correr el script 24** en Supabase → SQL Editor: `db/para-correr/24_agentes.sql`. El final tiene que mostrar los 11 controles en ✅. Si aborta con FUNCIONES_SIN_CERRAR, no se instaló nada: avisar.
-2. **Darles contraseña a los dos roles** (uno para los agentes y otro sólo para Codex). En el SQL Editor, con dos contraseñas largas **distintas**, generadas en el momento y **que no se guardan en ningún archivo**:
+1. **Correr el script 24** en Supabase → SQL Editor: `db/para-correr/24_agentes.sql`. El final tiene que mostrar los 12 controles en ✅. Si aborta con FUNCIONES_SIN_CERRAR, no se instaló nada: avisar.
+2. **Generar las dos claves de la ventanilla.** Los agentes NO se conectan a la base: en Supabase el esquema `net` (pedidos a internet) no se puede cerrar, así que el script 24 les saca a los usuarios de base de los agentes el permiso de entrar y cualquier contraseña vieja, y corta las conexiones que hubieran quedado abiertas (control 24.11). **No hay que darles contraseña nunca.** En el SQL Editor:
    ```sql
-   ALTER ROLE agentes_ro      WITH LOGIN PASSWORD 'contraseña-larga-1';
-   ALTER ROLE agentes_revisor WITH LOGIN PASSWORD 'contraseña-larga-2';
+   SELECT public.agente_api_generar_clave('agentes');   -- copiala a AGENTES_CLAVE del entorno de la nube
+   SELECT public.agente_api_generar_clave('revisor');   -- copiala a REVISOR_CLAVE, SÓLO en la Mac
    ```
-3. **Armar la cadena de conexión** (Supabase → Connect → Session pooler):
-   - usuario `agentes_ro.<id-del-proyecto>`, con la contraseña del paso 2;
-   - queda como `postgresql://agentes_ro.<id>:<contraseña>@<host-del-pooler>:5432/postgres`;
-   - esa cadena es el secreto `AGENTES_DB_URL`. La misma con `agentes_revisor` y su contraseña es `REVISOR_DB_URL`;
-   - descargar el certificado SSL del proyecto (Supabase → Database → Settings → SSL) y cargar su contenido como `AGENTES_DB_CA`. Sin él, las herramientas no se conectan: es lo que garantiza que hablan con la base real.
-4. Publicar este PR (la pantalla Agentes del CRM). Hasta que el script 24 esté corrido, la pantalla sólo avisa "Falta correr el script 24".
+   Cada clave se muestra **una sola vez** y en la base queda guardado sólo su hash. Las funciones de la ventanilla sólo aceptan pedidos POST: la clave nunca viaja en una URL, que quedaría en registros. Si se pierde o se filtra, se corre de nuevo y la anterior deja de valer.
+3. Publicar este PR (la pantalla Agentes del CRM). Hasta que el script 24 esté corrido, la pantalla sólo avisa "Falta correr el script 24".
 
 ## Entorno de la nube (claude.ai/code → Entornos)
 
@@ -31,9 +27,9 @@ Un entorno "iphonemood-agentes" sobre el repo `iMGroupArg/iphonemood-crm`, con e
 
 | Variable | Para qué | Quién la usa |
 |---|---|---|
-| `AGENTES_DB_URL` | Conexión del rol `agentes_ro` | Todos |
-| `REVISOR_DB_URL` | **NO va en la nube.** Vive sólo en la Mac (llavero), donde corre el paso de Codex | — |
-| `AGENTES_DB_CA` | Certificado de Supabase para verificar la conexión | Todos |
+| `SUPABASE_URL`, `SUPABASE_ANON_KEY` | Dirección del proyecto y clave pública (las mismas que usa la landing) | Todos |
+| `AGENTES_CLAVE` | Clave de la ventanilla de los agentes | Todos |
+| `REVISOR_CLAVE` | **NO va en la nube.** Vive sólo en la Mac (llavero), donde se deja el veredicto de Codex | — |
 | `INBOX_USER`, `INBOX_PASSWORD` | Leer la Bandeja del bot. **Cargar sólo credenciales de SÓLO LECTURA** que dé el bot (las de Vercel permiten responder: esas no) | Bot |
 | `OPENAI_API_KEY` | Codex en la nube | Todos (segunda opinión) |
 | `META_TOKEN_LECTURA`, `META_AD_ACCOUNT_ID` | Fase 2: leer resultados de Meta (sólo lectura) | Pauta, Contenido |
@@ -41,8 +37,7 @@ Un entorno "iphonemood-agentes" sobre el repo `iMGroupArg/iphonemood-crm`, con e
 
 Script de preparación del entorno:
 ```bash
-cd agentes && npm install --silent && cd ..
-npm install -g @openai/codex   # si falla, Codex corre desde la Mac (ver abajo)
+npm install -g @openai/codex   # opcional: opinión de Codex dentro de la corrida (el veredicto formal sale de la Mac)
 ```
 
 **El token de Meta con permiso de escritura NO va acá**: vive sólo en Vercel, para el ejecutor de la Fase 2.
@@ -66,12 +61,13 @@ Cada rutina se crea con `/schedule` y lleva este prompt: "Sos el agente `<nombre
 Antes de agendar cada una, se dispara **una vez a mano** y se mira el resultado en CRM → Agentes (pestañas Informes y Bitácora).
 
 ## Codex: nube o Mac
-- **El veredicto de Codex se escribe SIEMPRE desde la Mac**, con `REVISOR_DB_URL`, que nunca va a la nube. Así un agente manipulado en la nube no puede fabricar una "aprobación de Codex".
+- **El veredicto de Codex se escribe SIEMPRE desde la Mac**, con `REVISOR_CLAVE`, que nunca va a la nube. Así un agente manipulado en la nube no puede fabricar una "aprobación de Codex".
 - En la nube, Codex (si anda) puede dar su opinión dentro de la corrida, como texto en `resumen`. El veredicto formal lo deja la Mac.
 - Las propuestas que piden Codex quedan con "Codex: pendiente", y una tarea programada en la Mac las completa. La Mac ya tiene Codex configurado.
   - La tarea corre de lunes a sábado a las 11:00 y 19:00.
   - Busca `revision_codex = 'pendiente'` y sigue la skill `segunda-opinion-codex`.
-  - Para eso la Mac también necesita `AGENTES_DB_URL`, guardada en el llavero, no en el repo.
+  - Para eso la Mac necesita `REVISOR_CLAVE` (y `SUPABASE_URL`/`SUPABASE_ANON_KEY`), guardada en el llavero, no en el repo.
+  - Con `REVISOR_CLAVE` sola, `mesa.mjs` puede leer (`leer`, `vistas`) y dejar el veredicto (`codex`), pero no proponer ni escribir en la bitácora.
 
 ## Límites conocidos (revisión de Codex, a propósito)
 - **Hasta la Fase 2 no hay aumentos automáticos de pauta.** El gasto que informa el propio agente no autoriza gastar: sólo habilita el automático una medición hecha por el ejecutor con su propio token de Meta. Las bajadas sí pueden ser automáticas.

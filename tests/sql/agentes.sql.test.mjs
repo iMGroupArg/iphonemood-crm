@@ -70,7 +70,7 @@ console.log('\n══ Mesa de control de los agentes (Postgres en WebAssembly) �
   const e2 = await falla(() => db.exec(SQL('agentes.sql')));
   check('El script 24 corre dos veces seguidas sin romper (idempotente)', !e2, e2);
   const tabla = (await db.exec(SQL('agentes.sql'))).pop().rows;
-  check('La tabla de verificación sale toda en ✅ (11 controles)', tabla.length === 11 && tabla.every(x => x.resultado === '✅'),
+  check('La tabla de verificación sale toda en ✅ (12 controles)', tabla.length === 12 && tabla.every(x => x.resultado === '✅'),
     JSON.stringify(tabla.map(x => [x.id, x.resultado])));
   const sin = new PGlite({ extensions: { pgcrypto } });
   const e3 = await falla(() => sin.exec(SQL('agentes.sql')));
@@ -313,20 +313,18 @@ console.log('\n══ Mesa de control de los agentes (Postgres en WebAssembly) �
   check('El libro de caja no muestra la descripción libre (sí referencia, tipo y montos)', !lib.includes('descripcion') && lib.includes('referencia') && lib.includes('delta'), lib.join(','));
   const mesa = (await q(db, `SELECT column_name FROM information_schema.columns WHERE table_schema='agentes' AND table_name='agente_bitacora'`)).map(x => x.column_name);
   check('En la mesa de los agentes el texto sí se ve (mensaje y datos de la bitácora)', mesa.includes('mensaje') && mesa.includes('datos'), mesa.join(','));
-  const eNet = await falla(() => comoAgente(db, () => q(db, `SELECT net.http_post('https://afuera.example/robo')`)));
-  check('Un agente NO puede mandar pedidos a internet desde la base (net.http_post)', eNet && /permission denied/.test(eNet), eNet);
-  const eNetR = await falla(() => comoRevisor(db, () => q(db, `SELECT net.http_post('https://afuera.example')`)));
-  check('El revisor tampoco', eNetR && /permission denied/.test(eNetR), eNetR);
-  const reloj = await comoRol(db, 'reloj_facturacion', null, () => q(db, `SELECT net.http_post('https://iphonemood.com/api/meli/worker') AS r`));
-  check('El reloj de facturación (y cualquier otro rol que lo usaba) sigue pudiendo', Number(reloj[0].r) === 42, JSON.stringify(reloj));
-  const eCola = await falla(() => comoAgente(db, () => q(db, `INSERT INTO net.http_request_queue (url) VALUES ('https://afuera')`)));
-  check('Un agente NO puede escribir en la cola de pedidos de net', eCola && /permission denied/.test(eCola), eCola);
-  const eResp = await falla(() => comoAgente(db, () => q(db, `SELECT * FROM net._http_response`)));
-  check('Ni leer las respuestas guardadas', eResp && /permission denied/.test(eResp), eResp);
-  const colaReloj = await comoRol(db, 'reloj_facturacion', null, () => q(db, `INSERT INTO net.http_request_queue (url) VALUES ('https://iphonemood.com') RETURNING id`));
-  check('El reloj sigue pudiendo encolar (tabla y secuencia)', colaReloj.length === 1, JSON.stringify(colaReloj));
-  const crmNet = await comoFranco(db, () => q(db, `SELECT net.http_post('https://x') AS r`));
-  check('authenticated conserva lo que tenía', Number(crmNet[0].r) === 42);
+  const login = await q(db, `SELECT rolname, rolcanlogin FROM pg_roles WHERE rolname IN ('agentes_ro','agentes_revisor')`);
+  check('Los dos roles de agentes NO pueden iniciar sesión (net de Supabase no se puede cerrar: no hay conexión directa)',
+    login.length === 2 && login.every(x => !x.rolcanlogin), JSON.stringify(login));
+  await db.exec(`ALTER ROLE agentes_ro LOGIN PASSWORD 'vieja-de-la-guia'; ALTER ROLE agentes_revisor PASSWORD 'otra-vieja'`);
+  await db.exec(SQL('agentes.sql'));
+  check('Si alguien les dio login, volver a correr el script se lo saca', !(await q(db, `SELECT rolcanlogin FROM pg_roles WHERE rolname='agentes_ro'`))[0].rolcanlogin);
+  const pw = await q(db, `SELECT rolname FROM pg_authid WHERE rolname IN ('agentes_ro','agentes_revisor') AND rolpassword IS NOT NULL`);
+  check('…y les borra la contraseña vieja (si algún día les devuelven el login, no entra nadie con ella)', pw.length === 0, JSON.stringify(pw));
+  const est = await q(db, `SELECT p.proname, p.provolatile FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace
+                            WHERE n.nspname='public' AND p.proname LIKE 'agente\\_api\\_%' ORDER BY 1`);
+  check('Todas las funciones de la ventanilla son VOLATILE: la API las acepta solo por POST (la clave nunca va en una URL)',
+    est.length >= 9 && est.every(x => x.provolatile === 'v'), JSON.stringify(est));
   const eProc = await falla(() => comoAgente(db, () => q(db, `CALL public.procedimiento_viejo()`)));
   check('Un procedimiento viejo de public también queda cerrado para los agentes (y no rompe la instalación)', eProc && /permission denied/.test(eProc), eProc);
   const rep = await comoAgente(db, () => q(db, `SELECT * FROM agentes.reparaciones`));
@@ -335,6 +333,71 @@ console.log('\n══ Mesa de control de los agentes (Postgres en WebAssembly) �
   check('El rol revisor (Codex) no puede proponer', eRev && /permission denied/.test(eRev), eRev);
   const lee = await comoRevisor(db, () => q(db, `SELECT count(*)::int n FROM agentes.stock`));
   check('El rol revisor lee las mismas vistas para controlar', lee[0].n >= 0);
+}
+
+// ── 7 · La ventanilla (API con clave) ───────────────────────────────────────
+{
+  const db = await nueva();
+  const claveA = (await q(db, `SELECT public.agente_api_generar_clave('agentes') AS c`))[0].c;
+  const claveR = (await q(db, `SELECT public.agente_api_generar_clave('revisor') AS c`))[0].c;
+  check('Se generan dos claves largas y distintas', claveA.length > 60 && claveR.length > 60 && claveA !== claveR);
+  const hashes = await q(db, `SELECT quien, hash FROM public.agente_claves ORDER BY quien`);
+  check('Solo se guarda el hash, nunca la clave', hashes.length === 2 && hashes.every(h => /^[0-9a-f]{64}$/.test(h.hash) && h.hash !== claveA && h.hash !== claveR));
+  const comoAnon = fn => comoRol(db, 'anon', null, fn);
+  const leer = (clave, args = {}) => comoAnon(() => q(db, `SELECT public.agente_api_leer($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) AS r`,
+    [clave, args.vista ?? 'cajas', args.columnas ?? null, args.filtros ? JSON.stringify(args.filtros) : null, args.fecha ?? null,
+     args.desde ?? null, args.hasta ?? null, args.orden ?? null, args.desc ?? true, args.limite ?? null]).then(x => x[0].r));
+
+  const eGen = await falla(() => comoAnon(() => q(db, `SELECT public.agente_api_generar_clave('agentes')`)));
+  check('Nadie genera claves por la API (ni anon)', eGen && /permission denied/.test(eGen), eGen);
+  const eGen2 = await falla(() => comoFranco(db, () => q(db, `SELECT public.agente_api_generar_clave('agentes')`)));
+  check('…ni un usuario del CRM (solo el SQL Editor)', eGen2 && /permission denied/.test(eGen2), eGen2);
+  const eTab = await falla(() => comoAnon(() => q(db, `SELECT * FROM public.agente_claves`)));
+  check('La tabla de claves no se lee por la API', eTab && /permission denied/.test(eTab), eTab);
+
+  const eMala = await falla(() => leer('ag_' + 'x'.repeat(64)));
+  check('Con una clave equivocada no se lee nada', eMala && eMala.includes('no autorizado'), eMala);
+  const eSin = await falla(() => leer(null));
+  check('Sin clave no se lee nada', eSin && eSin.includes('no autorizado'), eSin);
+
+  await db.query(`INSERT INTO public.ventas (cliente, estado, fecha_venta) VALUES ('Ana','abierta','2026-10-05'), ('Beto','cerrada','2026-10-20'), ('Caro','abierta','2026-11-02')`);
+  const r1 = await leer(claveA, { vista: 'ventas', columnas: ['cliente', 'estado'], filtros: { estado: 'abierta' }, orden: 'cliente', desc: false });
+  check('Con la clave se lee una vista con columnas, filtro y orden', r1.cantidad === 2 && r1.filas[0].cliente === 'Ana' && !('id' in r1.filas[0]), JSON.stringify(r1));
+  const r2 = await leer(claveA, { vista: 'ventas', fecha: 'fecha_venta', desde: '2026-10-10', hasta: '2026-11-01' });
+  check('Rango de fechas (desde incluido, hasta excluido)', r2.cantidad === 1 && r2.filas[0].cliente === 'Beto', JSON.stringify(r2));
+  const r3 = await leer(claveR, { vista: 'ventas', limite: 1 });
+  check('El revisor también lee, y el límite se respeta', r3.cantidad === 1);
+  for (const [n, args, cod] of [
+    ['una vista inexistente o con SQL en el nombre', { vista: 'ventas; DROP TABLE cajas' }, 'VISTA_INEXISTENTE'],
+    ['una tabla fuera del esquema agentes', { vista: 'usuarios_autorizados' }, 'VISTA_INEXISTENTE'],
+    ['una columna armada', { vista: 'ventas', columnas: ['cliente", (SELECT 1) AS "x'] }, 'COLUMNA_INEXISTENTE'],
+    ['un filtro sobre una columna que no está', { vista: 'ventas', filtros: { 'estado = estado OR true --': 'x' } }, 'COLUMNA_INEXISTENTE'],
+    ['un orden armado', { vista: 'ventas', orden: 'cliente; DROP TABLE x' }, 'COLUMNA_INEXISTENTE'],
+    ['una columna de fecha que no es fecha', { vista: 'ventas', fecha: 'cliente', desde: '2026-01-01' }, 'COLUMNA_FECHA_INVALIDA'],
+  ]) {
+    const e = await falla(() => leer(claveA, args));
+    check(`Se rechaza ${n}`, e && e.includes(cod), e);
+  }
+  const inj = await leer(claveA, { vista: 'ventas', filtros: { cliente: "x' OR '1'='1" } });
+  check('Un valor de filtro con comillas es solo un valor (no trae nada)', inj.cantidad === 0, JSON.stringify(inj));
+  const vistas = await comoAnon(() => q(db, `SELECT public.agente_api_vistas($1) AS r`, [claveA]).then(x => x[0].r));
+  check('Lista de vistas y columnas para no adivinar', !!vistas.ventas && !!vistas.cajas && !vistas.usuarios_autorizados, Object.keys(vistas).join(','));
+
+  const pr = await comoAnon(() => q(db, `SELECT public.agente_api_proponer($1,'contenido','story','Story perfumes',NULL,'{"texto":"hola"}',NULL,'api-1',false,true) AS r`, [claveA]).then(x => x[0].r));
+  check('Con la clave del agente se propone (queda pendiente)', pr.ok && pr.estado === 'pendiente', JSON.stringify(pr));
+  const ePrR = await falla(() => comoAnon(() => q(db, `SELECT public.agente_api_proponer($1,'contenido','story','x',NULL,'{}')`, [claveR])));
+  check('El revisor NO propone', ePrR && ePrR.includes('no autorizado'), ePrR);
+  const eCxA = await falla(() => comoAnon(() => q(db, `SELECT public.agente_api_codex($1,$2,'aprobado','me apruebo')`, [claveA, pr.id])));
+  check('La clave del agente NO sirve para dejar el veredicto de Codex', eCxA && eCxA.includes('no autorizado'), eCxA);
+  await comoAnon(() => q(db, `SELECT public.agente_api_codex($1,$2,'aprobado','Revisado')`, [claveR, pr.id]));
+  check('La del revisor sí', (await prop(db, pr.id)).revision_codex === 'aprobado');
+  const reg = await comoAnon(() => q(db, `SELECT public.agente_api_registrar($1,'ceo','c1','info','Corrida ok') AS r`, [claveA]));
+  check('Registrar en la bitácora por la ventanilla', Number(reg[0].r) > 0);
+  const eApr = await falla(() => comoAnon(() => q(db, `SELECT public.agente_aprobar($1, 1, NULL, NULL)`, [pr.id])));
+  check('Por la API pública no se puede aprobar (ni con la clave)', eApr && /permission denied/.test(eApr), eApr);
+  const nueva2 = (await q(db, `SELECT public.agente_api_generar_clave('agentes') AS c`))[0].c;
+  const eVieja = await falla(() => leer(claveA));
+  check('Generar una clave nueva anula la anterior', eVieja && eVieja.includes('no autorizado') && nueva2 !== claveA, eVieja);
 }
 
 console.log(`\n${ok} ok · ${fail} fallas\n`);

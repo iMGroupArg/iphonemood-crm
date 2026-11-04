@@ -1,109 +1,99 @@
 #!/usr/bin/env node
-// Puente ÚNICO entre los agentes y la base. Ningún agente arma SQL con texto pegado: todo pasa por acá, con parámetros.
+// Puente ÚNICO entre los agentes y la base: la "ventanilla" del script 24 por la API REST de Supabase.
+// Los agentes NO tienen conexión SQL (en Supabase el esquema net —pedidos a internet— no se puede cerrar): cada acción
+// es una función fija que exige la clave del agente. No hay forma de mandar SQL.
 //
-//   node agentes/mesa.mjs leer "SELECT ... FROM agentes.ventas WHERE ..."    → JSON (transacción de SOLO LECTURA, máx. 2000 filas)
-//   node agentes/mesa.mjs proponer  archivo.json   (o "-" para leer de stdin)
+//   node agentes/mesa.mjs vistas                         → qué vistas y columnas hay
+//   node agentes/mesa.mjs leer      consulta.json         {"vista","columnas","filtros","columna_fecha","desde","hasta","orden","desc","limite"}
+//   node agentes/mesa.mjs proponer  propuesta.json        (o "-" para leer de stdin)
 //   node agentes/mesa.mjs registrar archivo.json
 //   node agentes/mesa.mjs directiva archivo.json
-//   node agentes/mesa.mjs codex     archivo.json
 //   node agentes/mesa.mjs pauta     archivo.json
 //   node agentes/mesa.mjs blog      archivo.json
+//   node agentes/mesa.mjs codex     archivo.json          (SOLO en la Mac: usa REVISOR_CLAVE)
 //
-// Conexión: AGENTES_DB_URL (rol agentes_ro por el pooler de Supabase); la acción `codex` usa REVISOR_DB_URL (rol
-// agentes_revisor: el único que puede dejar la revisión de Codex). AGENTES_DB_CA = certificado de Supabase (PEM) para
-// verificar el servidor. AGENTES_DB_URL y AGENTES_DB_CA van en el entorno de la nube; REVISOR_DB_URL vive SOLO en la
-// Mac (donde corre el paso de Codex), nunca en la nube. Ninguna va en el repo.
-// Con MESA_ENSAYO=1 no se conecta: imprime lo que mandaría (para probar una rutina sin tocar la base).
+// Entorno: SUPABASE_URL y SUPABASE_ANON_KEY (públicas) + AGENTES_CLAVE (nube) o REVISOR_CLAVE (solo la Mac:
+// sirve para leer y para el veredicto de Codex, no para proponer).
+// Las claves se generan en el SQL Editor con agente_api_generar_clave(); NUNCA van en el repo.
+// Con MESA_ENSAYO=1 no llama a nada: imprime lo que mandaría (sin la clave).
 import fs from 'node:fs';
 
+// campo del JSON → parámetro de la función (el `clave` del JSON es la clave de idempotencia, no la secreta)
 const LLAMADAS = {
-  // campos del JSON → parámetros, en orden
-  proponer: ['agentes.proponer', ['agente', 'tipo', 'titulo', 'resumen', 'payload', 'programada_para', 'clave', 'auto', 'pedir_codex'],
-             ['text', 'text', 'text', 'text', 'jsonb', 'timestamptz', 'text', 'boolean', 'boolean']],
-  registrar: ['agentes.registrar', ['agente', 'corrida', 'nivel', 'mensaje', 'datos'], ['text', 'text', 'text', 'text', 'jsonb']],
-  directiva: ['agentes.directiva', ['semana', 'texto', 'prioridades'], ['date', 'text', 'jsonb']],
-  codex:     ['agentes.revision_codex', ['id', 'veredicto', 'texto'], ['bigint', 'text', 'text']],
-  pauta:     ['agentes.pauta_reporte', ['gasto_al_dia', 'gasto_proyectado'], ['numeric', 'numeric']],
-  blog:      ['agentes.blog_borrador', ['slug', 'titulo', 'bajada', 'cuerpo', 'etiquetas', 'fuentes'], ['text', 'text', 'text', 'text', 'text[]', 'text']],
+  vistas:    ['agente_api_vistas', {}],
+  leer:      ['agente_api_leer', { vista: 'p_vista', columnas: 'p_columnas', filtros: 'p_filtros', columna_fecha: 'p_columna_fecha',
+                                   desde: 'p_desde', hasta: 'p_hasta', orden: 'p_orden', desc: 'p_desc', limite: 'p_limite' }],
+  proponer:  ['agente_api_proponer', { agente: 'p_agente', tipo: 'p_tipo', titulo: 'p_titulo', resumen: 'p_resumen', payload: 'p_payload',
+                                       programada_para: 'p_programada_para', clave: 'p_clave_unica', auto: 'p_auto', pedir_codex: 'p_pedir_codex' }],
+  registrar: ['agente_api_registrar', { agente: 'p_agente', corrida: 'p_corrida', nivel: 'p_nivel', mensaje: 'p_mensaje', datos: 'p_datos' }],
+  directiva: ['agente_api_directiva', { semana: 'p_semana', texto: 'p_texto', prioridades: 'p_prioridades' }],
+  pauta:     ['agente_api_pauta', { gasto_al_dia: 'p_gasto_al_dia', gasto_proyectado: 'p_gasto_proyectado' }],
+  blog:      ['agente_api_blog', { slug: 'p_slug', titulo: 'p_titulo', bajada: 'p_bajada', cuerpo: 'p_cuerpo', etiquetas: 'p_etiquetas', fuentes: 'p_fuentes' }],
+  codex:     ['agente_api_codex', { id: 'p_id', veredicto: 'p_veredicto', texto: 'p_texto' }],
 };
-const DEFECTOS = { proponer: { auto: false, pedir_codex: false } };
+const OBLIGATORIOS = {
+  proponer: ['agente', 'tipo', 'titulo', 'resumen', 'payload'], registrar: ['agente', 'corrida', 'nivel', 'mensaje'],
+  directiva: ['semana', 'texto'], pauta: ['gasto_al_dia', 'gasto_proyectado'], leer: ['vista'],
+  blog: ['slug', 'titulo', 'bajada', 'cuerpo', 'etiquetas', 'fuentes'], codex: ['id', 'veredicto', 'texto'],
+};
 
-export function armarLlamada(accion, datos) {
+export function armarLlamada(accion, datos = {}) {
   const def = LLAMADAS[accion];
   if (!def) throw new Error(`Acción desconocida: ${accion}`);
   if (!datos || typeof datos !== 'object' || Array.isArray(datos)) throw new Error('El JSON tiene que ser un objeto');
-  const [fn, campos, tipos] = def;
-  const extra = Object.keys(datos).filter(k => !campos.includes(k));
+  const [rpc, campos] = def;
+  const extra = Object.keys(datos).filter(k => !(k in campos));
   if (extra.length) throw new Error(`Campos que ${accion} no conoce: ${extra.join(', ')}`);
-  const d = { ...(DEFECTOS[accion] || {}), ...datos };
-  const valores = campos.map((c, i) => {
-    const v = d[c] ?? null;
-    return tipos[i] === 'jsonb' && v !== null ? JSON.stringify(v) : v;
-  });
-  const sql = `SELECT ${fn}(${tipos.map((t, i) => `$${i + 1}::${t}`).join(', ')}) AS r`;
-  return { sql, valores };
+  const cuerpo = {};
+  for (const c of OBLIGATORIOS[accion] || []) cuerpo[campos[c]] = datos[c] ?? null;   // la API exige los parámetros sin defecto
+  for (const [k, v] of Object.entries(datos)) cuerpo[campos[k]] = v;
+  return { rpc, cuerpo, variableClave: accion === 'codex' ? 'REVISOR_CLAVE' : 'AGENTES_CLAVE' };
 }
 
-export const MAX_FILAS = 2000, MAX_BYTES = 4_000_000;
-export function consultaLecturaOk(sql) {
-  const s = String(sql || '').trim().replace(/;\s*$/, '');
-  if (!/^(select|with)\b/i.test(s)) throw new Error('leer solo acepta SELECT / WITH');
-  if (s.includes(';')) throw new Error('leer acepta UNA sola consulta');
-  return s;
+// Leer (leer/vistas) acepta las dos claves: en la Mac solo existe REVISOR_CLAVE y Codex tiene que poder buscar
+// pendientes. Escribir propuestas o bitácora exige AGENTES_CLAVE; el veredicto, REVISOR_CLAVE. Nada más se mezcla.
+export function elegirClave(accion, variableClave, entorno) {
+  if ((accion === 'leer' || accion === 'vistas') && !entorno.AGENTES_CLAVE && entorno.REVISOR_CLAVE) return 'REVISOR_CLAVE';
+  return variableClave;
 }
-// El tope de filas lo aplica la BASE (no se trae todo para recortar después).
-export const consultaAcotada = (sql) => `SELECT * FROM (${consultaLecturaOk(sql)}\n) AS consulta_del_agente LIMIT ${MAX_FILAS + 1}`;
+
+export function urlSupabase(u) {
+  let url;
+  try { url = new URL(u); } catch { throw new Error('SUPABASE_URL no es una URL válida'); }
+  if (url.protocol !== 'https:') throw new Error('SUPABASE_URL tiene que ser https://');
+  return url.origin;
+}
 
 function leerJson(arg) {
   const crudo = arg === '-' || arg === undefined ? fs.readFileSync(0, 'utf8') : fs.readFileSync(arg, 'utf8');
   return JSON.parse(crudo);
 }
 
-// Los parámetros SSL de la URL pisarían la verificación obligatoria (por ejemplo sslmode=disable): se rechazan.
-export function urlSegura(url, variable = 'la URL') {
-  let u;
-  try { u = new URL(url); } catch { throw new Error(`${variable} no es una URL válida`); }
-  if (!/^postgres(ql)?:$/.test(u.protocol)) throw new Error(`${variable} tiene que ser postgresql://`);
-  const prohibidos = [...u.searchParams.keys()].filter(k => /^ssl/i.test(k) || /^(uselibpqcompat|options)$/i.test(k));
-  if (prohibidos.length) throw new Error(`${variable} no puede traer ${prohibidos.join(', ')}: la seguridad de la conexión la fija la herramienta`);
-  return url;
-}
-
-async function conectar(variable = 'AGENTES_DB_URL') {
-  const url = process.env[variable];
-  if (!url) throw new Error(`Falta ${variable} en el entorno`);
-  urlSegura(url, variable);
-  const ca = process.env.AGENTES_DB_CA;
-  if (!ca) throw new Error('Falta AGENTES_DB_CA (certificado de Supabase): sin él no se puede verificar que la base sea la real');
-  const { default: pg } = await import('pg');
-  const c = new pg.Client({ connectionString: url, ssl: { rejectUnauthorized: true, ca }, statement_timeout: 30000 });
-  await c.connect();
-  return c;
+export async function llamar(accion, datos, entorno = process.env, fetchImpl = fetch) {
+  const { rpc, cuerpo, variableClave: porDefecto } = armarLlamada(accion, datos);
+  const variableClave = elegirClave(accion, porDefecto, entorno);
+  if (entorno.MESA_ENSAYO === '1') return { ensayo: true, rpc, cuerpo };
+  const base = urlSupabase(entorno.SUPABASE_URL || '');
+  const anon = entorno.SUPABASE_ANON_KEY, clave = entorno[variableClave];
+  if (!anon) throw new Error('Falta SUPABASE_ANON_KEY');
+  if (!clave) throw new Error(`Falta ${variableClave}${variableClave === 'REVISOR_CLAVE' ? ' (solo existe en la Mac)' : ''}`);
+  const r = await fetchImpl(`${base}/rest/v1/rpc/${rpc}`, {
+    method: 'POST',
+    headers: { apikey: anon, Authorization: `Bearer ${anon}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ p_clave: clave, ...cuerpo }),
+    signal: AbortSignal.timeout(30000),
+  });
+  const texto = await r.text();
+  if (texto.length > 5_000_000) throw new Error('Respuesta demasiado grande: pedí menos columnas o filas');
+  let json; try { json = JSON.parse(texto); } catch { json = texto; }
+  if (!r.ok) throw new Error(typeof json === 'object' && json?.message ? json.message : `La base respondió ${r.status}`);
+  return json;
 }
 
 async function main() {
   const [accion, arg] = process.argv.slice(2);
-  const ensayo = process.env.MESA_ENSAYO === '1';
-  if (accion === 'leer') {
-    const sql = consultaAcotada(arg);
-    if (ensayo) { console.log(JSON.stringify({ ensayo: true, sql })); return; }
-    const c = await conectar();
-    try {
-      await c.query('BEGIN READ ONLY');
-      await c.query('SET LOCAL search_path = agentes');
-      const r = await c.query(sql);
-      await c.query('ROLLBACK');
-      const filas = r.rows.slice(0, MAX_FILAS);
-      let salida = JSON.stringify({ filas, recortado: r.rows.length > MAX_FILAS });
-      if (salida.length > MAX_BYTES) salida = JSON.stringify({ error: 'Resultado demasiado grande: pedí menos columnas o filas', bytes: salida.length });
-      console.log(salida);
-    } finally { await c.end(); }
-    return;
-  }
-  const { sql, valores } = armarLlamada(accion, leerJson(arg));
-  if (ensayo) { console.log(JSON.stringify({ ensayo: true, sql, valores })); return; }
-  const c = await conectar(accion === 'codex' ? 'REVISOR_DB_URL' : 'AGENTES_DB_URL');
-  try { console.log(JSON.stringify((await c.query(sql, valores)).rows[0].r)); } finally { await c.end(); }
+  const datos = accion === 'vistas' ? {} : leerJson(arg);
+  console.log(JSON.stringify(await llamar(accion, datos)));
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {

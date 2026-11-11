@@ -691,8 +691,8 @@ const MeliOrdenes = {
         venta = `<table style="font-size:13px;border-collapse:collapse;width:100%">
           ${fila('Venta', '#' + e(o.ventaId))}
           ${fila('Cotización congelada', v.meliCotizacion ? '$' + Number(v.meliCotizacion).toLocaleString('es-AR') : '—')}
-          ${fila('Costo de comisión y envío', o.acreditado ? State.fmtUSD(r.costoCanal) : 'se fija al acreditar')}
-          ${fila(o.acreditado ? 'Margen comercial' : 'Margen provisorio (todavía sin descontar comisión y envío)', State.fmtUSD(r.margenComercial))}
+          ${fila('Comisión y envío', o.acreditado ? State.fmtUSD(r.costoCanal) : (r.canalEstimado !== null ? '≈ ' + State.fmtUSD(r.canalEstimado) + ' (estimada)' : 'sin importes confirmados'))}
+          ${fila(o.acreditado ? 'Margen comercial' : (r.canalEstimado !== null ? 'Margen provisorio (con la comisión estimada)' : 'Margen provisorio (sin descontar comisión)'), State.fmtUSD(r.margenComercial))}
         </table>`;
       }
     }

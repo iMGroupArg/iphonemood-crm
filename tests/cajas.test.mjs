@@ -2082,12 +2082,16 @@ const entornoVenta = (extra = {}, cfg = {}) => {
   check('Detalle con datos de pago incompletos: lo dice y no calcula retenido', html.includes('Datos de pago incompletos') && !html.includes('Total que se queda'));
 
   // Orden procesada con su venta
-  e.mod.Ventas = { resultadoVenta: () => ({ costoCanal: 0, margenComercial: 12.5 }) };
+  e.mod.Ventas = { resultadoVenta: () => ({ costoCanal: 0, canalEstimado: null, margenComercial: 12.5 }) };
   e.State.ventas = [{ id: 9, meliCotizacion: 1540, items: [{ precio: 40 }] }];
   e.State.meliOrdenes = [{ ...lattafa, procesada: true, ventaId: 9 }];
   M.abrirDetalle(1);
   let t2 = html.replace(/\s+/g, ' ');
-  check('Procesada y SIN acreditar: venta #9, cotización 1.540, costo «se fija al acreditar» y margen rotulado PROVISORIO', t2.includes('#9') && t2.includes('$1.540') && t2.includes('se fija al acreditar') && t2.includes('Margen provisorio'));
+  check('Procesada y SIN acreditar y sin importes confirmados: venta #9, cotización 1.540, «sin importes confirmados» y margen provisorio SIN descontar comisión', t2.includes('#9') && t2.includes('$1.540') && t2.includes('sin importes confirmados') && t2.includes('Margen provisorio (sin descontar comisión)'));
+  e.mod.Ventas = { resultadoVenta: () => ({ costoCanal: 11.61, canalEstimado: 11.61, margenComercial: 2.66 }) };
+  M.abrirDetalle(1);
+  t2 = html.replace(/\s+/g, ' ');
+  check('Procesada y SIN acreditar con comisión estimada: la muestra «≈ USD 11,61 (estimada)» y rotula el margen «con la comisión estimada» (no «sin descontar»)', t2.includes('≈ USD 11,61 (estimada)') && t2.includes('Margen provisorio (con la comisión estimada)') && !t2.includes('sin descontar'));
   e.mod.Ventas = { resultadoVenta: () => ({ costoCanal: 18.3, margenComercial: 9.1 }) };
   e.State.meliOrdenes = [{ ...lattafa, procesada: true, ventaId: 9, acreditado: true }];
   M.abrirDetalle(1);
@@ -2540,22 +2544,30 @@ const entornoVenta = (extra = {}, cfg = {}) => {
   const venta = (extra = {}) => ({ id: 125, estado: 'abierta', tipoVenta: 'mercadolibre', meliOrdenId: 7, meliCotizacion: 1620, costoCanal: 0, items: [{ precio: 38.27, costo: 24 }], pagos: [], ...extra });
   const orden = (extra = {}) => ({ ventaId: 125, acreditado: false, revertidaEn: null, financieraCompleta: true, bruto: 61990, neto: 43187, ...extra });
   e.State.meliOrdenes = [orden()];
-  const r = V.resultadoVenta(venta());
-  const d = V._detalleMeli(venta(), r);
+  const calc = (v = venta()) => { const r = V.resultadoVenta(v); return { r, d: V._detalleMeli(v, r) }; };
+  let { r, d } = calc();
   check('Caso real #125: cotización 1.620 y Mercado Libre se queda ≈ (61.990 − 43.187) ÷ 1.620 = USD 11,61', d && d.cot === 1620 && d.estimado === 11.61, JSON.stringify(d));
   check('Trae el precio de Mercado Libre en pesos ($61.990), de donde sale el total en dólares', d.ars === 61990, JSON.stringify(d));
-  check('El profit que se muestra (14,27) es ANTES de Mercado Libre; después queda ≈ 2,66 (provisorio)', Math.abs(r.margenReal - 14.27) < 0.005 && d.profitDespues === 2.66, JSON.stringify([r.margenReal, d]));
-  check('Ya acreditada: no hay estimado (el costo real ya está en la venta)', V._detalleMeli(venta({ costoCanal: 11.6 }), r) !== null && (e.State.meliOrdenes = [orden({ acreditado: true })], V._detalleMeli(venta(), r).estimado === null));
+  check('El profit (margenReal) YA descuenta la comisión estimada: 38,27 − 24 − 11,61 = 2,66 (provisorio); antes de la comisión eran 14,27',
+    Math.abs(r.margenReal - 2.66) < 0.005 && Math.abs(r.margenBruto - 14.27) < 0.005 && r.canalEstimado === 11.61 && r.costoCanal === 11.61 && r.costoCanalReal === 0 && d.profitDespues === r.margenReal, JSON.stringify([r.margenReal, r.margenBruto, r.canalEstimado]));
+  e.State.meliOrdenes = [orden({ acreditado: true })];
+  ({ r, d } = calc(venta({ costoCanal: 11.6 })));
+  check('Ya acreditada: manda el costo REAL guardado (11,60) y no hay estimado', r.costoCanal === 11.6 && r.costoCanalReal === 11.6 && r.canalEstimado === null && d.estimado === null && Math.abs(r.margenReal - 2.67) < 0.005, JSON.stringify([r.costoCanal, r.canalEstimado, r.margenReal]));
   e.State.meliOrdenes = [orden({ financieraCompleta: false })];
-  check('Datos de pago incompletos: no se estima (nunca se inventa)', V._detalleMeli(venta(), r).estimado === null);
+  ({ r, d } = calc());
+  check('Datos de pago incompletos: no se estima (nunca se inventa): el profit queda sin descontar', d.estimado === null && r.canalEstimado === null && r.costoCanal === 0 && Math.abs(r.margenReal - 14.27) < 0.005);
   e.State.meliOrdenes = [orden({ neto: null })];
-  check('Neto nulo: no se estima', V._detalleMeli(venta(), r).estimado === null);
+  check('Neto nulo: no se estima', calc().d.estimado === null);
   e.State.meliOrdenes = [orden({ revertidaEn: '2026-10-10T00:00:00Z' })];
-  check('Orden revertida: no se estima', V._detalleMeli(venta(), r).estimado === null);
+  check('Orden revertida: no se estima', calc().d.estimado === null);
   e.State.meliOrdenes = [];
-  check('Sin la orden en memoria: muestra la cotización pero no estima', V._detalleMeli(venta(), r).estimado === null && V._detalleMeli(venta(), r).cot === 1620);
+  check('Sin la orden en memoria: muestra la cotización pero no estima', calc().d.estimado === null && calc().d.cot === 1620);
   e.State.meliOrdenes = [orden()];
-  check('Venta sin cotización guardada o que no es de Mercado Libre: no agrega nada', V._detalleMeli(venta({ meliCotizacion: null }), r) === null && V._detalleMeli({ id: 1, tipoVenta: 'minorista', items: [], pagos: [] }, r) === null);
+  check('Venta sin cotización guardada o que no es de Mercado Libre: no agrega nada ni descuenta nada', V._detalleMeli(venta({ meliCotizacion: null }), calc().r) === null && V._detalleMeli({ id: 1, tipoVenta: 'minorista', items: [], pagos: [] }, r) === null
+    && V.resultadoVenta({ id: 5, tipoVenta: 'minorista', items: [{ precio: 10, costo: 4 }], pagos: [] }).margenReal === 6);
+  check('El número de orden de Mercado Libre sale de la orden de la venta (y vacío si no es de Mercado Libre o no se conoce)',
+    (e.State.meliOrdenes = [orden({ orderId: '2000015705798705' })], V._numeroMeli(venta()) === '2000015705798705') && V._numeroMeli({ id: 1, tipoVenta: 'minorista' }) === '' && (e.State.meliOrdenes = [], V._numeroMeli(venta()) === ''));
+  e.State.meliOrdenes = [orden()];
 }
 
 // 46. COMISIÓN DE MERCADO LIBRE POR ÍTEM, EN DÓLARES (ventas.js): reparto exacto y detalle de la venta
@@ -2621,16 +2633,23 @@ const entornoVenta = (extra = {}, cfg = {}) => {
   const detalle = (vv) => { e.State.ventas = [vv]; reg['venta-modal-host'].innerHTML = ''; try { V.viewSale(vv.id); } catch (err) { return 'ERROR ' + err.message; } return reg['venta-modal-host'].innerHTML.replace(/\s+/g, ' '); };
   e.State.meliOrdenes = [orden()];
   let h = detalle(venta({ items: [{ nombre: 'Khamrah', precio: 40.73, costo: 17.78, stockId: 's1' }], tipoVenta: 'mercadolibre' }));
-  check('Detalle (accesorio de Mercado Libre, estimada): columnas Costo | Comisión plataforma | Precio venta | Profit, comisión en dólares con «≈», profit NETO provisorio y nota explicativa',
-    !h.startsWith('ERROR') && /<th>Costo<\/th><th>Comisión plataforma<\/th><th>Precio venta<\/th><th>Profit<\/th>/.test(h) && /≈ USD 11,61/.test(h) && h.includes('estimada hasta que se acredite') && /\+USD 11,34/.test(h) && !/<td>\$0<\/td>/.test(h), h.startsWith('ERROR') ? h : h.slice(h.indexOf('Accesorios Vendidos'), h.indexOf('Accesorios Vendidos') + 900));
+  e.State.meliOrdenes = [orden({ orderId: '2000015705798705' })];
+  h = detalle(venta({ items: [{ nombre: 'Khamrah', precio: 40.73, costo: 17.78, stockId: 's1' }], tipoVenta: 'mercadolibre' }));
+  check('Detalle (Mercado Libre, estimada): columnas Costo | Comisión plataforma | Precio venta | Profit, comisión con «≈» y profit NETO por fila',
+    !h.startsWith('ERROR') && /<th>Costo<\/th><th>Comisión plataforma<\/th><th>Precio venta<\/th><th>Profit<\/th>/.test(h) && /≈ USD 11,61/.test(h) && /\+USD 11,34/.test(h) && !/<td>\$0<\/td>/.test(h), h.startsWith('ERROR') ? h : h.slice(h.indexOf('Accesorios Vendidos'), h.indexOf('Accesorios Vendidos') + 900));
+  check('El encabezado muestra el NÚMERO DE ORDEN de Mercado Libre para identificar la venta', h.includes('Orden <b') && h.includes('2000015705798705'));
+  check('Sin texto de relleno: no están las notas largas ni «prov.» por fila ni los renglones sueltos de antes', !h.includes('repartida según el precio') && !h.includes('estimada hasta que se acredite') && !h.includes('prov.') && !h.includes('antes de Mercado Libre') && !h.includes('Subtotal Accesorios') && !h.includes('queda fija'));
+  check('Resumen claro en una tablita: precio en Mercado Libre, cotización, total en dólares, costo, comisión (estimada) y profit (provisorio)',
+    h.includes('Precio en Mercado Libre') && h.includes('$61.990') && h.includes('Cotización') && h.includes('$1.620') && h.includes('Total en dólares') && h.includes('Comisión Mercado Libre') && h.includes('estimada') && h.includes('provisorio') && /\+USD 11,34/.test(h.slice(h.indexOf('Total en dólares'))), h.slice(h.indexOf('Precio en Mercado Libre'), h.indexOf('Precio en Mercado Libre') + 700));
+  check('Sin filas vacías de cliente: no aparecen Teléfono/DNI/Email en blanco ni «Comisión: USD 0» de vendedor', !/Teléfono<\/label><div[^>]*>—/.test(h) && !h.includes('Comisión: USD 0') && !/DNI<\/label>/.test(h));
   e.State.meliOrdenes = [orden({ acreditado: true })];
   h = detalle(venta({ items: [{ nombre: 'Khamrah', precio: 40.73, costo: 17.78, stockId: 's1' }], costoCanal: 11.5 }));
-  check('Detalle acreditada: comisión real sin «≈» y sin nota de estimada', /<td>USD 11,5<\/td>|USD 11,50/.test(h) && !h.includes('estimada hasta que se acredite') && h.includes('repartida según el precio'));
+  check('Detalle acreditada: comisión real sin «≈», sin «estimada» ni «provisorio»', /<td>USD 11,5<\/td>|USD 11,50/.test(h) && !/<td>≈/.test(h) && !h.includes('provisorio') && !h.includes('>estimada<'));
   e.State.meliOrdenes = [orden({ financieraCompleta: false })];
   h = detalle(venta({ items: [{ nombre: 'Khamrah', precio: 40.73, costo: 17.78, stockId: 's1' }] }));
   check('Detalle sin importes confirmados: la comisión muestra «—» y el profit queda sin descontar nada', h.includes('<span title="Todavía no hay importes confirmados') && /\+USD 22,95/.test(h));
-  h = detalle({ id: 300, estado: 'abierta', tipoVenta: 'minorista', items: [{ nombre: 'Khamrah', precio: 40.73, costo: 17.78, stockId: 's1' }], pagos: [], cliente: 'x' });
-  check('Venta común: la comisión de accesorios sale en DÓLARES («USD 0»), nunca «$0», y el profit no cambia', /<td>USD 0<\/td>/.test(h) && !/<td>\$0<\/td>/.test(h) && /\+USD 22,95/.test(h) && !h.includes('repartida según el precio'));
+  h = detalle({ id: 300, estado: 'abierta', tipoVenta: 'minorista', items: [{ nombre: 'Khamrah', precio: 40.73, costo: 17.78, stockId: 's1' }], pagos: [], cliente: 'x', vendedor: 'Franco', clienteTel: '1155' });
+  check('Venta común: comisión de accesorios en DÓLARES («USD 0»), sin «$0», profit sin cambios, con su resumen de siempre y sin número de orden', /<td>USD 0<\/td>/.test(h) && !/<td>\$0<\/td>/.test(h) && /\+USD 22,95/.test(h) && h.includes('Subtotal Accesorios') && !h.includes('Orden <b') && h.includes('1155') && h.includes('Franco'));
   e.State.meliOrdenes = [orden()];
   h = detalle(venta({ items: [{ nombre: 'Khamrah', precio: 40.73, costo: 17.78, stockId: 's1' }, { nombre: 'iPhone MELI', precio: 100, costo: 90, stockId: 's2' }] }));
   e.State.meliOrdenes = [orden({ bruto: 61990, neto: 61980 })];
@@ -2638,6 +2657,119 @@ const entornoVenta = (extra = {}, cfg = {}) => {
   check('Detalle con el mismo ítem repetido: la comisión por fila suma la total (USD 0,01 una sola vez: una fila 0,01 y la otra 0)', (hDup.match(/<td>≈ USD 0,01<\/td>/g) || []).length === 1 && (hDup.match(/<td>≈ USD 0<\/td>/g) || []).length === 1, (hDup.match(/<td>≈ USD [^<]*<\/td>/g) || []).join('|'));
   e.State.meliOrdenes = [orden()];
   check('Un dispositivo en una venta de Mercado Libre también lleva su parte de la comisión del canal (una celda por ítem)', (h.match(/<td>≈ USD/g) || []).length === 2, String((h.match(/<td>≈ USD/g) || []).length));
+}
+
+// 47. VENTAS: orden por fecha y filtros (período, rango libre, mes, rubro)
+{
+  const tzAntes = process.env.TZ; process.env.TZ = 'America/Argentina/Buenos_Aires';   // el huso del negocio: los bordes de día dependen de él
+  const e = nuevoEntorno({ modulos: ['ventas.js'] });
+  const V = e.mod.Ventas;
+  e.ctx.Reportes.nichoDe = i => i.rubro;
+  const mk = (id, fechaISO, extra = {}) => ({ id, fechaISO, items: [{ nombre: 'x', precio: 1, rubro: 'perfumeria' }], pagos: [], ...extra });
+  const ids = () => V.ventasDelPeriodo().map(v => v.id).join();
+  V.periodoVentas = 'todo'; V._nicho = '';
+  e.State.ventas = [mk(258, '2026-11-02'), mk(257, '2026-11-02'), mk(256, '2026-11-03'), mk(255, '2026-11-03'), mk(251, '2026-11-05'), mk(250, '2026-10-30')];
+  check('Orden: por FECHA (la más reciente primero) y dentro del mismo día por número — no por número de venta', ids() === '251,256,255,258,257,250', ids());
+  const original = e.State.ventas.map(v => v.id).join();
+  V.ventasDelPeriodo();
+  check('Ordenar no cambia la lista original del estado', e.State.ventas.map(v => v.id).join() === original);
+  e.State.ventas = [mk(1, '2026-11-02T10:00:00Z'), mk(2, '2026-11-02'), mk(3, null), mk(4, '2026-11-04T01:00:00Z')];
+  check('Mezcla de fechas con hora y solo día, y una venta SIN fecha: las fechadas por día local, la sin fecha al final', ids() === '4,2,1,3', ids());
+  // Rango libre: el último día cuenta
+  e.State.ventas = ['2026-11-01', '2026-11-02', '2026-11-05', '2026-11-06'].map((f, k) => mk(10 + k, f));
+  V.periodoVentas = 'libre'; V.periodoDesde = '2026-11-02'; V.periodoHasta = '2026-11-05';
+  check('Rango libre 2/11 a 5/11: incluye el 2 y el 5 (el último día NO queda afuera) y excluye el 1 y el 6', ids() === '12,11', ids());
+  V.periodoHasta = ''; check('Rango con solo «desde»', ids() === '13,12,11');
+  V.periodoDesde = ''; V.periodoHasta = '2026-11-02'; check('Rango con solo «hasta»', ids() === '11,10');
+  // Mes específico: una venta del 30/11 a las 21:30 hora Argentina (= 1/12 00:30 UTC) es de NOVIEMBRE
+  e.State.ventas = [mk(20, '2026-12-01T00:30:00Z'), mk(21, '2026-12-01T12:00:00Z'), mk(22, '2026-11-15')];
+  V.periodoVentas = 'mes-especifico'; V.periodoMes = '2026-11';
+  check('Mes específico: la venta de las 21:30 del 30/11 (ya es 1/12 en UTC) cuenta en NOVIEMBRE, y la del 1/12 al mediodía en diciembre', ids() === '20,22', ids());
+  V.periodoMes = '2026-12'; check('… y diciembre trae solo la del 1/12 al mediodía', ids() === '21', ids());
+  // Semana, hoy y mes con el reloj real
+  const dia = (n) => { const d = new Date(); d.setHours(12, 0, 0, 0); d.setDate(d.getDate() + n); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };
+  e.State.ventas = [mk(30, dia(0)), mk(31, dia(-6)), mk(32, dia(-7)), mk(33, dia(-40))];
+  V.periodoVentas = 'hoy'; check('Hoy: solo las de hoy', ids() === '30', ids());
+  V.periodoVentas = 'semana'; check('Esta semana: hoy y los 6 días anteriores (7 días, igual que Cueva); el día −7 queda afuera', ids() === '30,31', ids());
+  // Rubro
+  e.State.ventas = [mk(40, '2026-11-02', { items: [{ nombre: 'p', precio: 1, rubro: 'perfumeria' }] }), mk(41, '2026-11-02', { items: [{ nombre: 'i', precio: 1, rubro: 'iphone' }] }),
+    mk(42, '2026-11-02', { items: [{ nombre: 'p', precio: 1, rubro: 'perfumeria' }, { nombre: 'i', precio: 1, rubro: 'iphone' }] })];
+  V.periodoVentas = 'todo'; V._nicho = '';
+  check('Sin rubro: todas', ids() === '42,41,40');
+  V._nicho = 'iphone'; check('Rubro «iphone»: solo las ventas que tienen algún ítem de ese rubro (la mixta también)', ids() === '42,41', ids());
+  V._nicho = 'perfumeria'; check('Rubro «perfumeria»', ids() === '42,40', ids());
+  V._nicho = 'otro'; check('Un rubro sin ventas: lista vacía', ids() === '');
+  V._nicho = 'iphone'; V.periodoVentas = 'libre'; V.periodoDesde = '2026-11-03'; V.periodoHasta = '';
+  check('Rubro y período se combinan (los dos filtros a la vez)', ids() === '', ids());
+  V._nicho = ''; V.periodoVentas = 'hoy';
+  if (tzAntes === undefined) delete process.env.TZ; else process.env.TZ = tzAntes;
+}
+
+// 48. EXPORT Y LISTA DE VENTAS: la comisión de Mercado Libre descuenta del profit y se ve el número de orden
+{
+  const e = nuevoEntorno({ modulos: ['ventas.js'] });
+  const V = e.mod.Ventas;
+  e.ctx.Reportes.NICHOS = [{ id: 'perfumeria', label: 'Perfumería' }];
+  e.ctx.Reportes.nichoDe = () => 'perfumeria';
+  const hojas = {}; let reg0;
+  e.ctx.XLSX = { utils: { book_new: () => ({}), json_to_sheet: d => ({ d }), book_append_sheet: (wb, ws, n) => { hojas[n] = ws.d; }, aoa_to_sheet: d => ({ d }) }, writeFile() {} };
+  e.State.stock = [{ id: 's1', cat: 'perfumeria', nombre: 'Khamrah', notas: '' }];
+  V.periodoVentas = 'todo'; V._nicho = '';
+  const venta = (id, extra = {}) => ({ id, estado: 'abierta', tipoVenta: 'mercadolibre', meliOrdenId: id, meliCotizacion: 1620, costoCanal: 0, fecha: '28/10', fechaISO: '2026-10-28', cliente: 'C' + id, vendedor: 'Franco',
+    items: [{ nombre: 'Khamrah', precio: 38.27, costo: 24, stockId: 's1', cantidad: 1 }], pagos: [], ...extra });
+  const orden = (id, extra = {}) => ({ ventaId: id, orderId: '20000' + id, acreditado: false, revertidaEn: null, financieraCompleta: true, bruto: 61990, neto: 43187, ...extra });
+  e.State.ventas = [venta(248), venta(247, { costoCanal: 11.5 }), { id: 300, estado: 'cerrada', tipoVenta: 'minorista', fecha: '28/10', fechaISO: '2026-10-28', cliente: 'Z', items: [{ nombre: 'Khamrah', precio: 40, costo: 20, stockId: 's1', cantidad: 1 }], pagos: [] }];
+  e.State.meliOrdenes = [orden(248), orden(247, { acreditado: true })];
+  const r248 = V.resultadoVenta(e.State.ventas[0]);
+  check('El resultado de una venta de Mercado Libre sin acreditar YA descuenta la comisión estimada (profit real en TODA pantalla: lista, métricas, reportes)', Math.abs(r248.margenReal - 2.66) < 0.005 && r248.costoCanal === 11.61, JSON.stringify(r248));
+  V.exportarDetalleExcel();
+  const hv = hojas['Ventas'] || hojas['Resumen'] || Object.values(hojas)[0];
+  const f248 = hv.find(x => x['Venta'] === 248), f247 = hv.find(x => x['Venta'] === 247), tot = hv.find(x => x['Cliente'] === 'TOTALES');
+  check('Export: la venta SIN acreditar muestra el costo del canal ESTIMADO (11,61), la marca «Estimado» y la ganancia real ya neta (2,66)', f248 && f248['Costo del canal'] === 11.61 && f248['Canal'] === 'Estimado' && Math.abs(f248['Ganancia real'] - 2.66) < 0.005 && f248['Ganancia bruta'] === 14.27, JSON.stringify(f248));
+  check('Export: la acreditada usa el costo REAL (11,50) y dice «Real»', f247 && f247['Costo del canal'] === 11.5 && f247['Canal'] === 'Real' && Math.abs(f247['Ganancia real'] - 2.77) < 0.005, JSON.stringify(f247));
+  check('Export: trae el NÚMERO DE ORDEN de Mercado Libre y las ventas comunes lo dejan vacío', f248['Orden ML'] === '20000248' && f247['Orden ML'] === '20000247' && hv.find(x => x['Venta'] === 300)['Orden ML'] === '');
+  check('Export: la fila de totales suma el costo del canal con lo estimado', tot && Math.abs(tot['Costo del canal'] - 23.11) < 0.005, JSON.stringify(tot));
+  const acc = (hojas['Accesorios'] || []).find(x => x['Venta'] === 248);
+  check('Export, hoja de accesorios (perfumería): comisión por ítem y profit NETO (38,27 − 24 − 11,61 = 2,66)', acc && acc['Comisión canal'] === 11.61 && Math.abs(acc['Profit'] - 2.66) < 0.005 && acc['Orden ML'] === '20000248', JSON.stringify(acc));
+  const accComun = (hojas['Accesorios'] || []).find(x => x['Venta'] === 300);
+  check('Export: una venta común no lleva comisión de canal y su profit no cambia', accComun && accComun['Comisión canal'] === 0 && accComun['Profit'] === 20);
+  // Ventas mixtas con un rubro elegido: métricas y export cuentan solo lo de ese rubro
+  {
+    e.ctx.Reportes.nichoDe = i => i.rubro;
+    e.State.ventas = [{ id: 400, estado: 'cerrada', tipoVenta: 'minorista', fecha: '28/10', fechaISO: '2026-10-28', cliente: 'M', vendedor: '',
+      items: [{ nombre: 'Perfume', precio: 40, costo: 20, rubro: 'perfumeria', cantidad: 1 }, { nombre: 'iPhone', precio: 1000, costo: 900, rubro: 'iphone', cantidad: 1 }],
+      pagos: [{ monto: 1040, persona: 'Franco', bolsillo: 'USD cash' }] }];
+    e.State.meliOrdenes = [];
+    V._nicho = 'perfumeria';
+    const m = V._vistaRubro(e.State.ventas[0]);
+    check('Vista por rubro: solo el perfume, y el pago (1.040) se prorratea según el precio de lo que queda (40)', m.items.length === 1 && Math.abs(m.pagos[0].monto - 40) < 0.005 && e.State.ventas[0].items.length === 2 && e.State.ventas[0].pagos[0].monto === 1040);
+    const rm = V.resultadoVenta(m);
+    check('Resultado del rubro: total 40, costo 20, profit 20 y SIN quebranto inventado por el prorrateo', rm.total === 40 && rm.costo === 20 && Math.abs(rm.margenReal - 20) < 0.005 && rm.quebranto < 0.005, JSON.stringify(rm));
+    reg0 = { innerHTML: '', style: {} };
+    const orig0 = e.ctx.document.getElementById; e.ctx.document.getElementById = id => (id === 'ventas-metricas' ? reg0 : orig0(id));
+    V.isMobile = () => false;
+    V.renderMetricas();
+    const t = reg0.innerHTML.replace(/\s+/g, ' ');
+    check('Métricas con rubro «perfumeria» en una venta mixta: volumen USD 40 y 1 unidad (no 1.040 ni 2 unidades)', t.includes('USD 40') && !t.includes('1.040') && !/>2<\/div>/.test(t.slice(0, 600)), t.slice(0, 400));
+    V.exportarDetalleExcel();
+    const fila = (hojas['Ventas'] || []).find(x => x['Venta'] === 400);
+    check('Export con rubro en una venta mixta: SUBTOTAL 40, costo 20 y ganancia real 20 (solo el perfume)', fila && fila['SUBTOTAL'] === 40 && fila['Costo'] === 20 && Math.abs(fila['Ganancia real'] - 20) < 0.005, JSON.stringify(fila));
+    V._nicho = ''; e.ctx.Reportes.nichoDe = () => 'perfumeria';
+    e.ctx.document.getElementById = orig0;
+    e.State.ventas = [venta(248), venta(247, { costoCanal: 11.5 }), { id: 300, estado: 'cerrada', tipoVenta: 'minorista', fecha: '28/10', fechaISO: '2026-10-28', cliente: 'Z', items: [{ nombre: 'Khamrah', precio: 40, costo: 20, stockId: 's1', cantidad: 1 }], pagos: [] }];
+    e.State.meliOrdenes = [orden(248), orden(247, { acreditado: true })];
+  }
+  // La lista
+  const reg = {}; const orig = e.ctx.document.getElementById;
+  e.ctx.document.getElementById = id => reg[id] || orig(id);
+  reg['ventas-list-host'] = { innerHTML: '' };
+  V.isMobile = () => false; V.estadoToggle = () => '';
+  V.renderList();
+  const h = reg['ventas-list-host'].innerHTML.replace(/\s+/g, ' ');
+  check('Lista (escritorio): debajo del # de cada venta de Mercado Libre se ve «ML» + el número de orden; las comunes no', h.includes('ML 20000248') && h.includes('ML 20000247') && (h.match(/ML \d{5,}/g) || []).length === 2, (h.match(/ML \d+/g) || []).join());
+  V.isMobile = () => true; V.renderList();
+  const hm = reg['ventas-list-host'].innerHTML.replace(/\s+/g, ' ');
+  check('Lista (celular): «Orden ML» + el número en la tarjeta de la venta', hm.includes('Orden ML 20000248') && (hm.match(/Orden ML/g) || []).length === 2, (hm.match(/Orden ML \d*/g) || []).join());
 }
 
 // 30. Altas: si el registro no se puede crear, NO se toca la caja (o se deshace)

@@ -67,6 +67,14 @@ CREATE TABLE IF NOT EXISTS public.meli_adelanto_ops (
        (tipo = 'pago' AND orden_id IS NOT NULL AND referencia IS NULL)
     OR (tipo = 'flex' AND referencia IS NOT NULL AND orden_id IS NULL AND referencia ~ '^[A-Za-z0-9_-]{1,60}$'))
 );
+
+-- Adelantos que ya existían sin cuenta: se deriva de sus órdenes SOLO si todas son de la misma cuenta. Los demás (por ejemplo, de solo bonificaciones) quedan
+-- sin cuenta y hay que asignarla explícitamente con meli_adelanto_asignar_cuenta; mientras tanto no pueden acreditar Flex.
+UPDATE public.meli_adelantos a SET cuenta_id = x.cuenta
+  FROM (SELECT op.adelanto_id, min(m.cuenta_id) AS cuenta
+          FROM public.meli_adelanto_ops op JOIN public.meli_ordenes m ON m.meli_order_id = op.orden_id
+         WHERE op.tipo = 'pago' GROUP BY op.adelanto_id HAVING count(DISTINCT m.cuenta_id) = 1) x
+ WHERE a.id = x.adelanto_id AND a.cuenta_id IS NULL;
 -- Una orden solo puede estar en UN adelanto; una bonificación, tampoco se repite.
 CREATE UNIQUE INDEX IF NOT EXISTS meli_adelanto_ops_orden_unica ON public.meli_adelanto_ops (orden_id) WHERE tipo = 'pago';
 CREATE UNIQUE INDEX IF NOT EXISTS meli_adelanto_ops_flex_unica ON public.meli_adelanto_ops (referencia) WHERE tipo = 'flex';
@@ -96,7 +104,7 @@ SECURITY DEFINER
 SET search_path = public, pg_temp
 AS $$
 DECLARE
-  v_usuario TEXT; v_id BIGINT; v_suma NUMERIC; v_n INTEGER; v_faltan TEXT; v_repetidas TEXT; v_otro TEXT; r RECORD; v_cuenta BIGINT; v_cuentas INTEGER; v_persona UUID; v_bolsillo TEXT;
+  v_usuario TEXT; v_id BIGINT; v_suma NUMERIC; v_n INTEGER; v_faltan TEXT; v_repetidas TEXT; v_otro TEXT; r RECORD; v_cuenta BIGINT; v_cuentas INTEGER; v_persona UUID; v_bolsillo TEXT; v_activa BOOLEAN;
 BEGIN
   IF NOT public.is_authorized_user() THEN RAISE EXCEPTION 'no autorizado' USING ERRCODE = '42501'; END IF;
   IF p_fecha IS NULL OR p_fecha > now() + interval '1 day' THEN RAISE EXCEPTION 'FECHA_INVALIDA'; END IF;
@@ -142,8 +150,9 @@ BEGIN
   ELSIF p_cuenta_id IS NOT NULL AND p_cuenta_id <> v_cuenta THEN
     RAISE EXCEPTION 'CUENTA_NO_COINCIDE';
   END IF;
-  SELECT c.persona_id, c.bolsillo INTO v_persona, v_bolsillo FROM public.meli_cuentas c WHERE c.id = v_cuenta;
+  SELECT c.persona_id, c.bolsillo, c.activa INTO v_persona, v_bolsillo, v_activa FROM public.meli_cuentas c WHERE c.id = v_cuenta;
   IF NOT FOUND OR v_persona IS NULL OR COALESCE(btrim(v_bolsillo), '') = '' THEN RAISE EXCEPTION 'CUENTA_SIN_CAJA'; END IF;
+  IF NOT COALESCE(v_activa, FALSE) THEN RAISE EXCEPTION 'CUENTA_INACTIVA'; END IF;
 
   v_usuario := COALESCE(NULLIF(auth.jwt() -> 'user_metadata' ->> 'full_name', ''), NULLIF(auth.jwt() ->> 'email', ''), 'Desconocido');
   BEGIN
@@ -219,7 +228,7 @@ AS $$
 DECLARE
   a public.meli_adelantos%ROWTYPE; r RECORD; v_usuario TEXT; v_res JSONB := '[]'::jsonb; v_r JSONB; v_motivo TEXT;
   v_acred INTEGER := 0; v_ya INTEGER := 0; v_pend INTEGER := 0; v_monto_acred NUMERIC := 0; v_flex INTEGER := 0; v_flex_monto NUMERIC := 0;
-  v_persona UUID; v_bolsillo TEXT;
+  v_persona UUID; v_bolsillo TEXT; v_activa BOOLEAN;
 BEGIN
   IF NOT public.is_authorized_user() THEN RAISE EXCEPTION 'no autorizado' USING ERRCODE = '42501'; END IF;
   SELECT * INTO a FROM public.meli_adelantos WHERE id = p_adelanto_id FOR UPDATE;       -- una corrida por adelanto a la vez
@@ -263,10 +272,13 @@ BEGIN
     END;
   END LOOP;
 
-  IF COALESCE(p_incluir_flex, FALSE) THEN
+  -- Solo se pide/valida la cuenta si HAY bonificaciones pendientes: un adelanto sin Flex pendiente (o ya completo) no depende de ella.
+  IF COALESCE(p_incluir_flex, FALSE) AND EXISTS (SELECT 1 FROM public.meli_adelanto_ops WHERE adelanto_id = a.id AND tipo = 'flex' AND acreditado_en IS NULL) THEN
     -- La bonificación entra a la caja de la cuenta DEL ADELANTO (la misma de sus órdenes), no a la de una cuenta cualquiera.
-    SELECT c.persona_id, c.bolsillo INTO v_persona, v_bolsillo FROM public.meli_cuentas c WHERE c.id = a.cuenta_id FOR SHARE;
+    IF a.cuenta_id IS NULL THEN RAISE EXCEPTION 'CUENTA_REQUERIDA'; END IF;
+    SELECT c.persona_id, c.bolsillo, c.activa INTO v_persona, v_bolsillo, v_activa FROM public.meli_cuentas c WHERE c.id = a.cuenta_id FOR SHARE;
     IF v_persona IS NULL OR COALESCE(btrim(v_bolsillo), '') = '' THEN RAISE EXCEPTION 'CUENTA_SIN_CAJA'; END IF;
+    IF NOT COALESCE(v_activa, FALSE) THEN RAISE EXCEPTION 'CUENTA_INACTIVA'; END IF;
     INSERT INTO public.cajas (persona_id, bolsillo, saldo) VALUES (v_persona, v_bolsillo, 0) ON CONFLICT (persona_id, bolsillo) DO NOTHING;
     FOR r IN SELECT id, referencia, monto FROM public.meli_adelanto_ops WHERE adelanto_id = a.id AND tipo = 'flex' AND acreditado_en IS NULL ORDER BY id LOOP
       PERFORM public._caja_aplicar_delta(v_persona, v_bolsillo, r.monto, 'meli', r.referencia, 'Bonificación Flex por envío (adelanto ' || a.id || ')', v_usuario, 'meli-flex-' || r.referencia);
@@ -277,6 +289,35 @@ BEGIN
 
   RETURN jsonb_build_object('ok', true, 'acreditadas', v_acred, 'monto_acreditado', v_monto_acred, 'ya_acreditadas', v_ya, 'pendientes', v_pend,
                             'flex', v_flex, 'monto_flex', v_flex_monto, 'detalle', v_res);
+END;
+$$;
+
+-- ── Asignar la cuenta a un adelanto que no la tiene (adelantos viejos o de solo bonificaciones) ─────────────────────
+DROP FUNCTION IF EXISTS public.meli_adelanto_asignar_cuenta(BIGINT, BIGINT);
+CREATE FUNCTION public.meli_adelanto_asignar_cuenta(p_adelanto_id BIGINT, p_cuenta_id BIGINT)
+RETURNS JSONB
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+DECLARE a public.meli_adelantos%ROWTYPE; v_persona UUID; v_bolsillo TEXT; v_activa BOOLEAN; v_cuentas INTEGER;
+BEGIN
+  IF NOT public.is_authorized_user() THEN RAISE EXCEPTION 'no autorizado' USING ERRCODE = '42501'; END IF;
+  SELECT * INTO a FROM public.meli_adelantos WHERE id = p_adelanto_id FOR UPDATE;
+  IF NOT FOUND THEN RAISE EXCEPTION 'ADELANTO_INEXISTENTE'; END IF;
+  IF a.cuenta_id IS NOT NULL THEN
+    IF a.cuenta_id = p_cuenta_id THEN RETURN jsonb_build_object('ok', true, 'sin_cambios', true); END IF;
+    RAISE EXCEPTION 'ADELANTO_YA_TIENE_CUENTA';
+  END IF;
+  -- Si el adelanto trae órdenes, la cuenta tiene que ser la de ellas.
+  SELECT count(DISTINCT m.cuenta_id) INTO v_cuentas FROM public.meli_adelanto_ops op JOIN public.meli_ordenes m ON m.meli_order_id = op.orden_id
+   WHERE op.adelanto_id = a.id AND op.tipo = 'pago' AND m.cuenta_id IS DISTINCT FROM p_cuenta_id;
+  IF v_cuentas > 0 THEN RAISE EXCEPTION 'CUENTA_NO_COINCIDE'; END IF;
+  SELECT c.persona_id, c.bolsillo, c.activa INTO v_persona, v_bolsillo, v_activa FROM public.meli_cuentas c WHERE c.id = p_cuenta_id;
+  IF NOT FOUND OR v_persona IS NULL OR COALESCE(btrim(v_bolsillo), '') = '' THEN RAISE EXCEPTION 'CUENTA_SIN_CAJA'; END IF;
+  IF NOT COALESCE(v_activa, FALSE) THEN RAISE EXCEPTION 'CUENTA_INACTIVA'; END IF;
+  UPDATE public.meli_adelantos SET cuenta_id = p_cuenta_id WHERE id = a.id;
+  RETURN jsonb_build_object('ok', true, 'cuenta_id', p_cuenta_id);
 END;
 $$;
 
@@ -305,14 +346,14 @@ END;
 $$;
 
 REVOKE ALL ON FUNCTION public.meli_adelanto_registrar(TIMESTAMPTZ, NUMERIC, NUMERIC, JSONB, TEXT, BIGINT), public.meli__acreditar_por_adelanto(BIGINT, NUMERIC, TEXT),
-  public.meli_adelanto_acreditar(BIGINT, BOOLEAN), public.meli_adelanto_estado(BIGINT) FROM PUBLIC, anon, authenticated;
+  public.meli_adelanto_acreditar(BIGINT, BOOLEAN), public.meli_adelanto_estado(BIGINT), public.meli_adelanto_asignar_cuenta(BIGINT, BIGINT) FROM PUBLIC, anon, authenticated;
 GRANT EXECUTE ON FUNCTION public.meli_adelanto_registrar(TIMESTAMPTZ, NUMERIC, NUMERIC, JSONB, TEXT, BIGINT), public.meli_adelanto_acreditar(BIGINT, BOOLEAN),
-  public.meli_adelanto_estado(BIGINT) TO authenticated;
+  public.meli_adelanto_estado(BIGINT), public.meli_adelanto_asignar_cuenta(BIGINT, BIGINT) TO authenticated;
 DO $$
 BEGIN
   IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'service_role') THEN
     REVOKE ALL ON FUNCTION public.meli_adelanto_registrar(TIMESTAMPTZ, NUMERIC, NUMERIC, JSONB, TEXT, BIGINT), public.meli__acreditar_por_adelanto(BIGINT, NUMERIC, TEXT),
-      public.meli_adelanto_acreditar(BIGINT, BOOLEAN), public.meli_adelanto_estado(BIGINT) FROM service_role;
+      public.meli_adelanto_acreditar(BIGINT, BOOLEAN), public.meli_adelanto_estado(BIGINT), public.meli_adelanto_asignar_cuenta(BIGINT, BIGINT) FROM service_role;
   END IF;
 END $$;
 

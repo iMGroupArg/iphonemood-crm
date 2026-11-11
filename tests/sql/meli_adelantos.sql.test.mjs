@@ -230,6 +230,50 @@ console.log('\n══ Acreditar por adelanto de Mercado Pago (Postgres en WebAss
   check('Cuenta sin caja configurada → CUENTA_SIN_CAJA', /CUENTA_SIN_CAJA/.test(String(await falla(() => q(ctx3.db, `SELECT public.meli_adelanto_registrar(now() - interval '1 hour', 499, 10, $1::jsonb, NULL, $2)`, [JSON.stringify([flex('cashback_y')]), sc.id])))));
   check('Solo bonificaciones indicando la cuenta correcta se registra', (await q(ctx3.db, `SELECT public.meli_adelanto_registrar(now() - interval '2 hour', 499, 10, $1::jsonb, NULL, $2) r`, [JSON.stringify([flex('cashback_z')]), ctx3.cuentaId]))[0].r.ok === true);
 }
+{ // Codex pasada 2: cuenta de los adelantos existentes, cuenta inactiva y asignación explícita
+  const ctx = await baseNueva(); const { db } = ctx;
+  // (1) Adelantos «viejos» sin cuenta: con órdenes de una sola cuenta se deriva sola al volver a correr el script; los de solo Flex quedan sin cuenta.
+  const o1 = await ordenAdel(ctx, { neto: 40000 });
+  const rOrd = await reg(db, 40000, 100, [pago(o1)]);
+  const rFlex = (await q(db, `SELECT public.meli_adelanto_registrar(now() - interval '3 hour', 499, 10, $1::jsonb, NULL, $2) r`, [JSON.stringify([flex('cashback_viejo')]), ctx.cuentaId]))[0].r;
+  await q(db, `UPDATE public.meli_adelantos SET cuenta_id = NULL`);
+  await db.exec(SCRIPT);
+  const ests = await est(db);
+  const dOrd = ests.find((x) => x.id === rOrd.adelanto_id), dFlex = ests.find((x) => x.id === rFlex.adelanto_id);
+  check('Backfill: el adelanto con órdenes recupera la cuenta de sus órdenes; el de solo Flex queda sin cuenta', dOrd.cuenta_id === ctx.cuentaId && dFlex.cuenta_id === null, JSON.stringify([dOrd.cuenta_id, dFlex.cuenta_id]));
+  // acreditar Flex sin cuenta → CUENTA_REQUERIDA y no mueve plata; sin Flex pendiente NO pide cuenta
+  const cajaAntes = await caja(db);
+  check('Acreditar Flex de un adelanto sin cuenta → CUENTA_REQUERIDA y no se mueve plata', /CUENTA_REQUERIDA/.test(String(await falla(() => acr(db, rFlex.adelanto_id, true)))) && (await caja(db)) === cajaAntes);
+  check('Sin bonificaciones pendientes (o sin pedir Flex) no se exige cuenta: el adelanto sin cuenta acredita lo suyo',
+    (await acr(db, rFlex.adelanto_id, false)).ok === true);
+  await q(db, `UPDATE public.meli_adelantos SET cuenta_id = NULL WHERE id = $1`, [rOrd.adelanto_id]);
+  const sinFlexPend = await acr(db, rOrd.adelanto_id, true);
+  check('Un adelanto sin cuenta y SIN Flex pendiente acredita igual aunque se pida incluir Flex', sinFlexPend.ok === true && sinFlexPend.acreditadas === 1, JSON.stringify(sinFlexPend));
+  // asignar cuenta explícita
+  const asig = (id, c) => q(db, `SELECT public.meli_adelanto_asignar_cuenta($1,$2) r`, [id, c]).then((x) => x[0].r);
+  const { rows: [pj] } = await db.query(`INSERT INTO public.personas (nombre) VALUES ('Otro') RETURNING id`);
+  const { rows: [cOtra] } = await db.query(`INSERT INTO public.meli_cuentas (meli_user_id, nickname, persona_id, bolsillo) VALUES ('7777','OTRA',$1,'ARS Otra') RETURNING id`, [pj.id]);
+  const { rows: [cInact] } = await db.query(`INSERT INTO public.meli_cuentas (meli_user_id, nickname, persona_id, bolsillo, activa) VALUES ('8888','APAGADA',$1,'ARS Apagada', false) RETURNING id`, [pj.id]);
+  check('Asignar una cuenta INACTIVA → CUENTA_INACTIVA', /CUENTA_INACTIVA/.test(String(await falla(() => asig(rFlex.adelanto_id, cInact.id)))));
+  check('Asignar una cuenta inexistente → CUENTA_SIN_CAJA', /CUENTA_SIN_CAJA/.test(String(await falla(() => asig(rFlex.adelanto_id, 999999)))));
+  check('Asignar una cuenta a un adelanto inexistente → ADELANTO_INEXISTENTE', /ADELANTO_INEXISTENTE/.test(String(await falla(() => asig(999999, ctx.cuentaId)))));
+  check('Asignar la cuenta correcta funciona', (await asig(rFlex.adelanto_id, ctx.cuentaId)).ok === true && (await est(db, rFlex.adelanto_id))[0].cuenta_id === ctx.cuentaId);
+  check('Asignar de nuevo la misma no cambia nada; otra distinta → ADELANTO_YA_TIENE_CUENTA',
+    (await asig(rFlex.adelanto_id, ctx.cuentaId)).sin_cambios === true && /ADELANTO_YA_TIENE_CUENTA/.test(String(await falla(() => asig(rFlex.adelanto_id, cOtra.id)))));
+  const xf = await acr(db, rFlex.adelanto_id, true);
+  check('Con la cuenta asignada, la bonificación entra a su caja', xf.flex === 1, JSON.stringify(xf));
+  // el asignar con órdenes exige la cuenta de ellas
+  const o2 = await ordenAdel(ctx, { neto: 41000 });
+  const r2 = await reg(db, 41000, 100, [pago(o2)]);
+  await q(db, `UPDATE public.meli_adelantos SET cuenta_id = NULL WHERE id = $1`, [r2.adelanto_id]);
+  check('Asignar una cuenta distinta a la de sus órdenes → CUENTA_NO_COINCIDE', /CUENTA_NO_COINCIDE/.test(String(await falla(() => asig(r2.adelanto_id, cOtra.id)))));
+  // (3) cuenta inactiva al registrar y al acreditar Flex
+  check('Registrar un adelanto de solo Flex con una cuenta INACTIVA → CUENTA_INACTIVA', /CUENTA_INACTIVA/.test(String(await falla(() => q(db, `SELECT public.meli_adelanto_registrar(now() - interval '5 hour', 499, 10, $1::jsonb, NULL, $2)`, [JSON.stringify([flex('cashback_inact')]), cInact.id])))));
+  const rf2 = (await q(db, `SELECT public.meli_adelanto_registrar(now() - interval '6 hour', 499, 10, $1::jsonb, NULL, $2) r`, [JSON.stringify([flex('cashback_apagar')]), cOtra.id]))[0].r;
+  await q(db, `UPDATE public.meli_cuentas SET activa = false WHERE id = $1`, [cOtra.id]);
+  const cajaOtraAntes = (await q(db, `SELECT coalesce(sum(saldo),0)::float s FROM public.cajas WHERE bolsillo = 'ARS Otra'`))[0].s;
+  check('Si la cuenta se desactiva después, acreditar Flex → CUENTA_INACTIVA y no se mueve plata', /CUENTA_INACTIVA/.test(String(await falla(() => acr(db, rf2.adelanto_id, true)))) && (await q(db, `SELECT coalesce(sum(saldo),0)::float s FROM public.cajas WHERE bolsillo = 'ARS Otra'`))[0].s === cajaOtraAntes);
+}
 { // casos que NO se acreditan
   const ctx = await baseNueva(); const { db } = ctx;
   const a = await ordenAdel(ctx, { neto: 40000 }), b = await ordenAdel(ctx, { neto: 41000 }), c = await ordenAdel(ctx, { neto: 42000 }), d = await ordenAdel(ctx, { neto: 43000 });

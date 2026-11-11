@@ -33,6 +33,9 @@
     CUENTA_REQUERIDA: 'Falta indicar la cuenta de Mercado Libre del adelanto.',
     CUENTA_NO_COINCIDE: 'La cuenta no coincide con la de las órdenes.',
     CUENTA_SIN_CAJA: 'La cuenta de Mercado Libre no tiene caja asociada.',
+    CUENTA_INACTIVA: 'La cuenta de Mercado Libre está desactivada: no se pueden cargar ni acreditar movimientos con ella.',
+    ADELANTO_YA_TIENE_CUENTA: 'Ese adelanto ya tiene una cuenta asignada.',
+    ADELANTO_INEXISTENTE: 'El adelanto no existe: actualizá la pantalla.',
   };
   const mensajeDe = (error) => {
     const txt = String((error && (error.message || '')) || '') + ' ' + String((error && error.details) || '');
@@ -45,8 +48,21 @@
     _ocupado: false,
     MOTIVOS,
 
+    // Cuentas de Mercado Libre activas y con caja: sirven para elegir la cuenta de un adelanto (solo bonificaciones o adelantos viejos sin cuenta).
+    async cargarCuentas() {
+      try {
+        const { data } = await supa.from('meli_cuentas_estado').select('id,nickname,activa,persona_id,bolsillo').order('id');
+        State.meliAdelantoCuentas = (data || []).filter((c) => c.activa !== false && c.persona_id && String(c.bolsillo || '').trim());
+      } catch { State.meliAdelantoCuentas = []; }
+    },
+    opcionesCuenta(sel) {
+      const cs = Array.isArray(State.meliAdelantoCuentas) ? State.meliAdelantoCuentas : [];
+      return cs.map((c) => `<option value="${e(c.id)}"${String(sel) === String(c.id) ? ' selected' : ''}>${e(c.nickname || ('Cuenta ' + c.id))}</option>`).join('');
+    },
+
     async cargar() {
       try {
+        if (!Array.isArray(State.meliAdelantoCuentas)) await this.cargarCuentas();
         const { data, error } = await supa.rpc('meli_adelanto_estado', { p_adelanto_id: null });
         if (error) throw error;
         State.meliAdelantos = Array.isArray(data) ? data : []; State.meliAdelantosError = false;
@@ -131,12 +147,17 @@
           return `<div style="font-size:11.5px;color:${s.clave === 'no' ? 'var(--red)' : 'var(--text-secondary)'}">${quien} · ${e(State.fmtARS(num(op.monto)))} · ${e(s.txt)}</div>`;
         }).join('');
         const hayAlgo = r.listas > 0 || r.flexPend > 0;
+        const sinCuenta = a.cuenta_id == null && r.flexPend > 0;
+        const asignar = sinCuenta ? `<div style="margin-top:6px;font-size:11.5px;padding:6px 8px;border:1px solid var(--border-strong);border-radius:8px">Este adelanto no tiene cuenta de Mercado Libre asignada, y la necesita para acreditar sus bonificaciones de Flex.
+            <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:4px"><select id="meliadel-asig-${e(a.id)}" style="padding:5px 8px;border:1px solid var(--border-strong);border-radius:8px"><option value="">Elegí la cuenta…</option>${this.opcionesCuenta('')}</select>
+            <button class="btn btn-sm" data-adelanto="${e(a.id)}" onclick="MeliAdelantos.asignarCuenta(this)">Asignar cuenta</button></div></div>` : '';
         return `<div style="border-top:1px solid var(--border);margin-top:8px;padding-top:8px">
           <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center"><b>Adelanto del ${e(new Date(a.fecha).toLocaleDateString('es-AR'))}</b>
             <span class="badge ${r.hechas === r.total ? 'b-green' : 'b-amber'}">${r.hechas} de ${r.total} acreditadas</span></div>
           <div style="margin-top:3px">Adelantado <b>${e(State.fmtARS(num(a.total_adelantado)))}</b> · costo ${e(State.fmtARS(num(a.costo)))} · recibido <b>${e(State.fmtARS(num(a.recibido)))}</b></div>
           ${r.espera ? `<div style="font-size:11.5px;color:var(--text-secondary);margin-top:3px">${r.espera} sin procesar todavía: se acreditan apenas las proceses.</div>` : ''}
           ${detalle ? `<details style="margin-top:4px"><summary style="cursor:pointer;font-size:11.5px">Ver lo que falta (${r.total - r.hechas})</summary>${detalle}</details>` : ''}
+          ${asignar}
           ${hayAlgo ? `<div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-top:6px">
             <button class="btn btn-sm btn-primary" data-adelanto="${e(a.id)}" data-monto="${e(r.listasMonto)}" data-n="${e(r.listas)}" onclick="MeliAdelantos.acreditar(this)"><i class="ti ti-check"></i> Acreditar ${r.listas ? e(r.listas) + ' lista' + (r.listas === 1 ? '' : 's') + ' (' + e(State.fmtARS(r.listasMonto)) + ')' : ''}</button>
             ${r.flexPend ? `<label style="font-size:11.5px"><input type="checkbox" id="meliadel-flex-${e(a.id)}"> incluir ${e(r.flexPend)} bonificación${r.flexPend === 1 ? '' : 'es'} de Flex</label>` : ''}</div>` : ''}
@@ -163,6 +184,8 @@
           <label>Total adelantado (ARS)<br><input type="text" inputmode="decimal" id="meliadel-total" style="width:150px;padding:6px 8px;border:1px solid var(--border-strong);border-radius:8px"></label>
           <label>Costo del adelanto (ARS)<br><input type="text" inputmode="decimal" id="meliadel-costo" style="width:130px;padding:6px 8px;border:1px solid var(--border-strong);border-radius:8px"></label>
         </div>
+        <label style="display:block;margin-top:8px">Cuenta de Mercado Libre<br><select id="meliadel-cuenta" style="padding:6px 8px;border:1px solid var(--border-strong);border-radius:8px"><option value="">Según las órdenes de la lista</option>${this.opcionesCuenta((State.meliAdelantoCuentas || []).length === 1 ? State.meliAdelantoCuentas[0].id : '')}</select>
+          <span style="font-size:11px;color:var(--text-secondary)">Obligatoria si la lista tiene solo bonificaciones de Flex (sin órdenes). Si hay órdenes, tiene que ser la cuenta de ellas.</span></label>
         <label style="display:block;margin-top:8px">Operaciones<br><textarea id="meliadel-ops" rows="9" oninput="MeliAdelantos.mostrarSuma()" style="width:100%;font-family:monospace;font-size:11.5px;padding:8px;border:1px solid var(--border-strong);border-radius:8px"></textarea></label>
         <div id="meliadel-suma" style="font-size:11.5px;margin:6px 0"></div>
         <label style="display:block">Nota (opcional)<br><input type="text" id="meliadel-nota" maxlength="200" style="width:100%;padding:6px 8px;border:1px solid var(--border-strong);border-radius:8px"></label>
@@ -189,15 +212,35 @@
       if (!fecha || total === null || costo === null) { toast('Completá la fecha, el total y el costo con montos válidos.'); return; }
       if (p.errores.length || !p.ops.length) { toast(p.errores[0] || 'Pegá la lista de operaciones.'); return; }
       if (centavos(p.suma) !== centavos(total)) { toast('Las operaciones no suman el total del adelanto.'); return; }
+      const cuentaSel = document.getElementById('meliadel-cuenta')?.value || '';
+      const soloFlex = p.ops.every((o) => o.tipo === 'flex');
+      if (soloFlex && !cuentaSel) { toast('Elegí la cuenta de Mercado Libre: la lista tiene solo bonificaciones de Flex.'); return; }
       this._ocupado = true; if (btn) btn.disabled = true;
       try {
-        const { data, error } = await supa.rpc('meli_adelanto_registrar', { p_fecha: fecha, p_total: Number(total), p_costo: Number(costo), p_ops: p.ops, p_nota: document.getElementById('meliadel-nota')?.value || null });
+        const { data, error } = await supa.rpc('meli_adelanto_registrar', { p_fecha: fecha, p_total: Number(total), p_costo: Number(costo), p_ops: p.ops, p_nota: document.getElementById('meliadel-nota')?.value || null, p_cuenta_id: cuentaSel ? Number(cuentaSel) : null });
         if (error || !data || data.ok !== true) { toast(mensajeDe(error)); return; }
         this.cerrarCarga();
         toast(`Adelanto cargado: ${p.ops.length} operaciones. Ahora podés acreditar las ya procesadas.`);
         await this.cargar();
         if (window.MeliOrdenes && MeliOrdenes.pintar) MeliOrdenes.pintar();
       } catch { toast('No se pudo cargar el adelanto. Probá de nuevo.'); }
+      finally { this._ocupado = false; if (btn) btn.disabled = false; }
+    },
+
+    // ── Asignar la cuenta a un adelanto que no la tiene
+    async asignarCuenta(btn) {
+      if (this._ocupado) return;
+      const id = Number(btn && btn.dataset ? btn.dataset.adelanto : NaN);
+      const cuenta = Number(document.getElementById(`meliadel-asig-${id}`)?.value);
+      if (!Number.isSafeInteger(id) || id <= 0 || !Number.isSafeInteger(cuenta) || cuenta <= 0) { toast('Elegí la cuenta de Mercado Libre.'); return; }
+      this._ocupado = true; if (btn) btn.disabled = true;
+      try {
+        const { data, error } = await supa.rpc('meli_adelanto_asignar_cuenta', { p_adelanto_id: id, p_cuenta_id: cuenta });
+        if (error || !data || data.ok !== true) { toast(mensajeDe(error)); return; }
+        toast('Cuenta asignada al adelanto.');
+        await this.cargar();
+        if (window.MeliOrdenes && MeliOrdenes.pintar) MeliOrdenes.pintar();
+      } catch { toast('No se pudo asignar la cuenta. Probá de nuevo.'); }
       finally { this._ocupado = false; if (btn) btn.disabled = false; }
     },
 

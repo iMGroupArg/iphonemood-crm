@@ -74,7 +74,7 @@ await caso('Cargar: arma el pedido con fecha de Argentina y solo las operaciones
   const { M, llamadas, toasts } = cargar({ campos: { 'meliadel-fecha': '2026-11-03T15:08', 'meliadel-total': '1.000,50', 'meliadel-costo': '10', 'meliadel-ops': '2000019000000001;500,25\n2000019000000002;500,25', 'meliadel-nota': 'prueba' } });
   await M.guardar();
   assert.equal(llamadas[0].fn, 'meli_adelanto_registrar');
-  assert.deepEqual(llamadas[0].args, { p_fecha: '2026-11-03T15:08:00-03:00', p_total: 1000.5, p_costo: 10, p_ops: [{ tipo: 'pago', orden: '2000019000000001', monto: 500.25 }, { tipo: 'pago', orden: '2000019000000002', monto: 500.25 }], p_nota: 'prueba' });
+  assert.deepEqual(llamadas[0].args, { p_fecha: '2026-11-03T15:08:00-03:00', p_total: 1000.5, p_costo: 10, p_cuenta_id: null, p_ops: [{ tipo: 'pago', orden: '2000019000000001', monto: 500.25 }, { tipo: 'pago', orden: '2000019000000002', monto: 500.25 }], p_nota: 'prueba' });
   assert.match(toasts[0], /Adelanto cargado/);
 });
 await caso('Cargar: si la suma no cierra, o faltan datos, NO llama a la base', async () => {
@@ -105,5 +105,29 @@ await caso('Acreditar: sin confirmar o con un id raro no llama a la base', async
 await caso('Acreditar: un error de la base se informa y no rompe', async () => {
   const { M, toasts } = cargar({ rpc: { meli_adelanto_acreditar: { data: null, error: { message: 'no autorizado' } } } });
   await M.acreditar({ dataset: { adelanto: '7', monto: '1', n: '1' } }); assert.match(toasts[0], /No estás autorizado/);
+});
+await caso('Cargar solo bonificaciones: exige elegir la cuenta y la manda; con órdenes no la exige', async () => {
+  const base = { 'meliadel-fecha': '2026-11-03T15:08', 'meliadel-total': '499', 'meliadel-costo': '10', 'meliadel-ops': 'cashback_1;499' };
+  const sin = cargar({ campos: base }); await sin.M.guardar();
+  assert.equal(sin.llamadas.length, 0); assert.match(sin.toasts[0], /Elegí la cuenta/);
+  const con = cargar({ campos: { ...base, 'meliadel-cuenta': '5' } }); await con.M.guardar();
+  assert.equal(con.llamadas[0].fn, 'meli_adelanto_registrar'); assert.equal(con.llamadas[0].args.p_cuenta_id, 5);
+  const ord = cargar({ campos: { 'meliadel-fecha': '2026-11-03T15:08', 'meliadel-total': '1000', 'meliadel-costo': '10', 'meliadel-ops': '2000019000000001;1000' } }); await ord.M.guardar();
+  assert.equal(ord.llamadas[0].args.p_cuenta_id, null);
+});
+await caso('Adelanto sin cuenta y con Flex pendiente: la tarjeta ofrece asignar la cuenta; asignar manda solo id y cuenta', async () => {
+  const { M, State, llamadas, toasts } = cargar({ campos: { 'meliadel-asig-7': '5' }, estado: [adelanto([op({ id: 2, tipo: 'flex', orden: null, referencia: 'cashback_1', monto: 499 })], { cuenta_id: null })] });
+  State.meliAdelantoCuentas = [{ id: 5, nickname: 'FRANCO' }];
+  const html = M.tarjetaHtml(); assert.match(html, /no tiene cuenta de Mercado Libre asignada/); assert.match(html, /FRANCO/);
+  await M.asignarCuenta({ dataset: { adelanto: '7' } });
+  assert.deepEqual(llamadas[0], { fn: 'meli_adelanto_asignar_cuenta', args: { p_adelanto_id: 7, p_cuenta_id: 5 } });
+  const ya = cargar({ estado: [adelanto([op({ id: 2, tipo: 'flex', orden: null, referencia: 'cashback_1', monto: 499 })], { cuenta_id: 5 })] });
+  assert.doesNotMatch(ya.M.tarjetaHtml(), /no tiene cuenta de Mercado Libre asignada/);
+});
+await caso('Asignar cuenta: sin elegir no llama; un error de la base sale en castellano', async () => {
+  const a = cargar({ campos: { 'meliadel-asig-7': '' } }); await a.M.asignarCuenta({ dataset: { adelanto: '7' } });
+  assert.equal(a.llamadas.length, 0); assert.match(a.toasts[0], /Elegí la cuenta/);
+  const b = cargar({ campos: { 'meliadel-asig-7': '5' }, rpc: { meli_adelanto_asignar_cuenta: { data: null, error: { message: 'CUENTA_INACTIVA' } } } });
+  await b.M.asignarCuenta({ dataset: { adelanto: '7' } }); assert.match(b.toasts[0], /desactivada/);
 });
 console.log(`\n${n - fallos}/${n} ok`); process.exit(fallos ? 1 : 0);

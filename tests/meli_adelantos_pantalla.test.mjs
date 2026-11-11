@@ -43,7 +43,7 @@ await caso('Estado de cada operación', () => {
   const { M } = cargar({});
   const t = (o) => M.estadoOp(op(o)).clave;
   assert.equal(t({}), 'lista'); assert.equal(t({ procesada: false }), 'espera'); assert.equal(t({ revertida: true }), 'no'); assert.equal(t({ revisar: true }), 'no');
-  assert.equal(t({ neto: 40001 }), 'no'); assert.equal(t({ acreditada: true }), 'lista'); assert.equal(t({ resultado: 'acreditada' }), 'hecha');
+  assert.equal(t({ neto: 40001 }), 'no'); assert.equal(t({ acreditada: true, monto_acreditado: 40000 }), 'lista'); assert.equal(t({ resultado: 'acreditada' }), 'hecha');
 });
 await caso('Sin el script 27 no muestra nada; con error real avisa; sin adelantos invita a cargar', () => {
   const a = cargar({ estado: null }); assert.equal(a.M.tarjetaHtml(), '');
@@ -55,6 +55,20 @@ await caso('La tarjeta muestra totales, avance y lo que falta, y escapa todo', (
   const h = M.tarjetaHtml();
   assert.match(h, /1 de 4 acreditadas/); assert.match(h, /Adelantado/); assert.match(h, /todavía sin procesar/); assert.match(h, /Acreditar 1 lista/); assert.match(h, /bonificación de Flex/);
   assert.ok(!/<img src=x/.test(h) && !/cashback_<b>/.test(h), 'sin HTML ejecutable');
+});
+await caso('Ya acreditada por otro monto: se marca «no» con ambos importes; con el mismo monto se reconoce', () => {
+  const { M } = cargar({});
+  const a = M.estadoOp(op({ acreditada: true, monto_acreditado: 39000 }));
+  assert.equal(a.clave, 'no'); assert.match(a.txt, /otro monto/);
+  assert.equal(M.estadoOp(op({ acreditada: true, monto_acreditado: 40000 })).clave, 'lista');
+  assert.equal(M.estadoOp(op({ acreditada: true, monto_acreditado: null })).clave, 'no');
+});
+await caso('Los adelantos con pendientes se muestran TODOS (aunque sean muchos) y los completos quedan plegados', () => {
+  const abiertos = Array.from({ length: 6 }, (_, i) => adelanto([op({ id: 10 + i, procesada: false })], { id: 100 + i }));
+  const completo = adelanto([op({ id: 99, resultado: 'acreditada' })], { id: 200 });
+  const { M } = cargar({ estado: [completo, ...abiertos] });
+  const h = M.tarjetaHtml();
+  assert.equal((h.match(/Adelanto del/g) || []).length, 7); assert.match(h, /Adelantos completos \(1\)/);
 });
 await caso('Cargar: arma el pedido con fecha de Argentina y solo las operaciones válidas', async () => {
   const { M, llamadas, toasts } = cargar({ campos: { 'meliadel-fecha': '2026-11-03T15:08', 'meliadel-total': '1.000,50', 'meliadel-costo': '10', 'meliadel-ops': '2000019000000001;500,25\n2000019000000002;500,25', 'meliadel-nota': 'prueba' } });

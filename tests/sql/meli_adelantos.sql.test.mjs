@@ -206,10 +206,29 @@ console.log('\n══ Acreditar por adelanto de Mercado Pago (Postgres en WebAss
   const x2 = await acr(db, r.adelanto_id, true);
   check('Repetir no duplica la bonificación', x2.flex === 0 && (await caja(db)) === antes + 40998);
   check('Los saldos cuadran', await cuadra(db));
-  const ctx2 = await baseNueva(); const b = await ordenAdel(ctx2, { neto: 40000 });
-  await ctx2.db.query(`INSERT INTO public.meli_cuentas (meli_user_id, nickname, persona_id, bolsillo) VALUES ('1000','OTRA',$1,'ARS Mercado Pago')`, [ctx2.pid]);
+  // Con dos cuentas de Mercado Libre: la bonificación entra a la caja de la cuenta DEL ADELANTO, no a otra.
+  const ctx2 = await baseNueva();
+  const { rows: [p2] } = await ctx2.db.query(`INSERT INTO public.personas (nombre) VALUES ('Socio') RETURNING id`);
+  const { rows: [cb] } = await ctx2.db.query(`INSERT INTO public.meli_cuentas (meli_user_id, nickname, persona_id, bolsillo) VALUES ('1000','OTRA',$1,'ARS Otra caja') RETURNING id`, [p2.id]);
+  const b = await ordenAdel(ctx2, { neto: 40000 });
   const r2 = await reg(ctx2.db, 40499, 100, [pago(b), flex('cashback_9')]);
-  check('Con más de una cuenta de Mercado Libre no se adivina la caja de la bonificación (FLEX_CUENTA_AMBIGUA)', /FLEX_CUENTA_AMBIGUA/.test(String(await falla(() => acr(ctx2.db, r2.adelanto_id, true)))));
+  check('El adelanto queda atado a la cuenta de sus órdenes', (await est(ctx2.db, r2.adelanto_id))[0].cuenta_id === ctx2.cuentaId);
+  const x3 = await acr(ctx2.db, r2.adelanto_id, true);
+  const cajaA = Number((await ctx2.db.query(`SELECT saldo FROM public.cajas WHERE bolsillo='ARS Mercado Pago'`)).rows[0].saldo);
+  const cajaB = (await ctx2.db.query(`SELECT saldo FROM public.cajas WHERE bolsillo='ARS Otra caja'`)).rows;
+  check('Con otra cuenta activa la bonificación entra a la caja del adelanto (40.499) y NO a la otra', x3.flex === 1 && cajaA === 40499 && (cajaB.length === 0 || Number(cajaB[0].saldo) === 0), JSON.stringify([x3, cajaA, cajaB]));
+  // órdenes de dos cuentas en el mismo adelanto
+  const ctx3 = await baseNueva();
+  const { rows: [p3] } = await ctx3.db.query(`INSERT INTO public.personas (nombre) VALUES ('Socio') RETURNING id`);
+  const { rows: [cc] } = await ctx3.db.query(`INSERT INTO public.meli_cuentas (meli_user_id, nickname, persona_id, bolsillo) VALUES ('2000','C2',$1,'ARS C2') RETURNING id`, [p3.id]);
+  const o1 = await ordenAdel(ctx3, { neto: 40000 });
+  const o2 = await ordenAdel({ ...ctx3, cuentaId: cc.id }, { neto: 41000 });
+  check('Órdenes de DOS cuentas en el mismo adelanto → CUENTAS_MEZCLADAS', /CUENTAS_MEZCLADAS/.test(String(await falla(() => reg(ctx3.db, 81000, 100, [pago(o1), pago(o2)])))));
+  check('Solo bonificaciones sin indicar la cuenta → CUENTA_REQUERIDA; con una cuenta sin caja → CUENTA_SIN_CAJA',
+    /CUENTA_REQUERIDA/.test(String(await falla(() => reg(ctx3.db, 499, 10, [flex('cashback_x')])))) && true);
+  const { rows: [sc] } = await ctx3.db.query(`INSERT INTO public.meli_cuentas (meli_user_id, nickname) VALUES ('3000','SINCAJA') RETURNING id`);
+  check('Cuenta sin caja configurada → CUENTA_SIN_CAJA', /CUENTA_SIN_CAJA/.test(String(await falla(() => q(ctx3.db, `SELECT public.meli_adelanto_registrar(now() - interval '1 hour', 499, 10, $1::jsonb, NULL, $2)`, [JSON.stringify([flex('cashback_y')]), sc.id])))));
+  check('Solo bonificaciones indicando la cuenta correcta se registra', (await q(ctx3.db, `SELECT public.meli_adelanto_registrar(now() - interval '2 hour', 499, 10, $1::jsonb, NULL, $2) r`, [JSON.stringify([flex('cashback_z')]), ctx3.cuentaId]))[0].r.ok === true);
 }
 { // casos que NO se acreditan
   const ctx = await baseNueva(); const { db } = ctx;
@@ -234,6 +253,18 @@ console.log('\n══ Acreditar por adelanto de Mercado Pago (Postgres en WebAss
   const r = await reg(db, 40000, 100, [pago(a)]);
   const x = await acr(db, r.adelanto_id);
   check('Orden ya acreditada de antes: se reconoce («ya_acreditada») y NO se vuelve a mover plata', x.ya_acreditadas === 1 && x.acreditadas === 0 && (await caja(db)) === antes && x.detalle[0].monto_igual === true, JSON.stringify(x));
+}
+{ // ya acreditada por la vía normal con OTRO monto: NO se da por conciliada
+  const ctx = await baseNueva(); const { db } = ctx;
+  const a = await ordenAdel(ctx, { neto: 40000, libera: '-1 day' });
+  await acreditar(db, a.id, 39000, true);                          // liquidación final por menos del neto
+  const antes = await caja(db);
+  const r = await reg(db, 40000, 100, [pago(a, 40000)]);
+  const x = await acr(db, r.adelanto_id);
+  const d = x.detalle[0];
+  check('Orden ya acreditada con otro monto: queda PENDIENTE (MONTO_PREVIO_DISTINTO) con ambos importes y no se mueve plata', x.ya_acreditadas === 0 && x.pendientes === 1 && d.motivo === 'MONTO_PREVIO_DISTINTO' && Number(d.monto_mp) === 40000 && Number(d.monto_previo) === 39000 && (await caja(db)) === antes, JSON.stringify(x));
+  const e = (await est(db, r.adelanto_id))[0].ops[0];
+  check('No se marca como hecha: sigue sin resultado y el estado informa el monto ya acreditado', e.resultado === null && Number(e.monto_acreditado) === 39000, JSON.stringify(e));
 }
 { // permisos de acreditar / estado
   const ctx = await baseNueva(); const { db } = ctx;

@@ -16,6 +16,7 @@
     MONTO_MAYOR_AL_BRUTO: 'el monto supera el bruto: resolver a mano',
     CUENTA_SIN_CAJA: 'la cuenta no tiene caja asociada',
     VENTA_SIN_COTIZACION: 'la venta no tiene cotización',
+    MONTO_PREVIO_DISTINTO: 'ya estaba acreditada con otro monto: resolver a mano',
   };
   const ERRORES = {
     SUMA_NO_CIERRA: 'Las operaciones no suman el total del adelanto.',
@@ -28,7 +29,10 @@
     ORDEN_INEXISTENTE: 'Hay órdenes que no existen en el CRM.',
     OPERACION_YA_EN_OTRO_ADELANTO: 'Hay operaciones que ya están en otro adelanto.',
     ADELANTO_YA_REGISTRADO: 'Ese adelanto ya estaba cargado.',
-    FLEX_CUENTA_AMBIGUA: 'Hay más de una cuenta de Mercado Libre: no se puede decidir a qué caja entra la bonificación de Flex.',
+    CUENTAS_MEZCLADAS: 'Las órdenes son de más de una cuenta de Mercado Libre: cargá un adelanto por cuenta.',
+    CUENTA_REQUERIDA: 'Falta indicar la cuenta de Mercado Libre del adelanto.',
+    CUENTA_NO_COINCIDE: 'La cuenta no coincide con la de las órdenes.',
+    CUENTA_SIN_CAJA: 'La cuenta de Mercado Libre no tiene caja asociada.',
   };
   const mensajeDe = (error) => {
     const txt = String((error && (error.message || '')) || '') + ' ' + String((error && error.details) || '');
@@ -85,7 +89,10 @@
       if (op.resultado === 'ya_acreditada') return { clave: 'hecha', txt: 'ya estaba acreditada' };
       if (op.tipo === 'flex') return { clave: 'lista', txt: 'bonificación Flex' };
       if (op.revertida) return { clave: 'no', txt: MOTIVOS.ORDEN_REVERTIDA };
-      if (op.acreditada) return { clave: 'lista', txt: 'ya acreditada por el camino normal (se reconoce al acreditar)' };
+      if (op.acreditada) {
+        if (op.monto_acreditado != null && centavos(op.monto_acreditado) === centavos(op.monto)) return { clave: 'lista', txt: 'ya acreditada por el camino normal (se reconoce al acreditar)' };
+        return { clave: 'no', txt: `ya acreditada por otro monto (${State.fmtARS(num(op.monto_acreditado))} y Mercado Pago pagó ${State.fmtARS(num(op.monto))}): resolver a mano` };
+      }
       if (!op.procesada) return { clave: 'espera', txt: MOTIVOS.ORDEN_NO_PROCESADA };
       if (op.revisar) return { clave: 'no', txt: MOTIVOS.ORDEN_EN_REVISION };
       if (op.neto == null || centavos(op.neto) !== centavos(op.monto)) return { clave: 'no', txt: MOTIVOS.MONTO_DISTINTO_AL_NETO };
@@ -114,7 +121,9 @@
         return `<div class="card" style="margin-bottom:10px;font-size:12.5px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">
           <div style="flex:1;min-width:220px"><b>Adelantos de Mercado Pago</b><div style="font-size:11.5px;color:var(--text-secondary);margin-top:3px">Si pediste un adelanto de dinero, cargalo acá para acreditar esas ventas sin esperar su fecha de liberación.</div></div>${boton}</div>`;
       }
-      const bloques = lista.slice(0, 4).map((a) => {
+      const completo = (a) => this.resumen(a).hechas === a.ops.length;
+      const abiertos = lista.filter((a) => !completo(a)), cerrados = lista.filter(completo);
+      const bloquesDe = (arr) => arr.map((a) => {
         const r = this.resumen(a);
         const detalle = a.ops.filter((op) => this.estadoOp(op).clave !== 'hecha').map((op) => {
           const s = this.estadoOp(op);
@@ -133,6 +142,7 @@
             ${r.flexPend ? `<label style="font-size:11.5px"><input type="checkbox" id="meliadel-flex-${e(a.id)}"> incluir ${e(r.flexPend)} bonificación${r.flexPend === 1 ? '' : 'es'} de Flex</label>` : ''}</div>` : ''}
         </div>`;
       }).join('');
+      const bloques = bloquesDe(abiertos) + (cerrados.length ? `<details style="border-top:1px solid var(--border);margin-top:8px;padding-top:8px"><summary style="cursor:pointer;font-size:11.5px">Adelantos completos (${cerrados.length})</summary>${bloquesDe(cerrados.slice(0, 20))}</details>` : '');
       return `<div class="card" style="margin-bottom:10px;font-size:12.5px">
         <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap"><b style="flex:1">Adelantos de Mercado Pago</b>${boton}</div>
         <div style="font-size:11.5px;color:var(--text-secondary);margin-top:3px;line-height:1.5">Acredita ya, por lo que pagó Mercado Pago, las ventas adelantadas y procesadas (no esperan su fecha de liberación y no se acreditan de nuevo después). El costo del adelanto se carga como gasto.</div>

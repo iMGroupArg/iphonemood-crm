@@ -23,6 +23,7 @@ import './blog.js';
 import './meli.js';
 import './meli-vincular.js';
 import './meli-ordenes.js';
+import './meli-adelantos.js';
 import './meli-facturas.js';
 import './meli-emitidas.js';
 import './liberaciones.js';

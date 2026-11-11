@@ -5,6 +5,20 @@
 
 BEGIN;
 
+-- Una nota RECHAZADA (sin número) puede reintentarse en otro punto de venta: es la única vez que se permite cambiarlo.
+CREATE OR REPLACE FUNCTION public.arca__nc_proteger()
+RETURNS trigger LANGUAGE plpgsql SET search_path = '' AS $$
+BEGIN
+  IF TG_OP = 'TRUNCATE' OR TG_OP = 'DELETE' THEN RAISE EXCEPTION 'NOTA_CREDITO_NO_SE_BORRA' USING ERRCODE = '42501'; END IF;
+  IF OLD.estado = 'autorizado' THEN RAISE EXCEPTION 'NOTA_CREDITO_AUTORIZADA_INMODIFICABLE' USING ERRCODE = '42501'; END IF;
+  IF NEW.comprobante_id IS DISTINCT FROM OLD.comprobante_id OR NEW.orden_id IS DISTINCT FROM OLD.orden_id OR NEW.ambiente IS DISTINCT FROM OLD.ambiente
+     OR (NEW.pto_venta IS DISTINCT FROM OLD.pto_venta AND NOT (OLD.estado = 'rechazado' AND OLD.numero IS NULL)) OR NEW.creado_por IS DISTINCT FROM OLD.creado_por THEN
+    RAISE EXCEPTION 'NOTA_CREDITO_DATOS_FIJOS' USING ERRCODE = '42501';
+  END IF;
+  NEW.actualizado_en := now();
+  RETURN NEW;
+END $$;
+
 -- ── Funciones del servidor (con el secreto compartido) ─────────────────────
 DROP FUNCTION IF EXISTS public.arca_nc_estado(TEXT, TEXT, TEXT);
 CREATE FUNCTION public.arca_nc_estado(p_secreto TEXT, p_orden TEXT, p_ambiente TEXT)
@@ -71,7 +85,7 @@ BEGIN
     INSERT INTO public.meli_notas_credito (comprobante_id, orden_id, ambiente, pto_venta, numero, estado, importe_centavos, doc_tipo, doc_nro, cond_iva, motivo, creado_por, ultimo_solicitante, intento_id, trabajo_hasta)
     VALUES (f.id, p_orden, p_ambiente, p_pto_venta, v_num, 'reservado', f.importe_centavos, f.doc_tipo, f.doc_nro, f.cond_iva, p_motivo, left(btrim(p_usuario), 200), left(btrim(p_usuario), 200), v_intento, now() + interval '2 minutes');
   ELSE
-    UPDATE public.meli_notas_credito SET estado = 'reservado', numero = v_num, motivo = p_motivo, ultimo_solicitante = left(btrim(p_usuario), 200), intento_id = v_intento, trabajo_hasta = now() + interval '2 minutes',
+    UPDATE public.meli_notas_credito SET estado = 'reservado', pto_venta = p_pto_venta, numero = v_num, motivo = p_motivo, ultimo_solicitante = left(btrim(p_usuario), 200), intento_id = v_intento, trabajo_hasta = now() + interval '2 minutes',
            intentos = intentos + 1, ultimo_error = NULL WHERE id = n.id;
   END IF;
   RETURN jsonb_build_object('estado', 'reservado', 'intento', v_intento, 'numero', v_num, 'pto_venta', p_pto_venta, 'factura_pto_venta', f.pto_venta, 'importe_centavos', f.importe_centavos,

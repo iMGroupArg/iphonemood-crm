@@ -126,6 +126,13 @@ console.log('\n══ Notas de crédito C (Postgres en WebAssembly) ══\n');
     const r4 = await reservar(db, o4, { pv: 2, ultimo: 7 });
     const e4 = await estado(db, o4);
     check('Factura del pto 4, nota en el pto 2: numeración del pto 2 (7→8), asociada a la factura del pto 4', r4.numero === 8 && r4.pto_venta === 2 && r4.factura_pto_venta === 4 && r4.factura_numero === 10 && e4.pto_venta === 2 && e4.factura_pto_venta === 4, JSON.stringify([r4, e4]));
+    // Codex: una nota RECHAZADA en el pto 2 se reintenta en el pto 3 → la fila pasa al pto 3 (numeración del 3) y no queda en el 2
+    const i4 = r4.intento;
+    await q(db, `SELECT public.arca_nc_rechazar($1,$2,$3,'prueba')`, [SECRETO, i4, 8]);
+    const r5 = await reservar(db, o4, { pv: 3, ultimo: 20 });
+    const fila5 = (await q(db, `SELECT pto_venta, numero, estado FROM public.meli_notas_credito WHERE orden_id=$1`, [o4]))[0];
+    check('Reintento tras rechazo en otro punto: la fila se mueve al pto 3 con número 21', r5.pto_venta === 3 && r5.numero === 21 && fila5.pto_venta === 3 && fila5.numero === 21 && fila5.estado === 'reservado', JSON.stringify([r5, fila5]));
+    check('…y una reservada NO puede cambiar de punto de venta a mano', (await falla(() => q(db, `UPDATE public.meli_notas_credito SET pto_venta = 9 WHERE orden_id=$1`, [o4])))?.includes('DATOS_FIJOS'));
   
 }
 console.log(`\n${ok} pasan, ${fail} fallan de ${ok + fail}`);

@@ -53,6 +53,7 @@ const MeliOrdenes = {
 
   async cargar() {
     await DB.cargarMeliOrdenes();
+    if (window.MeliAdelantos) await window.MeliAdelantos.cargar();     // adelantos de Mercado Pago (script 27)
     this.pintar();
     // Una orden que entró sin vínculo queda en «revisar»; si después se vincula el aviso, SOLO
     // vuelve a poder procesarse cuando se la revalida. Se hace una por una (cada llamada es su
@@ -238,6 +239,7 @@ const MeliOrdenes = {
         <button class="btn btn-sm" onclick="MeliOrdenes.cargar()"><i class="ti ti-refresh"></i> Actualizar</button>
       </div>
       ${window.Liberaciones ? window.Liberaciones.tarjetaHtml() : ''}
+      ${window.MeliAdelantos ? window.MeliAdelantos.tarjetaHtml() : ''}
       <div class="card mo-liberar" style="margin-bottom:10px;display:flex;gap:24px;flex-wrap:wrap">
         <div><div style="font-size:22px;font-weight:600;color:var(--amber)">${this._ars(pend.ars)}</div>
           <div style="font-size:11.5px;color:var(--text-secondary)">a liberar (${pend.ordenes} orden${pend.ordenes === 1 ? '' : 'es'}${pend.sinDato ? `, ${pend.sinDato} sin importe confirmado` : ''})</div></div>

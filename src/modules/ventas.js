@@ -58,7 +58,7 @@ const Ventas = {
     return c;
   },
 
-  _nicho: '',   // filtro de tipo de negocio para el export
+  _nicho: '',   // filtro de rubro: la lista, las métricas y el export
 
   setNicho(n) { this._nicho = n; this.renderList(); this.renderMetricas(); },
 
@@ -82,24 +82,62 @@ const Ventas = {
     return State.spreadCuevaDelPeriodo(this._periodoParaCueva()) / (State.refBlue || 1);
   },
 
+  // Día (calendario LOCAL) de una venta como 'YYYY-MM-DD', o '' si no tiene fecha. Una sola definición para filtrar y ordenar:
+  // antes «mes específico» miraba los 7 primeros caracteres de la fecha en UTC y una venta de las 21:00 del último día del mes caía
+  // en el mes siguiente, mientras «este mes» usaba el día local.
+  _diaLocal(v) {
+    const f = v && v.fechaISO ? State.parseFecha(v.fechaISO) : null;
+    if (!f) return '';
+    return `${f.getFullYear()}-${String(f.getMonth() + 1).padStart(2, '0')}-${String(f.getDate()).padStart(2, '0')}`;
+  },
+
+  // Las ventas del período y rubro elegidos, ordenadas por FECHA (la más reciente primero) y, dentro del mismo día, por número.
+  // Antes salían por número de venta: las de Mercado Libre se numeran cuando se procesan, no cuando se vendieron, y quedaban
+  // desordenadas (#258 del 2/11 arriba de #256 del 3/11).
   ventasDelPeriodo() {
     const hoy = new Date(); hoy.setHours(0,0,0,0);
+    const nicho = this._nicho || '';
+    const enNicho = i => typeof Reportes !== 'undefined' && Reportes.nichoDe ? Reportes.nichoDe(i) === nicho : true;
     return State.ventas.filter(v => {
+      // Rubro: la venta se muestra si tiene algún ítem de ese rubro (antes el selector no filtraba nada en pantalla).
+      if (nicho && !(v.items || []).some(enNicho)) return false;
       if (!v.fechaISO) return true;
       const f = State.parseFecha(v.fechaISO) || new Date(0); f.setHours(0,0,0,0);
       if (this.periodoVentas === 'hoy') return f.getTime() === hoy.getTime();
-      if (this.periodoVentas === 'semana') { const d=new Date(hoy); d.setDate(d.getDate()-7); return f>=d; }
+      // «Esta semana» = hoy y los 6 días anteriores (7 días), el mismo criterio que usa Cueva para el mismo período.
+      if (this.periodoVentas === 'semana') { const d=new Date(hoy); d.setDate(d.getDate()-6); return f>=d; }
       if (this.periodoVentas === 'mes') return f.getFullYear()===hoy.getFullYear()&&f.getMonth()===hoy.getMonth();
-      if (this.periodoVentas === 'mes-especifico') return v.fechaISO.slice(0,7) === this.periodoMes;
+      if (this.periodoVentas === 'mes-especifico') return this._diaLocal(v).slice(0,7) === this.periodoMes;
       if (this.periodoVentas === 'libre') {
-        const desde=this.periodoDesde?new Date(this.periodoDesde):null;
-        const hasta=this.periodoHasta?new Date(this.periodoHasta):null;
+        // Las fechas del rango se leen como DÍAS locales: `new Date('2026-11-05')` es medianoche UTC y dejaba afuera el último día.
+        const desde=this.periodoDesde?State.parseFecha(this.periodoDesde):null;
+        const hasta=this.periodoHasta?State.parseFecha(this.periodoHasta):null;
         if (desde&&f<desde) return false;
         if (hasta&&f>hasta) return false;
         return true;
       }
       return true;
+    }).sort((x, y) => {
+      const dx = this._diaLocal(x), dy = this._diaLocal(y);
+      return dx === dy ? (y.id - x.id) : (dx < dy ? 1 : -1);   // sin fecha ('') al final
     });
+  },
+
+  // Con un rubro elegido, una venta MIXTA (un perfume + un iPhone) cuenta solo con los ítems de ese rubro: los pagos, el trade-in
+  // y el costo del canal se prorratean según el precio de lo que queda. Sin rubro (o si todos los ítems son del rubro) devuelve la
+  // misma venta. Es una vista de solo lectura para sumar métricas y el export: no toca la venta.
+  _vistaRubro(v) {
+    const nicho = this._nicho || '';
+    if (!nicho || typeof Reportes === 'undefined' || !Reportes.nichoDe) return v;
+    const todos = v.items || [];
+    const sel = todos.filter(i => Reportes.nichoDe(i) === nicho);
+    if (!sel.length || sel.length === todos.length) return v;
+    const peso = i => Math.max(0, Number(i.precio) || 0);
+    const W = todos.reduce((a, i) => a + peso(i), 0), Ws = sel.reduce((a, i) => a + peso(i), 0);
+    const parte = W > 0 ? Ws / W : sel.length / todos.length;
+    const canal = this.resultadoVenta(v).costoCanal * parte;
+    return { ...v, items: sel, pagos: (v.pagos || []).map(p => ({ ...p, monto: p.monto * parte })),
+      tradeIn: v.tradeIn ? { ...v.tradeIn, valor: (v.tradeIn.valor || 0) * parte } : v.tradeIn, costoCanal: canal, meliCotizacion: null };
   },
 
   _mesesDisponibles() {
@@ -175,20 +213,25 @@ const Ventas = {
     // entre el total de la venta y lo que de verdad llegó. Es un concepto EXPLÍCITO,
     // distinto del quebranto (plata que el cliente no pagó): cuenta como "cubierto" al
     // calcular el faltante —no es deuda de nadie— y resta del margen comercial.
-    const costoCanal  = Math.max(0, Number(v.costoCanal) || 0);
+    // Mientras la orden NO se acreditó, el costo real todavía no está guardado: se usa lo estimado con los importes que informó
+    // Mercado Libre (retenido en pesos ÷ cotización congelada), para que el profit de TODA pantalla (lista, métricas, reportes y
+    // export) sea el real y no el de antes de la comisión. Al acreditar manda el costo real.
+    const esMeli      = v.tipoVenta === 'mercadolibre' || v.meliOrdenId != null;
+    const costoCanalReal = Math.max(0, Number(v.costoCanal) || 0);
+    const canalEstimado  = (esMeli && costoCanalReal <= 0.005) ? this._canalEstimado(v) : null;   // número | null (null = sin importes confirmados)
+    const costoCanal  = costoCanalReal > 0.005 ? costoCanalReal : (canalEstimado || 0);
     const faltante    = Math.max(0, total - cobrado - costoCanal);
     const cerrada     = v.estado === 'cerrada';
     // Una venta de Mercado Libre abierta no es plata que un cliente deba: ya la cobró
     // Mercado Libre y viene en camino ("pendiente de liberar", que se ve aparte). Por eso
     // NO cuenta como "por cobrar".
-    const esMeli      = v.tipoVenta === 'mercadolibre' || v.meliOrdenId != null;
     const quebranto   = cerrada ? faltante : 0;
     const pendiente   = (cerrada || esMeli) ? 0 : faltante;
     // margenComercial = lo que deja la venta en sí (sin recargos de tarjeta). TODOS los
     // que antes calculaban `margenBruto − quebranto` por su cuenta usan este.
     const margenComercial = margenBruto - costoCanal - quebranto;
     return {
-      total, costo, cobrado, margenBruto, diferencial, quebranto, pendiente, costoCanal, margenComercial, esMeli,
+      total, costo, cobrado, margenBruto, diferencial, quebranto, pendiente, costoCanal, costoCanalReal, canalEstimado, margenComercial, esMeli,
       margenReal: margenComercial + diferencial,
     };
   },
@@ -225,8 +268,20 @@ const Ventas = {
     const nombreNicho = id => Reportes.NICHOS.find(x => x.id === id)?.label || id;
 
     ventas.forEach(v => {
-      const r = this.resultadoVenta(v);
+      const rFull = this.resultadoVenta(v);
+      const vr = this._vistaRubro(v);                           // con un rubro elegido, solo lo de ese rubro (ventas mixtas)
+      const r = vr === v ? rFull : this.resultadoVenta(vr);
       const items = v.items.filter(enNicho);
+      // Comisión de Mercado Libre de cada ítem (real o estimada), repartida según su precio; null si la venta no es de Mercado Libre.
+      const comV = this._comisionPorItem(v, rFull);
+      const usadosCom = new Map();
+      const parteCom = it => {
+        if (!comV) return 0;
+        const k = usadosCom.get(it) || 0; usadosCom.set(it, k + 1);
+        let pos = -1, c = 0;
+        for (let q = 0; q < v.items.length; q++) if (v.items[q] === it && c++ === k) { pos = q; break; }
+        return comV.porItem[pos] || 0;
+      };
       const disp = items.filter(esDisp);
       const acc  = items.filter(i => !esDisp(i));
       const subDisp = disp.reduce((a, i) => a + i.precio, 0);
@@ -240,36 +295,39 @@ const Ventas = {
       const nichosVenta = [...new Set(items.map(i => Reportes.nichoDe(i)))].map(nombreNicho).join(', ');
 
       hojaVentas.push({
-        'Venta': v.id, 'Fecha': v.fecha, 'Cliente': v.cliente, 'Vendedor': v.vendedor || '',
+        'Venta': v.id, 'Orden ML': this._numeroMeli(v), 'Fecha': v.fecha, 'Cliente': v.cliente, 'Vendedor': v.vendedor || '',
         'Nicho': nichosVenta,
         'Tipo': v.tipoVenta || 'minorista', 'Estado': v.estado === 'cerrada' ? 'Cerrada' : 'Abierta',
         'Subtotal dispositivos': n(subDisp), 'Subtotal accesorios': n(subAcc), 'SUBTOTAL': n(subtotal),
         'Trade-in': n(v.tradeIn?.valor || 0), 'Total pagos': n(totalPagos),
         'Total cobrado': n(r.cobrado), 'Saldo': n(r.esMeli ? r.pendiente + r.quebranto : r.total - r.cobrado - r.costoCanal),
         'Costo': n(costoFila), 'Ganancia bruta': n(subtotal - costoFila),
-        'Diferencial tarjeta': n(r.diferencial), 'Costo del canal': n(r.costoCanal), 'Sin cobrar': n(r.quebranto),
+        'Diferencial tarjeta': n(r.diferencial), 'Costo del canal': n(r.costoCanal),
+        'Canal': rFull.costoCanalReal > 0.005 ? 'Real' : (rFull.canalEstimado !== null ? 'Estimado' : ''), 'Sin cobrar': n(r.quebranto),
         'Pendiente': n(r.pendiente), 'Ganancia real': n(r.margenReal),
       });
 
       disp.forEach(i => {
         const p = State.stock.find(s => s.id === i.stockId);
+        const com = parteCom(i);
         hojaDisp.push({
-          'Venta': v.id, 'Fecha': v.fecha, 'Cliente': v.cliente,
+          'Venta': v.id, 'Orden ML': this._numeroMeli(v), 'Fecha': v.fecha, 'Cliente': v.cliente,
           'Nicho': nombreNicho(Reportes.nichoDe(i)),
           'Dispositivo': i.nombre, 'Condición': p?.estadoProducto || '',
           'IMEI': i.imei || '', 'Regalo': i.regalo ? 'Sí' : '',
           'Precio compra': n(i.costo), 'Precio venta': n(i.precio),
-          'Profit': n(i.precio - (i.costo || 0)),
+          'Comisión canal': n(com), 'Profit': n(i.precio - (i.costo || 0) - com),
         });
       });
 
       acc.forEach(i => {
+        const com = parteCom(i);
         hojaAcc.push({
-          'Venta': v.id, 'Fecha': v.fecha, 'Cliente': v.cliente,
+          'Venta': v.id, 'Orden ML': this._numeroMeli(v), 'Fecha': v.fecha, 'Cliente': v.cliente,
           'Nicho': nombreNicho(Reportes.nichoDe(i)),
           'Accesorio': i.nombre, 'Cantidad': i.cantidad || 1, 'Regalo': i.regalo ? 'Sí' : '',
           'Costo': n(i.costo), 'Precio total': n(i.precio),
-          'Profit': n(i.precio - (i.costo || 0)),
+          'Comisión canal': n(com), 'Profit': n(i.precio - (i.costo || 0) - com),
         });
       });
 
@@ -291,12 +349,12 @@ const Ventas = {
     // Fila de totales al pie del resumen
     const tot = (campo) => n(hojaVentas.reduce((a, x) => a + (Number(x[campo]) || 0), 0));
     hojaVentas.push({
-      'Venta': '', 'Fecha': '', 'Cliente': 'TOTALES', 'Vendedor': '', 'Tipo': '', 'Estado': '',
+      'Venta': '', 'Orden ML': '', 'Fecha': '', 'Cliente': 'TOTALES', 'Vendedor': '', 'Tipo': '', 'Estado': '',
       'Subtotal dispositivos': tot('Subtotal dispositivos'), 'Subtotal accesorios': tot('Subtotal accesorios'),
       'SUBTOTAL': tot('SUBTOTAL'), 'Trade-in': tot('Trade-in'), 'Total pagos': tot('Total pagos'),
       'Total cobrado': tot('Total cobrado'), 'Saldo': tot('Saldo'), 'Costo': tot('Costo'),
       'Ganancia bruta': tot('Ganancia bruta'), 'Diferencial tarjeta': tot('Diferencial tarjeta'),
-      'Costo del canal': tot('Costo del canal'), 'Sin cobrar': tot('Sin cobrar'), 'Pendiente': tot('Pendiente'), 'Ganancia real': tot('Ganancia real'),
+      'Costo del canal': tot('Costo del canal'), 'Canal': '', 'Sin cobrar': tot('Sin cobrar'), 'Pendiente': tot('Pendiente'), 'Ganancia real': tot('Ganancia real'),
     });
 
     // ── Diferencial de tipo de cambio del mismo período (operaciones de cueva)
@@ -361,7 +419,7 @@ const Ventas = {
   renderMetricas() {
     const el=document.getElementById('ventas-metricas');
     if (!el) return;
-    const ventas=this.ventasDelPeriodo();
+    const ventas=this.ventasDelPeriodo().map(v => this._vistaRubro(v));   // con rubro elegido, solo los ítems de ese rubro
 
     const volumen = ventas.reduce((s,v) => s + v.items.reduce((a,i) => a + i.precio, 0), 0);
     // "Unidades vendidas" es lo que generó ingreso: los ítems regalo tienen
@@ -463,7 +521,8 @@ const Ventas = {
           <span class="m-item-ico ${cerrada ? 'verde' : 'ambar'}"><i class="ti ti-receipt"></i></span>
           <span class="m-item-cuerpo"><span class="m-item-t">${esc(v.cliente)}</span>
             <span class="m-item-s" style="display:block">${resumen}</span>
-            <span class="m-item-s" style="display:block">${esc(v.fecha)} · ${esc(TIPO[v.tipoVenta] || 'Minorista')} · #${v.id}</span></span>
+            <span class="m-item-s" style="display:block">${esc(v.fecha)} · ${esc(TIPO[v.tipoVenta] || 'Minorista')} · #${v.id}</span>
+            ${this._numeroMeli(v) ? `<span class="m-item-s" style="display:block">Orden ML ${esc(this._numeroMeli(v))}</span>` : ''}</span>
           <span class="m-item-der"><span class="m-item-precio" style="display:block">${State.fmtUSD(total)}</span>
             <span class="m-item-sub" ${color ? `style="color:${color};font-weight:600"` : ''}>${sub}</span></span>
         </button>`;
@@ -481,7 +540,7 @@ const Ventas = {
           ? v.pagos.map(p=>`<div style="font-size:10.5px;color:var(--text-secondary);white-space:nowrap">${p.persona} · ${(p.bolsillo||'').replace('transferencia','transf.')}${p.esTarjeta?' <span class="badge b-purple" style="font-size:8px">Tarjeta</span>':''} — <b>${State.fmtUSD(p.monto)}</b></div>`).join('')
           : `<span style="font-size:10.5px;color:var(--text-secondary)">Sin pagos</span>`;
         return `<tr>
-          <td style="font-weight:600">#${v.id}</td>
+          <td style="font-weight:600">#${v.id}${this._numeroMeli(v) ? `<div style="font-size:10px;font-weight:400;color:var(--text-secondary);user-select:all" title="Número de orden en Mercado Libre">ML ${State.esc(this._numeroMeli(v))}</div>` : ''}</td>
           <td style="font-size:11.5px">${v.fecha}</td>
           <td>${State.esc(v.cliente)}${v.clienteTel?`<div style="font-size:10px;color:var(--text-secondary)">${State.esc(v.clienteTel)}</div>`:''}</td>
           <td><span class="badge b-blue" style="font-size:10px">${TIPO[v.tipoVenta]||'Minorista'}</span></td>
@@ -2151,7 +2210,7 @@ const Ventas = {
     };
     const comDisp = comLista(itemsDispositivos), comAcc = comLista(itemsAccesorios);
     const comTxt = c => (comMeli ? (comMeli.conocida ? `${comMeli.estimada ? '≈ ' : ''}${State.fmtUSD(c)}` : '<span title="Todavía no hay importes confirmados de Mercado Libre">—</span>') : null);
-    const notaMeli = comMeli ? `<div style="font-size:10.5px;color:var(--text-secondary);margin-top:6px">Comisión de Mercado Libre (cargos + envío) en dólares, repartida según el precio de cada producto${comMeli.estimada ? ' · <b>estimada hasta que se acredite</b>' : comMeli.conocida ? '' : ' · todavía sin importes confirmados'}. El profit de cada fila ya la descuenta.</div>` : '';
+    const notaMeli = false ? `<div style="font-size:10.5px;color:var(--text-secondary);margin-top:6px">Comisión de Mercado Libre (cargos + envío) en dólares, repartida según el precio de cada producto${comMeli.estimada ? ' · <b>estimada hasta que se acredite</b>' : comMeli.conocida ? '' : ' · todavía sin importes confirmados'}. El profit de cada fila ya la descuenta.</div>` : '';
 
     const host = document.getElementById('venta-modal-host');
     host.innerHTML = `
@@ -2162,7 +2221,7 @@ const Ventas = {
           <div style="padding:16px 20px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;flex-shrink:0">
             <div>
               <h2 style="font-size:20px;font-weight:700">Venta #${v.id}</h2>
-              <p style="font-size:12px;color:var(--text-secondary);margin-top:2px">${v.fecha}${v.tipoVenta ? ` · ${TIPO_LABEL[v.tipoVenta]||v.tipoVenta}` : ''}</p>
+              <p style="font-size:12px;color:var(--text-secondary);margin-top:2px">${v.fecha}${v.tipoVenta ? ` · ${TIPO_LABEL[v.tipoVenta]||v.tipoVenta}` : ''}${Ventas._numeroMeli(v) ? ` · Orden <b style="user-select:all;color:var(--text)">${State.esc(Ventas._numeroMeli(v))}</b>` : ''}</p>
             </div>
             <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
               ${this.estadoToggle(cerrada)}
@@ -2196,13 +2255,13 @@ const Ventas = {
               <div class="card-title"><i class="ti ti-user"></i> Información del Cliente</div>
               <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
                 <div><label style="font-size:11px;color:var(--text-secondary)">Nombre</label><div style="font-size:13px;font-weight:500">${State.esc(v.cliente)}</div></div>
-                <div><label style="font-size:11px;color:var(--text-secondary)">Teléfono</label><div style="font-size:13px">${State.esc(v.clienteTel)||'—'}</div></div>
-                <div><label style="font-size:11px;color:var(--text-secondary)">DNI</label><div style="font-size:13px">${v.clienteDni||'—'}</div></div>
-                <div><label style="font-size:11px;color:var(--text-secondary)">Email</label><div style="font-size:13px">${v.clienteEmail ? `<a href="mailto:${v.clienteEmail}" style="color:var(--blue)">${v.clienteEmail}</a>` : '—'}</div></div>
-                <div><label style="font-size:11px;color:var(--text-secondary)">Vendedor</label>
-                  <div style="font-size:13px;font-weight:600">${v.vendedor||'—'}</div>
-                  <div style="font-size:11px;color:var(--green)">Comisión: ${State.fmtUSD(v.comisionVendedor||0)}</div>
-                </div>
+                ${v.clienteTel ? `<div><label style="font-size:11px;color:var(--text-secondary)">Teléfono</label><div style="font-size:13px">${State.esc(v.clienteTel)}</div></div>` : ''}
+                ${v.clienteDni ? `<div><label style="font-size:11px;color:var(--text-secondary)">DNI</label><div style="font-size:13px">${State.esc(v.clienteDni)}</div></div>` : ''}
+                ${v.clienteEmail ? `<div><label style="font-size:11px;color:var(--text-secondary)">Email</label><div style="font-size:13px"><a href="mailto:${State.esc(v.clienteEmail)}" style="color:var(--blue)">${State.esc(v.clienteEmail)}</a></div></div>` : ''}
+                ${v.vendedor ? `<div><label style="font-size:11px;color:var(--text-secondary)">Vendedor</label>
+                  <div style="font-size:13px;font-weight:600">${State.esc(v.vendedor)}</div>
+                  ${(v.comisionVendedor || 0) > 0 ? `<div style="font-size:11px;color:var(--green)">Comisión: ${State.fmtUSD(v.comisionVendedor)}</div>` : ''}
+                </div>` : ''}
               </div>
             </div>
 
@@ -2248,7 +2307,7 @@ const Ventas = {
                   <td>${State.fmtUSD(i.costo||0)}</td>
                   <td>${comTxt(comAcc[k]) ?? State.fmtUSD(0)}</td>
                   <td>${i.regalo?`<span style="color:var(--green)">Gratis</span>`:State.fmtUSD(i.precio)}</td>
-                  <td style="color:${profit>=0?'var(--green)':'var(--red)'}">${profit>=0?'+':''}${State.fmtUSD(profit)}${comMeli && comMeli.estimada ? ' <span style="font-size:10px;color:var(--text-secondary)" title="Estimado hasta que Mercado Libre acredite">prov.</span>' : ''}</td>
+                  <td style="color:${profit>=0?'var(--green)':'var(--red)'}">${profit>=0?'+':''}${State.fmtUSD(profit)}</td>
                 </tr>`;
               }).join('')}</tbody></table>${notaMeli}
             </div>` : ''}
@@ -2272,29 +2331,21 @@ const Ventas = {
 
             <!-- SUBTOTAL -->
             <div style="display:flex;justify-content:flex-end;margin-bottom:14px;gap:20px;flex-wrap:wrap">
-              <div style="text-align:right">
-                <div style="font-size:12px;color:var(--text-secondary)">Subtotal Dispositivos: ${State.fmtUSD(itemsDispositivos.reduce((s,i)=>s+i.precio,0))}</div>
-                <div style="font-size:12px;color:var(--text-secondary)">Subtotal Accesorios: ${State.fmtUSD(itemsAccesorios.reduce((s,i)=>s+i.precio,0))}</div>
-                <div style="font-size:16px;font-weight:700;margin-top:6px">Subtotal: ${State.fmtUSD(total)}</div>
-                ${(()=>{
-                  const r = Ventas.resultadoVenta(v);
-                  const c = r.margenReal>=0?'var(--green)':'var(--red)';
-                  let extra = '';
-                  if (r.quebranto > 0.005) extra = `<div style="font-size:10.5px;color:var(--red)">− ${State.fmtUSD(r.quebranto)} que no se cobraron</div>`;
-                  else if (r.diferencial > 0.005) extra = `<div style="font-size:10.5px;color:var(--purple)">incluye +${State.fmtUSD(r.diferencial)} de recargo</div>`;
-                  else if (r.pendiente > 0.005) extra = `<div style="font-size:10.5px;color:var(--amber)">${State.fmtUSD(r.pendiente)} pendiente de cobro</div>`;
-                  // Venta de Mercado Libre: se muestra con qué cotización se convirtió y, mientras no se acredite, cuánto
-                  // se va a quedar Mercado Libre (estimado) y el profit que quedaría DESPUÉS de esa comisión.
-                  const m = Ventas._detalleMeli(v, r);
-                  if (m) {
-                    extra += `<div style="font-size:10.5px;color:var(--text-secondary)">${m.ars !== null ? `Precio en Mercado Libre: ${State.fmtARS(m.ars)} · ` : ''}pesos a USD con cotización $${m.cot.toLocaleString('es-AR')} (la que se eligió al procesar; queda fija)</div>`;
-                    if (m.estimado !== null) extra += `<div style="font-size:10.5px;color:var(--amber)">Mercado Libre se queda ≈ ${State.fmtUSD(m.estimado)} (comisión + envío, estimado hasta acreditar)</div>`
-                      + `<div style="font-size:12px;font-weight:600;color:${m.profitDespues>=0?'var(--green)':'var(--red)'}">Profit después de Mercado Libre: ${m.profitDespues>=0?'+':''}${State.fmtUSD(m.profitDespues)} (provisorio)</div>`;
-                    else if (r.costoCanal > 0.005) extra += `<div style="font-size:10.5px;color:var(--text-secondary)">Mercado Libre se quedó ${State.fmtUSD(r.costoCanal)} (comisión + envío)</div>`;
-                  }
-                  return `<div style="font-size:12px;color:${c}">Profit: ${r.margenReal>=0?'+':''}${State.fmtUSD(r.margenReal)}${m && m.estimado !== null ? ' <span style="font-size:10.5px;color:var(--text-secondary)">(antes de Mercado Libre)</span>' : ''}</div>${extra}`;
-                })()}
-              </div>
+              ${(()=>{
+                const r = Ventas.resultadoVenta(v);
+                const m = Ventas._detalleMeli(v, r);
+                if (m) return Ventas._resumenMeliHtml(v, r, m);
+                const c = r.margenReal>=0?'var(--green)':'var(--red)';
+                let extra = '';
+                if (r.quebranto > 0.005) extra = `<div style="font-size:10.5px;color:var(--red)">− ${State.fmtUSD(r.quebranto)} que no se cobraron</div>`;
+                else if (r.diferencial > 0.005) extra = `<div style="font-size:10.5px;color:var(--purple)">incluye +${State.fmtUSD(r.diferencial)} de recargo</div>`;
+                else if (r.pendiente > 0.005) extra = `<div style="font-size:10.5px;color:var(--amber)">${State.fmtUSD(r.pendiente)} pendiente de cobro</div>`;
+                return `<div style="text-align:right">
+                  <div style="font-size:12px;color:var(--text-secondary)">Subtotal Dispositivos: ${State.fmtUSD(itemsDispositivos.reduce((s,i)=>s+i.precio,0))}</div>
+                  <div style="font-size:12px;color:var(--text-secondary)">Subtotal Accesorios: ${State.fmtUSD(itemsAccesorios.reduce((s,i)=>s+i.precio,0))}</div>
+                  <div style="font-size:16px;font-weight:700;margin-top:6px">Subtotal: ${State.fmtUSD(total)}</div>
+                  <div style="font-size:12px;color:${c}">Profit: ${r.margenReal>=0?'+':''}${State.fmtUSD(r.margenReal)}</div>${extra}</div>`;
+              })()}
             </div>
 
             <!-- PAGOS -->
@@ -2886,27 +2937,63 @@ const Ventas = {
   //   → { total, porItem[] (alineado con v.items), estimada, conocida }
   _comisionPorItem(v, r) {
     if (!this._esMeli(v)) return null;
-    const m = this._detalleMeli(v, r);
-    const real = r.costoCanal > 0.005;
-    const conocida = real || (m && m.estimado !== null);
-    const totalC = conocida ? Math.round((real ? r.costoCanal : m.estimado) * 100) : 0;
+    const real = r.costoCanalReal > 0.005;
+    const conocida = real || r.canalEstimado !== null;
+    const totalC = conocida ? Math.round((real ? r.costoCanalReal : r.canalEstimado) * 100) : 0;
     const items = v.items || [];
     const pesos = items.map(i => (i.regalo || !Number.isFinite(Number(i.precio)) ? 0 : Math.max(0, Math.round(Number(i.precio) * 100))));
     const parte = this._repartirCentavos(totalC, pesos);
     return { total: totalC / 100, porItem: parte.map(c => c / 100), estimada: conocida && !real, conocida };
   },
+  // La orden de Mercado Libre de una venta (o null). Mapa en memoria por venta, que se reconstruye cuando la lista de órdenes cambia.
+  _ordenDeVenta(vid) {
+    const arr = State.meliOrdenes || [];
+    if (!this._mapaOrdenes || this._mapaOrdenes.arr !== arr || this._mapaOrdenes.n !== arr.length) {
+      const m = new Map(); arr.forEach(o => { if (o && o.ventaId != null) m.set(o.ventaId, o); });
+      this._mapaOrdenes = { arr, n: arr.length, m };
+    }
+    return this._mapaOrdenes.m.get(vid) || null;
+  },
+  // Número de la orden en Mercado Libre (el que se ve en su panel), para identificar la venta. '' si no se conoce.
+  _numeroMeli(v) {
+    if (!this._esMeli(v)) return '';
+    const o = this._ordenDeVenta(v.id);
+    return o && o.orderId ? String(o.orderId) : '';
+  },
+  // Comisión (cargos + envío) estimada de una venta de Mercado Libre aún sin acreditar: lo que retiene (bruto − neto, en pesos)
+  // a la cotización congelada. null si no hay importes confirmados: nunca se inventa.
+  _canalEstimado(v) {
+    const cot = Number(v.meliCotizacion);
+    if (!(cot > 0)) return null;
+    const o = this._ordenDeVenta(v.id);
+    if (!o || o.acreditado || o.revertidaEn || !o.financieraCompleta || !Number.isFinite(o.bruto) || !Number.isFinite(o.neto) || o.bruto < o.neto) return null;
+    return State.cent((o.bruto - o.neto) / cot);
+  },
   _detalleMeli(v, r) {
     if (!this._esMeli(v)) return null;
     const cot = Number(v.meliCotizacion);
     if (!(cot > 0)) return null;
-    const o = (State.meliOrdenes || []).find(x => x.ventaId === v.id);
-    let estimado = null;
-    if (o && !o.acreditado && !o.revertidaEn && o.financieraCompleta && Number.isFinite(o.bruto) && Number.isFinite(o.neto) && o.bruto >= o.neto) {
-      estimado = State.cent((o.bruto - o.neto) / cot);
-    }
+    const o = this._ordenDeVenta(v.id);
     // Precio que pagó el comprador en Mercado Libre, en pesos (de donde sale el total en dólares de la venta).
     const ars = o && Number.isFinite(o.bruto) ? o.bruto : null;
-    return { cot, ars, estimado, profitDespues: estimado === null ? null : State.cent(r.margenReal - estimado) };
+    // `margenReal` ya descuenta la comisión (real o estimada): es el profit después de Mercado Libre.
+    return { cot, ars, estimado: r.canalEstimado, profitDespues: r.canalEstimado === null ? null : r.margenReal, orden: o && o.orderId ? String(o.orderId) : '' };
+  },
+  // Resumen claro de una venta de Mercado Libre (reemplaza a varias líneas sueltas): lo que se vendió, lo que se queda
+  // Mercado Libre y el profit, en una tablita.
+  _resumenMeliHtml(v, r, m) {
+    const fila = (t, val, estilo = '') => `<tr><td style="padding:2px 16px 2px 0;color:var(--text-secondary)">${t}</td><td style="padding:2px 0;text-align:right;${estilo}">${val}</td></tr>`;
+    const conocida = r.costoCanalReal > 0.005 || r.canalEstimado !== null;
+    const etiqueta = r.costoCanalReal > 0.005 ? '' : (r.canalEstimado !== null ? ' <span style="font-size:10.5px;color:var(--amber)">estimada</span>' : '');
+    const ganancia = r.margenReal;
+    return `<table style="font-size:12.5px;border-collapse:collapse;margin-left:auto">
+      ${m.ars !== null ? fila('Precio en Mercado Libre', State.fmtARS(m.ars)) : ''}
+      ${fila('Cotización', '$' + m.cot.toLocaleString('es-AR'))}
+      ${fila('Total en dólares', State.fmtUSD(r.total), 'font-weight:600')}
+      ${fila('Costo', State.fmtUSD(r.costo))}
+      ${fila('Comisión Mercado Libre' + etiqueta, conocida ? State.fmtUSD(r.costoCanal) : '—')}
+      ${fila('Profit' + (r.canalEstimado !== null ? ' <span style="font-size:10.5px;color:var(--amber)">provisorio</span>' : ''), `${ganancia >= 0 ? '+' : ''}${State.fmtUSD(ganancia)}`, `font-weight:700;font-size:14px;color:${ganancia >= 0 ? 'var(--green)' : 'var(--red)'}`)}
+    </table>`;
   },
   // Para MOSTRAR el saldo de una venta: { dif: pagado − total (≥ 0 = pagada), aLiberar }.
   // En una venta de Mercado Libre, lo que se quedó el canal (comisión + envío) cuenta

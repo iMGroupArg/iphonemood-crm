@@ -12,7 +12,7 @@ const SCRIPT = SQL('arca_notas_credito.sql');
 async function nueva() {
   const c = await baseNueva({ conVentas: false, sin7: true });
   await c.db.exec(PREPARAR); await c.db.exec(SQL('meli_facturas.sql')); await c.db.exec(SQL('arca_comprobantes.sql'));
-  await c.db.exec(SQL('arca_control_anual.sql')); await c.db.exec(SCRIPT);
+  await c.db.exec(SQL('arca_control_anual.sql')); await c.db.exec(SCRIPT); await c.db.exec(SQL('arca_nc_otro_pv.sql'));
   return c;
 }
 const q = (db, sql, args = []) => db.query(sql, args).then((x) => x.rows);
@@ -52,8 +52,7 @@ console.log('\n══ Notas de crédito C (Postgres en WebAssembly) ══\n');
   check('Estado: hay factura y todavía no hay nota', (await estado(db, o)).estado === 'ninguna');
   check('Motivo fuera de la lista', (await falla(() => reservar(db, o, { motivo: 'x' })))?.includes('MOTIVO_INVALIDO'));
   check('Usuario vacío', (await falla(() => reservar(db, o, { usuario: ' ' })))?.includes('USUARIO_INVALIDO'));
-  const dist = await falla(() => reservar(db, o, { pv: 2, ultimo: 0 }));
-  check('Si el punto de venta consultado no es el de la factura: PUNTO_DE_VENTA_DISTINTO y NO se escribe nada', dist && dist.includes('PUNTO_DE_VENTA_DISTINTO') && (await q(db, `SELECT count(*)::int n FROM public.meli_notas_credito`))[0].n === 0, dist);
+  check('Punto de venta inválido de la nota: se rechaza y NO se escribe nada', (await falla(() => reservar(db, o, { pv: 0, ultimo: 0 })))?.includes('PUNTO_DE_VENTA_INVALIDO') && (await q(db, `SELECT count(*)::int n FROM public.meli_notas_credito`))[0].n === 0);
   const r = await reservar(db, o, { ultimo: 2 });
   check('Reserva con numeración PROPIA (último 2 → 3), mismo importe, receptor y punto de venta de la factura, con la factura asociada',
     r.numero === 3 && Number(r.importe_centavos) === 10000000 && r.doc_tipo === 96 && r.doc_nro === '43577502' && r.pto_venta === 1 && r.factura_numero === 6 && r.factura_fecha === '2026-11-02', JSON.stringify(r));
@@ -120,6 +119,14 @@ console.log('\n══ Notas de crédito C (Postgres en WebAssembly) ══\n');
   const baja = await comoRol(db, 'authenticated', 'baja@x.com', () => db.query(`SELECT count(*)::int n FROM public.meli_notas_credito`));
   check('Uno dado de baja no ve ninguna', baja.rows[0].n === 0);
   check('service_role tampoco toca la tabla', /permission denied/i.test(String(await falla(() => comoRol(db, 'service_role', null, () => db.query(`SELECT * FROM public.meli_notas_credito`))))));
+}
+{
+  const ctx2 = await nueva(); const db = ctx2.db; // factura de OTRO punto de venta (script 28): la nota sale en el punto configurado, con su numeración, asociada a la factura
+    const o4 = await facturada(ctx2, { pv: 4, ultimo: 9, bruto: 50000 });
+    const r4 = await reservar(db, o4, { pv: 2, ultimo: 7 });
+    const e4 = await estado(db, o4);
+    check('Factura del pto 4, nota en el pto 2: numeración del pto 2 (7→8), asociada a la factura del pto 4', r4.numero === 8 && r4.pto_venta === 2 && r4.factura_pto_venta === 4 && r4.factura_numero === 10 && e4.pto_venta === 2 && e4.factura_pto_venta === 4, JSON.stringify([r4, e4]));
+  
 }
 console.log(`\n${ok} pasan, ${fail} fallan de ${ok + fail}`);
 process.exit(fail ? 1 : 0);

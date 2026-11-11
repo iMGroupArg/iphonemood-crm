@@ -11,7 +11,7 @@ const SCRIPT = SQL('arca_automatico.sql');
 async function nueva() {
   const c = await baseNueva({ conVentas: false, sin7: true });
   await c.db.exec(PREPARAR);
-  for (const f of ['meli_facturas.sql', 'arca_comprobantes.sql', 'arca_control_anual.sql', 'arca_notas_credito.sql']) await c.db.exec(SQL(f));
+  for (const f of ['meli_facturas.sql', 'arca_comprobantes.sql', 'arca_control_anual.sql', 'arca_notas_credito.sql', 'arca_nc_otro_pv.sql']) await c.db.exec(SQL(f));
   await c.db.exec(SCRIPT);
   return c;
 }

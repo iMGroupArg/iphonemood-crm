@@ -36,7 +36,7 @@ console.log('\n══ Reloj de la facturación automática en Supabase (Postgres
   await vacia.db.exec(STUBS);
   check('Sin el script 23 frena con un mensaje claro', (await falla(() => vacia.db.exec(SCRIPT)))?.includes('Falta el script 23'));
 }
-for (const f of ['meli_facturas.sql', 'arca_comprobantes.sql', 'arca_control_anual.sql', 'arca_notas_credito.sql', 'arca_automatico.sql']) await db.exec(SQL(f));
+for (const f of ['meli_facturas.sql', 'arca_comprobantes.sql', 'arca_control_anual.sql', 'arca_notas_credito.sql', 'arca_nc_otro_pv.sql', 'arca_automatico.sql']) await db.exec(SQL(f));
 {
   const e = await falla(() => db.exec(SCRIPT)), e2 = await falla(() => db.exec(SCRIPT));
   check('El script corre dos veces más sin romper (idempotente)', !e && !e2, `${e} | ${e2}`);

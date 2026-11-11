@@ -29,7 +29,7 @@ const PREPARAR = `DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolnam
 async function entorno({ completa = false } = {}) {
   const ctx = completa ? await baseNueva() : await baseNueva({ conVentas: false, sin7: true });
   await ctx.db.exec(PREPARAR); await ctx.db.exec(SQL('meli_facturas.sql')); await ctx.db.exec(SQL('arca_comprobantes.sql'));
-  await ctx.db.exec(SQL('arca_control_anual.sql')); await ctx.db.exec(SQL('arca_notas_credito.sql')); await ctx.db.exec(SQL('arca_automatico.sql'));
+  await ctx.db.exec(SQL('arca_control_anual.sql')); await ctx.db.exec(SQL('arca_notas_credito.sql')); await ctx.db.exec(SQL('arca_nc_otro_pv.sql')); await ctx.db.exec(SQL('arca_automatico.sql'));
   // rpc como la de api/_meli.js: agrega el secreto y devuelve lo mismo que PostgREST (jsonb pelado, tabla como arreglo).
   const rpc = async (nombre, args = {}) => {
     const todos = { p_secreto: SECRETO, ...args }; const claves = Object.keys(todos);
@@ -335,11 +335,14 @@ console.log('\n══ Emisor de facturas (base real + ARCA simulado) ══\n');
   check('NC: queda guardada con motivo y quién la pidió', fila.length === 1 && fila[0].motivo === 'devolucion' && fila[0].creado_por === 'franco@x.com', JSON.stringify(fila));
   check('NC: una autorizada no se modifica ni se borra', /INMODIFICABLE/.test(String(await falla(() => ctx.db.query(`UPDATE public.meli_notas_credito SET importe_centavos=1`)))) && /NO_SE_BORRA/.test(String(await falla(() => ctx.db.query(`DELETE FROM public.meli_notas_credito`)))));
 }
-{ // punto de venta distinto al configurado
+{ // punto de venta distinto al configurado (script 28): la nota sale en el configurado, asociada a la factura del otro
   const ctx = await entorno(); const a = arca(); const o = await ordenId(ctx);
   await emitir(ctx, o, a);
-  const e = await falla(() => emitirNC(ctx, o, a, 'devolucion', { ...ENV, ARCA_PTO_VTA: '2' }));
-  check('NC: si el punto de venta configurado no es el de la factura NO se emite (PUNTO_DE_VENTA_DISTINTO) y la base no escribe nada', e && e.includes('PUNTO_DE_VENTA_DISTINTO') && a.st.cuerposNC.length === 0 && (await ctx.db.query(`SELECT count(*)::int n FROM public.meli_notas_credito`)).rows[0].n === 0, e);
+  const nc = await emitirNC(ctx, o, a, 'devolucion', { ...ENV, ARCA_PTO_VTA: '2' });
+  const cuerpo = a.st.cuerposNC[0] || '';
+  check('NC: factura del pto 1 y configurado el 2 → se emite en el pto 2 asociada a la factura del pto 1', nc.estado === 'emitida' && nc.ptoVenta === 2 && /<ar:PtoVta>2<\/ar:PtoVta>/.test(cuerpo) && /<ar:CbtesAsoc><ar:CbteAsoc><ar:Tipo>11<\/ar:Tipo><ar:PtoVta>1<\/ar:PtoVta>/.test(cuerpo), JSON.stringify(nc) + cuerpo.slice(-300));
+  const fila = (await ctx.db.query(`SELECT pto_venta FROM public.meli_notas_credito`)).rows;
+  check('NC: en la base queda con el punto de venta de la nota (2)', fila.length === 1 && fila[0].pto_venta === 2, JSON.stringify(fila));
 }
 { // la conciliación exige la factura ASOCIADA correcta (Codex)
   const ctx = await entorno(); const a = arca(); const o = await ordenId(ctx);

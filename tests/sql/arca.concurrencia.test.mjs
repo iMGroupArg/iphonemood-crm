@@ -51,7 +51,7 @@ try {
   await admin.query(`UPDATE public.meli_config SET valor = $1 WHERE clave = 'rpc_secret_sha256'`, [crypto.createHash('sha256').update(SECRETO).digest('hex')]);
   await admin.query(ventasConParche(SQL('meli_ventas_migration.sql')));
   await admin.query(`DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname='service_role') THEN CREATE ROLE service_role NOLOGIN BYPASSRLS; END IF; END $$;`);
-  for (const f of ['meli_facturas.sql', 'arca_comprobantes.sql', 'arca_control_anual.sql', 'arca_notas_credito.sql', 'arca_automatico.sql']) await admin.query(SQL(f));
+  for (const f of ['meli_facturas.sql', 'arca_comprobantes.sql', 'arca_control_anual.sql', 'arca_notas_credito.sql', 'arca_nc_otro_pv.sql', 'arca_automatico.sql']) await admin.query(SQL(f));
   const { rows: [p] } = await admin.query(`INSERT INTO public.personas (nombre) VALUES ('Franco') RETURNING id`);
   const { rows: [c] } = await admin.query(`INSERT INTO public.meli_cuentas (meli_user_id, nickname, persona_id, bolsillo) VALUES ('999','FRANCO',$1,'ARS Mercado Pago') RETURNING id`, [p.id]);
 

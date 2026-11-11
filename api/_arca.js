@@ -413,9 +413,10 @@ async function emitirNotaCreditoC({ datos, numeroReservado, env = process.env, c
   const comprobante = armarNotaCreditoC(datos, { cfg, ahora: ahora() });
   if (cfg.modo === 'simulacion') return { simulado: true, modo: cfg.modo, comprobante, resultado: 'A', numero: numeroReservado || 0, cae: 'SIMULADO', caeVto: null, observaciones: [], errores: [] };
   if (!cfg.cuit || cfg.cuit.length !== 11) throw new ErrorArca('SIN_CUIT', 'Falta ARCA_CUIT (11 dígitos).');
+  if (!Number.isInteger(cfg.ptoVta) || cfg.ptoVta < 1) throw new ErrorArca('SIN_PUNTO_DE_VENTA', 'Falta ARCA_PTO_VTA.');
   enteroEn(numeroReservado, 1, 99999999, 'Número de comprobante');
   const ticket = await obtenerTicket({ cfg, cache, fetchImpl, ahora });
-  const r = await solicitarCAE({ cfg, ticket, ptoVta: datos.factura.ptoVta, numero: numeroReservado, comprobante, fetchImpl });
+  const r = await solicitarCAE({ cfg, ticket, ptoVta: cfg.ptoVta, numero: numeroReservado, comprobante, fetchImpl });
   return { simulado: false, modo: cfg.modo, comprobante, ...r };
 }
 

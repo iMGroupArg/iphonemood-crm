@@ -294,7 +294,7 @@ async function emitirNotaCreditoOrden({ orden, motivo, usuario, env = process.en
     if (!t.tomado) return { estado: 'en_curso', mensaje: 'Otro proceso está resolviendo esta nota de crédito.' };
     const c = await A.consultarComprobante({ cfg, ticket: await ticket(), ptoVta: t.pto_venta, cbteTipo: TIPO, numero: t.numero, fetchImpl: f });
     if (c.existe) {
-      const igual = Math.round(Number(c.importe) * 100) === Number(t.importe_centavos) && mismoNumero(c.docTipo, t.doc_tipo) && mismoNumero(c.docNro, t.doc_nro) && asociadaA(c, t.pto_venta, t.factura_numero, cfg.cuit);
+      const igual = Math.round(Number(c.importe) * 100) === Number(t.importe_centavos) && mismoNumero(c.docTipo, t.doc_tipo) && mismoNumero(c.docNro, t.doc_nro) && asociadaA(c, t.factura_pto_venta, t.factura_numero, cfg.cuit);
       if (!igual) throw new A.ErrorArca('RECONCILIACION_DISTINTA', 'ARCA tiene ese número con otro importe, receptor o factura asociada: se frena para revisarlo a mano.');
       await rpc('arca_nc_autorizar', { p_intento: t.intento, p_numero: t.numero, p_cae: c.cae, p_cae_vto: isoDeAfip(String(c.caeVto)), p_fecha_cbte: isoDeAfip(String(c.fecha)) }, pres);
       return { estado: 'emitida', numero: t.numero, cae: c.cae, ptoVenta: t.pto_venta, reconciliada: true };
@@ -305,8 +305,8 @@ async function emitirNotaCreditoOrden({ orden, motivo, usuario, env = process.en
   }
 
   if (limite - Date.now() < TIEMPO_MINIMO_NUEVA_EMISION_MS) return { estado: 'sin_tiempo', mensaje: 'No queda tiempo para emitir en esta corrida.' };
-  // Nueva emisión. El punto de venta sale de la factura (lo devuelve la base al reservar); para pedir el último número de ARCA se usa el configurado
-  // y la base rechaza si no coincide con el de la factura.
+  // Nueva emisión. La nota se emite en el punto de venta CONFIGURADO (su numeración propia) y se asocia a la factura, que puede ser de otro punto de venta
+  // (lo devuelve la base al reservar como factura_pto_venta).
   if (!Number.isInteger(cfg.ptoVta) || cfg.ptoVta < 1) throw new A.ErrorArca('SIN_PUNTO_DE_VENTA', 'Falta ARCA_PTO_VTA.');
   const ultimo = await A.ultimoAutorizado({ cfg, ticket: await ticket(), ptoVta: cfg.ptoVta, cbteTipo: TIPO, fetchImpl: f });
   if (limite - Date.now() < TIEMPO_MINIMO_ANTES_DE_RESERVAR_MS) return { estado: 'sin_tiempo', mensaje: 'No queda tiempo para emitir en esta corrida.' };
@@ -316,10 +316,9 @@ async function emitirNotaCreditoOrden({ orden, motivo, usuario, env = process.en
   } catch (e) {
     if (e && /NOTA_CREDITO_YA_EXISTE/.test(String(e.message))) return { estado: 'en_curso', mensaje: 'Otro proceso está emitiendo esta nota de crédito.' };
     if (esNoElegible(e)) return { estado: 'omitida', mensaje: 'La venta ya no es elegible para la nota de crédito automática.' };
-    if (e && /PUNTO_DE_VENTA_DISTINTO/.test(String(e.message))) throw new A.ErrorArca('PUNTO_DE_VENTA_DISTINTO', 'La factura es de otro punto de venta que el configurado: no se emite la nota de crédito.');
     throw e;
   }
-  const datos = { importeCentavos: Number(res.importe_centavos), docTipo: res.doc_tipo, docNro: res.doc_nro, condicionIva: res.cond_iva, factura: { ptoVta: res.pto_venta, numero: res.factura_numero, fecha: res.factura_fecha } };
+  const datos = { importeCentavos: Number(res.importe_centavos), docTipo: res.doc_tipo, docNro: res.doc_nro, condicionIva: res.cond_iva, factura: { ptoVta: res.factura_pto_venta, numero: res.factura_numero, fecha: res.factura_fecha } };
   if (limite - Date.now() < TIEMPO_MINIMO_ANTES_DE_EMITIR_MS) return { estado: 'pendiente_verificar', numero: res.numero, ptoVenta: cfg.ptoVta, error: 'SIN_TIEMPO: quedó reservada sin emitir; se resuelve en la próxima corrida' };
   let em;
   try {
@@ -340,7 +339,7 @@ async function emitirNotaCreditoOrden({ orden, motivo, usuario, env = process.en
   try { c2 = await A.consultarComprobante({ cfg, ticket: await ticket(), ptoVta: cfg.ptoVta, cbteTipo: TIPO, numero: res.numero, fetchImpl: f }); }
   catch (e) { return { estado: 'pendiente_verificar', numero: res.numero, ptoVenta: cfg.ptoVta, error: 'ARCA rechazó pero no se pudo confirmar el número: ' + textoError(e) }; }
   if (c2.existe) {
-    const igual = Math.round(Number(c2.importe) * 100) === datos.importeCentavos && mismoNumero(c2.docTipo, datos.docTipo) && mismoNumero(c2.docNro, datos.docNro) && asociadaA(c2, res.pto_venta, res.factura_numero, cfg.cuit);
+    const igual = Math.round(Number(c2.importe) * 100) === datos.importeCentavos && mismoNumero(c2.docTipo, datos.docTipo) && mismoNumero(c2.docNro, datos.docNro) && asociadaA(c2, res.factura_pto_venta, res.factura_numero, cfg.cuit);
     if (!igual) throw new A.ErrorArca('RECONCILIACION_DISTINTA', 'ARCA tiene ese número con otro importe, receptor o factura asociada: se frena para revisarlo a mano.');
     await rpc('arca_nc_autorizar', { p_intento: res.intento, p_numero: res.numero, p_cae: c2.cae, p_cae_vto: isoDeAfip(String(c2.caeVto)), p_fecha_cbte: isoDeAfip(String(c2.fecha)) }, presFresco(SEGUNDOS(6)));
     return { estado: 'emitida', numero: res.numero, cae: c2.cae, ptoVenta: cfg.ptoVta, reconciliada: true };

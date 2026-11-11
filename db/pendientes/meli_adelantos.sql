@@ -17,8 +17,11 @@
 --   · Un adelanto no se puede cargar dos veces (misma fecha y total) y una orden no puede estar en dos adelantos.
 --   · Solo órdenes procesadas, no revertidas, no en revisión, con importes completos. Las demás se saltan con su motivo.
 --   · El COSTO del adelanto NO lo crea este script: se carga como gasto en el CRM; acá solo se anota para controlar que total - costo = lo recibido.
---   · Las bonificaciones de Flex (tipo 'flex') solo entran a la caja si se pide expresamente (p_incluir_flex), una vez cada una (clave estable).
---   · Cada orden se acredita en su propia sub-transacción: si una falla, las demás siguen y la falla queda informada.
+--   · Las bonificaciones de Flex (tipo 'flex') solo entran a la caja si se pide expresamente (p_incluir_flex), una vez cada una (clave estable), y SIEMPRE a la
+--     caja de la cuenta de Mercado Libre del adelanto (todas las órdenes de un adelanto tienen que ser de la MISMA cuenta).
+--   · Si una orden ya estaba acreditada por la vía normal con OTRO monto, no se da por conciliada: queda pendiente (MONTO_PREVIO_DISTINTO) para resolver a mano.
+--   · Antes de mover plata se bloquean, en un orden fijo, todas las órdenes y ventas del lote (orden → venta → caja, igual que la acreditación normal): sin interbloqueos.
+--   · Cada orden se acredita en su propia sub-transacción: si una falla, las demás siguen y la falla queda informada (los errores de concurrencia NO se tragan).
 --   · Solo personas autorizadas del CRM. Las tablas están cerradas: se lee y escribe únicamente con estas funciones.
 --
 --  REQUISITOS: script 3 (meli_esquema_base), script 4 (meli_ventas_migration: meli_acreditar_orden, ventas, caja) y is_authorized_user().
@@ -39,6 +42,7 @@ BEGIN;
 CREATE TABLE IF NOT EXISTS public.meli_adelantos (
   id                BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
   fecha             TIMESTAMPTZ  NOT NULL,
+  cuenta_id         BIGINT       REFERENCES public.meli_cuentas (id),
   total_adelantado  NUMERIC(18,2) NOT NULL CHECK (total_adelantado > 0),
   costo             NUMERIC(18,2) NOT NULL CHECK (costo >= 0),
   recibido          NUMERIC(18,2) NOT NULL,
@@ -47,6 +51,7 @@ CREATE TABLE IF NOT EXISTS public.meli_adelantos (
   creado_en         TIMESTAMPTZ  NOT NULL DEFAULT now(),
   CONSTRAINT meli_adelantos_recibido_ck CHECK (recibido = total_adelantado - costo)
 );
+ALTER TABLE public.meli_adelantos ADD COLUMN IF NOT EXISTS cuenta_id BIGINT REFERENCES public.meli_cuentas (id);
 CREATE UNIQUE INDEX IF NOT EXISTS meli_adelantos_unico ON public.meli_adelantos (fecha, total_adelantado);
 
 CREATE TABLE IF NOT EXISTS public.meli_adelanto_ops (
@@ -82,14 +87,16 @@ END $$;
 -- ── Registrar el adelanto ───────────────────────────────────────────────────
 --  p_ops: arreglo JSON de { "tipo": "pago"|"flex", "orden": "2000…" (pago) | "referencia": "cashback_…" (flex), "monto": 47061.86 }.
 DROP FUNCTION IF EXISTS public.meli_adelanto_registrar(TIMESTAMPTZ, NUMERIC, NUMERIC, JSONB, TEXT);
-CREATE FUNCTION public.meli_adelanto_registrar(p_fecha TIMESTAMPTZ, p_total NUMERIC, p_costo NUMERIC, p_ops JSONB, p_nota TEXT DEFAULT NULL)
+DROP FUNCTION IF EXISTS public.meli_adelanto_registrar(TIMESTAMPTZ, NUMERIC, NUMERIC, JSONB, TEXT, BIGINT);
+--  p_cuenta_id: solo hace falta si el adelanto no trae ninguna orden (solo bonificaciones); si no, sale de las órdenes (todas de la misma cuenta).
+CREATE FUNCTION public.meli_adelanto_registrar(p_fecha TIMESTAMPTZ, p_total NUMERIC, p_costo NUMERIC, p_ops JSONB, p_nota TEXT DEFAULT NULL, p_cuenta_id BIGINT DEFAULT NULL)
 RETURNS JSONB
 LANGUAGE plpgsql
 SECURITY DEFINER
 SET search_path = public, pg_temp
 AS $$
 DECLARE
-  v_usuario TEXT; v_id BIGINT; v_suma NUMERIC; v_n INTEGER; v_faltan TEXT; v_repetidas TEXT; v_otro TEXT; r RECORD;
+  v_usuario TEXT; v_id BIGINT; v_suma NUMERIC; v_n INTEGER; v_faltan TEXT; v_repetidas TEXT; v_otro TEXT; r RECORD; v_cuenta BIGINT; v_cuentas INTEGER; v_persona UUID; v_bolsillo TEXT;
 BEGIN
   IF NOT public.is_authorized_user() THEN RAISE EXCEPTION 'no autorizado' USING ERRCODE = '42501'; END IF;
   IF p_fecha IS NULL OR p_fecha > now() + interval '1 day' THEN RAISE EXCEPTION 'FECHA_INVALIDA'; END IF;
@@ -126,10 +133,22 @@ BEGIN
    JOIN _adelanto_ops o ON (x.tipo = 'pago' AND o.tipo = 'pago' AND x.orden_id = o.orden) OR (x.tipo = 'flex' AND o.tipo = 'flex' AND x.referencia = o.referencia);
   IF v_otro IS NOT NULL THEN RAISE EXCEPTION 'OPERACION_YA_EN_OTRO_ADELANTO' USING DETAIL = v_otro; END IF;
 
+  -- La cuenta del adelanto: todas las órdenes tienen que ser de la MISMA cuenta de Mercado Libre, y esa cuenta tiene que tener su caja configurada.
+  SELECT count(DISTINCT m.cuenta_id), min(m.cuenta_id) INTO v_cuentas, v_cuenta FROM _adelanto_ops o JOIN public.meli_ordenes m ON m.meli_order_id = o.orden WHERE o.tipo = 'pago';
+  IF v_cuentas > 1 THEN RAISE EXCEPTION 'CUENTAS_MEZCLADAS'; END IF;
+  IF v_cuentas = 0 THEN
+    IF p_cuenta_id IS NULL THEN RAISE EXCEPTION 'CUENTA_REQUERIDA'; END IF;
+    v_cuenta := p_cuenta_id;
+  ELSIF p_cuenta_id IS NOT NULL AND p_cuenta_id <> v_cuenta THEN
+    RAISE EXCEPTION 'CUENTA_NO_COINCIDE';
+  END IF;
+  SELECT c.persona_id, c.bolsillo INTO v_persona, v_bolsillo FROM public.meli_cuentas c WHERE c.id = v_cuenta;
+  IF NOT FOUND OR v_persona IS NULL OR COALESCE(btrim(v_bolsillo), '') = '' THEN RAISE EXCEPTION 'CUENTA_SIN_CAJA'; END IF;
+
   v_usuario := COALESCE(NULLIF(auth.jwt() -> 'user_metadata' ->> 'full_name', ''), NULLIF(auth.jwt() ->> 'email', ''), 'Desconocido');
   BEGIN
-    INSERT INTO public.meli_adelantos (fecha, total_adelantado, costo, recibido, nota, creado_por)
-    VALUES (p_fecha, p_total, p_costo, p_total - p_costo, left(NULLIF(btrim(COALESCE(p_nota, '')), ''), 300), v_usuario) RETURNING id INTO v_id;
+    INSERT INTO public.meli_adelantos (fecha, cuenta_id, total_adelantado, costo, recibido, nota, creado_por)
+    VALUES (p_fecha, v_cuenta, p_total, p_costo, p_total - p_costo, left(NULLIF(btrim(COALESCE(p_nota, '')), ''), 300), v_usuario) RETURNING id INTO v_id;
   EXCEPTION WHEN unique_violation THEN
     RAISE EXCEPTION 'ADELANTO_YA_REGISTRADO';
   END;
@@ -200,38 +219,54 @@ AS $$
 DECLARE
   a public.meli_adelantos%ROWTYPE; r RECORD; v_usuario TEXT; v_res JSONB := '[]'::jsonb; v_r JSONB; v_motivo TEXT;
   v_acred INTEGER := 0; v_ya INTEGER := 0; v_pend INTEGER := 0; v_monto_acred NUMERIC := 0; v_flex INTEGER := 0; v_flex_monto NUMERIC := 0;
-  v_persona UUID; v_bolsillo TEXT; v_cuentas INTEGER;
+  v_persona UUID; v_bolsillo TEXT;
 BEGIN
   IF NOT public.is_authorized_user() THEN RAISE EXCEPTION 'no autorizado' USING ERRCODE = '42501'; END IF;
   SELECT * INTO a FROM public.meli_adelantos WHERE id = p_adelanto_id FOR UPDATE;       -- una corrida por adelanto a la vez
   IF NOT FOUND THEN RAISE EXCEPTION 'ADELANTO_INEXISTENTE'; END IF;
   v_usuario := COALESCE(NULLIF(auth.jwt() -> 'user_metadata' ->> 'full_name', ''), NULLIF(auth.jwt() ->> 'email', ''), 'Desconocido');
 
-  -- Órdenes en orden de id: bloqueos siempre en el mismo orden.
+  -- BLOQUEOS ANTES DE TOCAR PLATA, siempre en el mismo orden que la acreditación normal (orden → venta → caja): primero TODAS las órdenes del lote por id,
+  -- después TODAS sus ventas por id. Así otra sesión que acredite o revierta una de estas órdenes nunca queda esperando a esta mientras esta espera a aquella.
+  PERFORM 1 FROM public.meli_ordenes m WHERE m.meli_order_id IN (SELECT orden_id FROM public.meli_adelanto_ops WHERE adelanto_id = a.id AND tipo = 'pago' AND acreditado_en IS NULL)
+   ORDER BY m.id FOR UPDATE;
+  PERFORM 1 FROM public.ventas v WHERE v.id IN (SELECT m.venta_id FROM public.meli_ordenes m WHERE m.venta_id IS NOT NULL AND m.meli_order_id IN
+           (SELECT orden_id FROM public.meli_adelanto_ops WHERE adelanto_id = a.id AND tipo = 'pago' AND acreditado_en IS NULL)) ORDER BY v.id FOR UPDATE;
+
   FOR r IN SELECT op.id AS op_id, op.monto, m.id AS orden_pk, op.orden_id FROM public.meli_adelanto_ops op
             JOIN public.meli_ordenes m ON m.meli_order_id = op.orden_id
            WHERE op.adelanto_id = a.id AND op.tipo = 'pago' AND op.acreditado_en IS NULL ORDER BY m.id LOOP
     BEGIN
       v_r := public.meli__acreditar_por_adelanto(r.orden_pk, r.monto, v_usuario);
+      IF (v_r ->> 'ya_acreditada')::BOOLEAN AND NOT COALESCE((v_r ->> 'monto_igual')::BOOLEAN, FALSE) THEN
+        -- Ya estaba acreditada por la vía normal con OTRO monto (o sin monto): NO se da por conciliada. Queda pendiente, con ambos importes, para resolver a mano.
+        v_pend := v_pend + 1;
+        v_res := v_res || jsonb_build_array(jsonb_build_object('orden', r.orden_id, 'resultado', 'pendiente', 'motivo', 'MONTO_PREVIO_DISTINTO',
+                   'monto_mp', r.monto, 'monto_previo', v_r -> 'monto'));
+        CONTINUE;
+      END IF;
       UPDATE public.meli_adelanto_ops SET acreditado_en = now(), resultado = CASE WHEN (v_r ->> 'ya_acreditada')::BOOLEAN THEN 'ya_acreditada' ELSE 'acreditada' END WHERE id = r.op_id;
       IF (v_r ->> 'ya_acreditada')::BOOLEAN THEN
         v_ya := v_ya + 1;
-        v_res := v_res || jsonb_build_array(jsonb_build_object('orden', r.orden_id, 'resultado', 'ya_acreditada', 'monto_igual', (v_r ->> 'monto_igual')::BOOLEAN));
+        v_res := v_res || jsonb_build_array(jsonb_build_object('orden', r.orden_id, 'resultado', 'ya_acreditada', 'monto_igual', TRUE));
       ELSE
         v_acred := v_acred + 1; v_monto_acred := v_monto_acred + r.monto;
         v_res := v_res || jsonb_build_array(jsonb_build_object('orden', r.orden_id, 'resultado', 'acreditada', 'monto', r.monto));
       END IF;
-    EXCEPTION WHEN OTHERS THEN
-      v_motivo := substring(SQLERRM FROM '^[A-Z_]+');
-      v_pend := v_pend + 1;
-      v_res := v_res || jsonb_build_array(jsonb_build_object('orden', r.orden_id, 'resultado', 'pendiente', 'motivo', COALESCE(v_motivo, 'ERROR')));
+    EXCEPTION
+      -- Los errores de concurrencia NO se tragan: se propagan y se reintenta la corrida completa (es idempotente).
+      WHEN deadlock_detected OR serialization_failure OR lock_not_available THEN RAISE;
+      WHEN OTHERS THEN
+        v_motivo := substring(SQLERRM FROM '^[A-Z_]+');
+        v_pend := v_pend + 1;
+        v_res := v_res || jsonb_build_array(jsonb_build_object('orden', r.orden_id, 'resultado', 'pendiente', 'motivo', COALESCE(v_motivo, 'ERROR')));
     END;
   END LOOP;
 
   IF COALESCE(p_incluir_flex, FALSE) THEN
-    SELECT count(*) INTO v_cuentas FROM public.meli_cuentas c WHERE COALESCE(c.activa, TRUE) AND c.persona_id IS NOT NULL AND COALESCE(btrim(c.bolsillo), '') <> '';
-    IF v_cuentas <> 1 THEN RAISE EXCEPTION 'FLEX_CUENTA_AMBIGUA'; END IF;       -- sin una única cuenta no se adivina a qué caja entra
-    SELECT c.persona_id, c.bolsillo INTO v_persona, v_bolsillo FROM public.meli_cuentas c WHERE COALESCE(c.activa, TRUE) AND c.persona_id IS NOT NULL AND COALESCE(btrim(c.bolsillo), '') <> '';
+    -- La bonificación entra a la caja de la cuenta DEL ADELANTO (la misma de sus órdenes), no a la de una cuenta cualquiera.
+    SELECT c.persona_id, c.bolsillo INTO v_persona, v_bolsillo FROM public.meli_cuentas c WHERE c.id = a.cuenta_id FOR SHARE;
+    IF v_persona IS NULL OR COALESCE(btrim(v_bolsillo), '') = '' THEN RAISE EXCEPTION 'CUENTA_SIN_CAJA'; END IF;
     INSERT INTO public.cajas (persona_id, bolsillo, saldo) VALUES (v_persona, v_bolsillo, 0) ON CONFLICT (persona_id, bolsillo) DO NOTHING;
     FOR r IN SELECT id, referencia, monto FROM public.meli_adelanto_ops WHERE adelanto_id = a.id AND tipo = 'flex' AND acreditado_en IS NULL ORDER BY id LOOP
       PERFORM public._caja_aplicar_delta(v_persona, v_bolsillo, r.monto, 'meli', r.referencia, 'Bonificación Flex por envío (adelanto ' || a.id || ')', v_usuario, 'meli-flex-' || r.referencia);
@@ -258,25 +293,25 @@ BEGIN
   IF NOT public.is_authorized_user() THEN RAISE EXCEPTION 'no autorizado' USING ERRCODE = '42501'; END IF;
   RETURN COALESCE((
     SELECT jsonb_agg(jsonb_build_object(
-      'id', a.id, 'fecha', a.fecha, 'total_adelantado', a.total_adelantado, 'costo', a.costo, 'recibido', a.recibido, 'nota', a.nota, 'creado_por', a.creado_por,
+      'id', a.id, 'fecha', a.fecha, 'cuenta_id', a.cuenta_id, 'total_adelantado', a.total_adelantado, 'costo', a.costo, 'recibido', a.recibido, 'nota', a.nota, 'creado_por', a.creado_por,
       'ops', COALESCE((SELECT jsonb_agg(jsonb_build_object(
             'id', op.id, 'tipo', op.tipo, 'orden', op.orden_id, 'referencia', op.referencia, 'monto', op.monto, 'resultado', op.resultado, 'acreditado_en', op.acreditado_en,
             'estado', m.estado, 'procesada', m.procesada, 'acreditada', m.acreditado, 'revertida', (m.revertida_en IS NOT NULL), 'revisar', m.revisar,
-            'neto', m.neto, 'libera', m.fecha_liberacion) ORDER BY op.id)
+            'neto', m.neto, 'monto_acreditado', m.monto_acreditado, 'libera', m.fecha_liberacion) ORDER BY op.id)
           FROM public.meli_adelanto_ops op LEFT JOIN public.meli_ordenes m ON m.meli_order_id = op.orden_id WHERE op.adelanto_id = a.id), '[]'::jsonb))
       ORDER BY a.fecha DESC)
     FROM public.meli_adelantos a WHERE p_adelanto_id IS NULL OR a.id = p_adelanto_id), '[]'::jsonb);
 END;
 $$;
 
-REVOKE ALL ON FUNCTION public.meli_adelanto_registrar(TIMESTAMPTZ, NUMERIC, NUMERIC, JSONB, TEXT), public.meli__acreditar_por_adelanto(BIGINT, NUMERIC, TEXT),
+REVOKE ALL ON FUNCTION public.meli_adelanto_registrar(TIMESTAMPTZ, NUMERIC, NUMERIC, JSONB, TEXT, BIGINT), public.meli__acreditar_por_adelanto(BIGINT, NUMERIC, TEXT),
   public.meli_adelanto_acreditar(BIGINT, BOOLEAN), public.meli_adelanto_estado(BIGINT) FROM PUBLIC, anon, authenticated;
-GRANT EXECUTE ON FUNCTION public.meli_adelanto_registrar(TIMESTAMPTZ, NUMERIC, NUMERIC, JSONB, TEXT), public.meli_adelanto_acreditar(BIGINT, BOOLEAN),
+GRANT EXECUTE ON FUNCTION public.meli_adelanto_registrar(TIMESTAMPTZ, NUMERIC, NUMERIC, JSONB, TEXT, BIGINT), public.meli_adelanto_acreditar(BIGINT, BOOLEAN),
   public.meli_adelanto_estado(BIGINT) TO authenticated;
 DO $$
 BEGIN
   IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'service_role') THEN
-    REVOKE ALL ON FUNCTION public.meli_adelanto_registrar(TIMESTAMPTZ, NUMERIC, NUMERIC, JSONB, TEXT), public.meli__acreditar_por_adelanto(BIGINT, NUMERIC, TEXT),
+    REVOKE ALL ON FUNCTION public.meli_adelanto_registrar(TIMESTAMPTZ, NUMERIC, NUMERIC, JSONB, TEXT, BIGINT), public.meli__acreditar_por_adelanto(BIGINT, NUMERIC, TEXT),
       public.meli_adelanto_acreditar(BIGINT, BOOLEAN), public.meli_adelanto_estado(BIGINT) FROM service_role;
   END IF;
 END $$;

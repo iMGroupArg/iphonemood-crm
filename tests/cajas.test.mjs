@@ -910,7 +910,7 @@ const gastoDom = () => ({ 'gf-motivo': 'Alquiler', 'gf-monto': '400', 'gf-caja-p
 {
   const e = nuevoEntorno({ modulos: ['gastos.js'], dom: gastoDom(), dbExtra: { async crearGasto() { return 9; }, async eliminarGasto(id) { e.eliminados.push(id); } } });
   e.eliminados = [];
-  e.sembrar({ Franco: { 'USD cash': 1000 } });
+  e.sembrar({ Franco: { 'USD cash': 1000 } }); e.State.personas = ['Franco']; // el formulario endurecido exige una persona que exista
   Object.assign(e.mod.Gastos, { close() {}, renderChips() {}, renderKpis() {}, renderTable() {} });
   e.State.categoriasGasto = [{ id: 'c1', nombre: 'Varios', color: '#888' }]; e.State.gastos = [];
   await e.mod.Gastos.save();
@@ -921,7 +921,7 @@ const gastoDom = () => ({ 'gf-motivo': 'Alquiler', 'gf-monto': '400', 'gf-caja-p
   const e = nuevoEntorno({ modulos: ['gastos.js'], dom: gastoDom(), fallaEscritura: () => true,
     dbExtra: { async crearGasto() { return 9; }, async eliminarGasto(id) { e.eliminados.push(id); } } });
   e.eliminados = [];
-  e.sembrar({ Franco: { 'USD cash': 1000 } });
+  e.sembrar({ Franco: { 'USD cash': 1000 } }); e.State.personas = ['Franco']; // el formulario endurecido exige una persona que exista
   Object.assign(e.mod.Gastos, { close() {}, renderChips() {}, renderKpis() {}, renderTable() {} });
   e.State.categoriasGasto = [{ id: 'c1', nombre: 'Varios', color: '#888' }]; e.State.gastos = [];
   await e.mod.Gastos.save();

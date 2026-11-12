@@ -5,9 +5,10 @@
 import fs from 'node:fs';
 import vm from 'node:vm';
 
-const SRC = '/Users/francovelas/crm-complete/iphonemood-crm/src/modules/state.js';
-const MODULOS = '/Users/francovelas/crm-complete/iphonemood-crm/src/modules/';
-const RAIZ = '/Users/francovelas/crm-complete/iphonemood-crm/';
+// Las rutas salen de DÓNDE ESTÁ ESTE ARCHIVO: así la suite prueba los módulos del árbol (o worktree) en el que se corre, no los de otra carpeta.
+const RAIZ = new URL('../', import.meta.url).pathname;
+const SRC = RAIZ + 'src/modules/state.js';
+const MODULOS = RAIZ + 'src/modules/';
 
 const BOLSILLOS = ['ARS cash', 'ARS transferencia', 'USD cash', 'USD transferencia', 'USDT'];
 const monedaDe = b => (b.startsWith('ARS') ? 'ARS' : b === 'USDT' ? 'USDT' : 'USD');

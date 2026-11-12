@@ -182,8 +182,7 @@ const Adelantos = {
     const host = document.getElementById('adelantos-modal-host');
     const montoFmt = a.moneda === 'USD' ? State.fmtUSD(a.monto) : State.fmtARS(a.monto);
     const personaOpts = State.personas.map(p => `<option>${p}</option>`).join('');
-    const bolsilloOpts = ['ARS cash','ARS transferencia','USD cash','USD transferencia','USDT']
-      .map(b => `<option>${b}</option>`).join('');
+    const bolsilloOpts = State.opcionesBolsillo(null, State.personas[0]);
     host.innerHTML = `
       <div style="position:fixed;inset:0;background:rgba(0,0,0,.75);backdrop-filter:blur(6px);z-index:900;display:flex;align-items:center;justify-content:center;padding:20px" onclick="if(event.target===this)Adelantos.closeModal()">
         <div style="background:var(--bg-elevated);border:1px solid var(--border-strong);border-radius:var(--radius-xl);width:min(400px,96vw);overflow:hidden" onclick="event.stopPropagation()">
@@ -199,7 +198,7 @@ const Adelantos = {
             <div>
               <label style="font-size:11px;color:var(--text-secondary);display:block;margin-bottom:4px">De qué caja sale el dinero</label>
               <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
-                <select id="cob-persona" style="font-size:12px;padding:8px 10px;background:var(--bg-secondary);border:1px solid var(--border-strong);border-radius:8px;color:var(--text)">${personaOpts}</select>
+                <select id="cob-persona" onchange="document.getElementById('cob-bolsillo').innerHTML=State.opcionesBolsillo(null,this.value)" style="font-size:12px;padding:8px 10px;background:var(--bg-secondary);border:1px solid var(--border-strong);border-radius:8px;color:var(--text)">${personaOpts}</select>
                 <select id="cob-bolsillo" style="font-size:12px;padding:8px 10px;background:var(--bg-secondary);border:1px solid var(--border-strong);border-radius:8px;color:var(--text)">${bolsilloOpts}</select>
               </div>
             </div>

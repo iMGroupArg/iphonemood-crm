@@ -2796,7 +2796,7 @@ const entornoVenta = (extra = {}, cfg = {}) => {
     V._nicho = 'perfumeria'; const cP = V._vistaRubro(e.State.ventas[0]).costoCanal;
     V._nicho = 'iphone'; const cI = V._vistaRubro(e.State.ventas[0]).costoCanal;
     V._nicho = '';
-    check('Comisión real de USD 0,10 repartida entre dos rubros (1 % y 99 %): las partes suman 0,10 exacto y coinciden con el reparto por ítem', Math.round((cP + cI) * 100) === 10 && cP >= 0 && cI >= 0, JSON.stringify([cP, cI]));
+    check('Comisión real de USD 0,10 repartida entre dos rubros (1 % y 99 %): las partes suman 0,10 exacto (misma proporción que Reportes)', Math.round((cP + cI) * 100) === 10 && cP >= 0 && cI >= 0, JSON.stringify([cP, cI]));
     V._nicho = 'perfumeria';
     check('Un rubro con una parte chica que redondea a 0 centavos no inventa costo ni deja de cerrar la cuenta', V.resultadoVenta(V._vistaRubro(e.State.ventas[0])).costoCanal === cP);
     V._nicho = '';
@@ -2815,6 +2815,21 @@ const entornoVenta = (extra = {}, cfg = {}) => {
       return f.quebranto > 0 && Math.abs((a.quebranto + b.quebranto) - f.quebranto) < 1e-9 && Math.abs((a.margenReal + b.margenReal) - f.margenReal) < 1e-9;
     })());
     check('Sin rubro, o con una venta de un solo rubro, el resultado por rubro es resultadoVenta tal cual', JSON.stringify(V._resultadoRubro(vCod)) === JSON.stringify(rFullC) && (V._nicho = 'perfumeria', JSON.stringify(V._resultadoRubro({ ...vCod, items: [vCod.items[0]] })) === JSON.stringify(V.resultadoVenta({ ...vCod, items: [vCod.items[0]] })), V._nicho = '', true));
+    // Caso de Codex (3ª ronda): 8 ítems de USD 1 (4 y 4), comisión 0,04, cobrado 7,96 → las FILAS de ítems del export suman lo mismo que el resumen
+    const itemsOcho = Array.from({ length: 8 }, (_, k) => ({ nombre: 'I' + k, precio: 1, costo: 0, rubro: k < 4 ? 'perfumeria' : 'iphone', stockId: 's1', cantidad: 1 }));
+    const v8 = { id: 405, estado: 'cerrada', tipoVenta: 'mercadolibre', meliOrdenId: 405, meliCotizacion: 100, costoCanal: 0.04, fecha: '28/10', fechaISO: '2026-10-28', cliente: 'O8', vendedor: '', items: itemsOcho, pagos: [{ monto: 7.96, persona: 'F', bolsillo: 'USD cash' }] };
+    e.State.ventas = [v8]; e.State.meliOrdenes = []; V._nicho = 'perfumeria';
+    V.exportarDetalleExcel();
+    const res8 = (hojas['Ventas'] || []).find(x => x['Venta'] === 405);
+    const filas8 = (hojas['Accesorios'] || []).filter(x => x['Venta'] === 405);
+    V._nicho = '';
+    const sumaCom = filas8.reduce((a, x) => a + x['Comisión canal'], 0), sumaProfit = filas8.reduce((a, x) => a + x['Profit'], 0);
+    check('Export con rubro (8 ítems, comisión 0,04): las filas de ítems SUMAN la comisión y el profit del resumen por rubro (antes diferían 0,02)',
+      filas8.length === 4 && Math.abs(sumaCom - res8['Costo del canal']) < 1e-3 && Math.abs(sumaProfit - res8['Ganancia real']) < 1e-3 && Math.abs(res8['Costo del canal'] - 0.02) < 1e-9, JSON.stringify([res8['Costo del canal'], sumaCom, res8['Ganancia real'], sumaProfit]));
+    // Venta sin precios con rubro: igual que Reportes (peso 0), sin repartir por cantidad de ítems
+    const vCero = { id: 406, estado: 'abierta', tipoVenta: 'minorista', fecha: '28/10', fechaISO: '2026-10-28', cliente: 'Z', costoCanal: 0.5, items: [{ nombre: 'a', precio: 0, costo: 1, rubro: 'perfumeria', cantidad: 1 }, { nombre: 'b', precio: 0, costo: 1, rubro: 'iphone', cantidad: 1 }], pagos: [] };
+    V._nicho = 'perfumeria'; const rCero = V._resultadoRubro(vCero); V._nicho = '';
+    check('Venta con todos los precios en cero y un rubro elegido: el canal del rubro es 0 (peso 0, como Reportes), no repartido por cantidad de ítems', rCero.costoCanal === 0 && rCero.costo === 1);
     check('Venta común con costo del canal de USD 0,004: se descuenta igual (sin umbral que cambie resultados históricos)', V.resultadoVenta({ id: 7, tipoVenta: 'minorista', estado: 'abierta', costoCanal: 0.004, items: [{ precio: 10, costo: 4 }], pagos: [] }).costoCanal === 0.004);
     // Reemplazar una orden dentro de la MISMA lista se refleja (sin caché que quede viejo)
     const lista = [{ ventaId: 402, orderId: 'A', acreditado: false, revertidaEn: null, financieraCompleta: true, bruto: 1000, neto: 900 }];

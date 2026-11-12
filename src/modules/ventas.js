@@ -131,10 +131,13 @@ const Ventas = {
     if (!nicho || typeof Reportes === 'undefined' || !Reportes.nichoDe) return v;
     const todos = v.items || [];
     const sel = todos.filter(i => Reportes.nichoDe(i) === nicho);
-    if (!sel.length || sel.length === todos.length) return v;
+    if (!sel.length) return v;
     const peso = i => Math.max(0, Number(i.precio) || 0);
     const W = todos.reduce((a, i) => a + peso(i), 0), Ws = sel.reduce((a, i) => a + peso(i), 0);
-    const parte = W > 0 ? Ws / W : 0;   // misma regla que Reportes.calcular (sin precios no hay con qué repartir)
+    // Una venta de un solo rubro con todo el precio repartido es la venta misma. Con total en cero se aplica la regla de
+    // Reportes.calcular (peso 0: sin precios no hay con qué repartir), también si todos los ítems son del rubro.
+    if (sel.length === todos.length && W > 0) return v;
+    const parte = W > 0 ? Ws / W : 0;
     return { ...v, items: sel, pagos: (v.pagos || []).map(p => ({ ...p, monto: p.monto * parte })),
       tradeIn: v.tradeIn ? { ...v.tradeIn, valor: (v.tradeIn.valor || 0) * parte } : v.tradeIn,
       costoCanal: this.resultadoVenta(v).costoCanal * parte, meliCotizacion: null, parteRubro: parte };
@@ -290,13 +293,13 @@ const Ventas = {
       const r = this._resultadoRubro(v);
       const items = v.items.filter(enNicho);
       // Comisión de Mercado Libre de cada ítem (real o estimada), repartida según su precio con la MISMA proporción continua que usa
-      // el resumen por rubro y Reportes: las filas de ítems suman exactamente la comisión del resumen (los importes por fila van con 4
-      // decimales: redondearlos a centavos separaba hasta medio centavo por fila). El detalle en pantalla, en cambio, reparte en
+      // el resumen por rubro y Reportes: las filas de ítems suman exactamente la comisión del resumen (los importes por fila van con 6
+      // decimales: redondearlos a centavos —o a 4— acumulaba diferencias en ventas con muchos ítems). El detalle en pantalla, en cambio, reparte en
       // centavos enteros porque ahí hay que mostrar una suma exacta.
       const comV = this._comisionPorItem(v, rFull);
       const Wv = (v.items || []).reduce((a, i) => a + Math.max(0, Number(i.precio) || 0), 0);
       const parteCom = it => (comV && Wv > 0 ? comV.total * Math.max(0, Number(it.precio) || 0) / Wv : 0);
-      const n4 = x => Number(Number(x || 0).toFixed(4));
+      const n6 = x => Number(Number(x || 0).toFixed(6));
       const disp = items.filter(esDisp);
       const acc  = items.filter(i => !esDisp(i));
       const subDisp = disp.reduce((a, i) => a + i.precio, 0);
@@ -331,7 +334,7 @@ const Ventas = {
           'Dispositivo': i.nombre, 'Condición': p?.estadoProducto || '',
           'IMEI': i.imei || '', 'Regalo': i.regalo ? 'Sí' : '',
           'Precio compra': n(i.costo), 'Precio venta': n(i.precio),
-          'Comisión canal': n4(com), 'Profit': n4(i.precio - (i.costo || 0) - com),
+          'Comisión canal': n6(com), 'Profit': n6(i.precio - (i.costo || 0) - com),
         });
       });
 
@@ -342,7 +345,7 @@ const Ventas = {
           'Nicho': nombreNicho(Reportes.nichoDe(i)),
           'Accesorio': i.nombre, 'Cantidad': i.cantidad || 1, 'Regalo': i.regalo ? 'Sí' : '',
           'Costo': n(i.costo), 'Precio total': n(i.precio),
-          'Comisión canal': n4(com), 'Profit': n4(i.precio - (i.costo || 0) - com),
+          'Comisión canal': n6(com), 'Profit': n6(i.precio - (i.costo || 0) - com),
         });
       });
 

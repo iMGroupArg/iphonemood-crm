@@ -828,8 +828,7 @@ const CuentaCorriente = {
       : 'background:var(--bg-elevated);border-radius:var(--radius-lg);width:480px;padding:24px;max-height:85vh;overflow-y:auto;align-self:center;box-shadow:0 20px 60px rgba(0,0,0,.4)';
 
     const personasOpts = (State.personas || []).map(p => `<option value="${p}">${p}</option>`).join('');
-    const bolsillos = ['ARS cash','ARS transferencia','USD cash','USD transferencia','USDT'];
-    const bolsillosOpts = bolsillos.map(b => `<option value="${b}">${b}</option>`).join('');
+    const bolsillosOpts = State.opcionesBolsillo(null, (State.personas || [])[0]);
     const aplicarOpts = opciones.map((o, i) => `<option value="${i}">${o.label}</option>`).join('');
 
     box.innerHTML = `
@@ -845,7 +844,7 @@ const CuentaCorriente = {
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
           <div>
             <label style="font-size:12px;font-weight:600;color:var(--text-secondary);text-transform:uppercase;letter-spacing:.5px;display:block;margin-bottom:6px">Persona (caja)</label>
-            <select id="cc-p-persona" style="width:100%;padding:10px;border:1px solid var(--border);border-radius:var(--radius);background:var(--bg);color:var(--text);font-size:14px">${personasOpts}</select>
+            <select id="cc-p-persona" onchange="(function(){const s=document.getElementById('cc-p-bolsillo');const a=s.value;s.innerHTML=State.opcionesBolsillo(null,document.getElementById('cc-p-persona').value);if([...s.options].some(o=>o.value===a))s.value=a;s.dispatchEvent(new Event('change'))})()" style="width:100%;padding:10px;border:1px solid var(--border);border-radius:var(--radius);background:var(--bg);color:var(--text);font-size:14px">${personasOpts}</select>
           </div>
           <div>
             <label style="font-size:12px;font-weight:600;color:var(--text-secondary);text-transform:uppercase;letter-spacing:.5px;display:block;margin-bottom:6px">Bolsillo</label>
@@ -884,6 +883,8 @@ const CuentaCorriente = {
 
     overlay.appendChild(box);
     document.body.appendChild(overlay);
+    // La caja elegida al abrir puede no ser en pesos (si la primera persona no tiene cajas ARS): se ajustan rótulo y cotización ya.
+    document.getElementById('cc-p-bolsillo')?.dispatchEvent(new Event('change'));
 
     const close = () => overlay.remove();
     overlay.addEventListener('click', e => { if (e.target === overlay) close(); });

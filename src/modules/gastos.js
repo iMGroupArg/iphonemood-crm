@@ -160,7 +160,7 @@ const Gastos = {
           ${this._labelInp('Motivo', `<input type="text" id="gf-motivo" style="${this._inp()}" placeholder="ej: Alquiler, nafta…">`)}
           <div style="display:grid;grid-template-columns:1fr 1fr;gap:9px">
             ${this._labelInp('Categoría', `<select id="gf-cat" style="${this._sel()}">${State.categoriasGasto.map(c=>`<option value="${c.id}">${c.nombre}</option>`).join('')}</select>`)}
-            ${this._labelInp('Responsable', `<select id="gf-resp" style="${this._sel()}">${State.personas.map(p=>`<option>${p}</option>`).join('')}</select>`)}
+            ${this._labelInp('Responsable', `<select id="gf-resp" style="${this._sel()}">${State.personas.map(p=>`<option value="${State.esc(p)}">${State.esc(p)}</option>`).join('')}</select>`)}
           </div>
           <div style="display:grid;grid-template-columns:1fr 1fr;gap:9px">
             ${this._labelInp('Moneda', `<select id="gf-moneda" onchange="Gastos._syncBolsillos()" style="${this._sel()}"><option value="ARS">ARS</option><option value="USD">USD</option></select>`)}
@@ -169,7 +169,7 @@ const Gastos = {
           <div style="margin-bottom:14px">
             <label style="font-size:11px;color:var(--text-secondary);font-weight:600;display:block;margin-bottom:4px">Caja que paga</label>
             <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
-              <select id="gf-caja-persona" style="${this._sel()}"><option value="">— ¿Quién paga? —</option>${State.personas.map(p=>`<option>${p}</option>`).join('')}</select>
+              <select id="gf-caja-persona" onchange="Gastos._syncBolsillos()" style="${this._sel()}"><option value="">— ¿Quién paga? —</option>${State.personas.map(p=>`<option value="${State.esc(p)}">${State.esc(p)}</option>`).join('')}</select>
               <select id="gf-caja-bolsillo" style="${this._sel()}"><option value="">— ¿De qué caja? —</option>${this._opcionesBolsillo('ARS')}</select>
             </div>
           </div>
@@ -223,24 +223,32 @@ const Gastos = {
   // Cajas que pueden pagar un gasto según su moneda: un gasto en pesos solo sale de cajas en pesos;
   // uno en dólares, de cajas en dólares o USDT (1:1). Antes la moneda y la caja eran listas
   // independientes y se podía descontar «50.000» de una caja en dólares.
-  _opcionesBolsillo(moneda) {
+  _bolsillosPara(moneda, persona) {
     const ok = b => moneda === 'ARS' ? State.monedaDeBolsillo(b) === 'ARS' : ['USD', 'USDT'].includes(State.monedaDeBolsillo(b));
-    return State.bolsillosExistentes().filter(ok).map(b => `<option>${b}</option>`).join('');
+    // Con persona elegida: los 5 de siempre más los que ESA persona tiene (un bolsillo de otra no sirve).
+    const suyo = b => !persona || State.BOLSILLOS_BASE.includes(b) || Object.prototype.hasOwnProperty.call(State.cajas[persona] || {}, b);
+    return State.bolsillosExistentes().filter(ok).filter(suyo);
+  },
+  // Los nombres vienen de la base y se pegan en HTML: siempre escapados (texto y value).
+  _opcionesBolsillo(moneda, persona) {
+    return this._bolsillosPara(moneda, persona).map(b => `<option value="${State.esc(b)}">${State.esc(b)}</option>`).join('');
   },
   _syncBolsillos() {
     const moneda = document.getElementById('gf-moneda')?.value || 'ARS';
+    const persona = document.getElementById('gf-caja-persona')?.value || '';
     const sel = document.getElementById('gf-caja-bolsillo');
     if (!sel) return;
     const actual = sel.value;
-    sel.innerHTML = `<option value="">— ¿De qué caja? —</option>${this._opcionesBolsillo(moneda)}`;
+    sel.innerHTML = `<option value="">— ¿De qué caja? —</option>${this._opcionesBolsillo(moneda, persona)}`;
     // Se conserva la elección solo si sigue siendo válida para la nueva moneda.
     if ([...sel.options].some(o => o.value === actual)) sel.value = actual;
   },
 
   async save() {
     const motivo = document.getElementById('gf-motivo').value.trim();
-    const monto = parseFloat(document.getElementById('gf-monto').value) || 0;
-    if (!motivo || !monto) { toast('Completá motivo y monto.'); return; }
+    const monto = Number(document.getElementById('gf-monto').value);
+    if (!motivo || !Number.isFinite(monto) || monto <= 0) { toast('Completá motivo y un monto mayor a cero.'); return; }
+    if (Math.abs(monto * 100 - Math.round(monto * 100)) > 1e-6) { toast('El monto admite hasta 2 decimales.'); return; }
     const persona = document.getElementById('gf-caja-persona').value;
     const bolsillo = document.getElementById('gf-caja-bolsillo').value;
     const moneda = document.getElementById('gf-moneda').value;
@@ -248,10 +256,14 @@ const Gastos = {
     const responsable = document.getElementById('gf-resp').value;
     // La caja se ELIGE: sin una por defecto, no se puede descontar de la primera de la lista sin darse cuenta.
     if (!persona || !bolsillo) { toast('Elegí de qué caja se paga el gasto (quién y qué bolsillo).'); return; }
-    const monedaBolsillo = State.monedaDeBolsillo(bolsillo);
-    const compatible = moneda === 'ARS' ? monedaBolsillo === 'ARS' : ['USD', 'USDT'].includes(monedaBolsillo);
-    if (!compatible) {
-      toast(`El gasto es en ${moneda} pero la caja "${bolsillo}" es en ${monedaBolsillo}. Elegí una caja en la misma moneda.`);
+    if (!['ARS', 'USD'].includes(moneda)) { toast('Moneda no válida.'); return; }
+    if (!State.personas.includes(persona)) { toast('Esa persona no existe. Elegí quién paga de la lista.'); return; }
+    // El bolsillo tiene que ser de ESA persona (o de los 5 de siempre) y de la misma moneda que el gasto.
+    if (!this._bolsillosPara(moneda, persona).includes(bolsillo)) {
+      const monedaBolsillo = State.monedaDeBolsillo(bolsillo);
+      toast(monedaBolsillo && monedaBolsillo !== moneda && !(moneda === 'USD' && monedaBolsillo === 'USDT')
+        ? `El gasto es en ${State.esc(moneda)} pero la caja "${State.esc(bolsillo)}" es en ${State.esc(monedaBolsillo)}. Elegí una caja en la misma moneda.`
+        : `${State.esc(persona)} no tiene la caja "${State.esc(bolsillo)}". Elegí una de la lista.`);
       return;
     }
 
@@ -287,7 +299,7 @@ const Gastos = {
     this.close(); this.renderChips(); this.renderKpis(); this.renderTable();
     // Se dice EXACTAMENTE de qué caja salió y cuánto queda, para que un error de caja se vea al instante.
     const fmtCaja = n => bolsillo === 'USDT' ? `${(+n).toLocaleString('es-AR')} USDT` : (State.monedaDeBolsillo(bolsillo) === 'ARS' ? State.fmtARS(n) : State.fmtUSD(n));
-    toast(`Gasto registrado: se descontaron ${fmtCaja(monto)} de ${persona} · ${bolsillo} (queda ${fmtCaja(State.cajas[persona]?.[bolsillo] ?? 0)}).`);
+    toast(`Gasto registrado: se descontaron ${fmtCaja(monto)} de ${State.esc(persona)} · ${State.esc(bolsillo)} (queda ${fmtCaja(State.cajas[persona]?.[bolsillo] ?? 0)}).`);
   },
 
   openEdit(id) {

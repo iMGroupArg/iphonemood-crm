@@ -113,7 +113,7 @@ BEGIN
   IF p_ops IS NULL OR jsonb_typeof(p_ops) <> 'array' OR jsonb_array_length(p_ops) = 0 OR jsonb_array_length(p_ops) > 500 THEN RAISE EXCEPTION 'OPERACIONES_INVALIDAS'; END IF;
 
   CREATE TEMP TABLE IF NOT EXISTS _adelanto_ops (tipo TEXT, orden TEXT, referencia TEXT, monto NUMERIC) ON COMMIT DROP;
-  DELETE FROM _adelanto_ops;
+  DELETE FROM _adelanto_ops WHERE true;   -- Supabase (pg_safeupdate) rechaza DELETE sin WHERE cuando llega por la API
   FOR r IN SELECT value AS e FROM jsonb_array_elements(p_ops) LOOP
     IF jsonb_typeof(r.e) <> 'object' OR (r.e ->> 'tipo') NOT IN ('pago', 'flex')
        OR (r.e ->> 'monto') !~ '^[0-9]{1,12}(\.[0-9]{1,2})?$' OR (r.e ->> 'monto')::NUMERIC <= 0 THEN

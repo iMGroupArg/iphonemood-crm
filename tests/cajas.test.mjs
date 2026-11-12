@@ -5,8 +5,10 @@
 import fs from 'node:fs';
 import vm from 'node:vm';
 
-const SRC = '/Users/francovelas/crm-complete/iphonemood-crm/src/modules/state.js';
-const MODULOS = '/Users/francovelas/crm-complete/iphonemood-crm/src/modules/';
+// Las rutas salen de DÓNDE ESTÁ ESTE ARCHIVO: así la suite prueba los módulos del árbol (o worktree) en el que se corre, no los de otra carpeta.
+const RAIZ = new URL('../', import.meta.url).pathname;
+const SRC = RAIZ + 'src/modules/state.js';
+const MODULOS = RAIZ + 'src/modules/';
 
 const BOLSILLOS = ['ARS cash', 'ARS transferencia', 'USD cash', 'USD transferencia', 'USDT'];
 const monedaDe = b => (b.startsWith('ARS') ? 'ARS' : b === 'USDT' ? 'USDT' : 'USD');
@@ -777,7 +779,7 @@ async function dosPestanasMismaCaja(legacy) {
 // 21. DB.aplicarDeltaCaja REAL (supabase-config.js) contra un cliente simulado:
 //     reintento con la misma clave, errores lógicos que no se reintentan, función ausente.
 {
-  const fuente = fs.readFileSync('/Users/francovelas/crm-complete/iphonemood-crm/src/modules/supabase-config.js', 'utf8');
+  const fuente = fs.readFileSync(MODULOS + 'supabase-config.js', 'utf8');
   const llamadas = [];
   let guion = [];                                   // respuestas que va devolviendo supa.rpc
   const fakeSupa = {
@@ -1772,7 +1774,7 @@ const entornoVenta = (extra = {}, cfg = {}) => {
 
 // 38. FECHAS: una hora sin zona horaria se toma como UTC (un gasto de las 21:02 no puede aparecer a las 00:02 del día siguiente)
 {
-  const fuente = fs.readFileSync('/Users/francovelas/crm-complete/iphonemood-crm/src/modules/supabase-config.js', 'utf8');
+  const fuente = fs.readFileSync(MODULOS + 'supabase-config.js', 'utf8');
   const ctxDB = { window: { __APP_CONFIG__: { SUPABASE_URL: 'x', SUPABASE_ANON_KEY: 'y' } }, supabase: { createClient: () => ({}) },
     console: { log() {}, warn() {}, error() {} }, Auth: {}, State: {}, toast() {}, Date, Math, Number, JSON, String, Promise, Error };
   vm.createContext(ctxDB);
@@ -2269,7 +2271,7 @@ const entornoVenta = (extra = {}, cfg = {}) => {
 
 // 43. DB REAL (supabase-config.js) · conversión con sobrante: lectura, escritura y detección de las columnas
 {
-  const fuente = fs.readFileSync('/Users/francovelas/crm-complete/iphonemood-crm/src/modules/supabase-config.js', 'utf8');
+  const fuente = fs.readFileSync(MODULOS + 'supabase-config.js', 'utf8');
   const mkDB = (supa, state = {}) => {
     const ctxDB = { window: { __APP_CONFIG__: { SUPABASE_URL: 'x', SUPABASE_ANON_KEY: 'y' } }, supabase: { createClient: () => supa },
       console: { log() {}, warn() {}, error() {} }, Auth: {}, State: state, toast() {}, Date, Math, Number, JSON, String, Promise, Error };
@@ -2518,7 +2520,7 @@ const entornoVenta = (extra = {}, cfg = {}) => {
   check('textoPendientes: cuenta SOLO transferencias pendientes (no manuales ni hechas) con su total', A.textoPendientes() === 'Tenés 2 transferencias pendientes por $170.000.', A.textoPendientes());
   check('… en singular con una, y vacío sin ninguna', A.textoPendientes([{ tipo: 'meli_transferir', estado: 'pendiente', monto: 5 }]) === 'Tenés 1 transferencia pendiente por $5.' && A.textoPendientes([]) === '');
   // Cableado: la pantalla está conectada al menú y a la app
-  const appJs = fs.readFileSync('/Users/francovelas/crm-complete/iphonemood-crm/src/modules/app.js', 'utf8'), crmHtml = fs.readFileSync('/Users/francovelas/crm-complete/iphonemood-crm/crm.html', 'utf8');
+  const appJs = fs.readFileSync(MODULOS + 'app.js', 'utf8'), crmHtml = fs.readFileSync(RAIZ + 'crm.html', 'utf8');
   check('Cableado: app.js importa actividades.js y la registra en PAGES; crm.html tiene el ítem del menú y su badge propio (distinto del de Mercado Libre)',
     /import '\.\/actividades\.js'/.test(appJs) && /actividades: \{ title: 'Actividades', module: Actividades \}/.test(appJs) && /data-page="actividades"/.test(crmHtml) && /id="badge-actividades"/.test(crmHtml) && /id="badge-meli"/.test(crmHtml));
   check('Cableado: el aviso de apertura espera a las actividades y el badge se actualiza con el resto', /Actividades\?\.cargar\?\.\(\)/.test(appJs) && /Actividades\?\.actualizarBadge\?\.\(\)/.test(appJs));
@@ -2673,7 +2675,7 @@ const entornoVenta = (extra = {}, cfg = {}) => {
 
 // 99. Reparaciones · una reparación recién creada trae su link de seguimiento (antes la tarjeta decía «aún no tiene link» hasta recargar)
 {
-  const fuente = fs.readFileSync('/Users/francovelas/crm-complete/iphonemood-crm/src/modules/supabase-config.js', 'utf8');
+  const fuente = fs.readFileSync(MODULOS + 'supabase-config.js', 'utf8');
   const mkDB = (supa) => {
     const ctxDB = { window: { __APP_CONFIG__: { SUPABASE_URL: 'x', SUPABASE_ANON_KEY: 'y' } }, supabase: { createClient: () => supa },
       console: { log() {}, warn() {}, error() {} }, Auth: {}, State: {}, toast() {}, Date, Math, Number, JSON, String, Promise, Error };
@@ -2687,7 +2689,7 @@ const entornoVenta = (extra = {}, cfg = {}) => {
   check('Crear una reparación devuelve el link que generó la base y lo pide con select (sin leer otras columnas)', tk === 'abc123' && pedido.some(x => x.cols === 'token_seguimiento') && pedido[0].t === 'reparaciones');
   const supaFalla = { from: () => ({ insert: () => ({ select: () => ({ single: async () => ({ data: null, error: { message: 'x' } }) }) }) }) };
   check('Si no se pudo leer el link, devuelve null (la pantalla sigue como antes y se arregla al recargar)', (await mkDB(supaFalla).crearReparacion({ id: 'R002' })) === null);
-  const rep = fs.readFileSync('/Users/francovelas/crm-complete/iphonemood-crm/src/modules/reparaciones.js', 'utf8');
+  const rep = fs.readFileSync(MODULOS + 'reparaciones.js', 'utf8');
   check('La pantalla guarda ese link en la reparación nueva antes de mostrarla', /o\.tokenSeguimiento\s*=\s*await DB\.crearReparacion\(o\)/.test(rep));
 }
 

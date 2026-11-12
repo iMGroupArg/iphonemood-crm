@@ -2770,6 +2770,21 @@ const entornoVenta = (extra = {}, cfg = {}) => {
     V._nicho = 'perfumeria';
     check('Un rubro con una parte chica que redondea a 0 centavos no inventa costo ni deja de cerrar la cuenta', V.resultadoVenta(V._vistaRubro(e.State.ventas[0])).costoCanal === cP);
     V._nicho = '';
+    // Caso hallado por Codex: venta ML cerrada, dos ítems de USD 1 en rubros distintos, pago 1,99 y canal 0,01: sin faltantes inventados
+    const vCod = { id: 403, estado: 'cerrada', tipoVenta: 'mercadolibre', meliOrdenId: 403, meliCotizacion: 100, costoCanal: 0.01, fecha: '28/10', fechaISO: '2026-10-28', cliente: 'C',
+      items: [{ nombre: 'A', precio: 1, costo: 0, rubro: 'perfumeria', cantidad: 1 }, { nombre: 'B', precio: 1, costo: 0, rubro: 'iphone', cantidad: 1 }], pagos: [{ monto: 1.99, persona: 'F', bolsillo: 'USD cash' }] };
+    const rFullC = V.resultadoVenta(vCod);
+    V._nicho = 'perfumeria'; const rA = V._resultadoRubro(vCod);
+    V._nicho = 'iphone'; const rB = V._resultadoRubro(vCod);
+    V._nicho = '';
+    check('Venta mixta cerrada de Mercado Libre: la ganancia de los rubros SUMA exactamente la de la venta y no se inventa quebranto por redondeo (caso de Codex)',
+      Math.abs((rA.margenReal + rB.margenReal) - rFullC.margenReal) < 1e-9 && Math.abs(rA.quebranto) < 1e-9 && Math.abs(rB.quebranto) < 1e-9 && Math.abs(rA.costoCanal - 0.005) < 1e-9 && Math.abs((rA.costoCanal + rB.costoCanal) - rFullC.costoCanal) < 1e-9, JSON.stringify([rFullC.margenReal, rA.margenReal, rB.margenReal, rA.quebranto, rB.quebranto]));
+    check('Con quebranto real (cobraron de menos) también es aditivo: lo que no se cobró se reparte con la misma proporción y suma el total', (() => {
+      const v2 = { ...vCod, id: 404, pagos: [{ monto: 1.5, persona: 'F', bolsillo: 'USD cash' }] };
+      const f = V.resultadoVenta(v2); V._nicho = 'perfumeria'; const a = V._resultadoRubro(v2); V._nicho = 'iphone'; const b = V._resultadoRubro(v2); V._nicho = '';
+      return f.quebranto > 0 && Math.abs((a.quebranto + b.quebranto) - f.quebranto) < 1e-9 && Math.abs((a.margenReal + b.margenReal) - f.margenReal) < 1e-9;
+    })());
+    check('Sin rubro, o con una venta de un solo rubro, el resultado por rubro es resultadoVenta tal cual', JSON.stringify(V._resultadoRubro(vCod)) === JSON.stringify(rFullC) && (V._nicho = 'perfumeria', JSON.stringify(V._resultadoRubro({ ...vCod, items: [vCod.items[0]] })) === JSON.stringify(V.resultadoVenta({ ...vCod, items: [vCod.items[0]] })), V._nicho = '', true));
     check('Venta común con costo del canal de USD 0,004: se descuenta igual (sin umbral que cambie resultados históricos)', V.resultadoVenta({ id: 7, tipoVenta: 'minorista', estado: 'abierta', costoCanal: 0.004, items: [{ precio: 10, costo: 4 }], pagos: [] }).costoCanal === 0.004);
     // Reemplazar una orden dentro de la MISMA lista se refleja (sin caché que quede viejo)
     const lista = [{ ventaId: 402, orderId: 'A', acreditado: false, revertidaEn: null, financieraCompleta: true, bruto: 1000, neto: 900 }];

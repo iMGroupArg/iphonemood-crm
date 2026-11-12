@@ -135,15 +135,26 @@ const Ventas = {
     const peso = i => Math.max(0, Number(i.precio) || 0);
     const W = todos.reduce((a, i) => a + peso(i), 0), Ws = sel.reduce((a, i) => a + peso(i), 0);
     const parte = W > 0 ? Ws / W : sel.length / todos.length;
-    // Comisión de Mercado Libre del rubro = la suma de las partes (en centavos enteros) de SUS ítems: es exactamente lo que suman
-    // las hojas de ítems del export. En una venta que no es de Mercado Libre, el costo del canal se prorratea redondeado a centavos.
-    const rFull = this.resultadoVenta(v);
-    const com = this._comisionPorItem(v, rFull);
-    const canal = com
-      ? todos.reduce((a, it, k) => a + (Reportes.nichoDe(it) === nicho ? (com.porItem[k] || 0) : 0), 0)
-      : State.cent(rFull.costoCanal * parte);
     return { ...v, items: sel, pagos: (v.pagos || []).map(p => ({ ...p, monto: p.monto * parte })),
-      tradeIn: v.tradeIn ? { ...v.tradeIn, valor: (v.tradeIn.valor || 0) * parte } : v.tradeIn, costoCanal: State.cent(canal), meliCotizacion: null };
+      tradeIn: v.tradeIn ? { ...v.tradeIn, valor: (v.tradeIn.valor || 0) * parte } : v.tradeIn,
+      costoCanal: this.resultadoVenta(v).costoCanal * parte, meliCotizacion: null, parteRubro: parte };
+  },
+
+  // El RESULTADO (ganancia, quebranto, canal…) de una venta para el rubro elegido. En una venta mixta no se recalcula con los
+  // pagos prorrateados (el redondeo inventaba faltantes de fracciones de centavo): se reparte el resultado COMPLETO de la venta con
+  // la misma proporción de precio que usa Reportes.calcular, así la ganancia de los rubros SUMA exactamente la de la venta.
+  // Sin rubro, o con una venta de un solo rubro, es resultadoVenta(v) tal cual.
+  _resultadoRubro(v) {
+    const full = this.resultadoVenta(v);
+    const vr = this._vistaRubro(v);
+    if (vr === v) return full;
+    const p = vr.parteRubro;
+    const total = vr.items.reduce((a, i) => a + i.precio, 0), costo = vr.items.reduce((a, i) => a + (i.costo || 0), 0);
+    const margenBruto = total - costo, canal = full.costoCanal * p, quebranto = full.quebranto * p, diferencial = full.diferencial * p;
+    const margenComercial = margenBruto - canal - quebranto;
+    return { ...full, total, costo, cobrado: full.cobrado * p, margenBruto, diferencial, quebranto, pendiente: full.pendiente * p,
+      costoCanal: canal, costoCanalReal: full.costoCanalReal * p, canalEstimado: full.canalEstimado === null ? null : full.canalEstimado * p,
+      margenComercial, margenReal: margenComercial + diferencial };
   },
 
   _mesesDisponibles() {
@@ -276,7 +287,7 @@ const Ventas = {
     ventas.forEach(v => {
       const rFull = this.resultadoVenta(v);
       const vr = this._vistaRubro(v);                           // con un rubro elegido, solo lo de ese rubro (ventas mixtas)
-      const r = vr === v ? rFull : this.resultadoVenta(vr);
+      const r = this._resultadoRubro(v);
       const items = v.items.filter(enNicho);
       // Comisión de Mercado Libre de cada ítem (real o estimada), repartida según su precio; null si la venta no es de Mercado Libre.
       const comV = this._comisionPorItem(v, rFull);
@@ -425,7 +436,8 @@ const Ventas = {
   renderMetricas() {
     const el=document.getElementById('ventas-metricas');
     if (!el) return;
-    const ventas=this.ventasDelPeriodo().map(v => this._vistaRubro(v));   // con rubro elegido, solo los ítems de ese rubro
+    const base=this.ventasDelPeriodo();
+    const ventas=base.map(v => this._vistaRubro(v));   // con rubro elegido, solo los ítems de ese rubro
 
     const volumen = ventas.reduce((s,v) => s + v.items.reduce((a,i) => a + i.precio, 0), 0);
     // "Unidades vendidas" es lo que generó ingreso: los ítems regalo tienen
@@ -438,7 +450,7 @@ const Ventas = {
     const itemsRegalo = ventas.flatMap(v => v.items.filter(i => i.regalo));
     const valorRegalado = itemsRegalo.reduce((s,i) => s + (i.costo || 0), 0);
     // Un solo criterio para todo: ver resultadoVenta()
-    const res = ventas.map(v => this.resultadoVenta(v));
+    const res = base.map(v => this._resultadoRubro(v));
     const margenBruto  = res.reduce((s,r) => s + r.margenBruto, 0);
     const diferencial  = res.reduce((s,r) => s + r.diferencial, 0);
     const quebranto    = res.reduce((s,r) => s + r.quebranto, 0);

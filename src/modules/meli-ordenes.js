@@ -590,7 +590,8 @@ const MeliOrdenes = {
         for (const [vid, its] of Object.entries(porVenta)) {
           const x = porId.get(Number(vid)) || porId.get(vid);
           if (!x) continue;
-          const cuando = x.fecha_venta || (DB._utc ? DB._utc(x.creado_en) : x.creado_en);
+          // creado_en de ventas se deja TAL CUAL (como hasta ahora) hasta confirmar que esa columna guarda la hora en UTC sin zona; entonces se le aplica la corrección de hora (la función _utc de supabase-config.js).
+          const cuando = x.fecha_venta || x.creado_en;
           // Días calendario de Argentina (una fecha sin hora es de ese día): ±3 días inclusivos.
           const d1 = this._diaAR(cuando), d0 = this._diaAR(o.fechaOrden);
           if (!d1 || !d0) continue;

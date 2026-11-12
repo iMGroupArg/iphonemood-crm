@@ -1,7 +1,12 @@
 const Gastos = {
   activeCat: 'all',
   currentView: 'mes', // 'mes' | 'fijos' | 'cierre'
-  mesActual: new Date().toISOString().slice(0, 7), // 'YYYY-MM'
+  // Mes de HOY en hora local ('YYYY-MM'). Con toISOString() el mes cambiaba a las 21:00 del último día
+  // (medianoche UTC): un gasto cargado el 31/10 a las 22:00 quedaba imputado a noviembre.
+  mesActual: (d => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`)(new Date()),   // 'YYYY-MM'
+
+  // 'YYYY-MM' de una fecha en hora local (los meses se cuentan en hora argentina, no en UTC).
+  _mesLocal(d) { return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`; },
 
   isMobile() { return window.innerWidth <= 768; },
 
@@ -540,7 +545,7 @@ const Gastos = {
     const hoy = new Date();
     for (let i = 0; i < n; i++) {
       const d = new Date(hoy.getFullYear(), hoy.getMonth() - i, 1);
-      const value = d.toISOString().slice(0, 7);
+      const value = this._mesLocal(d);
       const label = d.toLocaleDateString('es-AR', { month: 'long', year: 'numeric' });
       arr.push({ value, label: label.charAt(0).toUpperCase() + label.slice(1) });
     }
@@ -553,8 +558,9 @@ const Gastos = {
 
   ventasDelMes(mes) {
     return State.ventas.filter(v => {
-      const f = v.fechaISO ? v.fechaISO.slice(0, 7) : null;
-      return f === mes;
+      // El mes de la venta es el LOCAL: una venta del 30/9 a las 21:02 (00:02 UTC del 1/10) es de septiembre.
+      const d = v.fechaISO ? State.parseFecha(v.fechaISO) : null;
+      return !!d && this._mesLocal(d) === mes;
     });
   },
 

@@ -100,7 +100,7 @@ const DB = {
 
     // gastos
     State.gastos = (gastosRes.data || []).map(g => ({
-      id: g.id, fecha: this.fmtFecha(g.creado_en), fechaISO: g.creado_en, motivo: g.motivo, cat: g.categoria_id,
+      id: g.id, fecha: this.fmtFecha(this._utc(g.creado_en)), fechaISO: this._utc(g.creado_en), motivo: g.motivo, cat: g.categoria_id,
       responsable: this.personasIdToNombre[g.responsable_id] || '',
       caja: `${this.personasIdToNombre[g.persona_caja_id] || ''}-${g.bolsillo}`,
       moneda: g.moneda, monto: Number(g.monto), estado: g.estado,
@@ -597,6 +597,26 @@ const DB = {
     ]);
   },
 
+  // La columna gastos.creado_en guarda la hora SIN zona horaria, en UTC. Sin zona, el navegador la
+  // toma como hora LOCAL y un gasto cargado el 8/10 a las 21:02 (Argentina) aparecía como 9/10 00:02.
+  // Esta función le agrega la zona (UTC) cuando falta y deja todo lo demás igual:
+  //   · sin zona («2026-10-09 00:02:11.5», con espacio o con T)  → se le pone la Z (UTC)
+  //   · con zona (Z, +00:00, +0000, -03, -03:00)                → se normaliza a ±HH:MM (el navegador no acepta «-03»)
+  //   · solo fecha, vacío, solo espacios, no-texto o formato desconocido → no se toca
+  // Se aplica SOLO a columnas confirmadas como «timestamp sin zona en UTC» (hoy: gastos.creado_en).
+  _utc(v) {
+    if (typeof v !== 'string') return v;
+    const t = v.trim();
+    if (!t || /^\d{4}-\d{2}-\d{2}$/.test(t)) return t || v;   // vacío o solo fecha
+    const m = t.match(/^(\d{4}-\d{2}-\d{2})[T ](\d{2}:\d{2}(?::\d{2}(?:\.(\d+))?)?)\s*(Z|[+-]\d{2}(?::?\d{2})?)?$/i);
+    if (!m) return v;                                              // formato que no conocemos: tal cual
+    const dia = m[1];
+    const hora = m[2].replace(/\.(\d+)$/, (_, f) => '.' + (f + '00').slice(0, 3));   // los navegadores esperan exactamente 3 decimales
+    const zona = m[4];
+    if (!zona || zona.toUpperCase() === 'Z') return `${dia}T${hora}Z`;
+    const z = zona.replace(':', '');
+    return `${dia}T${hora}${z[0]}${z.slice(1, 3)}:${z.slice(3, 5) || '00'}`;
+  },
   fmtFecha(iso) {
     if (!iso) return 'Hoy';
     // Una fecha sola ("2026-07-30") la interpreta el navegador como medianoche

@@ -596,6 +596,22 @@ const State = {
     }));
     return [...this.BOLSILLOS_BASE, ...[...extras].sort()];
   },
+  // Cajas que se pueden ofrecer en un selector. Con persona elegida: SOLO las que esa
+  // persona tiene de verdad (la base rechaza un movimiento sobre una caja que no existe),
+  // incluidas las extra como 'ARS Mercado Pago'; si todavía no se cargaron sus cajas, los 5
+  // de siempre. `monedas` = lista de monedas permitidas (['ARS'], ['USD','USDT']…) o null
+  // para todas. Sin persona no se filtra por persona.
+  bolsillosPara(monedas, persona) {
+    const ok = b => !monedas || monedas.includes(this.monedaDeBolsillo(b));
+    const suyas = persona ? ((this.cajas || {})[persona] || {}) : null;
+    const tiene = suyas && Object.keys(suyas).length > 0;
+    const suyo = b => !suyas || (tiene ? Object.prototype.hasOwnProperty.call(suyas, b) : this.BOLSILLOS_BASE.includes(b));
+    return this.bolsillosExistentes().filter(ok).filter(suyo);
+  },
+  // Lo mismo como <option>, con los nombres escapados (vienen de la base y se pegan en HTML).
+  opcionesBolsillo(monedas, persona) {
+    return this.bolsillosPara(monedas, persona).map(b => `<option value="${this.esc(b)}">${this.esc(b)}</option>`).join('');
+  },
   // Moneda de un bolsillo por su PREFIJO: 'ARS…' → ARS, 'USDT…' → USDT, 'USD…' → USD.
   monedaDeBolsillo(b) {
     const n = String(b || '');

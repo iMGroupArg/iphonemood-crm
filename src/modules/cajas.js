@@ -98,8 +98,8 @@ const Cajas = {
     const filas = r.diferencias.map(d => `
       <div style="display:flex;justify-content:space-between;gap:10px;padding:4px 0;border-top:1px solid rgba(0,0,0,.06)">
         <span>${d.persona} · ${d.bolsillo}</span>
-        <span>saldo <b>${Math.round(d.saldo).toLocaleString('es-AR')}</b> · libro <b>${Math.round(d.suma).toLocaleString('es-AR')}</b>
-          · <span style="color:var(--red);font-weight:700">${d.dif > 0 ? '+' : ''}${Math.round(d.dif).toLocaleString('es-AR')}</span></span>
+        <span>saldo <b>${State.fmtPesos(d.saldo)}</b> · libro <b>${State.fmtPesos(d.suma)}</b>
+          · <span style="color:var(--red);font-weight:700">${d.dif > 0 ? '+' : ''}${State.fmtPesos(d.dif)}</span></span>
       </div>`).join('');
 
     el.innerHTML = `<div style="background:var(--red-light);border:1px solid var(--red);border-radius:10px;padding:10px 14px;font-size:12.5px;color:var(--red)">
@@ -212,7 +212,7 @@ const Cajas = {
     const filas = this._libro || [];
     const f = this._libroFiltro || {};
     const TIPO = this.TIPOS_LIBRO;
-    const fmt = n => Math.round(Number(n)).toLocaleString('es-AR');
+    const fmt = n => State.fmtPesos(n);   // pesos con centavos cuando los hay
 
     const bolsillos = State.bolsillosExistentes();
     const sel = 'font-size:12px;padding:6px 8px;border:1px solid var(--border-strong);border-radius:8px;background:var(--bg);color:var(--text)';
@@ -292,6 +292,12 @@ const Cajas = {
       </table>
     </div>
     <div style="font-size:11px;color:var(--text-secondary);margin-top:8px">Últimos ${filas.length} movimientos.</div>`;
+  },
+
+  // Un monto de una moneda dada: pesos con centavos cuando los hay (un solo
+  // criterio, el de State.fmtPesos); USD/USDT como estaban.
+  _numMoneda(n, moneda) {
+    return String(moneda).toLowerCase() === 'ars' ? State.fmtPesos(n) : Number(n).toLocaleString('es-AR');
   },
 
   _cajasHTML(BOLSILLO_ICON) {
@@ -375,7 +381,7 @@ const Cajas = {
         tipo: 'cueva', icon: 'ti-arrows-exchange', color: 'var(--purple)',
         titulo: `Cambio ${t}`,
         sub: `${c.origenP}·${c.origenB} → ${c.destinoP}·${c.destinoB}`,
-        montoFmt: `${c.entrega.toLocaleString('es-AR')} → ${c.recibe.toLocaleString('es-AR')}`,
+        montoFmt: `${this._numMoneda(c.entrega, String(c.tipo).split('-')[0])} → ${this._numMoneda(c.recibe, String(c.tipo).split('-')[1])}`,
         dir: '⇄', dirColor: 'var(--purple)',
         _revertKey: `cueva:${c.id}`,
       });
@@ -732,7 +738,7 @@ const Cajas = {
       const [id] = parts;
       const m = (this._movimientos || []).find(x => x.id == id);
       if (!m) return;
-      if (!confirm(`¿Revertir este movimiento (${m.monto.toLocaleString('es-AR')} ${m.moneda})?\nSe devolverá el dinero al origen y se quitará del destino.`)) return;
+      if (!confirm(`¿Revertir este movimiento (${this._numMoneda(m.monto, String(m.moneda).toLowerCase())} ${m.moneda})?\nSe devolverá el dinero al origen y se quitará del destino.`)) return;
       // Revertir: sumar al origen, restar del destino
       // Por el motor central, sin recortar en 0: el reverso tiene que devolver
       // exactamente lo mismo que se movió, aunque el saldo quede negativo.
@@ -848,12 +854,12 @@ const Cajas = {
           </div>
           <div>
             <label style="font-size:11px;color:var(--text-secondary);display:block;margin-bottom:4px">Nuevo saldo</label>
-            <input type="number" id="caja-nuevo-saldo" value="${actual}" step="${isUSD||bolsillo==='USDT'?'0.01':'1'}"
+            <input type="number" id="caja-nuevo-saldo" value="${actual}" step="0.01"
               style="width:100%;font-size:18px;font-weight:700;padding:10px 12px;background:var(--bg-secondary);border:1px solid var(--border-strong);border-radius:8px;color:var(--text)">
           </div>
           <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px">
             ${[0.25,0.5,0.75,1,1.5,2].filter(m => isARS ? m >= 1 : true).slice(0,3).map(m =>
-              `<button onclick="document.getElementById('caja-nuevo-saldo').value=(${actual}*${m}).toFixed(${isUSD||bolsillo==='USDT'?2:0})" style="font-size:10px;padding:5px;border:1px solid var(--border);border-radius:6px;background:transparent;color:var(--text-secondary);cursor:pointer">×${m}</button>`
+              `<button onclick="document.getElementById('caja-nuevo-saldo').value=(${actual}*${m}).toFixed(2)" style="font-size:10px;padding:5px;border:1px solid var(--border);border-radius:6px;background:transparent;color:var(--text-secondary);cursor:pointer">×${m}</button>`
             ).join('')}
           </div>
         </div>
@@ -890,7 +896,8 @@ const Cajas = {
     } else if (aplicado) {
       // El ajuste se aplicó como diferencia sobre el saldo REAL de la base, y ese
       // saldo ya no era el que se veía en pantalla (otra pestaña movió la caja).
-      toast(`⚠️ El ajuste se aplicó (${delta > 0 ? '+' : ''}${delta}), pero la caja había cambiado desde otra pestaña: ahora tiene ${final}, no ${nuevo}. Revisalo.`);
+      const f = n => (bolsillo.startsWith('ARS') ? State.fmtPesos(n) : n);   // pesos con el criterio común; dólares como estaban
+      toast(`⚠️ El ajuste se aplicó (${delta > 0 ? '+' : ''}${f(State.cent(delta))}), pero la caja había cambiado desde otra pestaña: ahora tiene ${f(final)}, no ${f(nuevo)}. Revisalo.`);
     }
   }
 };

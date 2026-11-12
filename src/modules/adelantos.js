@@ -171,7 +171,7 @@ const Adelantos = {
     State.adelantos.unshift({ id: data.id, socio, motivo, monto, moneda, fecha, notas: notas||'', estado: 'pendiente', fechaCobro: null, cajaDebito: null });
     this.closeModal();
     App.goTo('adelantos');
-    toast(`Adelanto de ${socio} registrado. El negocio le debe ${moneda} ${monto.toLocaleString('es-AR')}.`);
+    toast(`Adelanto de ${socio} registrado. El negocio le debe ${moneda} ${moneda === 'ARS' ? State.fmtPesos(monto) : monto.toLocaleString('es-AR')}.`);
   },
 
   // ── Modal cobrar ────────────────────────────────────────────────
@@ -249,7 +249,7 @@ const Adelantos = {
 
     this.closeModal();
     App.goTo('adelantos');
-    toast(`Cobro registrado. Se debitaron ${a.moneda} ${a.monto.toLocaleString('es-AR')} de ${cajaDebito}.`);
+    toast(`Cobro registrado. Se debitaron ${a.moneda} ${a.moneda === 'ARS' ? State.fmtPesos(a.monto) : a.monto.toLocaleString('es-AR')} de ${cajaDebito}.`);
   },
 
   // ── Modal editar / eliminar ─────────────────────────────────────

@@ -78,7 +78,34 @@ const State = {
     return isNaN(d) ? null : d;
   },
 
-  fmtARS(n) { return '$' + Math.round(n).toLocaleString('es-AR'); },
+  // Pesos SIN el signo $ (para tablas y libros donde la columna ya dice que son
+  // pesos). Es el ÚNICO lugar que decide cuántos decimales se ven: se redondea a
+  // centavos (simétrico para negativos y sin errores de coma flotante: 0,1+0,2 es
+  // 0,30000000000000004) y se muestran los 2 decimales SOLO si el monto tiene
+  // centavos. $39.114 sigue siendo $39.114; 1422260,74 se ve completo.
+  fmtPesos(n) {
+    const x = Number(n);
+    if (!Number.isFinite(x)) return String(x);            // 'NaN' / 'Infinity' como antes
+    const abs = Math.abs(x);
+    const miles = v => v.toLocaleString('es-AR');
+    // String() pasa a notación científica desde 1e21: de ahí para arriba (nada real
+    // en pesos) se muestra entero. Por debajo, el texto decimal es exacto.
+    if (abs >= 1e21) return (x < 0 ? '-' : '') + miles(Math.round(abs));
+    // El redondeo se hace sobre la representación DECIMAL más corta del número
+    // (String(abs): 0,1+0,2 es "0.30000000000000004", 1,005 es "1.005"), media hacia
+    // arriba, y con enteros BigInt: sin factores de tolerancia ni pasos intermedios
+    // que inventen o borren centavos, ni doble redondeo.
+    let c = 0n;                                             // centavos enteros, sin signo
+    if (abs >= 1e-3) {                                      // (por debajo no hay medio centavo; y String() pasaría a notación científica)
+      const [ent, dec = ''] = String(abs).split('.');
+      const d = dec + '000';
+      c = BigInt(ent) * 100n + BigInt(d.slice(0, 2)) + (d[2] >= '5' ? 1n : 0n);
+    }
+    const neg = x < 0 && c !== 0n;                          // −0,004 no es "-0"
+    const cent = c % 100n;
+    return (neg ? '-' : '') + miles(c / 100n) + (cent ? ',' + String(cent).padStart(2, '0') : '');   // coma decimal es-AR
+  },
+  fmtARS(n) { return '$' + State.fmtPesos(n); },
   fmtUSD(n) { return 'USD ' + Number(n).toLocaleString('es-AR', { maximumFractionDigits: 2 }); },
 
   // Escapa texto cargado por el usuario antes de meterlo en HTML. Sin esto, un

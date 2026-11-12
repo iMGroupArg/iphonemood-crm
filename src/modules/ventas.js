@@ -1618,7 +1618,7 @@ const Ventas = {
       return;
     }
     const filas = `
-      <div style="display:flex;justify-content:space-between;font-size:11px;color:var(--purple);padding:2px 0"><span>Neto después de comisión</span><b>$${netoArs.toLocaleString('es-AR', {maximumFractionDigits:0})}</b></div>
+      <div style="display:flex;justify-content:space-between;font-size:11px;color:var(--purple);padding:2px 0"><span>Neto después de comisión</span><b>${State.fmtARS(netoArs)}</b></div>
       <div style="display:flex;justify-content:space-between;font-size:11px;color:var(--purple);padding:2px 0"><span>Precio de venta real</span><b>${State.fmtUSD(precioVentaRealUSD)}</b></div>
     `;
     if (diferencialUSD > 0.005) {
@@ -1671,7 +1671,7 @@ const Ventas = {
   _bolsillosVueltoOpts() {
     const persona = document.getElementById('vf-vuelto-persona')?.value || (State.personas||[])[0] || '';
     const cajas = State.cajas?.[persona] || {};
-    return Object.keys(cajas).map(b => `<option value="${b}">${b} (${State.fmtUSD ? '' : ''}${typeof cajas[b] === 'number' ? cajas[b].toFixed(0) : ''})</option>`).join('') || '<option value="">Sin cajas</option>';
+    return Object.keys(cajas).map(b => `<option value="${b}">${b} (${State.fmtUSD ? '' : ''}${typeof cajas[b] === 'number' ? (b.startsWith('ARS') ? State.fmtPesos(cajas[b]) : cajas[b].toFixed(0)) : ''})</option>`).join('') || '<option value="">Sin cajas</option>';
   },
 
   _toggleVueltoPanel(exceso, vueltoARS) {
@@ -3035,7 +3035,7 @@ const Ventas = {
       : 'Ingresá el monto en dólares.'; return; }
     const restante = saldo - montoUSD;
     const detalle = esARS
-      ? `Entran <b>$${Math.round(ingresado).toLocaleString('es-AR')}</b> = <b>${State.fmtUSD(montoUSD)}</b> a cuenta de la venta.`
+      ? `Entran <b>${State.fmtARS(ingresado)}</b> = <b>${State.fmtUSD(montoUSD)}</b> a cuenta de la venta.`
       : `Entran <b>${State.fmtUSD(montoUSD)}</b> a la caja.`;
     const cierre = restante <= 0.005
       ? `<span style="color:var(--green)">Cubre el saldo — la venta queda cerrada.</span>`
@@ -3090,7 +3090,7 @@ const Ventas = {
       toast(`Cobro registrado. Venta #${id} cerrada ✓`);
     } else {
       toast(esARS
-        ? `Cobro de $${Math.round(ingresado).toLocaleString('es-AR')} (${State.fmtUSD(monto)}) registrado en caja de ${persona}.`
+        ? `Cobro de ${State.fmtARS(ingresado)} (${State.fmtUSD(monto)}) registrado en caja de ${persona}.`
         : `Cobro de ${State.fmtUSD(monto)} registrado en caja de ${persona}.`);
     }
     this.renderList();

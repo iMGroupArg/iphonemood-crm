@@ -412,9 +412,9 @@ const CuentaCorriente = {
           ${d.notas ? `<div style="margin-top:4px;font-size:12px;color:var(--text-secondary)">${d.notas}</div>` : ''}
         </div>
         <div style="text-align:right;flex-shrink:0">
-          <div style="font-weight:700;color:var(--amber)">${d.moneda} ${saldo.toLocaleString('es-AR', {maximumFractionDigits:2})}</div>
+          <div style="font-weight:700;color:var(--amber)">${d.moneda} ${d.moneda === 'ARS' ? State.fmtPesos(saldo) : saldo.toLocaleString('es-AR', {maximumFractionDigits:2})}</div>
           ${esARS ? `<div style="font-size:11px;color:var(--text-secondary)">≈ USD ${saldoUSD.toFixed(2)}</div>` : ''}
-          <div style="font-size:11px;color:var(--text-secondary)">${d.moneda} ${d.monto.toLocaleString('es-AR', {maximumFractionDigits:2})} total</div>
+          <div style="font-size:11px;color:var(--text-secondary)">${d.moneda} ${d.moneda === 'ARS' ? State.fmtPesos(d.monto) : d.monto.toLocaleString('es-AR', {maximumFractionDigits:2})} total</div>
         </div>
       </div>`;
     el.querySelector('[data-editdeuda]').addEventListener('click', e => { e.stopPropagation(); this.openEditarDeuda(d); });

@@ -624,7 +624,7 @@ const Capital = {
           this.renderBody();
           return;
         }
-        toast(`${nombre} agregado. Se descontaron ${bolsillo.startsWith('ARS') ? '$'+montoADescontar.toLocaleString('es-AR') : 'USD '+valorUSD} de ${persona} — ${bolsillo}.`);
+        toast(`${nombre} agregado. Se descontaron ${bolsillo.startsWith('ARS') ? State.fmtARS(State.cent(montoADescontar)) : 'USD '+valorUSD} de ${persona} — ${bolsillo}.`);
       } else {
         toast(`${nombre} agregado a activos fijos.`);
       }

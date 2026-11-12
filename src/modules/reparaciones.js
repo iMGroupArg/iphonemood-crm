@@ -36,7 +36,6 @@ const Reparaciones = {
     ingresado:'var(--gray)', diagnosticado:'var(--purple)', en_reparacion:'var(--blue)',
     listo:'var(--green)', entregado:'var(--teal)', rechazado:'var(--red)', no_reparable:'var(--red)'
   },
-  BOLSILLOS: ['ARS cash','ARS transferencia','USD cash','USD transferencia','USDT'],
 
   // ── Shell ─────────────────────────────────────────────
   render() {
@@ -889,7 +888,7 @@ const Reparaciones = {
   openAddPagoModal() {
     const personas = State.personas || [];
     const personaOpts = personas.map(p => `<option value="${p}">${p}</option>`).join('');
-    const bolsilloOpts = this.BOLSILLOS.map(b => `<option value="${b}">${b}</option>`).join('');
+    const bolsilloOpts = State.opcionesBolsillo(null, personas[0]);
     const overlay = document.createElement('div');
     overlay.id = 'rep-pago-overlay';
     overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.7);backdrop-filter:blur(6px);z-index:900;display:flex;align-items:center;justify-content:center;padding:20px';
@@ -908,7 +907,7 @@ const Reparaciones = {
           <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
             <div>
               <label style="font-size:11px;color:var(--text-secondary);display:block;margin-bottom:4px">Caja (persona)</label>
-              <select id="rep-p-persona" style="width:100%;font-size:13px;padding:8px 10px;background:var(--bg-secondary);border:1px solid var(--border-strong);border-radius:8px;color:var(--text)">
+              <select id="rep-p-persona" onchange="document.getElementById('rep-p-bolsillo').innerHTML=State.opcionesBolsillo(null,this.value)" style="width:100%;font-size:13px;padding:8px 10px;background:var(--bg-secondary);border:1px solid var(--border-strong);border-radius:8px;color:var(--text)">
                 ${personaOpts}
               </select>
             </div>
@@ -984,14 +983,14 @@ const Reparaciones = {
           <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
             <div>
               <label style="font-size:11px;color:var(--text-secondary);display:block;margin-bottom:4px">Caja</label>
-              <select id="rep-e-persona" style="width:100%;font-size:13px;padding:7px 10px;background:var(--bg-secondary);border:1px solid var(--border-strong);border-radius:8px;color:var(--text)">
+              <select id="rep-e-persona" onchange="document.getElementById('rep-e-bolsillo').innerHTML=State.opcionesBolsillo(null,this.value)" style="width:100%;font-size:13px;padding:7px 10px;background:var(--bg-secondary);border:1px solid var(--border-strong);border-radius:8px;color:var(--text)">
                 ${personas.map(p => `<option value="${p}">${p}</option>`).join('')}
               </select>
             </div>
             <div>
               <label style="font-size:11px;color:var(--text-secondary);display:block;margin-bottom:4px">Forma de pago</label>
               <select id="rep-e-bolsillo" style="width:100%;font-size:13px;padding:7px 10px;background:var(--bg-secondary);border:1px solid var(--border-strong);border-radius:8px;color:var(--text)">
-                ${this.BOLSILLOS.map(b => `<option value="${b}">${b}</option>`).join('')}
+                ${State.opcionesBolsillo(null, (State.personas || [])[0])}
               </select>
             </div>
           </div>` : ''}

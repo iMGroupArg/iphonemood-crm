@@ -135,9 +135,15 @@ const Ventas = {
     const peso = i => Math.max(0, Number(i.precio) || 0);
     const W = todos.reduce((a, i) => a + peso(i), 0), Ws = sel.reduce((a, i) => a + peso(i), 0);
     const parte = W > 0 ? Ws / W : sel.length / todos.length;
-    const canal = this.resultadoVenta(v).costoCanal * parte;
+    // Comisión de Mercado Libre del rubro = la suma de las partes (en centavos enteros) de SUS ítems: es exactamente lo que suman
+    // las hojas de ítems del export. En una venta que no es de Mercado Libre, el costo del canal se prorratea redondeado a centavos.
+    const rFull = this.resultadoVenta(v);
+    const com = this._comisionPorItem(v, rFull);
+    const canal = com
+      ? todos.reduce((a, it, k) => a + (Reportes.nichoDe(it) === nicho ? (com.porItem[k] || 0) : 0), 0)
+      : State.cent(rFull.costoCanal * parte);
     return { ...v, items: sel, pagos: (v.pagos || []).map(p => ({ ...p, monto: p.monto * parte })),
-      tradeIn: v.tradeIn ? { ...v.tradeIn, valor: (v.tradeIn.valor || 0) * parte } : v.tradeIn, costoCanal: canal, meliCotizacion: null };
+      tradeIn: v.tradeIn ? { ...v.tradeIn, valor: (v.tradeIn.valor || 0) * parte } : v.tradeIn, costoCanal: State.cent(canal), meliCotizacion: null };
   },
 
   _mesesDisponibles() {
@@ -218,8 +224,8 @@ const Ventas = {
     // export) sea el real y no el de antes de la comisión. Al acreditar manda el costo real.
     const esMeli      = v.tipoVenta === 'mercadolibre' || v.meliOrdenId != null;
     const costoCanalReal = Math.max(0, Number(v.costoCanal) || 0);
-    const canalEstimado  = (esMeli && costoCanalReal <= 0.005) ? this._canalEstimado(v) : null;   // número | null (null = sin importes confirmados)
-    const costoCanal  = costoCanalReal > 0.005 ? costoCanalReal : (canalEstimado || 0);
+    const canalEstimado  = (esMeli && !(costoCanalReal > 0)) ? this._canalEstimado(v) : null;   // número | null (null = sin importes confirmados)
+    const costoCanal  = costoCanalReal > 0 ? costoCanalReal : (canalEstimado || 0);
     const faltante    = Math.max(0, total - cobrado - costoCanal);
     const cerrada     = v.estado === 'cerrada';
     // Una venta de Mercado Libre abierta no es plata que un cliente deba: ya la cobró
@@ -286,7 +292,7 @@ const Ventas = {
       const acc  = items.filter(i => !esDisp(i));
       const subDisp = disp.reduce((a, i) => a + i.precio, 0);
       const subAcc  = acc.reduce((a, i) => a + i.precio, 0);
-      const totalPagos = (v.pagos || []).reduce((a, p) => a + p.monto, 0);
+      const totalPagos = (vr.pagos || []).reduce((a, p) => a + p.monto, 0);   // del rubro elegido (prorrateado en ventas mixtas)
       // Con filtro de rubro, los subtotales y el costo son solo de ese rubro
       const subtotal  = nicho ? subDisp + subAcc : r.total;
       const costoFila = nicho ? items.reduce((a, i) => a + (i.costo || 0), 0) : r.costo;
@@ -299,11 +305,11 @@ const Ventas = {
         'Nicho': nichosVenta,
         'Tipo': v.tipoVenta || 'minorista', 'Estado': v.estado === 'cerrada' ? 'Cerrada' : 'Abierta',
         'Subtotal dispositivos': n(subDisp), 'Subtotal accesorios': n(subAcc), 'SUBTOTAL': n(subtotal),
-        'Trade-in': n(v.tradeIn?.valor || 0), 'Total pagos': n(totalPagos),
+        'Trade-in': n(vr.tradeIn?.valor || 0), 'Total pagos': n(totalPagos),
         'Total cobrado': n(r.cobrado), 'Saldo': n(r.esMeli ? r.pendiente + r.quebranto : r.total - r.cobrado - r.costoCanal),
         'Costo': n(costoFila), 'Ganancia bruta': n(subtotal - costoFila),
         'Diferencial tarjeta': n(r.diferencial), 'Costo del canal': n(r.costoCanal),
-        'Canal': rFull.costoCanalReal > 0.005 ? 'Real' : (rFull.canalEstimado !== null ? 'Estimado' : ''), 'Sin cobrar': n(r.quebranto),
+        'Canal': rFull.costoCanalReal > 0 ? 'Real' : (rFull.canalEstimado !== null ? 'Estimado' : ''), 'Sin cobrar': n(r.quebranto),
         'Pendiente': n(r.pendiente), 'Ganancia real': n(r.margenReal),
       });
 
@@ -2937,7 +2943,7 @@ const Ventas = {
   //   → { total, porItem[] (alineado con v.items), estimada, conocida }
   _comisionPorItem(v, r) {
     if (!this._esMeli(v)) return null;
-    const real = r.costoCanalReal > 0.005;
+    const real = r.costoCanalReal > 0;
     const conocida = real || r.canalEstimado !== null;
     const totalC = conocida ? Math.round((real ? r.costoCanalReal : r.canalEstimado) * 100) : 0;
     const items = v.items || [];
@@ -2945,14 +2951,10 @@ const Ventas = {
     const parte = this._repartirCentavos(totalC, pesos);
     return { total: totalC / 100, porItem: parte.map(c => c / 100), estimada: conocida && !real, conocida };
   },
-  // La orden de Mercado Libre de una venta (o null). Mapa en memoria por venta, que se reconstruye cuando la lista de órdenes cambia.
+  // La orden de Mercado Libre de una venta (o null). Búsqueda directa, sin caché: siempre refleja el estado actual, incluso si una
+  // orden se reemplaza dentro de la misma lista.
   _ordenDeVenta(vid) {
-    const arr = State.meliOrdenes || [];
-    if (!this._mapaOrdenes || this._mapaOrdenes.arr !== arr || this._mapaOrdenes.n !== arr.length) {
-      const m = new Map(); arr.forEach(o => { if (o && o.ventaId != null) m.set(o.ventaId, o); });
-      this._mapaOrdenes = { arr, n: arr.length, m };
-    }
-    return this._mapaOrdenes.m.get(vid) || null;
+    return (State.meliOrdenes || []).find(o => o && o.ventaId === vid) || null;
   },
   // Número de la orden en Mercado Libre (el que se ve en su panel), para identificar la venta. '' si no se conoce.
   _numeroMeli(v) {
@@ -2983,8 +2985,8 @@ const Ventas = {
   // Mercado Libre y el profit, en una tablita.
   _resumenMeliHtml(v, r, m) {
     const fila = (t, val, estilo = '') => `<tr><td style="padding:2px 16px 2px 0;color:var(--text-secondary)">${t}</td><td style="padding:2px 0;text-align:right;${estilo}">${val}</td></tr>`;
-    const conocida = r.costoCanalReal > 0.005 || r.canalEstimado !== null;
-    const etiqueta = r.costoCanalReal > 0.005 ? '' : (r.canalEstimado !== null ? ' <span style="font-size:10.5px;color:var(--amber)">estimada</span>' : '');
+    const conocida = r.costoCanalReal > 0 || r.canalEstimado !== null;
+    const etiqueta = r.costoCanalReal > 0 ? '' : (r.canalEstimado !== null ? ' <span style="font-size:10.5px;color:var(--amber)">estimada</span>' : '');
     const ganancia = r.margenReal;
     return `<table style="font-size:12.5px;border-collapse:collapse;margin-left:auto">
       ${m.ars !== null ? fila('Precio en Mercado Libre', State.fmtARS(m.ars)) : ''}

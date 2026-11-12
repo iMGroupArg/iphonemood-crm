@@ -2783,6 +2783,29 @@ const entornoVenta = (extra = {}, cfg = {}) => {
     check('Métricas con rubro «perfumeria» en una venta mixta: volumen USD 40 y 1 unidad (no 1.040 ni 2 unidades)', t.includes('USD 40') && !t.includes('1.040') && !/>2<\/div>/.test(t.slice(0, 600)), t.slice(0, 400));
     V.exportarDetalleExcel();
     const fila = (hojas['Ventas'] || []).find(x => x['Venta'] === 400);
+    check('Export con rubro en una venta mixta: «Total pagos» y «Total cobrado» son del rubro (40), no de toda la operación (1.040) — caso hallado por Codex', fila && Math.abs(fila['Total pagos'] - 40) < 0.005 && Math.abs(fila['Total cobrado'] - 40) < 0.005, JSON.stringify(fila));
+    e.State.ventas[0].tradeIn = { valor: 104, modelo: 'x' }; V.exportarDetalleExcel();
+    const fTi = (hojas['Ventas'] || []).find(x => x['Venta'] === 400);
+    check('… y el trade-in también se prorratea (104 de 1.040 → 4 para el perfume)', fTi && Math.abs(fTi['Trade-in'] - 4) < 0.005, JSON.stringify(fTi));
+    delete e.State.ventas[0].tradeIn;
+    // Comisión del canal repartida entre rubros: la suma de los rubros es EXACTAMENTE el total (sin perder centavos chicos)
+    e.State.ventas = [{ id: 401, estado: 'abierta', tipoVenta: 'mercadolibre', meliOrdenId: 401, meliCotizacion: 1000, costoCanal: 0.10, fecha: '28/10', fechaISO: '2026-10-28', cliente: 'M',
+      items: [{ nombre: 'Chico', precio: 1, costo: 0.5, rubro: 'perfumeria', cantidad: 1 }, { nombre: 'Grande', precio: 99, costo: 50, rubro: 'iphone', cantidad: 1 }], pagos: [] }];
+    V._nicho = 'perfumeria'; const cP = V._vistaRubro(e.State.ventas[0]).costoCanal;
+    V._nicho = 'iphone'; const cI = V._vistaRubro(e.State.ventas[0]).costoCanal;
+    V._nicho = '';
+    check('Comisión real de USD 0,10 repartida entre dos rubros (1 % y 99 %): las partes suman 0,10 exacto y coinciden con el reparto por ítem', Math.round((cP + cI) * 100) === 10 && cP >= 0 && cI >= 0, JSON.stringify([cP, cI]));
+    V._nicho = 'perfumeria';
+    check('Un rubro con una parte chica que redondea a 0 centavos no inventa costo ni deja de cerrar la cuenta', V.resultadoVenta(V._vistaRubro(e.State.ventas[0])).costoCanal === cP);
+    V._nicho = '';
+    check('Venta común con costo del canal de USD 0,004: se descuenta igual (sin umbral que cambie resultados históricos)', V.resultadoVenta({ id: 7, tipoVenta: 'minorista', estado: 'abierta', costoCanal: 0.004, items: [{ precio: 10, costo: 4 }], pagos: [] }).costoCanal === 0.004);
+    // Reemplazar una orden dentro de la MISMA lista se refleja (sin caché que quede viejo)
+    const lista = [{ ventaId: 402, orderId: 'A', acreditado: false, revertidaEn: null, financieraCompleta: true, bruto: 1000, neto: 900 }];
+    e.State.meliOrdenes = lista;
+    const v402 = { id: 402, tipoVenta: 'mercadolibre', meliOrdenId: 402, estado: 'abierta', meliCotizacion: 100, costoCanal: 0, items: [{ precio: 10, costo: 4 }], pagos: [] };
+    const antes = V.resultadoVenta(v402).costoCanal;
+    lista[0] = { ...lista[0], neto: 800 };
+    check('Si una orden se reemplaza dentro de la misma lista, el resultado se actualiza (1,00 → 2,00); no hay caché viejo', antes === 1 && V.resultadoVenta(v402).costoCanal === 2 && V._numeroMeli(v402) === 'A');
     check('Export con rubro en una venta mixta: SUBTOTAL 40, costo 20 y ganancia real 20 (solo el perfume)', fila && fila['SUBTOTAL'] === 40 && fila['Costo'] === 20 && Math.abs(fila['Ganancia real'] - 20) < 0.005, JSON.stringify(fila));
     V._nicho = ''; e.ctx.Reportes.nichoDe = () => 'perfumeria';
     e.ctx.document.getElementById = orig0;

@@ -2795,6 +2795,19 @@ const entornoVenta = (extra = {}, cfg = {}) => {
     const sumaCom = filas8.reduce((a, x) => a + x['Comisión canal'], 0), sumaProfit = filas8.reduce((a, x) => a + x['Profit'], 0);
     check('Export con rubro (8 ítems, comisión 0,04): las filas de ítems SUMAN la comisión y el profit del resumen por rubro (antes diferían 0,02)',
       filas8.length === 4 && Math.abs(sumaCom - res8['Costo del canal']) < 1e-3 && Math.abs(sumaProfit - res8['Ganancia real']) < 1e-3 && Math.abs(res8['Costo del canal'] - 0.02) < 1e-9, JSON.stringify([res8['Costo del canal'], sumaCom, res8['Ganancia real'], sumaProfit]));
+    // Caso de Codex (4ª ronda): 1.000 ítems de USD 1 (500 por rubro) con comisión 0,04 → las filas siguen sumando el resumen
+    const mil = Array.from({ length: 1000 }, (_, k) => ({ nombre: 'M' + k, precio: 1, costo: 0, rubro: k < 500 ? 'perfumeria' : 'iphone', stockId: 's1', cantidad: 1 }));
+    e.State.ventas = [{ id: 407, estado: 'cerrada', tipoVenta: 'mercadolibre', meliOrdenId: 407, meliCotizacion: 100, costoCanal: 0.04, fecha: '28/10', fechaISO: '2026-10-28', cliente: 'Mil', vendedor: '', items: mil, pagos: [{ monto: 999.96, persona: 'F', bolsillo: 'USD cash' }] }];
+    V._nicho = 'perfumeria'; V.exportarDetalleExcel(); V._nicho = '';
+    const resMil = (hojas['Ventas'] || []).find(x => x['Venta'] === 407), filasMil = (hojas['Accesorios'] || []).filter(x => x['Venta'] === 407);
+    check('Export con 1.000 ítems: la suma de las filas coincide con el resumen por rubro (sin que el redondeo por fila acumule diferencia)',
+      filasMil.length === 500 && Math.abs(filasMil.reduce((a, x) => a + x['Comisión canal'], 0) - resMil['Costo del canal']) < 0.005 && Math.abs(filasMil.reduce((a, x) => a + x['Profit'], 0) - resMil['Ganancia real']) < 0.005,
+      JSON.stringify([filasMil.reduce((a, x) => a + x['Comisión canal'], 0), resMil['Costo del canal']]));
+    // Una venta de UN solo rubro con todos los precios en cero y rubro elegido: también peso 0, como Reportes
+    V._nicho = 'perfumeria';
+    const vUno = { id: 408, estado: 'abierta', tipoVenta: 'minorista', fecha: '28/10', fechaISO: '2026-10-28', cliente: 'U', costoCanal: 0.5, items: [{ nombre: 'a', precio: 0, costo: 1, rubro: 'perfumeria', cantidad: 1 }], pagos: [] };
+    const rUno = V._resultadoRubro(vUno); V._nicho = '';
+    check('Venta de un solo rubro con precios en cero y ese rubro elegido: canal 0 (igual que Reportes), no 0,50', rUno.costoCanal === 0 && rUno.costo === 1, JSON.stringify(rUno));
     // Venta sin precios con rubro: igual que Reportes (peso 0), sin repartir por cantidad de ítems
     const vCero = { id: 406, estado: 'abierta', tipoVenta: 'minorista', fecha: '28/10', fechaISO: '2026-10-28', cliente: 'Z', costoCanal: 0.5, items: [{ nombre: 'a', precio: 0, costo: 1, rubro: 'perfumeria', cantidad: 1 }, { nombre: 'b', precio: 0, costo: 1, rubro: 'iphone', cantidad: 1 }], pagos: [] };
     V._nicho = 'perfumeria'; const rCero = V._resultadoRubro(vCero); V._nicho = '';

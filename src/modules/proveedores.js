@@ -1134,11 +1134,6 @@ const Proveedores = {
       sugeridoPago = Math.min(sugeridoPago, dispon);
     }
     const personas = State.personas || [];
-    const BOLSILLOS_POR_MONEDA = {
-      'USDT':  ['USDT'],
-      'USD':   ['USD cash', 'USD transferencia'],
-      'ARS':   ['ARS cash', 'ARS transferencia'],
-    };
     const overlay = document.createElement('div');
     overlay.id = 'prov-pago-overlay';
     overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.65);backdrop-filter:blur(4px);z-index:900;display:flex;align-items:center;justify-content:center;padding:20px;overflow-y:auto';
@@ -1184,7 +1179,7 @@ const Proveedores = {
           <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
             <div>
               <label style="font-size:11px;color:var(--text-secondary);display:block;margin-bottom:4px">DESDE (persona)</label>
-              <select id="pago-persona" style="width:100%;font-size:13px;padding:7px 10px;background:var(--bg-secondary);border:1px solid var(--border-strong);border-radius:8px;color:var(--text)">
+              <select id="pago-persona" onchange="Proveedores._onPagoMonedaChange()" style="width:100%;font-size:13px;padding:7px 10px;background:var(--bg-secondary);border:1px solid var(--border-strong);border-radius:8px;color:var(--text)">
                 ${personas.map(p => `<option>${p}</option>`).join('')}
               </select>
             </div>
@@ -1223,12 +1218,11 @@ const Proveedores = {
     const bolsilloSel = document.getElementById('pago-bolsillo');
     const equivRow = document.getElementById('pago-equiv-row');
     if (!bolsilloSel) return;
-    const BOLSILLOS = {
-      USDT: ['USDT'],
-      USD: ['USD cash', 'USD transferencia'],
-      ARS: ['ARS cash', 'ARS transferencia'],
-    };
-    bolsilloSel.innerHTML = (BOLSILLOS[moneda] || ['USDT']).map(b => `<option>${b}</option>`).join('');
+    // Cajas que existen de verdad (p. ej. «ARS Mercado Pago») de la moneda elegida y que tiene ESA persona.
+    const persona = document.getElementById('pago-persona')?.value || '';
+    const actual = bolsilloSel.value;
+    bolsilloSel.innerHTML = State.opcionesBolsillo([moneda], persona);
+    if (Array.from(bolsilloSel.options || []).some(o => o.value === actual)) bolsilloSel.value = actual;   // se conserva la elección si sigue valiendo
     if (equivRow) equivRow.style.display = moneda === 'ARS' ? 'block' : 'none';
     this._calcPagoEquiv();
   },
@@ -1288,7 +1282,6 @@ const Proveedores = {
 
   modalCostoAdicional(loteId) {
     const personas = State.personas || [];
-    const BOLSILLOS = ['ARS cash', 'ARS transferencia', 'USD cash', 'USD transferencia', 'USDT'];
     const overlay = document.createElement('div');
     overlay.id = 'prov-costo-overlay';
     overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.65);backdrop-filter:blur(4px);z-index:900;display:flex;align-items:center;justify-content:center;padding:20px';
@@ -1329,7 +1322,7 @@ const Proveedores = {
           <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
             <div>
               <label style="font-size:11px;color:var(--text-secondary);display:block;margin-bottom:4px">Pagado por (opcional)</label>
-              <select id="costo-persona" style="width:100%;font-size:13px;padding:7px 10px;background:var(--bg-secondary);border:1px solid var(--border-strong);border-radius:8px;color:var(--text)">
+              <select id="costo-persona" onchange="Proveedores._syncCostoBolsillos()" style="width:100%;font-size:13px;padding:7px 10px;background:var(--bg-secondary);border:1px solid var(--border-strong);border-radius:8px;color:var(--text)">
                 <option value="">Sin registrar en caja</option>
                 ${personas.map(p => `<option>${p}</option>`).join('')}
               </select>
@@ -1337,7 +1330,7 @@ const Proveedores = {
             <div>
               <label style="font-size:11px;color:var(--text-secondary);display:block;margin-bottom:4px">Bolsillo</label>
               <select id="costo-bolsillo" style="width:100%;font-size:13px;padding:7px 10px;background:var(--bg-secondary);border:1px solid var(--border-strong);border-radius:8px;color:var(--text)">
-                ${BOLSILLOS.map(b => `<option>${b}</option>`).join('')}
+                ${State.opcionesBolsillo(null, '')}
               </select>
             </div>
           </div>
@@ -1382,6 +1375,15 @@ const Proveedores = {
       </div>
     `;
     document.body.appendChild(overlay);
+  },
+
+  // Al elegir quién pagó el costo, el selector muestra las cajas que esa persona tiene (con las extra, p. ej. Mercado Pago).
+  _syncCostoBolsillos() {
+    const sel = document.getElementById('costo-bolsillo');
+    if (!sel) return;
+    const actual = sel.value;
+    sel.innerHTML = State.opcionesBolsillo(null, document.getElementById('costo-persona')?.value || '');
+    if (Array.from(sel.options || []).some(o => o.value === actual)) sel.value = actual;
   },
 
   _toggleCostoTipo() {
@@ -1988,8 +1990,7 @@ const Proveedores = {
 
   _modalDevolucion(loteId, diferencia) {
     const personaOpts = State.personas.map(p => `<option value="${p}">${p}</option>`).join('');
-    const bolsilloOpts = (p) => ['USD cash', 'USD transferencia', 'USDT', 'ARS cash', 'ARS transferencia']
-      .map(b => `<option value="${b}">${b}</option>`).join('');
+    const bolsilloOpts = (p) => this._bolsillosOpts(p);
 
     const overlay = document.createElement('div');
     overlay.id = 'prov-devolucion-overlay';
@@ -2035,11 +2036,17 @@ const Proveedores = {
   },
 
   _bolsillosOpts(persona) {
-    const cajas = State.cajas[persona] || {};
-    const bolsillos = Object.keys(cajas).length
-      ? Object.keys(cajas)
-      : ['USD cash', 'USD transferencia', 'USDT', 'ARS cash', 'ARS transferencia'];
-    return bolsillos.map(b => `<option value="${b}">${b}</option>`).join('');
+    // Mismo orden que antes (dólares primero): la caja que queda elegida por defecto sigue siendo en dólares,
+    // porque esta devolución se acredita en USD sin convertir.
+    const orden = { USD: 0, USDT: 1, ARS: 2 };
+    const lista = State.bolsillosPara(null, persona)
+      .map((b, i) => ({ b, i, o: orden[State.monedaDeBolsillo(b)] ?? 3 }))
+      .sort((x, y) => x.o - y.o || x.i - y.i);
+    // Si la persona no tiene ninguna caja en dólares, NO se deja una de pesos elegida de antemano
+    // (acreditaría esos USD como si fueran pesos): se pide elegir y confirmarDevolucion exige la caja.
+    const sinDolares = !lista.length || State.monedaDeBolsillo(lista[0].b) === 'ARS' || lista[0].o > 1;
+    return (sinDolares ? '<option value="">— Elegí la caja —</option>' : '') +
+      lista.map(x => `<option value="${State.esc(x.b)}">${State.esc(x.b)}</option>`).join('');
   },
 
   async confirmarDevolucion(loteId) {

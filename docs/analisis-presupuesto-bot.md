@@ -36,3 +36,14 @@ Fecha: 2026-10-12. Pedido de Angel (Sesión C, tarea 3). Solo lectura del códig
 Riesgo previo a todo: `presupuesto_por_token` devuelve la fila entera (menos el id). Si se agrega un teléfono de contacto, saldría en el link público. Primero hay que limitar la función a una lista permitida de campos.
 Otros riesgos: el bot puede crear una oferta de precio con un canje inflado (de ahí el tope); datos personales de contacto (guardar lo mínimo, con plazo de borrado); límite de 12 funciones de Vercel al tope (colgar el endpoint de una función existente por reescritura); spam (tope diario).
 Orden: 1) restringir la función pública; 2) migración (columnas, índice de idempotencia, función de creación con secreto); 3) endpoint; 4) id en el catálogo; 5) etiqueta y contacto en la lista del CRM. Cada parte es de complejidad baja, salvo la función con sus validaciones (media). Plan revisado por Codex antes de construir.
+
+## Pedidos de Angel al contrato (2026-10-13) — para incorporar en la versión 2
+Franco pidió dejar anotado para Angel. Estado: Deploy-infra los recibió para armar el contrato v2 pero llegó a su límite de uso; se retoma al reabrirse. Los marcados [FRANCO] necesitan su OK.
+1. Contacto: aceptar tipo + valor (teléfono o @usuario/id de Instagram), 180 días de retención. [FRANCO: amplía "solo teléfono"]
+2. canje.valor_usd lo manda el bot (su planilla): rango por unidad (propuesto 50–2.500 USD, más el tope del 100 % del último precio vendido), tope diario 40, rotación de la clave (dos claves válidas durante el cambio) y texto en la página "estimado, sujeto a revisión del equipo en persona". [FRANCO: rango y si el texto va en todos los presupuestos con canje]
+3. canje.estado opcional.
+4. Vocabulario exacto de modelos y capacidades del canje (bloque en la respuesta de /api/catalogo, comparación sin distinguir mayúsculas/acentos/espacios; en error, devolver la lista válida).
+5. Errores 404/409/422/429/502: el bot manda el presupuesto en texto como hoy; 401 es error de configuración (alerta). [FRANCO: cambia "derivar a una persona"]
+6. 404 con códigos distintos: UNIDAD_VENDIDA, UNIDAD_NO_DISPONIBLE (reservada), UNIDAD_INEXISTENTE.
+7. La página congela precio, dólar y coeficientes al crear; la promo Macro solo tiene un texto de vigencia (no fecha); vence_en lo fija el CRM (2 días) y se devuelve al bot.
+8. Privacidad: sin contacto en la página (script 11), token aleatorio de 16 bytes, noindex (verificar), sin presupuestos en el sitemap, nombre del cliente opcional.

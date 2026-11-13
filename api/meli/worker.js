@@ -16,6 +16,7 @@ const { limitar } = require('../_ratelimit.js');
 const M = require('../_meli.js');
 const { procesarNotificacion } = require('../_meli_ingesta.js');
 const { sonda, conciliar } = require('../_meli_sonda.js');
+const { comparar } = require('../_meli_comparar.js');
 const { diagnosticoArca } = require('../_arca_diagnostico.js');
 const { emitirFacturaOrden, emitirNotaCreditoOrden } = require('../_facturacion.js');
 const { correrAutomatizacion } = require('../_facturacion_auto.js');
@@ -249,6 +250,22 @@ module.exports = async function handler(req, res) {
 
   // Diagnóstico de solo lectura (docs/meli-ventas-envios-plan.md, Fase 0): solo por POST con sesión.
   // Devuelve la forma de las respuestas de Mercado Libre, nunca valores. No drena ni escribe nada.
+  // «Comparar»: contrasta lo guardado de las órdenes con Mercado Pago en vivo (api/_meli_comparar.js). SOLO LECTURA: solo GET, con tope y
+  // cursor; la base se lee con el token del propio usuario (sin RPC ni escritura).
+  if (req.method === 'POST' && req.body && typeof req.body === 'object' && req.body.accion === 'comparar') {
+    const cuentaId = Number(req.body.cuenta);
+    if (!Number.isSafeInteger(cuentaId) || cuentaId <= 0) { res.status(400).json({ error: 'Cuenta inválida' }); return; }
+    try {
+      const pres = M.presupuestoHasta(t0 + PRESUPUESTO_MS - RESERVA_MS, t0 + PRESUPUESTO_MS);
+      const b = req.body;
+      res.status(200).json(await comparar({ cuentaId, token: req.headers['x-crm-token'], desde: b.desde, hasta: b.hasta, orden: b.orden, cursor: b.cursor, tope: b.tope }, pres));
+    } catch (e) {
+      console.error('meli/worker (comparar):', e.codigo || '', e.message);
+      res.status(502).json({ error: 'No se pudo comparar' });
+    }
+    return;
+  }
+
   if (req.method === 'POST' && req.body && typeof req.body === 'object' && (req.body.accion === 'sonda' || req.body.accion === 'conciliar')) {
     const cuentaId = Number(req.body.cuenta);
     if (!Number.isSafeInteger(cuentaId) || cuentaId <= 0) { res.status(400).json({ error: 'Cuenta inválida' }); return; }

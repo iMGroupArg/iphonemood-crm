@@ -216,5 +216,26 @@ console.log('\n══ Sonda de solo lectura de Mercado Libre ══\n');
   check('forma(): se listan hasta 150 campos por objeto (antes cortaba en 60)', Object.keys(S.forma(ancho, '', 0)).length === 100);
 }
 
+{
+  // ── conciliar: lo que el comprador pagó de más y TODOS los montos del costo de envío (para ver de dónde sale una diferencia) ──
+  reiniciar();
+  const ORD = { id: 2000018981569144, status: 'paid', date_created: '2026-10-08T23:06:00.000-03:00', total_amount: 55791, paid_amount: 61939.81,
+    buyer: { id: 99, nickname: 'jperez_nick', first_name: 'Juanita', last_name: 'Pérez' },
+    order_items: [{ item: { id: 'MLA4001111166', title: 'Perfume' }, quantity: 1, unit_price: 55791, sale_fee: 8000 }],
+    payments: [{ id: 3333, status: 'approved', transaction_amount: 55791, total_paid_amount: 61939.81, shipping_cost: 6148.81, overpaid_amount: 0, taxes_amount: 0, coupon_amount: 0 }], shipping: { id: 4444 } };
+  mundo.api['/orders/search'] = resp(200, { paging: { total: 1, limit: 6, offset: 0 }, results: [ORD] });
+  mundo.api['/v1/payments/3333'] = resp(200, { id: 3333, status: 'approved', transaction_amount: 55791, coupon_amount: 0, transaction_details: { net_received_amount: 31967.66, total_paid_amount: 61939.81 },
+    amounts: { collector: { net_received: 31967.66 } }, payer: { email: 'juanita@correo.com' }, charges_details: [] });
+  mundo.api['/shipments/4444/costs'] = resp(200, { gross_amount: 12297.62, senders: [{ cost: 6148.81, compensation: 0, discount: { rate: 0.5 } }], receiver: { cost: 6148.81, save: 0 }, 'Juanita': { x: 1 } });
+  const r = await pedir({ accion: 'conciliar', cuenta: 1 });
+  const o = r.body.ordenes && r.body.ordenes[0];
+  const t = JSON.stringify(r.body);
+  check('conciliar: informa total_amount, paid_amount y lo que el comprador pagó de MÁS (6.148,81)', o && o.total_amount === 55791 && o.paid_amount === 61939.81 && o.extra_pagado_por_el_comprador === 6148.81, t.slice(0, 300));
+  check('conciliar: por pago de la orden: total_paid_amount, shipping_cost, overpaid, taxes, coupon', o.pagos_de_la_orden[0].shipping_cost === 6148.81 && o.pagos_de_la_orden[0].total_paid_amount === 61939.81);
+  check('conciliar: por pago de Mercado Pago: total_paid_amount (transaction_details) y coupon', o.pagos[0].total_paid_amount === 61939.81 && o.pagos[0].coupon_amount === 0);
+  check('conciliar: TODOS los números del costo de envío por nombre de campo (receptor y emisores), también los anidados', o.envio.costos_receptor_todos_los_numeros.cost === 6148.81 && o.envio.costos_emisores_todos_los_numeros[0]['discount.rate'] === 0.5 && o.envio.costos_emisores_todos_los_numeros[0].cost === 6148.81);
+  check('conciliar: ningún dato personal con los campos nuevos', PERSONALES.every((p) => !t.includes(p)), PERSONALES.filter((p) => t.includes(p)).join());
+}
+
 console.log(`\n${ok} pasan, ${fail} fallan de ${ok + fail}`);
 process.exit(fail ? 1 : 0);

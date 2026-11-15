@@ -227,7 +227,8 @@ ${herr('Diagnóstico de datos', `      <div class="card" style="margin-top:14px"
           <button class="btn btn-sm" id="meli-btn-conciliar" onclick="Meli.sonda('conciliar')" title="Importes de las últimas 6 ventas y si la cuenta cierra"><i class="ti ti-calculator"></i> Conciliar importes</button>
         </div>
         <div id="meli-sonda-salida" style="margin-top:10px"></div>
-      </div>`)}`;
+      </div>`)}
+${herr('Comparar pagos con Mercado Pago', `<div style="margin-top:14px">${window.MeliComparar ? window.MeliComparar.vista() : ''}</div>`)}`;
   },
 
   // Diagnóstico de solo lectura: la forma de las respuestas de Mercado Libre, sin valores (api/_meli_sonda.js).

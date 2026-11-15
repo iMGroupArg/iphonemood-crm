@@ -16,6 +16,7 @@
 //   · Los errores de Mercado Libre se resumen en estado HTTP y un código corto; el mensaje no sale.
 
 const M = require('./_meli.js');
+const { hojasNumericas } = require('./_meli_comparar.js');
 
 // Campos cuyo valor es un código y no un dato de una persona.
 const ENUMERADOS = new Set([
@@ -223,7 +224,12 @@ async function conciliar({ cuentaId, cantidad = 6 }, pres) {
     const precio = items.reduce((a, it) => a + (num(it.unit_price) || 0) * (num(it.quantity) || 0), 0);
     const cargoVenta = items.reduce((a, it) => a + (num(it.sale_fee) || 0) * (num(it.quantity) || 0), 0);
     const salida = { orden: id, estado: cod(o.status), fecha_creada: dia(o.date_created),
-                     precio: r2(precio), cargo_venta_sale_fee: r2(cargoVenta), pagos: [] };
+                     precio: r2(precio), cargo_venta_sale_fee: r2(cargoVenta), pagos: [],
+                     // Lo que la orden dice haber pagado el comprador (puede incluir envío o intereses a su cargo) y los montos por pago de la ORDEN.
+                     total_amount: num(o.total_amount), paid_amount: num(o.paid_amount),
+                     extra_pagado_por_el_comprador: num(o.paid_amount) !== null && num(o.total_amount) !== null ? r2(o.paid_amount - o.total_amount) : null,
+                     pagos_de_la_orden: (Array.isArray(o.payments) ? o.payments.slice(0, 3) : []).map((p) => ({ transaction_amount: num(p && p.transaction_amount), total_paid_amount: num(p && p.total_paid_amount),
+                       shipping_cost: num(p && p.shipping_cost), overpaid_amount: num(p && p.overpaid_amount), taxes_amount: num(p && p.taxes_amount), coupon_amount: num(p && p.coupon_amount) })) };
 
     let netoTotal = 0, netoCompleto = true, cargos = {}, cargosTotal = 0, impuestos = 0, envioVend = null;
     const hayTiempo = () => pres.restante() >= 2500;          // antes de CADA pedido, no solo al empezar la orden
@@ -255,6 +261,7 @@ async function conciliar({ cuentaId, cantidad = 6 }, pres) {
         estado: cod(pj.status), transaction_amount: num(pj.transaction_amount),
         neto_amounts_collector_net_received: netoAmounts, neto_transaction_details_net_received_amount: netoDetails,
         taxes_amount: num(pj.taxes_amount), shipping_amount: num(pj.shipping_amount),
+        total_paid_amount: num(pj.transaction_details && pj.transaction_details.total_paid_amount), coupon_amount: num(pj.coupon_amount),
         fee_details_cantidad: Array.isArray(pj.fee_details) ? pj.fee_details.length : null,
         cargos_por_tipo_y_nombre: porTipo,
         fecha_liberacion: dia(pj.money_release_date),
@@ -281,6 +288,9 @@ async function conciliar({ cuentaId, cantidad = 6 }, pres) {
         costo_vendedor_senders_cost: envioVend,
         costo_total_gross_amount: cj ? num(cj.gross_amount) : null,
         costo_comprador_receiver_cost: cj ? num(cj.receiver && cj.receiver.cost) : null,
+        // Todos los montos que traiga el costo del envío (compensaciones, descuentos, bonificaciones…): solo números, por nombre de campo.
+        costos_receptor_todos_los_numeros: cj ? hojasNumericas(cj.receiver) : null,
+        costos_emisores_todos_los_numeros: cj && Array.isArray(cj.senders) ? cj.senders.slice(0, 5).map((x) => hojasNumericas(x)) : null,
       };
     } else {
       salida.envio = null;

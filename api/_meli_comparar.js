@@ -71,6 +71,7 @@ function estadosGuardados(fila) {
 function resumenVivo(pj) {
   return {
     estado: cod(pj.status),
+    detalle_estado: cod(pj.status_detail),
     monto: num(pj.transaction_amount),
     reintegrado: num(pj.transaction_amount_refunded),
     // Lo que el COMPRADOR pagó por el envío (entra al vendedor al liquidar): el CRM no lo suma al neto (api/_meli_ingesta.js solo lee net_received_amount).
@@ -84,6 +85,25 @@ function resumenVivo(pj) {
 }
 
 // Compara una orden guardada contra sus pagos vivos. Devuelve null si coincide todo; si no, el detalle de lo que difiere.
+// ── REGLA de «lo que llega» (VERIFICADA contra el «Total» del cobro en el panel de Mercado Libre en 6 órdenes reales + 46 liberadas que coincidían + 7 Flex) ──
+//   llega_real = Σ net_received_amount de los pagos aprobados + máx(0, costo de envío que pagó el comprador − Σ shipping_amount de los pagos aprobados)
+// El costo de envío del comprador es `receiver.cost` de GET /shipments/{id}/costs. Se SUMA solo cuando NO vino cobrado dentro del pago (shipping_amount = 0): si vino en el
+// pago, net_received_amount ya lo incluye (Qahwa: net 38.967,56 + 4.887,86 = 43.855,42; Fakhar: 31.967,66 + 6.148,81 = 38.116,47; una orden con shipping_amount 7.990 y
+// receiver.cost 7.990: crédito 0, llega = net). Si no se pudo leer el costo del envío, o a algún pago aprobado le falta shipping_amount, NO se afirma nada (null).
+// BONIFICACIÓN FLEX: un crédito de EXACTAMENTE uno de FLEX_BONIFICACIONES ($499) es el cashback que Mercado Libre suma al «Total» pero acredita APARTE (decisión de Franco: la orden se
+// acredita por su neto): se informa como bonificación Flex y NO suma a lo que llega. (Heurística por monto: el desglose muestra el tipo logístico del envío.)
+const FLEX_BONIFICACIONES = [499];
+function creditoEnvioComprador(aprobados, receiverCost) {
+  if (typeof receiverCost !== 'number' || !Number.isFinite(receiverCost) || receiverCost < 0) return null;
+  if (!aprobados.length) return null;
+  if (receiverCost === 0) return { credito: 0, flex: null, receiver: 0, ship: 0 };          // el comprador no pagó envío: el crédito es 0 sepamos o no el shipping_amount de cada pago
+  if (aprobados.some((v) => v.envio_comprador === null || v.envio_comprador === undefined)) return null;          // sin shipping_amount de algún pago no se puede restar: no se afirma
+  const ship = r2(aprobados.reduce((t, v) => t + v.envio_comprador, 0));
+  const credito = Math.max(0, r2(receiverCost - ship));
+  const flex = credito > 0 && FLEX_BONIFICACIONES.some((m) => cent(m) === cent(credito)) ? credito : null;
+  return { credito, flex, receiver: receiverCost, ship };
+}
+
 function compararOrden(fila, vivos, extra = {}) {
   const motivos = [];
   const aprobados = vivos.filter((v) => v.ok && v.estado === 'approved');
@@ -101,22 +121,26 @@ function compararOrden(fila, vivos, extra = {}) {
     return aprobados.length ? r2(t) : null;
   };
   const cobradoVivo = suma('monto'), netoVivo = suma('neto'), netoNuevo = suma('neto_nuevo');
-  // LO QUE LLEGA DE VERDAD = net_received_amount + lo que el comprador pagó por el envío (shipping_amount), por pago aprobado. Caso real: Mercado Pago
-  // liquidó 38.116,47 y 43.855,42 mientras el CRM guardó 31.967,66 y 38.967,56 (net_received_amount solo); las diferencias son exactamente el envío del comprador.
-  const hayEnvio = completa && aprobados.some((v) => v.envio_comprador !== null && v.envio_comprador !== undefined && v.envio_comprador > 0);
-  const envioVivo = hayEnvio && completa ? r2(aprobados.reduce((t, v) => t + (v.envio_comprador || 0), 0)) : 0;
-  const llegaReal = netoVivo !== null ? r2(netoVivo + envioVivo) : null;
+  // LO QUE LLEGA = net + crédito del envío del comprador según la regla verificada (ver creditoEnvioComprador). Sin el costo del envío leído, no se afirma.
+  const envio = completa ? creditoEnvioComprador(aprobados, extra.receiver_cost) : null;
+  const bonificacionFlex = envio && envio.flex !== null ? envio.flex : null;                // aparte: no es diferencia en lo que llega
+  const envioVivo = envio && bonificacionFlex === null ? envio.credito : 0;
+  const hayEnvio = envio !== null && bonificacionFlex === null && envio.credito > 0;
+  const llegaReal = netoVivo !== null && envio !== null ? r2(netoVivo + envioVivo) : null;
   const cobradoGuardado = numAny(fila.cobrado_aprobado);
   const netoGuardado = numAny(fila.neto);
 
   const difCobrado = cobradoVivo !== null && cobradoGuardado !== null && cent(cobradoVivo) !== cent(cobradoGuardado) ? r2(cobradoVivo - cobradoGuardado) : null;
   // Lo guardado es válido si coincide con el neto del pago O con «neto + envío del comprador» (así deja de marcarse apenas el CRM guarde lo que llega de verdad).
-  const difNeto = netoVivo !== null && netoGuardado !== null && cent(netoVivo) !== cent(netoGuardado) && !(hayEnvio && cent(netoVivo + envioVivo) === cent(netoGuardado)) ? r2(netoVivo - netoGuardado) : null;
+  // VERIFICADA: el net_received_amount del pago cambió respecto de lo guardado. Sin excepciones por envío (la «estimación» de llega real NO decide nada acá).
+  const difNeto = netoVivo !== null && netoGuardado !== null && cent(netoVivo) !== cent(netoGuardado) ? r2(netoVivo - netoGuardado) : null;
   const difLlega = llegaReal !== null && netoGuardado !== null && cent(llegaReal) !== cent(netoGuardado) ? r2(llegaReal - netoGuardado) : null;
   const difNetoNuevo = netoNuevo !== null && netoGuardado !== null && cent(netoNuevo) !== cent(netoGuardado) && !(hayEnvio && cent(netoNuevo + envioVivo) === cent(netoGuardado)) ? r2(netoNuevo - netoGuardado) : null;
   if (difCobrado !== null) motivos.push('COBRADO_DISTINTO');
   if (difNeto !== null) motivos.push('NETO_DISTINTO');
   if (hayEnvio && difLlega !== null) motivos.push('ENVIO_PAGADO_POR_EL_COMPRADOR');       // solo si lo guardado NO lo incluye
+  // Sin poder calcular «llega real» (costo del envío no leído, envío no guardado, o a un pago aprobado le falta shipping_amount) NO se afirma nada y la orden NO puede quedar como «sin cambios».
+  if (completa && aprobados.length && envio === null) motivos.push(extra.receiver_error ? 'ENVIO_COSTOS_NO_CONSULTADOS' : 'LLEGA_REAL_NO_CALCULABLE');
   if (difLlega !== null && difNeto === null) motivos.push('LLEGA_REAL_DISTINTO');
   if (difNetoNuevo !== null && difNeto === null) motivos.push('NETO_NUEVO_DISTINTO');
   // Ausencia de información ≠ igualdad: un dato que aparece o desaparece es un cambio y no se cuenta como «sin cambios».
@@ -128,7 +152,11 @@ function compararOrden(fila, vivos, extra = {}) {
   }
   // Un pago que estaba aprobado y hoy no lo está (devuelto, contracargo, cancelado, otra vez pendiente) o que se aprobó después.
   const estadosVivos = vivos.filter((v) => v.ok).map((v) => v.estado);
-  if (estadosVivos.some((e) => e && !['approved', 'pending', 'in_process', 'authorized'].includes(e))) motivos.push('PAGO_NO_APROBADO');
+  // Un intento RECHAZADO seguido de otro pago aprobado que cubre la orden no es un problema (falso positivo real: 'rejected' + 'approved'). Devuelto/cancelado/contracargo siguen marcándose siempre.
+  // «Cubre» = lo aprobado suma al menos el bruto guardado de la orden; si no (aprobado parcial), el rechazo se sigue marcando.
+  const brutoG = numAny(fila.bruto);
+  const hayAprobado = estadosVivos.includes('approved') && cobradoVivo !== null && brutoG !== null && cent(cobradoVivo) >= cent(brutoG);
+  if (estadosVivos.some((e) => e && !['approved', 'pending', 'in_process', 'authorized'].includes(e) && !(hayAprobado && e === 'rejected'))) motivos.push('PAGO_NO_APROBADO');
   const guardados = estadosGuardados(fila);
   if (vivos.some((v) => v.ok && v.id !== undefined && guardados[v.id] !== undefined && guardados[v.id] !== v.estado)) motivos.push('ESTADO_PAGO_CAMBIO');
   if (extra.truncado) motivos.push('PAGOS_NO_REVISADOS_TODOS');
@@ -156,7 +184,9 @@ function compararOrden(fila, vivos, extra = {}) {
     bruto: numAny(fila.bruto),
     cobrado_guardado: cobradoGuardado, cobrado_vivo: cobradoVivo, dif_cobrado: difCobrado,
     neto_guardado: netoGuardado, neto_vivo: netoVivo, dif_neto: difNeto,
-    envio_pagado_por_el_comprador: hayEnvio && completa ? envioVivo : null, llega_real_vivo: llegaReal, dif_llega_real: difLlega,
+    envio_pagado_por_el_comprador: hayEnvio ? envioVivo : null,
+    costo_envio_comprador: envio ? envio.receiver : null,
+    ...(bonificacionFlex !== null ? { bonificacion_flex: bonificacionFlex } : {}), llega_real_vivo: llegaReal, dif_llega_real: difLlega,
     // Costo de canal = lo que se retiene de verdad: bruto − lo que llega. Con el envío del comprador sumado no queda subestimado ni sobreestimado.
     costo_canal_guardado: numAny(fila.bruto) !== null && netoGuardado !== null ? r2(numAny(fila.bruto) - netoGuardado) : null,
     costo_canal_real: numAny(fila.bruto) !== null && llegaReal !== null ? r2(numAny(fila.bruto) - llegaReal) : null,
@@ -165,12 +195,16 @@ function compararOrden(fila, vivos, extra = {}) {
     ...(extraComprador !== null && cent(extraComprador) > 0 ? { extra_pagado_por_el_comprador: extraComprador } : {}),
     liberacion_guardada: libGuardada, liberacion_viva: libViva,
     estados_pago_vivos: estadosVivos,
+    // Para investigar PAGO_NO_APROBADO / HAY_REINTEGRO sin abrir cada orden: por pago, su estado, su detalle, el monto y lo reintegrado (solo números y códigos).
+    lectura_completa: completa,
+    reintegrado_vivo: completa && vivos.some((v) => v.reintegrado !== null) ? r2(vivos.reduce((t, v) => t + (v.reintegrado || 0), 0)) : null,      // solo con TODOS los pagos leídos (si no, un subtotal parecería el total)
+    pagos_vivos_resumen: vivos.filter((v) => v.ok).slice(0, 5).map((v) => ({ id: v.id !== undefined ? String(v.id) : null, estado: v.estado, detalle_estado: v.detalle_estado || null, monto: v.monto, reintegrado: v.reintegrado })),
     ...(extra.total_vivo !== undefined && extra.total_vivo !== null ? { total_orden_vivo: extra.total_vivo } : {}),
   };
 }
 
 // paid_orden / total_orden: `paid_amount` y `total_amount` de la orden tal como se guardaron (payload_orden); se piden sueltos para no traer el resumen entero.
-const COLUMNAS = 'id,meli_order_id,estado,procesada,acreditado,venta_id,bruto,neto,cobrado_aprobado,pago_id,fecha_liberacion,monto_acreditado,payload_pago,paid_orden:payload_orden->>paid_amount,total_orden:payload_orden->>total_amount';
+const COLUMNAS = 'id,meli_order_id,estado,procesada,acreditado,venta_id,bruto,neto,cobrado_aprobado,pago_id,fecha_liberacion,monto_acreditado,payload_pago,envio_id:payload_orden->shipping->>id,paid_orden:payload_orden->>paid_amount,total_orden:payload_orden->>total_amount';
 
 // Lectura de lo guardado: UN GET REST con el token del usuario. Todo lo que forma la URL está validado.
 async function leerGuardadas({ cuentaId, desde, hasta, orden, cursor, tope, token, leer }, pres) {
@@ -218,7 +252,9 @@ async function comparar(op, pres, deps = {}) {
   const salida = { ok: true, revisadas: 0, con_diferencia: 0, sin_cambios: 0, con_error: 0, pagos_consultados: 0, cortado: null, cursor: null, completo: false, diferencias: [],
     // Retenciones/impuestos de TODAS las órdenes revisadas en esta tanda (no solo las que difieren), por nombre de cargo: para sumarlas por período.
     // `incompletas`: órdenes cuyos pagos no se leyeron todos (su retención NO se suma): el total puede ser mayor.
-    retenciones: { total: 0, ordenes_con_retencion: 0, por_cargo: {}, incompletas: 0 } };
+    retenciones: { total: 0, ordenes_con_retencion: 0, por_cargo: {}, incompletas: 0 },
+    // Bonificaciones Flex (cashback por envío) de las órdenes revisadas: aparte, NO son una diferencia; con el número de orden para poder registrarlas.
+    bonificaciones_flex: { total: 0, ordenes: 0, lista: [] } };
   let pagosUsados = 0;
   let ultimaCompleta = cursor;
   let pedidos = 0;
@@ -227,7 +263,7 @@ async function comparar(op, pres, deps = {}) {
     if (pres.restante() < MIN_PARA_ORDEN_MS) { salida.cortado = 'SIN_TIEMPO'; break; }
     const todos = idsDePago(fila);
     const ids = todos.slice(0, MAX_PAGOS_POR_ORDEN), truncado = todos.length > ids.length;
-    if (pagosUsados + ids.length > MAX_PAGOS && salida.revisadas > 0) { salida.cortado = 'TOPE_DE_PAGOS'; break; }
+    if (pagosUsados + ids.length + (idNum(fila.envio_id) ? 1 : 0) > MAX_PAGOS && salida.revisadas > 0) { salida.cortado = 'TOPE_DE_PAGOS'; break; }          // +1: el costo del envío, si la orden tiene envío
 
     const vivos = [];
     let cortarAca = null;
@@ -247,6 +283,21 @@ async function comparar(op, pres, deps = {}) {
     if (cortarAca) { salida.cortado = cortarAca; break; }       // esta orden NO cuenta como revisada: se retoma desde la anterior
 
     let extra = truncado ? { truncado: true } : {};
+    // Costo del envío que pagó el comprador (receiver.cost): un pedido más por orden. Sin envío en lo guardado = 0 conocido; si no se puede leer, queda «no consultado».
+    const envioId = idNum(fila.envio_id);
+    // Sin envío en lo guardado: «sin envío» solo se afirma si la orden SÍ está guardada (payload_orden con total_amount); si ni eso hay, el envío es desconocido (no se afirma). Para una orden suelta se contrasta con la orden viva (abajo).
+    if (!envioId) extra = numAny(fila.total_orden) !== null ? { ...extra, receiver_cost: 0 } : { ...extra, receiver_error: true };
+    else {
+      if (pres.restante() < 1500) { salida.cortado = 'SIN_TIEMPO'; break; }
+      if (pedidos > 0 && pausa > 0) await dormir(pausa);
+      pedidos++; pagosUsados++;
+      let c = null;
+      try { c = await meliGet(cuentaId, `/shipments/${envioId}/costs`, pres); } catch (e) { if (agotoElTiempo(e, pres)) { salida.cortado = 'SIN_TIEMPO'; break; } c = null; }
+      if (c && c.status === 429) { salida.cortado = 'MELI_LIMITANDO'; break; }
+      if ((!c || !c.json) && pres.restante() <= 250) { salida.cortado = 'SIN_TIEMPO'; break; }
+      const rc = c && c.ok && c.json && c.json.receiver ? num(c.json.receiver.cost) : null;
+      if (rc === null) extra = { ...extra, receiver_error: true }; else extra = { ...extra, receiver_cost: rc };
+    }
     if (verTotal) {
       let o = null;
       try { o = await meliGet(cuentaId, `/orders/${orden}`, pres); } catch (e) { if (agotoElTiempo(e, pres)) { salida.cortado = 'SIN_TIEMPO'; break; } o = null; }
@@ -254,6 +305,20 @@ async function comparar(op, pres, deps = {}) {
       if ((!o || !o.json) && pres.restante() <= 250) { salida.cortado = 'SIN_TIEMPO'; break; }       // el AbortError al leer el cuerpo lo traga M.fetchJson
       if (o && o.ok && o.json && num(o.json.total_amount) !== null) extra = { ...extra, total_vivo: num(o.json.total_amount) };
       else extra = { ...extra, total_error: true };            // no se pudo contrastar el total: se informa, no se da por igual
+      // Orden suelta: si la orden viva TIENE envío y lo guardado no, se lee su costo (no se da por «sin envío»).
+      const envioVivoId = o && o.ok && o.json ? idNum(o.json.shipping && o.json.shipping.id) : null;
+      if (envioVivoId && !envioId) {
+        if (pres.restante() < 1500) { salida.cortado = 'SIN_TIEMPO'; break; }
+        if (pausa > 0) await dormir(pausa);
+        pedidos++; pagosUsados++;
+        let c2 = null;
+        try { c2 = await meliGet(cuentaId, `/shipments/${envioVivoId}/costs`, pres); } catch (e) { if (agotoElTiempo(e, pres)) { salida.cortado = 'SIN_TIEMPO'; break; } c2 = null; }
+        if (c2 && c2.status === 429) { salida.cortado = 'MELI_LIMITANDO'; break; }
+        if ((!c2 || !c2.json) && pres.restante() <= 250) { salida.cortado = 'SIN_TIEMPO'; break; }
+        const rc2 = c2 && c2.ok && c2.json && c2.json.receiver ? num(c2.json.receiver.cost) : null;
+        const { receiver_error, receiver_cost, ...resto } = extra;
+        extra = rc2 === null ? { ...resto, receiver_error: true } : { ...resto, receiver_cost: rc2 };
+      }
     }
 
     let conRet = false;
@@ -261,6 +326,9 @@ async function comparar(op, pres, deps = {}) {
     if (!lecturaCompleta) { salida.retenciones.incompletas++; if ((truncado || vivos.some((v) => v.cargos_truncados)) && !vivos.some((v) => !v.ok)) salida.con_error++; }
     else for (const v of vivos) if (v.ok && v.estado === 'approved') for (const [k, m] of Object.entries(v.retenciones || {})) { salida.retenciones.por_cargo[k] = r2((salida.retenciones.por_cargo[k] || 0) + m); salida.retenciones.total = r2(salida.retenciones.total + m); conRet = true; }
     if (conRet) salida.retenciones.ordenes_con_retencion++;
+    const aprobadosV = vivos.filter((v) => v.ok && v.estado === 'approved');
+    const env = vivos.length > 0 && vivos.every((v) => v.ok) && !truncado ? creditoEnvioComprador(aprobadosV, extra.receiver_cost) : null;          // misma condición de «completa» que compararOrden
+    if (env && env.flex !== null) { salida.bonificaciones_flex.total = r2(salida.bonificaciones_flex.total + env.flex); salida.bonificaciones_flex.ordenes++; if (salida.bonificaciones_flex.lista.length < 200) salida.bonificaciones_flex.lista.push({ orden: String(fila.meli_order_id), monto: env.flex }); }
     const dif = compararOrden(fila, vivos, extra);
     salida.revisadas++;
     if (vivos.some((v) => !v.ok)) salida.con_error++;
@@ -411,7 +479,7 @@ async function desglose(op, pres, deps = {}) {
   };
 
   const oj = await pedir(() => meliGet(cuentaId, `/orders/${orden}`, pres), 'orden');
-  let envioId = null;
+  let envioId = null, receiverCost;          // receiverCost: undefined = sin leer · número = costo de envío que pagó el comprador (receiver.cost)
   const idsPago = new Set(idsDePago(fila));
   if (oj) {
     const items = Array.isArray(oj.order_items) ? oj.order_items : [];
@@ -423,6 +491,7 @@ async function desglose(op, pres, deps = {}) {
     salida.orden_viva = { estado: cod(oj.status), total_amount: num(oj.total_amount), paid_amount: num(oj.paid_amount), precio_items: r2(precio), cargo_venta_sale_fee: r2(cargoVenta), pagos };
     envioId = idNum(oj.shipping && oj.shipping.id);
   }
+  if (!envioId && oj) receiverCost = 0;          // la orden viva no tiene envío: el comprador no pagó ninguno
   for (const id of [...idsPago].slice(0, MAX_PAGOS_POR_ORDEN)) {
     const pj = await pedir(() => mpGet(cuentaId, `/v1/payments/${id}`, pres), 'pago_' + id);
     if (pj) salida.pagos_vivos.push({ ...pagoVivoDetalle(pj), id });          // el id es el que se PIDIÓ (validado), no el que diga la respuesta
@@ -430,6 +499,7 @@ async function desglose(op, pres, deps = {}) {
   if (envioId) {
     const ej = await pedir(() => meliGet(cuentaId, `/shipments/${envioId}`, pres), 'envio');
     const cj = await pedir(() => meliGet(cuentaId, `/shipments/${envioId}/costs`, pres), 'envio_costos');
+    if (cj && cj.receiver) { const rc = num(cj.receiver.cost); if (rc !== null) receiverCost = rc; }
     salida.envio = {
       estado: ej ? cod(ej.status) : null, subestado: ej ? cod(ej.substatus) : null, tipo_logistico: ej ? cod(ej.logistic_type) : null,
       costo_declarado_en_envio: ej ? num(ej.shipping_option && ej.shipping_option.cost) : null,
@@ -473,11 +543,18 @@ async function desglose(op, pres, deps = {}) {
   // Hay que HABER LEÍDO la orden viva (si falla no se pueden descubrir pagos nuevos) y que todos sus pagos entren en el tope.
   const cobertura = salida.orden_viva !== null && !salida.pagos_vivos.some((p) => p.cargos_truncados) && salida.pagos_vivos.length === idsPedidos && idsPago.size <= MAX_PAGOS_POR_ORDEN && !salida.incompleto;
   if (!cobertura) { salida.resumen = null; salida.errores.push('resumen:PAGOS_INCOMPLETOS'); salida.retenciones_incompletas = true; }
+  // «Llega real» = REGLA VERIFICADA contra el panel de Mercado Libre (ver creditoEnvioComprador): neto + máx(0, receiver.cost − Σ shipping_amount). Sin leer receiver.cost no se afirma.
   if (cobertura && apr.length && apr.every((p) => p.net_received_amount !== null)) {
-    const neto = r2(apr.reduce((t, p) => t + p.net_received_amount, 0)), envio = r2(apr.reduce((t, p) => t + (p.shipping_amount || 0), 0));
-    salida.resumen = { neto_campo_que_usa_el_crm: neto, envio_pagado_por_el_comprador: envio, llega_real: r2(neto + envio),
-      costo_canal_real: salida.guardado.bruto !== null ? r2(salida.guardado.bruto - (neto + envio)) : null,
-      costo_canal_guardado: salida.guardado.bruto !== null && salida.guardado.neto !== null ? r2(salida.guardado.bruto - salida.guardado.neto) : null };
+    const neto = r2(apr.reduce((t, p) => t + p.net_received_amount, 0));
+    const env = creditoEnvioComprador(apr.map((p) => ({ envio_comprador: p.shipping_amount })), receiverCost);
+    if (env) {
+      const credito = env.flex !== null ? 0 : env.credito;
+      salida.resumen = { neto_campo_que_usa_el_crm: neto, costo_envio_comprador: env.receiver, envio_dentro_del_pago: env.ship, envio_pagado_por_el_comprador: credito,
+        ...(env.flex !== null ? { bonificacion_flex: env.flex } : {}),
+        llega_real: r2(neto + credito),
+        costo_canal_real: salida.guardado.bruto !== null ? r2(salida.guardado.bruto - (neto + credito)) : null,
+        costo_canal_guardado: salida.guardado.bruto !== null && salida.guardado.neto !== null ? r2(salida.guardado.bruto - salida.guardado.neto) : null };
+    } else { salida.resumen = null; salida.errores.push('resumen:COSTO_ENVIO_NO_LEIDO'); }
   }
   salida.candidatos = cand;
   salida.buscar = buscar;
@@ -486,4 +563,4 @@ async function desglose(op, pres, deps = {}) {
   return salida;
 }
 
-module.exports = { desglose, hojasNumericas, hallar, comparar, compararOrden, idsDePago, estadosGuardados, resumenVivo, MAX_PAGOS, MAX_TOPE, MAX_PAGOS_POR_ORDEN };
+module.exports = { desglose, creditoEnvioComprador, FLEX_BONIFICACIONES, hojasNumericas, hallar, comparar, compararOrden, idsDePago, estadosGuardados, resumenVivo, MAX_PAGOS, MAX_TOPE, MAX_PAGOS_POR_ORDEN };

@@ -24,7 +24,9 @@ const MeliComparar = {
   _msg: '', _msgTipo: '',
   _pedirPausa: false, _sinAvance: 0, _corrida: 0,
   _limite: 100,
+  _flex: { total: 0, ordenes: 0, lista: [] },   // bonificaciones Flex (cashback por envío): se acreditan APARTE, no son diferencia
   _ret: { total: 0, ordenes: 0, por_cargo: {}, incompletas: 0 },   // retenciones/impuestos de TODAS las órdenes revisadas (parte normal del costo de canal)
+  _dgForm: { orden: '', buscar: '', explorar: false },   // el formulario «Desglose de una orden»
   _desg: null,                    // { orden, cargando, datos, error } — desglose de UNA orden
 
   MOTIVOS: {
@@ -38,8 +40,10 @@ const MeliComparar = {
     PAGO_NO_APROBADO: 'Un pago pasó a devuelto, cancelado o en disputa',
     ESTADO_PAGO_CAMBIO: 'Un pago cambió de estado',
     HAY_REINTEGRO: 'Tiene un reintegro',
-    ENVIO_PAGADO_POR_EL_COMPRADOR: 'El comprador pagó el envío y el CRM no lo suma a lo que llega',
-    LLEGA_REAL_DISTINTO: 'Lo que llega de verdad (neto + envío del comprador) es más de lo guardado',
+    ENVIO_PAGADO_POR_EL_COMPRADOR: 'El comprador pagó el envío aparte y el CRM no lo suma a lo que llega',
+    LLEGA_REAL_DISTINTO: 'Lo que llega de verdad (neto + envío del comprador) difiere de lo guardado',
+    LLEGA_REAL_NO_CALCULABLE: 'No se pudo calcular lo que llega (falta el shipping_amount de un pago): no se afirma',
+    ENVIO_COSTOS_NO_CONSULTADOS: 'No se pudo leer el costo del envío: no se afirma lo que llega (queda incompleta)',
     EXTRA_PAGADO_POR_EL_COMPRADOR: 'El comprador pagó más que el total de los ítems (envío o intereses a su cargo)',
     LIBERACION_DISTINTA: 'Cambió la fecha de liberación',
     LIBERACION_APARECE: 'Ahora hay fecha de liberación',
@@ -131,7 +135,7 @@ const MeliComparar = {
   _reiniciar() {
     this._est = 'inactivo'; this._cursor = null; this._rev = 0; this._pagos = 0; this._conErrores = 0; this._total = null;
     this._filas = []; this._titulos = {}; this._sinAvance = 0; this._limite = this.LIMITE_FILAS; this._desg = null;
-    this._ret = { total: 0, ordenes: 0, por_cargo: {}, incompletas: 0 }; this._pedirPausa = false; this._aviso('');
+    this._flex = { total: 0, ordenes: 0, lista: [] }; this._ret = { total: 0, ordenes: 0, por_cargo: {}, incompletas: 0 }; this._pedirPausa = false; this._aviso('');
   },
 
   // Guarda lo escrito en las fechas: la pantalla de Mercado Libre se vuelve a dibujar cada ~60 s y lo no guardado se perdería.
@@ -180,6 +184,7 @@ const MeliComparar = {
         this._pagos += Number(j.pagos_consultados) || 0;
         this._conErrores += Number(j.con_error) || 0;
         this._sumarRetenciones(j.retenciones);
+        this._sumarFlex(j.bonificaciones_flex);
         if (j.cursor) this._cursor = String(j.cursor);
         await this._cargarTitulos(nuevas.map(d => d.orden));
         if (mia !== this._corrida) return;
@@ -205,6 +210,15 @@ const MeliComparar = {
     if (mia === this._corrida) this.pintar();
   },
 
+  _sumarFlex(f) {
+    if (!f || typeof f !== 'object') return;
+    for (const x of (Array.isArray(f.lista) ? f.lista : [])) {
+      const m = this._num(x && x.monto), o = String((x && x.orden) || '').replace(/\D/g, '');
+      if (m === null || !o || this._flex.lista.some(y => y.orden === o)) continue;          // una orden no se cuenta dos veces si se reanuda
+      this._flex.lista.push({ orden: o, monto: m });
+      this._flex.total = Math.round((this._flex.total + m) * 100) / 100; this._flex.ordenes++;
+    }
+  },
   _sumarRetenciones(r) {
     if (!r || typeof r !== 'object') return;
     const R = this._ret;
@@ -230,7 +244,7 @@ const MeliComparar = {
 
   // ── Datos para la tabla y las exportaciones ──
   ordenadas() {
-    const mag = d => Math.abs(this._difNeto(d) ?? this._num(d.dif_cobrado) ?? this._num(d.extra_pagado_por_el_comprador) ?? 0);
+    const mag = d => Math.abs(this._difNeto(d) ?? this._cambioNeto(d) ?? this._num(d.dif_cobrado) ?? this._num(d.extra_pagado_por_el_comprador) ?? 0);
     return this._filas.slice().sort((a, b) => mag(b) - mag(a) || String(a.orden).localeCompare(String(b.orden)));
   },
   _estadoTexto(d) {
@@ -238,13 +252,16 @@ const MeliComparar = {
     return t.join(' · ');
   },
   _motivosTexto(d) { return (d.motivos || []).map(m => this.MOTIVOS[m] || 'Otra diferencia').join('; '); },
-  _difNeto(d) { return this._num(d.dif_llega_real) ?? this._num(d.dif_neto) ?? this._num(d.dif_neto_campo_nuevo); },   // lo que llega de verdad (neto + envío del comprador) vs lo guardado
+  // La diferencia que se SUMA y se ordena es la de LO QUE LLEGA según la regla verificada contra el panel de Mercado Libre (neto + crédito de envío del comprador). Si el costo del envío no se pudo
+  // leer (llega_real_vivo nulo) se usa solo el cambio del neto del pago. El «campo nuevo» (amounts.collector.net_received) nunca entra.
+  _difNeto(d) { return d.llega_real_vivo !== null && d.llega_real_vivo !== undefined ? this._num(d.dif_llega_real) : null; },          // sin llega real leído la diferencia de lo que llega es DESCONOCIDA (no se suma)
+  _cambioNeto(d) { return this._num(d.dif_neto); },          // el cambio del neto del pago (verificable aparte): no se mezcla con la diferencia de lo que llega
 
   // Texto separado por tabuladores / CSV con ; (Excel en español): importes con coma decimal.
   _filasExport() {
     const n = x => { const v = this._num(x); return v === null ? '' : v.toFixed(2).replace('.', ','); };
-    const cab = ['Orden', 'Producto', 'Cobrado guardado', 'Cobrado actual', 'Neto guardado', 'Neto actual (campo que usa el CRM)', 'Envío pagado por el comprador', 'Llega real (neto + envío)', 'Costo de canal guardado', 'Costo de canal real', 'Diferencia (lo que llega)', 'Procesada', 'Acreditada', 'Con venta', 'Liberación guardada', 'Liberación actual', 'Qué cambió'];
-    const filas = this.ordenadas().map(d => [d.orden, this._titulos[d.orden] || '', n(d.cobrado_guardado), n(d.cobrado_vivo), n(d.neto_guardado), n(d.neto_vivo), n(d.envio_pagado_por_el_comprador), n(d.llega_real_vivo), n(d.costo_canal_guardado), n(d.costo_canal_real), n(this._difNeto(d)),
+    const cab = ['Orden', 'Producto', 'Cobrado guardado', 'Cobrado actual', 'Neto guardado', 'Neto actual (campo que usa el CRM)', 'Envío pagado por el comprador (aparte)', 'Bonificación Flex (se acredita aparte)', 'Llega real (regla verificada)', 'Costo de canal guardado', 'Costo de canal real', 'Diferencia en lo que llega', 'Cambio del neto del pago', 'Estado del pago hoy', 'Reintegrado hoy', 'Procesada', 'Acreditada', 'Con venta', 'Liberación guardada', 'Liberación actual', 'Qué cambió'];
+    const filas = this.ordenadas().map(d => [d.orden, this._titulos[d.orden] || '', n(d.cobrado_guardado), n(d.cobrado_vivo), n(d.neto_guardado), n(d.neto_vivo), n(d.envio_pagado_por_el_comprador), n(d.bonificacion_flex), n(d.llega_real_vivo), n(d.costo_canal_guardado), n(d.costo_canal_real), n(this._difNeto(d)), n(this._cambioNeto(d)), (d.estados_pago_vivos || []).join('+'), n(d.reintegrado_vivo),
       d.procesada ? 'Sí' : 'No', d.acreditado ? 'Sí' : 'No', d.tiene_venta ? 'Sí' : 'No', this._dia(d.liberacion_guardada), this._dia(d.liberacion_viva), this._motivosTexto(d)]);
     return { cab, filas };
   },
@@ -285,12 +302,46 @@ const MeliComparar = {
   async verDesglose(orden) {
     const d = this._filas.find(f => String(f.orden) === String(orden));
     if (!d || !this._cuentaId) return;
-    const buscar = Math.abs(this._difNeto(d) ?? this._num(d.extra_pagado_por_el_comprador) ?? this._num(d.dif_cobrado) ?? 0) || undefined;
+    const buscar = Math.abs(this._difNeto(d) ?? this._cambioNeto(d) ?? this._num(d.extra_pagado_por_el_comprador) ?? this._num(d.dif_cobrado) ?? 0) || undefined;
+    return this._pedirDesglose(String(orden), buscar, false);
+  },
+  // Desglose de CUALQUIER orden por su número (no hace falta que figure en la tabla): para verificar contra el detalle de la venta de Mercado Libre.
+  // `buscar`: montos que se quieren ubicar en los recursos (p. ej. el «Total» que muestra Mercado Libre), separados por coma o espacio; `explorar`: pide también los recursos exploratorios.
+  async desglosePorNumero() {
+    const o = String((document.getElementById('mc-dg-orden') || {}).value || '').trim();
+    if (!/^\d{6,20}$/.test(o)) { toast('Escribí el número de la orden: solo dígitos, sin otros caracteres.'); return; }
+    const cuenta = this._cuentaId || (this._cuenta() || {}).id;
+    if (!cuenta) { toast('No hay una cuenta de Mercado Libre conectada.'); return; }
+    this._cuentaId = cuenta;
+    const texto = String((document.getElementById('mc-dg-buscar') || {}).value || '');
+    const partes = texto.split(/[\s;]+/).filter(Boolean);
+    const montos = [];
+    for (const t of partes) {
+      let n = null;
+      if (/^\d{1,3}(\.\d{3})+(,\d{1,2})?$/.test(t)) n = Number(t.replace(/\./g, '').replace(',', '.'));      // 1.234.567,89
+      else if (/^\d+(,\d{1,2})?$/.test(t)) n = Number(t.replace(',', '.'));                                // 43855,42
+      else if (/^\d+(\.\d{1,2})?$/.test(t)) n = Number(t);                                                // 43855.42
+      if (n === null || !(n > 0)) { toast(`El monto «${t.slice(0, 20)}» no es válido. Escribilo como 43855,42 o 43.855,42.`); return; }
+      montos.push(n);
+    }
+    if (montos.length > 5) { toast('Podés buscar hasta 5 montos por vez.'); return; }
+    const explorar = !!(document.getElementById('mc-dg-explorar') || {}).checked;
+    if (explorar && !montos.length) { toast('Para consultar los recursos exploratorios escribí al menos un monto a buscar.'); return; }
+    this._dgForm = { orden: o, buscar: texto, explorar };
+    return this._pedirDesglose(o, montos.length ? montos : undefined, explorar);
+  },
+  async copiarDesgloseJson() {
+    const d = this._desg && this._desg.datos;
+    if (!d) { toast('Primero armá un desglose.'); return; }
+    const ok = window.Portapapeles ? await window.Portapapeles.copiar(JSON.stringify(d, null, 2)) : false;
+    toast(ok ? 'Desglose copiado (solo importes, estados y números de orden/pago).' : 'No se pudo copiar.');
+  },
+  async _pedirDesglose(orden, buscar, explorar) {
     this._desg = { orden: String(orden), cargando: true, datos: null, error: '' };
     this.pintar();
     const mia = this._desg;
     try {
-      const r = await this._post({ accion: 'desglose', cuenta: this._cuentaId, orden: String(orden), buscar });
+      const r = await this._post({ accion: 'desglose', cuenta: this._cuentaId, orden: String(orden), ...(buscar !== undefined ? { buscar } : {}), ...(explorar ? { explorar: true } : {}) });
       if (this._desg !== mia) return;
       if (!r.ok || !r.json || r.json.ok === false) mia.error = r.status === 401 ? 'Tu sesión no está autorizada: recargá el CRM.' : (this.ERRORES[r.json && r.json.error] || 'No se pudo armar el desglose.');
       else mia.datos = r.json;
@@ -302,7 +353,7 @@ const MeliComparar = {
     const g = this._desg;
     if (!g) return '';
     const e = s => this._e(s);
-    const caja = (cuerpo) => `<div class="mf-panel" id="mc-desglose"><div class="mf-cab"><b>Desglose de la orden ${e(g.orden)}</b><button class="btn btn-sm" onclick="MeliComparar.cerrarDesglose()">Cerrar</button></div>${cuerpo}</div>`;
+    const caja = (cuerpo) => `<div class="mf-panel" id="mc-desglose"><div class="mf-cab"><b>Desglose de la orden ${e(g.orden)}</b><span><button class="btn btn-sm" id="mc-btn-copiar-json" onclick="MeliComparar.copiarDesgloseJson()">Copiar JSON</button> <button class="btn btn-sm" onclick="MeliComparar.cerrarDesglose()">Cerrar</button></span></div>${cuerpo}</div>`;
     if (g.cargando) return caja('<p>Consultando a Mercado Libre y Mercado Pago…</p>');
     if (g.error) return caja(`<p style="color:var(--red)">${e(g.error)}</p>`);
     const d = g.datos || {};
@@ -315,7 +366,7 @@ const MeliComparar = {
       ${d.incompleto ? `<p style="color:var(--amber)">El desglose quedó incompleto (${e((d.errores || []).join(', '))}). Probá de nuevo en un momento.</p>` : ((d.errores || []).length ? `<p style="color:var(--amber)">No se pudo leer: ${e(d.errores.join(', '))}.</p>` : '')}
       ${(d.coincidencias || []).length ? `<p style="color:var(--green)"><b>Coinciden con la diferencia (${e(this._pesos(d.buscar))}):</b> ${e(d.coincidencias.join(' · '))}</p>` : (d.buscar ? `<p>Ninguna fuente coincide con ${e(this._pesos(d.buscar))}.</p>` : '')}
       ${sec('Lo que el CRM tiene guardado', fila('Bruto (total de ítems)', P(gu.bruto)) + fila('Cobrado aprobado', P(gu.cobrado_aprobado)) + fila('Neto (lo que llega)', P(gu.neto)) + fila('Total / pagado de la orden al guardar', `${P(gu.total_orden_guardado)} / ${P(gu.paid_orden_guardado)}`) + fila('Acreditado', P(gu.monto_acreditado)))}
-      ${d.resumen ? sec('Lo que llega de verdad (hoy)', fila('Neto — campo que usa el CRM', P(d.resumen.neto_campo_que_usa_el_crm)) + fila('+ Envío pagado por el comprador (shipping_amount)', P(d.resumen.envio_pagado_por_el_comprador)) + fila('= Llega real', P(d.resumen.llega_real)) + fila('Costo de canal real (bruto − llega real)', P(d.resumen.costo_canal_real)) + fila('Costo de canal guardado (bruto − neto)', P(d.resumen.costo_canal_guardado))) : ''}
+      ${d.resumen ? sec('Lo que llega de verdad (hoy) — regla verificada contra el panel de Mercado Libre', fila('Neto — campo que usa el CRM', P(d.resumen.neto_campo_que_usa_el_crm)) + fila('Costo de envío que pagó el comprador (receiver.cost)', P(d.resumen.costo_envio_comprador)) + fila('− Envío que ya viene dentro del pago (shipping_amount)', P(d.resumen.envio_dentro_del_pago)) + fila('+ Crédito por envío del comprador (máx. 0)', P(d.resumen.envio_pagado_por_el_comprador)) + (d.resumen.bonificacion_flex !== undefined ? fila('Bonificación Flex (se acredita APARTE, no suma)', P(d.resumen.bonificacion_flex)) : '') + fila('= Llega real', P(d.resumen.llega_real)) + fila('Costo de canal real (bruto − llega real)', P(d.resumen.costo_canal_real)) + fila('Costo de canal guardado (bruto − neto)', P(d.resumen.costo_canal_guardado))) : ''}
       ${ov ? sec('Orden en Mercado Libre (hoy)', fila('Total de ítems (total_amount)', P(ov.total_amount)) + fila('Pagado por el comprador (paid_amount)', P(ov.paid_amount)) + fila('Cargo de venta (sale_fee)', P(ov.cargo_venta_sale_fee)) + (ov.pagos || []).map(p => fila(`Pago ${p.id}: cobrado / total pagado / envío a cargo`, `${P(p.transaction_amount)} / ${P(p.total_paid_amount)} / ${P(p.shipping_cost)}`)).join('')) : ''}
       ${(d.pagos_vivos || []).map(p => sec(`Pago ${p.id} en Mercado Pago (hoy) — ${p.estado || '—'}`,
         fila('Monto (transaction_amount)', P(p.transaction_amount)) + fila('Total pagado (total_paid_amount)', P(p.total_paid_amount)) + fila('Envío (shipping_amount)', P(p.shipping_amount))
@@ -375,6 +426,8 @@ const MeliComparar = {
             <tr><td style="padding:3px 14px 1px 0"><b>Total</b> (${e(this._ret.ordenes)} orden(es) con retención)</td><td class="mf-der"><b>${e(this._pesos(this._ret.total))}</b></td></tr></table>
             ${this._ret.incompletas ? `<div style="color:var(--amber);font-size:11.5px">${e(this._ret.incompletas)} orden(es) no se pudieron revisar por completo (un pago sin leer o más pagos de los que se revisan): su retención NO está sumada, el total puede ser mayor.</div>` : ''}
             <div class="mf-acciones" style="justify-content:flex-start"><button class="btn btn-sm" id="mc-btn-copiar-ret" onclick="MeliComparar.copiarRetenciones()"><i class="ti ti-copy"></i> Copiar retenciones</button></div></div>` : '';
+      const flex = this._flex.lista.length
+        ? `<div class="mf-panel" id="mc-flex"><b>Bonificaciones Flex</b> (cashback por envío): <b>${e(this._flex.ordenes)}</b> orden(es), <b>${e(this._pesos(this._flex.total))}</b>. Se acreditan <b>aparte</b>: no suman a «lo que llega» ni son una diferencia.<div style="font-size:11.5px;color:var(--text-secondary);margin-top:3px">Órdenes: ${this._flex.lista.slice(0, 30).map(x => e(x.orden)).join(', ')}${this._flex.lista.length > 30 ? '…' : ''}</div></div>` : '';
       const filas = visibles.map(d => {
         const dif = this._difNeto(d);
         const colorDif = dif === null ? 'inherit' : (dif > 0 ? 'var(--green)' : 'var(--red)');
@@ -384,15 +437,17 @@ const MeliComparar = {
           <td data-l="Orden" style="font-family:monospace">${e(d.orden)}</td>
           <td data-l="Producto">${e(this._titulos[d.orden] || '—')}</td>
           <td data-l="Cobrado" class="mf-der">${this._par(d.cobrado_guardado, d.cobrado_vivo, x => this._pesos(x))}</td>
-          <td data-l="Llega" class="mf-der">${this._par(d.neto_guardado, d.llega_real_vivo ?? d.neto_vivo, x => this._pesos(x))}</td>
+          <td data-l="Llega" class="mf-der">${this._par(d.neto_guardado, d.llega_real_vivo ?? null, x => this._pesos(x))}${this._num(d.dif_llega_real) !== null && this._num(d.envio_pagado_por_el_comprador) ? `<br><span style="font-size:11px;color:var(--text-secondary)">incluye ${e(this._con(this._num(d.envio_pagado_por_el_comprador)))} de envío del comprador</span>` : ''}</td>
           <td data-l="Costo de canal" class="mf-der">${this._par(d.costo_canal_guardado, d.costo_canal_real, x => this._pesos(x))}</td>
-          <td data-l="Diferencia" class="mf-der" style="color:${colorDif};font-weight:600">${e(this._con(dif))}</td>
+          <td data-l="Diferencia" class="mf-der" style="color:${colorDif};font-weight:600">${e(this._con(dif))}${dif === null && this._cambioNeto(d) !== null ? `<br><span style="font-size:11px;font-weight:400;color:var(--amber)">neto del pago ${e(this._con(this._cambioNeto(d)))} · lo que llega sin afirmar</span>` : ''}</td>
+          <td data-l="Pago hoy" style="font-size:11.5px">${e((d.estados_pago_vivos || []).join(' + ') || '—')}${this._num(d.reintegrado_vivo) ? `<br><span style="color:var(--amber)">reintegrado ${e(this._pesos(d.reintegrado_vivo))}</span>` : (d.lectura_completa === false ? '<br><span style="color:var(--amber)">lectura incompleta</span>' : '')}</td>
           <td data-l="Estado">${e(this._estadoTexto(d))}</td>
           <td data-l="Liberación">${lib}</td>
           <td data-l="Qué cambió" style="font-size:11.5px">${e(this._motivosTexto(d))} <button class="btn btn-sm" onclick="MeliComparar.verDesglose('${String(d.orden).replace(/\D/g, '')}')" style="margin-left:4px">Ver desglose</button></td>
         </tr>`;
       }).join('');
-      cuerpo = `${resumen}${retenciones}${lista.length ? `<div class="mf-tabla"><table style="min-width:980px"><thead><tr><th>Orden</th><th>Producto</th><th class="mf-der">Cobrado (guardado → actual)</th><th class="mf-der">Llega a la cuenta (guardado → real)</th><th class="mf-der">Costo de canal (guardado → real)</th><th class="mf-der">Diferencia</th><th>Estado</th><th>Liberación</th><th>Qué cambió</th></tr></thead><tbody>${filas}</tbody></table></div>
+      const aviso = lista.length ? `<div class="mf-panel" id="mc-aviso-regla" style="font-size:12px"><b>Cómo se calcula «llega»:</b> neto del pago + lo que el comprador pagó de envío y NO viene dentro del pago (regla verificada contra el «Total» del cobro en el panel de Mercado Libre en 6 órdenes; las que coincidían dan +0). Si no se pudo leer el costo del envío, la orden queda sin afirmar.</div>` : '';
+      cuerpo = `${resumen}${retenciones}${flex}${aviso}${lista.length ? `<div class="mf-tabla"><table style="min-width:1080px"><thead><tr><th>Orden</th><th>Producto</th><th class="mf-der">Cobrado (guardado → actual)</th><th class="mf-der">Llega a la cuenta (guardado → real)</th><th class="mf-der">Costo de canal (guardado → real)</th><th class="mf-der">Diferencia</th><th>Pago hoy</th><th>Estado</th><th>Liberación</th><th>Qué cambió</th></tr></thead><tbody>${filas}</tbody></table></div>
         ${lista.length > visibles.length ? `<div class="mf-acciones"><button class="btn btn-sm" onclick="MeliComparar.verMas()">Ver más (${e(lista.length - visibles.length)})</button><span></span></div>` : ''}` : ''}`;
     }
 
@@ -405,6 +460,12 @@ const MeliComparar = {
         <label>Hasta (opcional, sin incluir ese día)<input id="mc-hasta" type="date" value="${e(this._selHasta || '')}" onchange="MeliComparar.cambiaRango()"${corriendo ? ' disabled' : ''}></label></div>
       ${corriendo ? '' : `<div class="mf-acciones" style="justify-content:flex-start;flex-wrap:wrap;margin-top:6px"><button class="btn btn-sm" onclick="MeliComparar.rango('mes')">Este mes</button><button class="btn btn-sm" onclick="MeliComparar.rango('anterior')">Mes anterior</button><button class="btn btn-sm" onclick="MeliComparar.rango('octubre')">Desde el 1/10</button></div>`}
       <div class="mf-acciones" style="justify-content:flex-start;flex-wrap:wrap">${botones.join('')}${exportar}</div>
+      <details style="margin-top:8px" id="mc-dg"${this._desg ? ' open' : ''}><summary style="cursor:pointer;font-size:12.5px"><b>Desglose de una orden</b> (para verificar contra el detalle de la venta de Mercado Libre)</summary>
+        <div class="mf-filtros" style="grid-template-columns:repeat(auto-fit,minmax(170px,1fr))">
+          <label>Número de orden<input id="mc-dg-orden" type="text" inputmode="numeric" placeholder="2000018981569144" value="${e(this._dgForm.orden)}"></label>
+          <label>Montos a buscar (opcional, p. ej. el «Total» de ML)<input id="mc-dg-buscar" type="text" placeholder="43855,42 4887,86" value="${e(this._dgForm.buscar)}"></label></div>
+        <label style="display:flex;gap:6px;align-items:center;font-size:12px;margin-top:4px"><input type="checkbox" id="mc-dg-explorar"${this._dgForm.explorar ? ' checked' : ''}> También consultar recursos exploratorios (descuentos, reintegros)</label>
+        <div class="mf-acciones" style="justify-content:flex-start"><button class="btn btn-sm" id="mc-btn-dg" onclick="MeliComparar.desglosePorNumero()"${hayCuenta ? '' : ' disabled'}>Armar desglose</button></div></details>
       ${!hayCuenta ? '<div class="mf-nota" style="color:var(--amber)">No hay una cuenta de Mercado Libre conectada.</div>' : ''}
       ${(this._est === 'pausado' || this._est === 'error') ? `<div class="mf-nota">«Reanudar» sigue con el rango de esta comparación (${e(this._dia(this._desde))} → ${this._hasta ? e(this._dia(this._hasta)) : 'hoy'}); para otro rango, «Empezar de nuevo».</div>` : ''}
       ${this._msg ? `<div class="mf-nota" style="color:${colorAviso}">${e(this._msg)}</div>` : ''}

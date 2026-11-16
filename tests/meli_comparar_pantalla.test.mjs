@@ -59,7 +59,7 @@ console.log('\n══ Pantalla «Comparar pagos con Mercado Pago» ══\n');
   const html = C.vista();
   check('Vista inicial: botón «Comparar pagos» habilitado, rango «desde» 2026-10-01 y aviso de solo lectura', html.includes('Comparar pagos</button>') && html.includes('value="2026-10-01"') && !/disabled/.test(html.match(/id="mc-btn-iniciar"[^>]*>/)[0]) && html.includes('Solo lectura'));
   const handlers = [...html.matchAll(/onclick="([^"]+)"/g)].map((m) => m[1]);
-  check('Los únicos botones son de lectura: comparar/pausar/reanudar/copiar/descargar/ver más/desglose (ninguno escribe)', handlers.every((h) => /^MeliComparar\.(iniciar|pausar|reanudar|copiar|descargar|verMas|verDesglose|cerrarDesglose|copiarRetenciones|rango)\(/.test(h)), handlers.join());
+  check('Los únicos botones son de lectura: comparar/pausar/reanudar/copiar/descargar/ver más/desglose (ninguno escribe)', handlers.every((h) => /^MeliComparar\.(iniciar|pausar|reanudar|copiar|descargar|verMas|verDesglose|cerrarDesglose|copiarRetenciones|rango|desglosePorNumero|copiarDesgloseJson)\(/.test(h)), handlers.join());
   const src = leer('src/modules/meli-comparar.js');
   check('El módulo solo llama a las acciones comparar y desglose del worker y solo hace lecturas a la base (select, nada de insert/update/rpc)', (src.match(/accion: '([a-z]+)'/g) || []).every((x) => /comparar|desglose/.test(x)) && !/\.(insert|update|delete|upsert|rpc)\(/.test(src));
   const sin = entorno({ cuentas: [] }).C.vista();
@@ -79,9 +79,9 @@ console.log('\n══ Pantalla «Comparar pagos con Mercado Pago» ══\n');
   check('Usa la sesión del usuario y POST a /api/meli/worker', e.pedidos.every((p) => p.url === '/api/meli/worker' && p.metodo === 'POST' && p.token === 'tok-usuario'));
   check('Termina «listo» con las 2 órdenes que difieren y 45 revisadas (20+20+5)', e.C._est === 'listo' && e.C._filas.length === 2 && e.C._rev === 45, `${e.C._est} ${e.C._filas.length} ${e.C._rev}`);
   const html = e.C.vista();
-  check('Resumen: 2 con diferencia de 45 revisadas, diferencia total +$11.036,67 y cuántas ya acreditadas', html.includes('Listo: <b>2</b> orden(es) con diferencia de 45 revisadas') && html.includes('+$11.036,67') && /ya acreditadas: <b>2<\/b>/.test(html), html.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').slice(0, 600));
+  check('Resumen: 2 con diferencia de 45 revisadas, la suma de lo que llega (6.148,81 + 4.887,86 = +$11.036,67) y cuántas ya acreditadas', html.includes('Listo: <b>2</b> orden(es) con diferencia de 45 revisadas') && html.includes('+$11.036,67') && /ya acreditadas: <b>2<\/b>/.test(html), html.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').slice(0, 600));
   check('Barra de avance: 45 de 45 revisadas, 100 %', html.includes('45 de 45 orden(es) revisadas') && html.includes('100 %') && html.includes('width:100%'));
-  check('Tabla: orden, producto, cobrado, llega guardado → real, costo de canal guardado → real, diferencia, estado y liberación', html.includes('2000018981569144') && html.includes('Perfume Khamrah') && html.includes('$31.967,66') && html.includes('$38.116,47') && html.includes('$23.823,34') && html.includes('$17.674,53') && html.includes('+$6.148,81') && html.includes('Procesada · Acreditada · Con venta') && html.includes('30/10/2026'));
+  check('Tabla: orden, producto, cobrado, llega guardado → real, costo de canal guardado → real, diferencia, pago hoy, estado y liberación', html.includes('2000018981569144') && html.includes('Perfume Khamrah') && html.includes('$31.967,66') && html.includes('$38.116,47') && html.includes('$23.823,34') && html.includes('$17.674,53') && html.includes('incluye +$6.148,81 de envío del comprador') && html.includes('Procesada · Acreditada · Con venta') && html.includes('30/10/2026'));
   check('Ordenadas por la diferencia más grande primero (6.148,81 antes que 4.887,86)', html.indexOf('2000018981569144') < html.indexOf('2000019315185954'));
   check('Muestra «Copiar lista» y «Descargar para Excel» (solo con resultados)', html.includes('id="mc-btn-copiar"') && html.includes('id="mc-btn-excel"') && !entorno().C.vista().includes('mc-btn-copiar'));
 }
@@ -299,6 +299,69 @@ console.log('\n══ Pantalla «Comparar pagos con Mercado Pago» ══\n');
   check('Un redibujado al terminar conserva el estado «listo» y las fechas', d.C._est === 'listo' && d.el('mc-desde').value === '2026-09-01');
 }
 
+
+// 6i. «Llega real» con la REGLA VERIFICADA contra el panel de ML (neto + crédito de envío del comprador) + desglose de cualquier orden + estado del pago hoy
+{
+  const e = entorno({ respuestas: [tanda([dif('2000018981569144'), dif('2000000000000013', { dif_llega_real: null, llega_real_vivo: null, motivos: ['PAGO_NO_APROBADO', 'HAY_REINTEGRO'], estados_pago_vivos: ['refunded'], reintegrado_vivo: 1500, pagos_vivos_resumen: [{ id: '55', estado: 'refunded', monto: 1500, reintegrado: 1500 }] })], { completo: true })] });
+  await e.C.iniciar();
+  const html = e.C.vista();
+  check('Arriba de la tabla se explica la regla (verificada contra el panel de Mercado Libre en 6 órdenes) y ya no dice «estimación»', html.includes('id="mc-aviso-regla"') && html.includes('regla verificada') && html.includes('6 órdenes') && !html.includes('ESTIMACIÓN') && !html.includes('ESTIMADO') && !html.includes('no uses esa columna'));
+  check('Las columnas dicen «guardado → real» y el motivo LLEGA_REAL_DISTINTO ya no es una estimación', html.includes('Llega a la cuenta (guardado → real)') && !html.includes('ESTIMADO') && !e.C._motivosTexto({ motivos: ['LLEGA_REAL_DISTINTO'] }).includes('ESTIMACIÓN'));
+  const celdaDif = (h, orden) => { const fila = h.slice(h.indexOf(orden)); const m = fila.match(/data-l="Diferencia"[^>]*>([^<]*)</); return m ? m[1] : null; };
+  check('La diferencia de una orden con crédito de envío (+6.148,81) es la que cuenta en la columna y en el orden', celdaDif(html, '2000018981569144') === '+$6.148,81' && e.C._difNeto(dif('1')) === 6148.81, String(celdaDif(html, '2000018981569144')));
+  const v2 = entorno({ respuestas: [tanda([dif('2000000000000001', { dif_neto: -150.5, neto_vivo: 31817.16, llega_real_vivo: 37965.97, dif_llega_real: 5998.31, dif_neto_campo_nuevo: 9999 }), dif('2000000000000002', { dif_neto: -20, llega_real_vivo: null, dif_llega_real: null, dif_neto_campo_nuevo: 777 }), dif('2000000000000003', { dif_neto: null, llega_real_vivo: null, dif_llega_real: null, dif_neto_campo_nuevo: 555 })], { completo: true })] });
+  await v2.C.iniciar();
+  const h2 = v2.C.vista();
+  check('Con llega real leído manda la diferencia de llega real (+5.998,31); sin el costo del envío leído la diferencia queda sin afirmar y el cambio del neto (−20) se muestra aparte y NO se suma; el «campo nuevo» NO entra en ninguna columna, suma ni orden', celdaDif(h2, '2000000000000001') === '+$5.998,31' && celdaDif(h2, '2000000000000002') === '—' && h2.includes('neto del pago $-20 · lo que llega sin afirmar') && celdaDif(h2, '2000000000000003') === '—' && h2.includes('Diferencia total en lo que llega: <b>+$5.998,31</b>') && !h2.includes('9.999') && !h2.includes('777') && !h2.includes('555'), h2.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').slice(0, 700));
+  const hv = v2.C.vista();
+  check('La leyenda muestra el crédito de ENVÍO (6.148,81), no la diferencia total (5.998,31) cuando también cambió el neto', hv.includes('incluye +$6.148,81 de envío del comprador') && !hv.includes('incluye +$5.998,31'));
+  const vn = entorno({ respuestas: [tanda([dif('2000000000000005', { llega_real_vivo: null, dif_llega_real: null, envio_pagado_por_el_comprador: null, neto_vivo: 31967.66, dif_neto: null, motivos: ['ENVIO_COSTOS_NO_CONSULTADOS'] })], { completo: true })] });
+  await vn.C.iniciar();
+  const hn = vn.C.vista();
+  const celdaLlega = hn.slice(hn.indexOf('2000000000000005')).match(/data-l="Llega"[^>]*>(.*?)<\/td>/s);
+  check('Si no se leyó el costo del envío la columna «Llega» NO afirma el neto como llega real (no muestra $31.967,66 como actual)', celdaLlega && !/→\s*<b>\$31\.967,66/.test(celdaLlega[1]) && celdaLlega[1].includes('—'), celdaLlega && celdaLlega[1]);
+  const vf = entorno({ respuestas: [tanda([dif('2000000000000004')], { completo: true, bonificaciones_flex: { total: 499, ordenes: 1, lista: [{ orden: '2000000000000777', monto: 499 }] } })] });
+  await vf.C.iniciar();
+  const hf = vf.C.vista();
+  check('Las bonificaciones Flex (499) se muestran en un panel aparte, con la orden, y no suman a la diferencia', hf.includes('id="mc-flex"') && hf.includes('<b>$499</b>') && hf.includes('2000000000000777') && hf.includes('<b>aparte</b>'), hf.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').slice(0, 500));
+  check('Una orden con el pago devuelto/reintegrado muestra «Pago hoy»: refunded y «reintegrado $1.500»', html.includes('refunded') && html.includes('reintegrado $1.500'));
+  const csv = e.C.csv();
+  const cab = csv.split('\r\n')[0];
+  check('El CSV trae «Estado del pago hoy», «Reintegrado hoy», la bonificación Flex aparte y «Llega real (regla verificada)»', cab.includes('Estado del pago hoy') && cab.includes('Reintegrado hoy') && cab.includes('Bonificación Flex') && cab.includes('Llega real (regla verificada)') && !cab.includes('NO usar') && csv.includes('refunded') && csv.includes('1500,00'));
+}
+{
+  const desglose = { json: { ok: true, orden: '2000000000000555', incompleto: false, errores: [], buscar: 43855.42, guardado: { bruto: 62690.5, neto: 38967.56 }, resumen: null, orden_viva: null, pagos_vivos: [], envio: null, candidatos: [], coincidencias: [], hallazgos: [{ recurso: 'pago_1', ruta: 'amounts.collector.net_received', buscado: 43855.42 }] } };
+  const e = entorno({ respuestas: [tanda([], { completo: true }), desglose] });
+  await e.C.iniciar();
+  e.el('mc-dg-orden').value = '2000000000000555'; e.el('mc-dg-buscar').value = '43.855,42 4887,86'; e.el('mc-dg-explorar').checked = true;
+  await e.C.desglosePorNumero();
+  const ped = e.pedidos[1] && e.pedidos[1].cuerpo;
+  check('«Armar desglose» funciona con CUALQUIER orden (no hace falta que esté en la tabla): manda la orden, los montos buscados (coma decimal y miles con punto) y explorar', ped && ped.accion === 'desglose' && ped.orden === '2000000000000555' && ped.explorar === true && ped.buscar.length === 2 && ped.buscar[0] === 43855.42 && ped.buscar[1] === 4887.86 && ped.cuenta === 1, JSON.stringify(ped));
+  check('Muestra el desglose y permite «Copiar JSON» (solo importes, estados y números)', e.C.vista().includes('Desglose de la orden 2000000000000555') && e.C.vista().includes('id="mc-btn-copiar-json"'));
+  await e.C.copiarDesgloseJson();
+  const j = e.copiados[0] && JSON.parse(e.copiados[0]);
+  check('El JSON copiado es el del desglose (con los hallazgos de dónde aparece el monto buscado)', j && j.orden === '2000000000000555' && j.hallazgos[0].ruta === 'amounts.collector.net_received', e.copiados[0]);
+  const x = entorno({ respuestas: [tanda([], { completo: true })] });
+  await x.C.iniciar();
+  x.el('mc-dg-orden').value = '12ab'; await x.C.desglosePorNumero();
+  check('Un número de orden inválido no hace ningún pedido', x.pedidos.length === 1 && x.toasts.some((t) => t.includes('número de la orden')));
+}
+
+
+// 6j. Entradas estrictas del formulario «Desglose de una orden»
+{
+  const e = entorno({ respuestas: [tanda([], { completo: true })] });
+  await e.C.iniciar();
+  const probar = async (orden, buscar, explorar = false) => { const n = e.pedidos.length; e.el('mc-dg-orden').value = orden; e.el('mc-dg-buscar').value = buscar; e.el('mc-dg-explorar').checked = explorar; await e.C.desglosePorNumero(); return e.pedidos.length - n; };
+  check('Un número de orden con letras o separadores en el medio NO se «arregla»: no se consulta (200000abc0000555, dos números pegados)', (await probar('200000abc0000555', '')) === 0 && (await probar('2000000000555 2000000000556', '')) === 0 && (await probar('2000000000-555', '')) === 0);
+  check('Un monto inválido (basura, 0x10, 1e3, negativo, 0) frena TODO el pedido con aviso, aunque otros montos sean válidos', (await probar('2000000000555', 'basura')) === 0 && (await probar('2000000000555', '43855,42 0x10')) === 0 && (await probar('2000000000555', '1e3')) === 0 && (await probar('2000000000555', '-5')) === 0 && (await probar('2000000000555', '0')) === 0);
+  check('«Explorar» sin ningún monto a buscar avisa y no consulta', (await probar('2000000000555', '', true)) === 0 && e.toasts.some((t) => t.includes('al menos un monto')));
+  check('Más de 5 montos se rechaza', (await probar('2000000000555', '1 2 3 4 5 6')) === 0);
+  const ok = async (buscar) => { e.pedidos.length = 0; e.el('mc-dg-orden').value = ' 2000000000555 '; e.el('mc-dg-buscar').value = buscar; await e.C.desglosePorNumero(); return e.pedidos[0] && e.pedidos[0].cuerpo.buscar; };
+  check('Formatos válidos: 43855,42 · 43.855,42 · 1.234.567,89 · 43855.42 · enteros; la orden con espacios exteriores se acepta', JSON.stringify(await ok('43855,42')) === '[43855.42]' && JSON.stringify(await ok('43.855,42')) === '[43855.42]' && JSON.stringify(await ok('1.234.567,89')) === '[1234567.89]' && JSON.stringify(await ok('43855.42')) === '[43855.42]' && JSON.stringify(await ok('499 4887,86')) === '[499,4887.86]');
+  check('Sin montos y sin explorar se arma el desglose igual (sin «buscar»)', (await ok('')) === undefined && e.pedidos[0].cuerpo.accion === 'desglose');
+}
+
 // 7. Seguridad de la vista: nada del servidor entra como HTML; sin datos del comprador
 {
   const mal = dif('2000018981569144', { motivos: ['<img src=x onerror=alert(1)>'], comprador: 'Juanita Pérez', estado: '<b>x</b>' });
@@ -313,7 +376,7 @@ console.log('\n══ Pantalla «Comparar pagos con Mercado Pago» ══\n');
 {
   const desglose = { json: { ok: true, orden: '2000018981569144', incompleto: false, errores: [], buscar: 6148.81,
     guardado: { bruto: 55791, neto: 31967.66, cobrado_aprobado: 55791, monto_acreditado: 31967.66, total_orden_guardado: 55791, paid_orden_guardado: 55791 },
-    resumen: { neto_campo_que_usa_el_crm: 31967.66, envio_pagado_por_el_comprador: 6148.81, llega_real: 38116.47, costo_canal_real: 17674.53, costo_canal_guardado: 23823.34 },
+    resumen: { neto_campo_que_usa_el_crm: 31967.66, costo_envio_comprador: 6148.81, envio_dentro_del_pago: 0, envio_pagado_por_el_comprador: 6148.81, llega_real: 38116.47, costo_canal_real: 17674.53, costo_canal_guardado: 23823.34 },
     orden_viva: { total_amount: 55791, paid_amount: 61939.81, cargo_venta_sale_fee: 8000, pagos: [{ id: '184173189868', transaction_amount: 55791, total_paid_amount: 61939.81, shipping_cost: 6148.81 }] },
     pagos_vivos: [{ id: '184173189868', estado: 'approved', transaction_amount: 55791, total_paid_amount: 61939.81, shipping_amount: 6148.81, net_received_amount: 31967.66, net_received_collector: 38116.47, cargos_por_tipo_y_nombre: { 'fee:mercadopago_fee': 2500.5 }, aprobado: '2026-10-14', actualizado: '2026-10-31', liberacion: '2026-10-30' }],
     envio: { estado: 'delivered', tipo_logistico: 'self_service', costo_declarado_en_envio: 6148.81, costos: { gross_amount: 12297.62, receptor: { cost: 6148.81 }, emisores: [{ cost: 6148.81 }] } },
@@ -325,7 +388,7 @@ console.log('\n══ Pantalla «Comparar pagos con Mercado Pago» ══\n');
   const pedido = e.pedidos[1];
   check('«Ver desglose» pide la acción desglose de ESA orden, buscando la diferencia (6.148,81)', pedido.cuerpo.accion === 'desglose' && pedido.cuerpo.orden === '2000018981569144' && pedido.cuerpo.buscar === 6148.81 && pedido.cuerpo.cuenta === 1, JSON.stringify(pedido.cuerpo));
   const html = e.C.vista();
-  check('El panel muestra lo guardado, la cuenta «llega real», la orden, el pago, el envío y las fuentes (con ✔ las que coinciden)', html.includes('Desglose de la orden 2000018981569144') && html.includes('= Llega real') && html.includes('$38.116,47') && html.includes('Envío (self_service, delivered)') && html.includes('✔ orden: paid_amount − total_amount') && html.includes('Coinciden con la diferencia'));
+  check('El panel muestra lo guardado, la cuenta de «llega real», la orden, el pago, el envío y las fuentes (con ✔ las que coinciden)', html.includes('Desglose de la orden 2000018981569144') && html.includes('= Llega real') && html.includes('regla verificada contra el panel de Mercado Libre') && html.includes('receiver.cost') && !html.includes('ESTIMACIÓN') && html.includes('$38.116,47') && html.includes('Envío (self_service, delivered)') && html.includes('✔ orden: paid_amount − total_amount') && html.includes('Coinciden con la diferencia'));
   e.C.cerrarDesglose();
   check('Cerrar el desglose lo oculta', !e.C.vista().includes('Desglose de la orden'));
   const e2 = entorno({ respuestas: [tanda([dif('2000018981569144')], { completo: true }), { status: 200, json: { ok: false, error: 'ORDEN_NO_ENCONTRADA' } }] });

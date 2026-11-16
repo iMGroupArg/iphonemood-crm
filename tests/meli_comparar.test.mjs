@@ -17,6 +17,8 @@ const C = require(RAIZ + 'api/_meli_comparar.js');
 
 let ok = 0, fail = 0;
 const check = (n, cond, det = '') => { cond ? ok++ : fail++; console.log(`${cond ? '  ok  ' : ' FALLA'} │ ${n}${cond ? '' : '  → ' + det}`); };
+// compararOrden directo: por defecto el comprador no pagó envío (receiver_cost 0); cada prueba puede pasar el suyo
+const CO = (f, v, e = {}) => C.compararOrden(f, v, { receiver_cost: 0, ...e });
 const resp = (status, json) => ({ ok: status >= 200 && status < 300, status, json: async () => json });
 const futuro = () => new Date(Date.now() + 3600_000).toISOString();
 
@@ -27,7 +29,7 @@ const fila = (id, o = {}) => ({
   id, meli_order_id: String(2000000000000000 + id), estado: 'paid', procesada: true, acreditado: false, venta_id: 7,
   bruto: 55791, neto: 31967.66, cobrado_aprobado: 55791, pago_id: String(900 + id), fecha_liberacion: '2026-10-30T12:00:00Z', monto_acreditado: null,
   payload_pago: { pagos: [{ id: 900 + id, status: 'approved', transaction_amount: 55791, net_received_amount: 31967.66 }] },
-  comprador: 'jperez_nick', ...o,
+  comprador: 'jperez_nick', total_orden: '55791', paid_orden: '55791', ...o,
 });
 
 const pagoVivo = (o = {}) => ({ status: 'approved', transaction_amount: 55791, transaction_details: { net_received_amount: 31967.66 }, money_release_date: '2026-10-30T12:00:00.000-04:00',
@@ -110,16 +112,16 @@ console.log('\n══ «Comparar»: lo guardado contra Mercado Pago en vivo (sol
 {
   const g = fila(10);
   const v = (o = {}) => [{ ok: true, estado: 'approved', monto: 55791, reintegrado: 0, neto: 31967.66, neto_nuevo: null, liberacion: '2026-10-30', ...o }];
-  check('Igual todo → null (no se marca)', C.compararOrden(g, v()) === null);
-  check('Un centavo de diferencia en el neto SÍ se marca (sin tolerancia)', C.compararOrden(g, v({ neto: 31967.67 })).dif_neto === 0.01);
-  check('Ruido de coma flotante no cuenta (0,1+0,2 vs 0,3)', C.compararOrden(fila(11, { neto: 0.3, cobrado_aprobado: 0.3 }), v({ monto: 0.1 + 0.2, neto: 0.1 + 0.2 })) === null);
-  check('El neto del campo NUEVO distinto (amounts.collector.net_received) se informa aparte', (() => { const d = C.compararOrden(g, v({ neto_nuevo: 38000 })); return d.motivos.join() === 'NETO_NUEVO_DISTINTO' && d.dif_neto_campo_nuevo === 6032.34 && d.dif_neto === null; })());
-  check('NUMERIC como texto de la base ("31967.66") se compara bien', C.compararOrden(fila(12, { neto: '31967.66', cobrado_aprobado: '55791.00' }), v()) === null);
-  check('Un pago devuelto / con reintegro se marca', C.compararOrden(g, v({ estado: 'refunded' })).motivos.includes('PAGO_NO_APROBADO') && C.compararOrden(g, v({ reintegrado: 100 })).motivos.includes('HAY_REINTEGRO'));
-  check('La liberación que cambió de día se marca', C.compararOrden(g, v({ liberacion: '2026-11-05' })).motivos.includes('LIBERACION_DISTINTA'));
-  check('Dos pagos aprobados: se suman (cobrado y neto)', C.compararOrden(fila(13, { neto: 100, cobrado_aprobado: 200, fecha_liberacion: null }), [{ ok: true, estado: 'approved', monto: 120, reintegrado: 0, neto: 60, neto_nuevo: null, liberacion: null }, { ok: true, estado: 'approved', monto: 80, reintegrado: 0, neto: 40, neto_nuevo: null, liberacion: null }]) === null);
-  check('Un pago que no se pudo consultar se informa (no se inventa «sin cambios»)', C.compararOrden(g, [{ ok: false, inexistente: false }]).motivos.includes('PAGO_NO_CONSULTADO') && C.compararOrden(g, [{ ok: false, inexistente: true }]).motivos.includes('PAGO_INEXISTENTE'));
-  check('Orden sin pagos guardados: se informa', C.compararOrden(fila(14, { pago_id: null, payload_pago: null }), []).motivos.includes('SIN_PAGOS_GUARDADOS'));
+  check('Igual todo → null (no se marca)', CO(g, v()) === null);
+  check('Un centavo de diferencia en el neto SÍ se marca (sin tolerancia)', CO(g, v({ neto: 31967.67 })).dif_neto === 0.01);
+  check('Ruido de coma flotante no cuenta (0,1+0,2 vs 0,3)', CO(fila(11, { neto: 0.3, cobrado_aprobado: 0.3 }), v({ monto: 0.1 + 0.2, neto: 0.1 + 0.2 })) === null);
+  check('El neto del campo NUEVO distinto (amounts.collector.net_received) se informa aparte', (() => { const d = CO(g, v({ neto_nuevo: 38000 })); return d.motivos.join() === 'NETO_NUEVO_DISTINTO' && d.dif_neto_campo_nuevo === 6032.34 && d.dif_neto === null; })());
+  check('NUMERIC como texto de la base ("31967.66") se compara bien', CO(fila(12, { neto: '31967.66', cobrado_aprobado: '55791.00' }), v()) === null);
+  check('Un pago devuelto / con reintegro se marca', CO(g, v({ estado: 'refunded' })).motivos.includes('PAGO_NO_APROBADO') && CO(g, v({ reintegrado: 100 })).motivos.includes('HAY_REINTEGRO'));
+  check('La liberación que cambió de día se marca', CO(g, v({ liberacion: '2026-11-05' })).motivos.includes('LIBERACION_DISTINTA'));
+  check('Dos pagos aprobados: se suman (cobrado y neto)', CO(fila(13, { neto: 100, cobrado_aprobado: 200, fecha_liberacion: null }), [{ ok: true, estado: 'approved', monto: 120, reintegrado: 0, neto: 60, neto_nuevo: null, liberacion: null }, { ok: true, estado: 'approved', monto: 80, reintegrado: 0, neto: 40, neto_nuevo: null, liberacion: null }]) === null);
+  check('Un pago que no se pudo consultar se informa (no se inventa «sin cambios»)', CO(g, [{ ok: false, inexistente: false }]).motivos.includes('PAGO_NO_CONSULTADO') && CO(g, [{ ok: false, inexistente: true }]).motivos.includes('PAGO_INEXISTENTE'));
+  check('Orden sin pagos guardados: se informa', CO(fila(14, { pago_id: null, payload_pago: null }), []).motivos.includes('SIN_PAGOS_GUARDADOS'));
   check('idsDePago: junta los pagos leídos y los aprobados, sin repetir y solo con ids numéricos', C.idsDePago({ pago_id: '5, 6', payload_pago: { pagos: [{ id: 5 }, { id: 7 }, { id: '../x' }] } }).join() === '5,7,6');
 }
 
@@ -128,15 +130,15 @@ console.log('\n══ «Comparar»: lo guardado contra Mercado Pago en vivo (sol
 {
   const g = fila(20);
   const v = (o = {}) => [{ ok: true, id: 920, estado: 'approved', monto: 55791, reintegrado: 0, neto: 31967.66, neto_nuevo: null, liberacion: '2026-10-30', ...o }];
-  const mismoInstante = (a, b) => C.compararOrden(fila(21, { fecha_liberacion: a }), [{ ok: true, estado: 'approved', monto: 55791, reintegrado: 0, neto: 31967.66, neto_nuevo: null, liberacion: C.resumenVivo({ money_release_date: b }).liberacion }]);
+  const mismoInstante = (a, b) => CO(fila(21, { fecha_liberacion: a }), [{ ok: true, estado: 'approved', monto: 55791, reintegrado: 0, neto: 31967.66, neto_nuevo: null, liberacion: C.resumenVivo({ money_release_date: b }).liberacion }]);
   check('El MISMO instante escrito en dos zonas no da días distintos (22:00 -04:00 = 02:00Z del día siguiente)', mismoInstante('2026-10-31T02:00:00+00:00', '2026-10-30T22:00:00.000-04:00') === null);
   check('Un instante que SÍ cae en otro día de Argentina se marca (03:00Z = 00:00 del 31 AR vs 02:59Z = 23:59 del 30)', mismoInstante('2026-10-31T03:00:00Z', '2026-10-31T02:59:00Z').motivos.includes('LIBERACION_DISTINTA'));
-  check('Todos los pagos vivos pasaron a pendiente: se marca (ya no es «sin cambios» aunque no haya aprobados que sumar)', (() => { const d = C.compararOrden(fila(22, { cobrado_aprobado: 200, neto: 100 }), [{ ok: true, id: 922, estado: 'pending', monto: 200, reintegrado: 0, neto: 100, neto_nuevo: null, liberacion: null }]); return d && d.motivos.includes('COBRADO_VIVO_NO_DISPONIBLE') && d.motivos.includes('NETO_VIVO_NO_DISPONIBLE') && d.motivos.includes('ESTADO_PAGO_CAMBIO'); })());
-  check('El estado de un pago que cambió respecto de lo guardado se marca aunque los importes coincidan', C.compararOrden(g, v({ estado: 'in_process' })) !== null && C.compararOrden(g, v({ estado: 'in_process' })).motivos.includes('ESTADO_PAGO_CAMBIO'));
-  check('Neto guardado vacío y neto vivo con dato → se marca (NETO_GUARDADO_FALTA), no «sin cambios»', C.compararOrden(fila(23, { neto: null }), v()).motivos.includes('NETO_GUARDADO_FALTA'));
-  check('Cobrado guardado vacío y vivo con dato → COBRADO_GUARDADO_FALTA', C.compararOrden(fila(24, { cobrado_aprobado: null }), v()).motivos.includes('COBRADO_GUARDADO_FALTA'));
-  check('Liberación que aparece (antes sin fecha) o desaparece (había y ya no) se marca', C.compararOrden(fila(25, { fecha_liberacion: null }), v()).motivos.includes('LIBERACION_APARECE') && C.compararOrden(g, v({ liberacion: null })).motivos.includes('LIBERACION_DESAPARECE'));
-  check('Datos que faltan en AMBOS lados no son una diferencia (orden aún sin pago aprobado)', C.compararOrden(fila(26, { neto: null, cobrado_aprobado: null, fecha_liberacion: null, payload_pago: null, pago_id: '926' }), [{ ok: true, id: 926, estado: 'pending', monto: 1, reintegrado: 0, neto: null, neto_nuevo: null, liberacion: null }]) === null);
+  check('Todos los pagos vivos pasaron a pendiente: se marca (ya no es «sin cambios» aunque no haya aprobados que sumar)', (() => { const d = CO(fila(22, { cobrado_aprobado: 200, neto: 100 }), [{ ok: true, id: 922, estado: 'pending', monto: 200, reintegrado: 0, neto: 100, neto_nuevo: null, liberacion: null }]); return d && d.motivos.includes('COBRADO_VIVO_NO_DISPONIBLE') && d.motivos.includes('NETO_VIVO_NO_DISPONIBLE') && d.motivos.includes('ESTADO_PAGO_CAMBIO'); })());
+  check('El estado de un pago que cambió respecto de lo guardado se marca aunque los importes coincidan', CO(g, v({ estado: 'in_process' })) !== null && CO(g, v({ estado: 'in_process' })).motivos.includes('ESTADO_PAGO_CAMBIO'));
+  check('Neto guardado vacío y neto vivo con dato → se marca (NETO_GUARDADO_FALTA), no «sin cambios»', CO(fila(23, { neto: null }), v()).motivos.includes('NETO_GUARDADO_FALTA'));
+  check('Cobrado guardado vacío y vivo con dato → COBRADO_GUARDADO_FALTA', CO(fila(24, { cobrado_aprobado: null }), v()).motivos.includes('COBRADO_GUARDADO_FALTA'));
+  check('Liberación que aparece (antes sin fecha) o desaparece (había y ya no) se marca', CO(fila(25, { fecha_liberacion: null }), v()).motivos.includes('LIBERACION_APARECE') && CO(g, v({ liberacion: null })).motivos.includes('LIBERACION_DESAPARECE'));
+  check('Datos que faltan en AMBOS lados no son una diferencia (orden aún sin pago aprobado)', CO(fila(26, { neto: null, cobrado_aprobado: null, fecha_liberacion: null, payload_pago: null, pago_id: '926' }), [{ ok: true, id: 926, estado: 'pending', monto: 1, reintegrado: 0, neto: null, neto_nuevo: null, liberacion: null }]) === null);
 }
 {
   reiniciar();
@@ -163,9 +165,9 @@ console.log('\n══ «Comparar»: lo guardado contra Mercado Pago en vivo (sol
 {
   const g = fila(30, { payload_pago: { pagos: [{ id: 3001, status: 'approved' }, { id: 3002, status: 'approved' }] }, cobrado_aprobado: 2, neto: 2, fecha_liberacion: null });
   const dosPagos = (l1, l2) => [{ ok: true, id: 3001, estado: 'approved', monto: 1, reintegrado: 0, neto: 1, neto_nuevo: null, liberacion: l1 }, { ok: true, id: 3002, estado: 'approved', monto: 1, reintegrado: 0, neto: 1, neto_nuevo: null, liberacion: l2 }];
-  check('Dos aprobados, uno con fecha y otro sin: la liberación de la orden es null (como en la ingesta) → sin falsa «aparece»', C.compararOrden(g, dosPagos('2026-10-30', null)) === null);
-  check('Si guardada tenía fecha y a un pago se le va la fecha (el otro conserva el máximo): se marca LIBERACION_DESAPARECE (no «sin cambios»)', C.compararOrden({ ...g, fecha_liberacion: '2026-10-30T12:00:00Z' }, dosPagos('2026-10-30', null)).motivos.includes('LIBERACION_DESAPARECE'));
-  check('Con todas las fechas: se toma la máxima y se compara', C.compararOrden({ ...g, fecha_liberacion: '2026-11-02T12:00:00Z' }, dosPagos('2026-10-30', '2026-11-02')) === null);
+  check('Dos aprobados, uno con fecha y otro sin: la liberación de la orden es null (como en la ingesta) → sin falsa «aparece»', CO(g, dosPagos('2026-10-30', null)) === null);
+  check('Si guardada tenía fecha y a un pago se le va la fecha (el otro conserva el máximo): se marca LIBERACION_DESAPARECE (no «sin cambios»)', CO({ ...g, fecha_liberacion: '2026-10-30T12:00:00Z' }, dosPagos('2026-10-30', null)).motivos.includes('LIBERACION_DESAPARECE'));
+  check('Con todas las fechas: se toma la máxima y se compara', CO({ ...g, fecha_liberacion: '2026-11-02T12:00:00Z' }, dosPagos('2026-10-30', '2026-11-02')) === null);
 }
 {
   reiniciar();
@@ -329,7 +331,7 @@ console.log('\n══ «Comparar»: lo guardado contra Mercado Pago en vivo (sol
   const r = await pedir({ accion: 'comparar', cuenta: 1, desde: '2026-10-01' });
   const d = r.body.diferencias[0];
   check('Comparar: una orden donde el comprador pagó de más (paid 61.939,81 vs total 55.791) se marca EXTRA_PAGADO_POR_EL_COMPRADOR con el importe', d && d.motivos.includes('EXTRA_PAGADO_POR_EL_COMPRADOR') && d.extra_pagado_por_el_comprador === 6148.81, JSON.stringify(r.body));
-  check('Y una orden con paid = total no se marca por eso', C.compararOrden(fila(40, { paid_orden: '55791', total_orden: '55791' }), [{ ok: true, id: 940, estado: 'approved', monto: 55791, reintegrado: 0, neto: 31967.66, neto_nuevo: null, liberacion: '2026-10-30' }]) === null);
+  check('Y una orden con paid = total no se marca por eso', CO(fila(40, { paid_orden: '55791', total_orden: '55791' }), [{ ok: true, id: 940, estado: 'approved', monto: 55791, reintegrado: 0, neto: 31967.66, neto_nuevo: null, liberacion: '2026-10-30' }]) === null);
 }
 
 
@@ -357,33 +359,168 @@ console.log('\n══ «Comparar»: lo guardado contra Mercado Pago en vivo (sol
 }
 
 
-// 10. LO QUE LLEGA DE VERDAD = net_received_amount + envío pagado por el comprador (shipping_amount): Fakhar y Qahwa
+// 10. LO QUE LLEGA = REGLA VERIFICADA contra el «Total» del cobro en el panel de Mercado Libre:
+//     llega_real = Σ net_received_amount + máx(0, receiver.cost del envío − Σ shipping_amount de los pagos aprobados)
 {
   reiniciar();
   guardadas = [
-    fila(1, { meli_order_id: '2000018981569144', bruto: 55791, neto: 31967.66, cobrado_aprobado: 55791, pago_id: '184173189868', payload_pago: null }),
-    fila(2, { meli_order_id: '2000019315185954', bruto: 62690.5, neto: 38967.56, cobrado_aprobado: 62690.5, pago_id: '186494543871', payload_pago: null, fecha_liberacion: '2026-12-01T12:00:00Z' }),
+    fila(1, { meli_order_id: '2000018981569144', bruto: 55791, neto: 31967.66, cobrado_aprobado: 55791, pago_id: '184173189868', payload_pago: null, envio_id: '48258555523' }),
+    fila(2, { meli_order_id: '2000019315185954', bruto: 62690.5, neto: 38967.56, cobrado_aprobado: 62690.5, pago_id: '186494543871', payload_pago: null, fecha_liberacion: '2026-12-01T12:00:00Z', envio_id: '48416791041' }),
   ];
-  // el pago vivo sigue diciendo el mismo net_received_amount (por eso las relecturas no cambiaban nada) pero trae el envío del comprador
-  vivos['184173189868'] = pagoVivo({ transaction_amount: 55791, shipping_amount: 6148.81, transaction_details: { net_received_amount: 31967.66 } });
-  vivos['186494543871'] = pagoVivo({ transaction_amount: 62690.5, shipping_amount: 4887.86, transaction_details: { net_received_amount: 38967.56 }, money_release_date: '2026-11-14T12:00:00.000-04:00' });
+  // Fakhar y Qahwa: el pago NO trae el envío (shipping_amount 0): el comprador lo pagó aparte y Mercado Libre lo suma al «Total»
+  vivos['184173189868'] = pagoVivo({ transaction_amount: 55791, shipping_amount: 0, transaction_details: { net_received_amount: 31967.66 } });
+  vivos['186494543871'] = pagoVivo({ transaction_amount: 62690.5, shipping_amount: 0, transaction_details: { net_received_amount: 38967.56 }, money_release_date: '2026-11-14T12:00:00.000-04:00' });
+  costosVivos['48258555523'] = { gross_amount: 12297.62, senders: [{ cost: 6148.81 }], receiver: { cost: 6148.81, save: 0 }, 'Juanita': { x: 1 } };
+  costosVivos['48416791041'] = { gross_amount: 9775.72, senders: [{ cost: 4887.86 }], receiver: { cost: 4887.86 } };
   const r = await pedir({ accion: 'comparar', cuenta: 1, desde: '2026-10-01' });
   const f = r.body.diferencias.find((d) => d.orden === '2000018981569144'), q = r.body.diferencias.find((d) => d.orden === '2000019315185954');
-  check('Fakhar: llega real 38.116,47 = neto 31.967,66 + envío del comprador 6.148,81; diferencia +6.148,81 contra lo guardado', f && f.envio_pagado_por_el_comprador === 6148.81 && f.llega_real_vivo === 38116.47 && f.dif_llega_real === 6148.81, JSON.stringify(f));
+  check('Fakhar: llega real 38.116,47 = neto 31.967,66 + envío del comprador 6.148,81 (receiver.cost, shipping_amount 0); diferencia +6.148,81', f && f.envio_pagado_por_el_comprador === 6148.81 && f.costo_envio_comprador === 6148.81 && f.llega_real_vivo === 38116.47 && f.dif_llega_real === 6148.81, JSON.stringify(f));
   check('Qahwa: llega real 43.855,42 = 38.967,56 + 4.887,86; diferencia +4.887,86', q && q.llega_real_vivo === 43855.42 && q.dif_llega_real === 4887.86, JSON.stringify(q));
   check('Costo de canal: Fakhar 23.823,34 guardado → 17.674,53 real; Qahwa 23.722,94 → 18.835,08', f.costo_canal_guardado === 23823.34 && f.costo_canal_real === 17674.53 && q.costo_canal_guardado === 23722.94 && q.costo_canal_real === 18835.08, JSON.stringify({ f: [f.costo_canal_guardado, f.costo_canal_real], q: [q.costo_canal_guardado, q.costo_canal_real] }));
-  check('Motivos: envío pagado por el comprador + llega real distinto (el neto del campo viejo NO cambió); Qahwa además la liberación 1/12 → 14/11', f.motivos.includes('ENVIO_PAGADO_POR_EL_COMPRADOR') && f.motivos.includes('LLEGA_REAL_DISTINTO') && !f.motivos.includes('NETO_DISTINTO') && q.motivos.includes('LIBERACION_DISTINTA') && q.liberacion_guardada === '2026-12-01' && q.liberacion_viva === '2026-11-14', JSON.stringify(q.motivos));
-  // si el CRM ya guarda el neto CON el envío (arreglo futuro), deja de marcarse
-  const ok1 = C.compararOrden(fila(50, { neto: 38116.47, cobrado_aprobado: 55791, bruto: 55791 }), [{ ok: true, id: 950, estado: 'approved', monto: 55791, envio_comprador: 6148.81, reintegrado: 0, neto: 31967.66, neto_nuevo: null, liberacion: '2026-10-30' }]);
-  check('Si lo guardado YA incluye el envío (neto 38.116,47) deja de marcarse: no hay diferencia', ok1 === null, JSON.stringify(ok1));
-  check('Sin envío pagado por el comprador (shipping_amount 0/ausente) nada cambia: llega real = neto', (() => { const d = C.compararOrden(fila(51, { neto: 100 }), [{ ok: true, id: 951, estado: 'approved', monto: 55791, envio_comprador: 0, reintegrado: 0, neto: 90, neto_nuevo: null, liberacion: '2026-10-30' }]); return d.llega_real_vivo === 90 && d.envio_pagado_por_el_comprador === null && d.motivos.includes('NETO_DISTINTO'); })());
-  // desglose: resumen con la cuenta
+  check('Motivos: envío pagado por el comprador + llega real distinto (el neto NO cambió → sin NETO_DISTINTO); Qahwa además la liberación', f.motivos.includes('ENVIO_PAGADO_POR_EL_COMPRADOR') && f.motivos.includes('LLEGA_REAL_DISTINTO') && !f.motivos.includes('NETO_DISTINTO') && q.motivos.includes('LIBERACION_DISTINTA'), JSON.stringify(q.motivos));
+  check('Cada orden con envío cuesta UN pedido más (el costo del envío): 2 órdenes × (1 pago + 1 costo) = 4 consultas', r.body.pagos_consultados === 4 && llamadas.filter((l) => /\/shipments\/\d+\/costs/.test(l.url)).length === 2, String(r.body.pagos_consultados));
+  check('Ni nombres ni otros datos personales salen (el receptor trae una clave con un nombre: no sale)', !PERSONALES.some((p) => JSON.stringify(r.body).includes(p)));
+
+  // Si el envío ya venía cobrado DENTRO del pago (shipping_amount = receiver.cost), net_received_amount ya lo incluye: crédito 0
+  reiniciar();
+  guardadas = [fila(1, { neto: 40000, envio_id: '500', pago_id: '901', payload_pago: null }), fila(2, { neto: 40000, envio_id: '501', pago_id: '902', payload_pago: null }), fila(3, { neto: 40000, envio_id: '502', pago_id: '903', payload_pago: null })];
+  vivos['901'] = pagoVivo({ shipping_amount: 7990, transaction_details: { net_received_amount: 40000 } });
+  vivos['902'] = pagoVivo({ shipping_amount: 7990, transaction_details: { net_received_amount: 40000 } });
+  vivos['903'] = pagoVivo({ shipping_amount: 5000, transaction_details: { net_received_amount: 40000 } });
+  costosVivos['500'] = { receiver: { cost: 7990 } }; costosVivos['501'] = { receiver: { cost: 7990 } }; costosVivos['502'] = { receiver: { cost: 6000 } };
+  const r2_ = await pedir({ accion: 'comparar', cuenta: 1, desde: '2026-10-01' });
+  const x3 = r2_.body.diferencias.find((d) => d.orden.endsWith('3'));
+  check('Envío ya incluido en el pago (shipping_amount 7.990 = receiver.cost 7.990): crédito 0, llega = neto, sin diferencia (2 órdenes sin cambios)', r2_.body.sin_cambios === 2 && r2_.body.diferencias.length === 1, JSON.stringify(r2_.body));
+  check('Parte del envío dentro del pago (5.000 de 6.000): el crédito es la diferencia, máx(0, 6.000 − 5.000) = 1.000', x3 && x3.envio_pagado_por_el_comprador === 1000 && x3.llega_real_vivo === 41000 && x3.dif_llega_real === 1000, JSON.stringify(x3));
+  check('Crédito nunca negativo: shipping_amount mayor que receiver.cost → 0', C.creditoEnvioComprador([{ envio_comprador: 9000 }], 7000).credito === 0);
+
+  // Flex: $499 exactos de crédito = bonificación que se acredita aparte; NO suma a lo que llega ni es diferencia
+  reiniciar();
+  guardadas = [fila(1, { neto: 20000, envio_id: '600', pago_id: '911', payload_pago: null }), fila(2, { neto: 20000, envio_id: '601', pago_id: '912', payload_pago: null })];
+  vivos['911'] = pagoVivo({ shipping_amount: 0, transaction_details: { net_received_amount: 20000 } });
+  vivos['912'] = pagoVivo({ shipping_amount: 0, transaction_details: { net_received_amount: 20000 } });
+  costosVivos['600'] = { receiver: { cost: 499 } }; costosVivos['601'] = { receiver: { cost: 499 } };
+  const rf = await pedir({ accion: 'comparar', cuenta: 1, desde: '2026-10-01' });
+  check('Flex +499: no es diferencia en lo que llega (sin cambios) y se informa aparte con su total y las órdenes', rf.body.sin_cambios === 2 && rf.body.diferencias.length === 0 && rf.body.bonificaciones_flex.total === 998 && rf.body.bonificaciones_flex.ordenes === 2 && rf.body.bonificaciones_flex.lista[0].monto === 499, JSON.stringify(rf.body));
+  const df = CO(fila(60, { neto: 20000 }), [{ ok: true, id: 1, estado: 'approved', monto: 1, envio_comprador: 0, reintegrado: 0, neto: 19000, neto_nuevo: null, liberacion: '2026-10-30' }], { receiver_cost: 499 });
+  check('Flex con otra diferencia real (neto cambió): la orden figura y lleva bonificacion_flex 499 con llega = neto', df && df.bonificacion_flex === 499 && df.llega_real_vivo === 19000 && df.motivos.includes('NETO_DISTINTO'), JSON.stringify(df));
+
+  // 46 órdenes que coinciden con el panel: todas +0 (mezcla de «sin envío», «envío dentro del pago» y «receiver 0»)
+  reiniciar();
+  guardadas = []; const regalo = [];
+  for (let i = 1; i <= 46; i++) {
+    const cfg = i % 3;          // 0: sin envío en la orden · 1: envío dentro del pago · 2: receiver.cost 0 (envío gratis)
+    guardadas.push(fila(i, { neto: 30000 + i, envio_id: cfg === 0 ? null : String(700 + i), pago_id: String(1000 + i), payload_pago: null }));
+    vivos[String(1000 + i)] = pagoVivo({ shipping_amount: cfg === 1 ? 3000 : 0, transaction_details: { net_received_amount: 30000 + i } });
+    if (cfg === 1) costosVivos[String(700 + i)] = { receiver: { cost: 3000 } }; else if (cfg === 2) costosVivos[String(700 + i)] = { receiver: { cost: 0 } };
+    regalo.push(i);
+  }
+  let cur = null, tot = { rev: 0, dif: 0, sc: 0 }, vueltas = 0;
+  for (;;) {
+    const rr = await pedir({ accion: 'comparar', cuenta: 1, desde: '2026-10-01', ...(cur ? { cursor: cur } : {}) });
+    tot.rev += rr.body.revisadas; tot.dif += rr.body.con_diferencia; tot.sc += rr.body.sin_cambios; vueltas++;
+    if (rr.body.completo || vueltas > 10) break;
+    cur = rr.body.cursor;
+  }
+  check('46 órdenes que coinciden con el panel: todas «sin cambios» (+0), ninguna diferencia', tot.rev === 46 && tot.sc === 46 && tot.dif === 0, JSON.stringify(tot));
+
+  // Si receiver.cost NO se pudo leer: la orden queda incompleta; NO se afirma llega real ni diferencia
+  reiniciar();
+  guardadas = [fila(1, { neto: 20000, envio_id: '800', pago_id: '921', payload_pago: null }), fila(2, { neto: 20000, envio_id: '801', pago_id: '922', payload_pago: null })];
+  vivos['921'] = pagoVivo({ shipping_amount: 0, transaction_details: { net_received_amount: 20000 } });
+  vivos['922'] = pagoVivo({ shipping_amount: 0, transaction_details: { net_received_amount: 20000 } });
+  costosVivos['801'] = { gross_amount: 5 };          // el envío 800 da 404; el 801 no trae «receiver»
+  const rn = await pedir({ accion: 'comparar', cuenta: 1, desde: '2026-10-01' });
+  check('receiver.cost no leído (404 o sin receiver): llega_real null, motivo ENVIO_COSTOS_NO_CONSULTADOS y sin diferencia afirmada', rn.body.diferencias.length === 2 && rn.body.diferencias.every((d) => d.llega_real_vivo === null && d.dif_llega_real === null && d.motivos.includes('ENVIO_COSTOS_NO_CONSULTADOS')), JSON.stringify(rn.body.diferencias));
+  // un 429 en el costo del envío corta y la orden no cuenta
+  reiniciar();
+  guardadas = [fila(1, { neto: 20000, envio_id: '810', pago_id: '931', payload_pago: null })];
+  vivos['931'] = pagoVivo({ shipping_amount: 0, transaction_details: { net_received_amount: 20000 } });
+  const f0 = globalThis.fetch; globalThis.fetch = async (u, o) => (/\/shipments\/810\/costs/.test(String(u)) ? resp(429, {}) : f0(u, o));
+  const r429 = await pedir({ accion: 'comparar', cuenta: 1, desde: '2026-10-01' });
+  globalThis.fetch = f0;
+  check('429 al pedir el costo del envío: corta con MELI_LIMITANDO y la orden NO cuenta como revisada', r429.body.cortado === 'MELI_LIMITANDO' && r429.body.revisadas === 0 && r429.body.completo === false, JSON.stringify(r429.body));
+
+  // La diferencia verificada no tiene excepciones por envío, y sin envío nada cambia
+  const ok1 = CO(fila(50, { neto: 38116.47, cobrado_aprobado: 55791, bruto: 55791 }), [{ ok: true, id: 950, estado: 'approved', monto: 55791, envio_comprador: 0, reintegrado: 0, neto: 31967.66, neto_nuevo: null, liberacion: '2026-10-30' }], { receiver_cost: 6148.81 });
+  check('Si lo guardado ya incluye el envío (38.116,47): llega real coincide → NO se marca LLEGA_REAL_DISTINTO, pero el neto del pago (31.967,66) sí difiere → NETO_DISTINTO', ok1 && ok1.motivos.includes('NETO_DISTINTO') && ok1.dif_neto === -6148.81 && ok1.dif_llega_real === null, JSON.stringify(ok1));
+  check('Sin envío (receiver_cost 0) llega real = neto', (() => { const d = CO(fila(51, { neto: 100 }), [{ ok: true, id: 951, estado: 'approved', monto: 55791, envio_comprador: null, reintegrado: 0, neto: 90, neto_nuevo: null, liberacion: '2026-10-30' }], { receiver_cost: 0 }); return d.llega_real_vivo === 90 && d.envio_pagado_por_el_comprador === null && d.motivos.includes('NETO_DISTINTO'); })());
+  check('Con receiver_cost > 0 y shipping_amount ausente en un pago aprobado NO se afirma (null)', C.creditoEnvioComprador([{ envio_comprador: null }], 500) === null);
+
+  // desglose: resumen con la regla
+  reiniciar();
+  guardadas = [fila(2, { meli_order_id: '2000019315185954', bruto: 62690.5, neto: 38967.56, cobrado_aprobado: 62690.5, pago_id: '186494543871', payload_pago: null, fecha_liberacion: '2026-12-01T12:00:00Z', envio_id: '48416791041' })];
+  vivos['186494543871'] = pagoVivo({ transaction_amount: 62690.5, shipping_amount: 0, transaction_details: { net_received_amount: 38967.56 } });
   const ID = '2000019315185954';
   ordenesVivas[ID] = { id: Number(ID), total_amount: 62690.5, paid_amount: 67578.36, payments: [{ id: 186494543871, status: 'approved', transaction_amount: 62690.5, shipping_cost: 4887.86 }], shipping: { id: 48416791041 } };
+  costosVivos['48416791041'] = { gross_amount: 9775.72, senders: [{ cost: 4887.86 }], receiver: { cost: 4887.86 } };
   const d = await pedir({ accion: 'desglose', cuenta: 1, orden: ID, buscar: [4887.86, 43855.42] });
-  check('Desglose: resumen «llega real» = 38.967,56 + 4.887,86 = 43.855,42 y costo de canal real 18.835,08; y 4.887,86 aparece como pago.shipping_amount y como paid−total', d.body.resumen && d.body.resumen.llega_real === 43855.42 && d.body.resumen.costo_canal_real === 18835.08 && d.body.resumen.costo_canal_guardado === 23722.94
-    && d.body.coincidencias.includes('pago[186494543871].shipping_amount') && d.body.coincidencias.includes('orden: paid_amount − total_amount'), JSON.stringify({ r: d.body.resumen, c: d.body.coincidencias }));
+  check('Desglose: resumen «llega real» = 38.967,56 + 4.887,86 = 43.855,42 (regla verificada) y costo de canal real 18.835,08', d.body.resumen && d.body.resumen.llega_real === 43855.42 && d.body.resumen.costo_envio_comprador === 4887.86 && d.body.resumen.costo_canal_real === 18835.08 && d.body.resumen.costo_canal_guardado === 23722.94 && d.body.coincidencias.includes('envio/costos.receptor.cost'), JSON.stringify({ r: d.body.resumen, c: d.body.coincidencias }));
   check('Desglose: el 43.855,42 aparece en los hallazgos solo si algún recurso lo trae (aquí ninguno → ningún hallazgo con ese valor)', !d.body.hallazgos.some((h) => h.buscado === 43855.42));
+  delete costosVivos['48416791041'];
+  const d2 = await pedir({ accion: 'desglose', cuenta: 1, orden: ID });
+  check('Desglose: si receiver.cost no se pudo leer NO hay resumen («llega real» no se afirma) y se informa', d2.body.resumen === null && d2.body.errores.includes('resumen:COSTO_ENVIO_NO_LEIDO'), JSON.stringify({ r: d2.body.resumen, e: d2.body.errores }));
+  ordenesVivas[ID].shipping = { id: 48416791041 }; costosVivos['48416791041'] = { receiver: { cost: 499 } };
+  const d3 = await pedir({ accion: 'desglose', cuenta: 1, orden: ID });
+  check('Desglose Flex ($499): bonificacion_flex aparte y llega real = neto', d3.body.resumen && d3.body.resumen.bonificacion_flex === 499 && d3.body.resumen.llega_real === 38967.56, JSON.stringify(d3.body.resumen));
+}
+
+// 10c. Revisión de Codex: envío no guardado, shipping_amount ausente, cobertura del aprobado
+{
+  reiniciar();
+  // (1) orden guardada SIN envío en lo guardado pero la orden suelta VIVA tiene envío: se lee su costo (no se da por «sin envío»)
+  const ID = '2000000000009001';
+  guardadas = [fila(1, { meli_order_id: ID, neto: 20000, pago_id: '951', payload_pago: null, envio_id: null })];
+  vivos['951'] = pagoVivo({ shipping_amount: 0, transaction_details: { net_received_amount: 20000 } });
+  ordenesVivas[ID] = { id: Number(ID), total_amount: 55791, paid_amount: 55791, payments: [{ id: 951 }], shipping: { id: 9100 } };
+  costosVivos['9100'] = { receiver: { cost: 1234.5 } };
+  const rs = await pedir({ accion: 'comparar', cuenta: 1, desde: '2026-10-01', orden: ID });
+  const ds = rs.body.diferencias[0];
+  check('Orden suelta con envío vivo y no guardado: se consulta su costo y se afirma llega real = 20.000 + 1.234,50', ds && ds.llega_real_vivo === 21234.5 && ds.dif_llega_real === 1234.5 && rs.body.pagos_consultados === 2 && llamadas.some((l) => /\/shipments\/9100\/costs/.test(l.url)), JSON.stringify(rs.body));
+  // (1b) sin payload_orden guardado (ni total) el envío es DESCONOCIDO: no se afirma «sin envío»
+  reiniciar();
+  guardadas = [fila(1, { neto: 20000, pago_id: '952', payload_pago: null, envio_id: null, total_orden: null, paid_orden: null })];
+  vivos['952'] = pagoVivo({ shipping_amount: 0, transaction_details: { net_received_amount: 20000 } });
+  const rd = await pedir({ accion: 'comparar', cuenta: 1, desde: '2026-10-01' });
+  check('Sin la orden guardada (ni envío ni total): la orden NO queda «sin cambios»; llega real sin afirmar y motivo ENVIO_COSTOS_NO_CONSULTADOS', rd.body.sin_cambios === 0 && rd.body.diferencias[0].llega_real_vivo === null && rd.body.diferencias[0].motivos.includes('ENVIO_COSTOS_NO_CONSULTADOS'), JSON.stringify(rd.body.diferencias));
+  // (3) receiver.cost > 0 y shipping_amount ausente en un aprobado: no se puede calcular → no es «sin cambios»
+  const d3 = CO(fila(80, { neto: 100, cobrado_aprobado: 1000, bruto: 1000 }), [{ ok: true, id: 980, estado: 'approved', monto: 1000, envio_comprador: null, reintegrado: 0, neto: 100, neto_nuevo: null, liberacion: '2026-10-30' }], { receiver_cost: 600 });
+  check('receiver.cost 600 y shipping_amount ausente: la orden queda marcada LLEGA_REAL_NO_CALCULABLE (no «sin cambios») y no afirma llega real', d3 && d3.motivos.includes('LLEGA_REAL_NO_CALCULABLE') && d3.llega_real_vivo === null && d3.dif_llega_real === null, JSON.stringify(d3));
+  // (4) un aprobado PARCIAL no tapa el rechazo
+  const pgx = (id, estado, monto) => ({ ok: true, id, estado, monto, envio_comprador: 0, reintegrado: 0, neto: monto * 0.9, neto_nuevo: null, liberacion: '2026-10-30' });
+  const d4 = CO(fila(81, { neto: 90, cobrado_aprobado: 100, bruto: 1000 }), [pgx(1, 'rejected', 900), pgx(2, 'approved', 100)]);
+  check('rejected + approved que NO cubre el bruto (100 de 1.000): se sigue marcando PAGO_NO_APROBADO', d4 && d4.motivos.includes('PAGO_NO_APROBADO'), JSON.stringify(d4));
+  const d4b = CO(fila(82, { neto: 900, cobrado_aprobado: 1000, bruto: 1000 }), [pgx(1, 'rejected', 1000), pgx(2, 'approved', 1000)]);
+  check('rejected + approved que cubre el bruto: no se marca', d4b === null || !d4b.motivos.includes('PAGO_NO_APROBADO'), JSON.stringify(d4b));
+}
+
+// 10d. Orden suelta con el total leído bien: NO es «TOTAL_ORDEN_NO_CONSULTADO» (con envío guardado, o sin envío vivo)
+{
+  for (const [titulo, envioGuardado, envioVivo] of [['envío guardado y vivo', '9200', { id: 9200 }], ['sin envío ni guardado ni vivo', null, null]]) {
+    reiniciar();
+    const ID = '2000000000009100';
+    guardadas = [fila(1, { meli_order_id: ID, neto: 20000, pago_id: '961', payload_pago: null, envio_id: envioGuardado })];
+    vivos['961'] = pagoVivo({ shipping_amount: 0, transaction_details: { net_received_amount: 20000 } });
+    ordenesVivas[ID] = { id: Number(ID), total_amount: 55791, paid_amount: 55791, payments: [{ id: 961 }], shipping: envioVivo };
+    if (envioGuardado) costosVivos[envioGuardado] = { receiver: { cost: 0 } };
+    const rr = await pedir({ accion: 'comparar', cuenta: 1, desde: '2026-10-01', orden: ID });
+    check(`Orden suelta, total leído bien (${titulo}): queda «sin cambios», sin TOTAL_ORDEN_NO_CONSULTADO`, rr.body.sin_cambios === 1 && rr.body.diferencias.length === 0, JSON.stringify(rr.body));
+  }
+}
+
+// 10b. PAGO_NO_APROBADO: un intento rechazado seguido de otro aprobado que cubre la orden NO es problema (falso positivo real)
+{
+  const pg = (id, estado, extra = {}) => ({ ok: true, id, estado, monto: 1000, envio_comprador: 0, reintegrado: 0, neto: 900, neto_nuevo: null, liberacion: '2026-10-30', ...extra });
+  const base = (vivosX) => CO(fila(70, { neto: 900, cobrado_aprobado: 1000, bruto: 1000 }), vivosX, { receiver_cost: 0 });
+  check('rejected + approved (neto vivo = guardado): NO se marca PAGO_NO_APROBADO', base([pg(1, 'rejected'), pg(2, 'approved')]) === null || !base([pg(1, 'rejected'), pg(2, 'approved')]).motivos.includes('PAGO_NO_APROBADO'), JSON.stringify(base([pg(1, 'rejected'), pg(2, 'approved')])));
+  const solo = base([pg(1, 'refunded')]);
+  check('Un único pago devuelto (orden cancelada): SÍ se marca PAGO_NO_APROBADO', solo && solo.motivos.includes('PAGO_NO_APROBADO'), JSON.stringify(solo));
+  const soloRech = base([pg(1, 'rejected')]);
+  check('Solo rechazado, sin ningún aprobado que cubra la orden: SÍ se marca', soloRech && soloRech.motivos.includes('PAGO_NO_APROBADO'), JSON.stringify(soloRech));
+  const mixto = base([pg(1, 'approved'), pg(2, 'refunded')]);
+  check('approved + refunded: SÍ se marca (un devuelto nunca se ignora)', mixto && mixto.motivos.includes('PAGO_NO_APROBADO'), JSON.stringify(mixto));
+  const cancel = base([pg(1, 'cancelled'), pg(2, 'approved')]);
+  check('cancelled + approved: se sigue marcando (solo se ignoran los rechazados)', cancel && cancel.motivos.includes('PAGO_NO_APROBADO'), JSON.stringify(cancel));
 }
 
 
@@ -419,9 +556,9 @@ console.log('\n══ «Comparar»: lo guardado contra Mercado Pago en vivo (sol
 {
   check('hojasNumericas: solo campos que son MONTOS; user_id, teléfono, código postal, número, lat/lon NO salen', (() => { const h = C.hojasNumericas({ cost: 10, save: 2, user_id: 123456789, phone: 1155550101, zip_code: 2000, tracking_number: 5551, latitude: -32.9, discount: { rate: 0.5, id: 77 }, receiver_id: 9 }); return Object.keys(h).sort().join() === 'cost,discount.rate,save'; })());
   const g = fila(60, { neto: 110, cobrado_aprobado: 1000, bruto: 1000, fecha_liberacion: null });
-  const d = C.compararOrden(g, [{ ok: true, id: 960, estado: 'approved', monto: 1000, envio_comprador: 10, reintegrado: 0, neto: 100, neto_nuevo: 100, liberacion: null }]);
-  check('Neto viejo 100 + envío 10 = guardado 110 y neto del campo nuevo 100: no se marca nada (ni «campo nuevo» negativo)', d === null, JSON.stringify(d));
-  const d2 = C.compararOrden(fila(61, { neto: 100, cobrado_aprobado: 1000, bruto: 1000, fecha_liberacion: null }), [{ ok: true, id: 961, estado: 'approved', monto: 1000, envio_comprador: 10, reintegrado: 0, neto: 100, neto_nuevo: 95, liberacion: null }]);
+  const d = CO(g, [{ ok: true, id: 960, estado: 'approved', monto: 1000, envio_comprador: 0, reintegrado: 0, neto: 100, neto_nuevo: 100, liberacion: null }], { receiver_cost: 10 });
+  check('Guardado 110 con net_received_amount vivo 100 y crédito de envío 10 (llega = 110 = guardado): el cambio del NETO (−10) SE VE igual (NETO_DISTINTO), aunque lo que llega no difiera', d && d.motivos.includes('NETO_DISTINTO') && d.dif_neto === -10 && d.dif_llega_real === null, JSON.stringify(d));
+  const d2 = CO(fila(61, { neto: 100, cobrado_aprobado: 1000, bruto: 1000, fecha_liberacion: null }), [{ ok: true, id: 961, estado: 'approved', monto: 1000, envio_comprador: 10, reintegrado: 0, neto: 100, neto_nuevo: 95, liberacion: null }]);
   check('Pero un neto del campo nuevo que de verdad no coincide con nada SÍ se marca', d2 && d2.motivos.includes('NETO_NUEVO_DISTINTO'), JSON.stringify(d2));
   reiniciar();
   guardadas = [fila(1)];
@@ -443,7 +580,7 @@ console.log('\n══ «Comparar»: lo guardado contra Mercado Pago en vivo (sol
   check('Si un pago de la orden no se pudo leer, NO se emite «llega real» ni costo de canal (una suma parcial parecería el total) y se avisa', r.body.resumen === null && r.body.errores.includes('resumen:PAGOS_INCOMPLETOS') && r.body.errores.some((x) => x.includes('pago_602')), JSON.stringify({ r: r.body.resumen, e: r.body.errores }));
   vivos['602'] = pagoVivo({ transaction_amount: 500, transaction_details: { net_received_amount: 400 }, shipping_amount: 20 });
   const ok2 = await pedir({ accion: 'desglose', cuenta: 1, orden: ID });
-  check('Con los dos pagos leídos sí: llega real = 420 + 400 + 20 = 840 y costo de canal 1000 − 840 = 160', ok2.body.resumen && ok2.body.resumen.llega_real === 840 && ok2.body.resumen.costo_canal_real === 160, JSON.stringify(ok2.body.resumen));
+  check('Con los dos pagos leídos sí: llega real = 420 + 400 = 820 (orden sin envío: shipping_amount 20 ya va dentro del pago, crédito 0) y costo de canal 1000 − 820 = 180', ok2.body.resumen && ok2.body.resumen.llega_real === 820 && ok2.body.resumen.costo_canal_real === 180, JSON.stringify(ok2.body.resumen));
   vivos['602'] = pagoVivo({ status: 'rejected', transaction_amount: 500, transaction_details: { net_received_amount: 400 }, charges_details: [{ type: 'tax', name: 'tax_iibb-neuquen', amounts: { original: 99 } }] });
   vivos['601'] = pagoVivo({ transaction_amount: 500, transaction_details: { net_received_amount: 420 }, charges_details: [{ type: 'tax', name: 'tax_iibb-neuquen', amounts: { original: 10 } }] });
   const ret = await pedir({ accion: 'desglose', cuenta: 1, orden: ID });
@@ -455,11 +592,11 @@ console.log('\n══ «Comparar»: lo guardado contra Mercado Pago en vivo (sol
 {
   const dosPagos = (v2) => [{ ok: true, id: 701, estado: 'approved', monto: 500, envio_comprador: 0, reintegrado: 0, neto: 400, neto_nuevo: null, liberacion: null }, v2];
   const g = fila(70, { neto: 800, cobrado_aprobado: 1000, bruto: 1000, fecha_liberacion: null, payload_pago: { pagos: [{ id: 701, status: 'approved' }, { id: 702, status: 'approved' }] } });
-  const d = C.compararOrden(g, dosPagos({ ok: false, id: 702, inexistente: false }));
+  const d = CO(g, dosPagos({ ok: false, id: 702, inexistente: false }));
   check('comparar: con un pago sin leer NO hay «llega real», diferencia ni costo de canal (una suma parcial parecería el total); solo PAGO_NO_CONSULTADO', d && d.motivos.join() === 'PAGO_NO_CONSULTADO' && d.llega_real_vivo === null && d.dif_llega_real === null && d.dif_neto === null && d.costo_canal_real === null && d.neto_vivo === null && d.cobrado_vivo === null, JSON.stringify(d));
-  const d2 = C.compararOrden(g, dosPagos({ ok: true, id: 702, estado: 'approved', monto: 500, envio_comprador: 0, reintegrado: 0, neto: 400, neto_nuevo: null, liberacion: null }));
+  const d2 = CO(g, dosPagos({ ok: true, id: 702, estado: 'approved', monto: 500, envio_comprador: 0, reintegrado: 0, neto: 400, neto_nuevo: null, liberacion: null }));
   check('…y con los dos pagos leídos el mismo caso da 800 = 800: sin diferencia', d2 === null);
-  const d3 = C.compararOrden(g, dosPagos({ ok: true, id: 702, estado: 'approved', monto: 500, envio_comprador: 0, reintegrado: 0, neto: 400, neto_nuevo: null, liberacion: null }).map((x) => x), { truncado: true });
+  const d3 = CO(g, dosPagos({ ok: true, id: 702, estado: 'approved', monto: 500, envio_comprador: 0, reintegrado: 0, neto: 400, neto_nuevo: null, liberacion: null }).map((x) => x), { truncado: true });
   check('Con más pagos de los que se revisan (truncado): tampoco se afirma ningún total', d3 && d3.llega_real_vivo === null && d3.motivos.includes('PAGOS_NO_REVISADOS_TODOS') && d3.costo_canal_real === null, JSON.stringify(d3));
   reiniciar();
   const ID = '2000018981569144';
@@ -522,6 +659,36 @@ console.log('\n══ «Comparar»: lo guardado contra Mercado Pago en vivo (sol
   vivos['901'] = pagoVivo({ charges_details: Array.from({ length: 101 }, () => ({ type: 'fee', name: 'mercadopago_fee', amounts: { original: 1 } })) });
   const r2 = await pedir({ accion: 'desglose', cuenta: 1, orden: ID });
   check('Con más de 100 cargos el desglose NO emite el resumen (cargos truncados) y lo avisa', r2.body.resumen === null && r2.body.pagos_vivos[0].cargos_truncados === true && r2.body.errores.includes('resumen:PAGOS_INCOMPLETOS'));
+}
+
+
+// 20. URGENTE: para investigar PAGO_NO_APROBADO y HAY_REINTEGRO sin abrir cada orden
+{
+  reiniciar();
+  guardadas = [fila(1, { meli_order_id: '2000000000000013' }), fila(2, { meli_order_id: '2000000000000014' })];
+  vivos['901'] = pagoVivo({ status: 'refunded', status_detail: 'refunded', transaction_amount_refunded: 55791 });
+  vivos['902'] = pagoVivo({ status: 'approved', status_detail: 'accredited', transaction_amount_refunded: 1500 });
+  const r = await pedir({ accion: 'comparar', cuenta: 1, desde: '2026-10-01' });
+  const a = r.body.diferencias.find((d) => d.orden === '2000000000000013'), b = r.body.diferencias.find((d) => d.orden === '2000000000000014');
+  check('Un pago devuelto: PAGO_NO_APROBADO con el estado, el detalle y lo reintegrado por pago (id, estado, detalle, monto, reintegrado)', a.motivos.includes('PAGO_NO_APROBADO') && a.reintegrado_vivo === 55791 && JSON.stringify(a.pagos_vivos_resumen) === JSON.stringify([{ id: '901', estado: 'refunded', detalle_estado: 'refunded', monto: 55791, reintegrado: 55791 }]), JSON.stringify(a));
+  check('Un pago aprobado con un reintegro parcial: HAY_REINTEGRO con el monto reintegrado (1.500) y su estado', b.motivos.includes('HAY_REINTEGRO') && !b.motivos.includes('PAGO_NO_APROBADO') && b.reintegrado_vivo === 1500 && b.pagos_vivos_resumen[0].estado === 'approved' && b.pagos_vivos_resumen[0].detalle_estado === 'accredited', JSON.stringify(b));
+  check('Solo números y códigos: ningún dato personal en esos campos', !JSON.stringify(r.body).includes('Juanita') && !JSON.stringify(r.body).includes('juanita@correo.com'));
+}
+
+
+// 21. La diferencia verificada depende SOLO del net_received_amount (no de la estimación ni del campo nuevo)
+{
+  const g = fila(90, { neto: 1000, cobrado_aprobado: 1000, bruto: 1000, fecha_liberacion: null });
+  const v = (o = {}) => [{ ok: true, id: 990, estado: 'approved', monto: 1000, envio_comprador: 0, reintegrado: 0, neto: 1000, neto_nuevo: null, liberacion: null, ...o }];
+  const a = CO(g, v({ neto: 900, envio_comprador: 100 }));
+  check('Guardado 1.000, neto vivo 900, envío 100 (la estimación daría 1.000): el cambio verificado de −100 NO se oculta', a && a.dif_neto === -100 && a.motivos.includes('NETO_DISTINTO'), JSON.stringify(a));
+  const b = CO(g, v({ neto_nuevo: 800 }));
+  check('Si el net_received_amount no cambió pero el «campo nuevo» sí: se informa aparte (NETO_NUEVO_DISTINTO, dif_neto_campo_nuevo) y dif_neto queda vacío', b && b.dif_neto === null && b.dif_neto_campo_nuevo === -200 && b.motivos.includes('NETO_NUEVO_DISTINTO') && !b.motivos.includes('NETO_DISTINTO'), JSON.stringify(b));
+  check('reintegrado_vivo solo con lectura COMPLETA: con un pago caído o sin dato no hay subtotal', (() => {
+    const r1 = CO(g, [{ ok: true, id: 1, estado: 'approved', monto: 500, envio_comprador: 0, reintegrado: 1500, neto: 500, neto_nuevo: null, liberacion: null }, { ok: false, id: 2 }]);
+    const r2 = CO(g, [{ ok: true, id: 1, estado: 'approved', monto: 500, envio_comprador: 0, reintegrado: 1500, neto: 500, neto_nuevo: null, liberacion: null }, { ok: true, id: 2, estado: 'approved', monto: 500, envio_comprador: 0, reintegrado: 250, neto: 500, neto_nuevo: null, liberacion: null }]);
+    return r1.reintegrado_vivo === null && r1.lectura_completa === false && r2.reintegrado_vivo === 1750 && r2.lectura_completa === true;
+  })());
 }
 
 // 5. Entradas inválidas y acceso

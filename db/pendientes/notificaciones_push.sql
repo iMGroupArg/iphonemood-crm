@@ -90,6 +90,13 @@ CREATE TABLE IF NOT EXISTS public.push_envios (
   PRIMARY KEY (evento_id, suscripcion_id)
 );
 
+-- Si ya se había corrido una versión anterior de este script: se pasa al esquema nuevo (un teléfono puede seguir varias reparaciones; reclamos con identificador).
+ALTER TABLE public.push_suscripciones DROP CONSTRAINT IF EXISTS push_suscripciones_endpoint_key;
+ALTER TABLE public.push_cola ADD COLUMN IF NOT EXISTS reclamos INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE public.push_cola ADD COLUMN IF NOT EXISTS reclamo_id UUID;
+ALTER TABLE public.push_cola DROP CONSTRAINT IF EXISTS push_cola_tipo_check;
+ALTER TABLE public.push_cola ADD CONSTRAINT push_cola_tipo_check CHECK (tipo IN ('venta_nueva', 'reparacion_lista', 'prueba'));
+
 -- Cerradas al navegador: sin políticas y sin permisos (Supabase da ALL a anon/authenticated por defecto: se quita).
 DO $$
 DECLARE t TEXT;
@@ -320,7 +327,8 @@ BEGIN
       v_msg := jsonb_build_object('titulo', 'Aviso de prueba ✅', 'cuerpo', 'Si ves esto, los avisos de iPhoneMood funcionan en este dispositivo.', 'url', '/login', 'tag', 'prueba');
     END IF;
 
-    SELECT COALESCE(jsonb_agg(jsonb_build_object('id', x.id, 'endpoint', x.endpoint, 'p256dh', x.p256dh, 'auth', x.auth) ORDER BY x.id), '[]'::JSONB) INTO d FROM public.push__destinos(ev.id) x;
+    -- De a 100 destinatarios por vuelta (push_resultado acepta hasta 200): los que falten van en la vuelta siguiente.
+    SELECT COALESCE(jsonb_agg(jsonb_build_object('id', x.id, 'endpoint', x.endpoint, 'p256dh', x.p256dh, 'auth', x.auth) ORDER BY x.id), '[]'::JSONB) INTO d FROM (SELECT * FROM public.push__destinos(ev.id) LIMIT 100) x;
     IF jsonb_array_length(d) = 0 THEN
       UPDATE public.push_cola SET estado = CASE WHEN EXISTS (SELECT 1 FROM public.push_envios e WHERE e.evento_id = ev.id) THEN 'enviado' ELSE 'sin_destinos' END, cerrado_en = now(), reclamado_hasta = NULL, reclamo_id = NULL WHERE id = ev.id;
       CONTINUE;
@@ -350,12 +358,13 @@ BEGIN
   FOR x IN SELECT * FROM jsonb_array_elements(p_resultados) LOOP
     v_id := (x ->> 'id')::BIGINT; v_est := x ->> 'estado';
     IF v_est = 'ok' THEN
-      INSERT INTO public.push_envios (evento_id, suscripcion_id, estado) VALUES (p_evento_id, v_id, 'ok') ON CONFLICT DO NOTHING;
+      -- Si la suscripción se borró mientras se enviaba (baja del cliente, reparación entregada), no hay nada que anotar: sin esto la FK haría fallar TODO el resultado.
+      INSERT INTO public.push_envios (evento_id, suscripcion_id, estado) SELECT p_evento_id, v_id, 'ok' WHERE EXISTS (SELECT 1 FROM public.push_suscripciones WHERE id = v_id) ON CONFLICT DO NOTHING;
       UPDATE public.push_suscripciones SET ultimo_ok = now(), fallos = 0 WHERE id = v_id;
     ELSIF v_est = 'baja' THEN
       DELETE FROM public.push_suscripciones WHERE id = v_id;                      -- el servicio de push dice que ya no existe
     ELSIF v_est = 'error' THEN
-      INSERT INTO public.push_envios (evento_id, suscripcion_id, estado) VALUES (p_evento_id, v_id, 'error') ON CONFLICT DO NOTHING;
+      INSERT INTO public.push_envios (evento_id, suscripcion_id, estado) SELECT p_evento_id, v_id, 'error' WHERE EXISTS (SELECT 1 FROM public.push_suscripciones WHERE id = v_id) ON CONFLICT DO NOTHING;
       UPDATE public.push_suscripciones SET fallos = fallos + 1, activa = (fallos + 1 < 3) WHERE id = v_id;
     ELSE
       v_reint := TRUE;
@@ -363,20 +372,28 @@ BEGIN
     END IF;
   END LOOP;
 
+  -- Al quinto reintento se ABANDONA a los destinatarios que siguieron fallando (quedan como 'error'), pero NO a los que nunca se alcanzaron a intentar.
+  IF v_reint AND v_ev.intentos + 1 >= 5 THEN
+    FOR x IN SELECT * FROM jsonb_array_elements(p_resultados) LOOP
+      IF x ->> 'estado' NOT IN ('ok', 'baja', 'error') THEN
+        INSERT INTO public.push_envios (evento_id, suscripcion_id, estado) SELECT p_evento_id, (x ->> 'id')::BIGINT, 'error' WHERE EXISTS (SELECT 1 FROM public.push_suscripciones WHERE id = (x ->> 'id')::BIGINT) ON CONFLICT DO NOTHING;
+      END IF;
+    END LOOP;
+    v_reint := FALSE;
+    UPDATE public.push_cola SET ultimo_error = 'sin respuesta del servicio de push para algunos destinatarios' WHERE id = p_evento_id;
+  END IF;
+
   SELECT count(*) INTO v_pend FROM public.push__destinos(p_evento_id);
   IF v_pend = 0 THEN
-    UPDATE public.push_cola SET estado = 'enviado', cerrado_en = now(), reclamado_hasta = NULL, reclamo_id = NULL WHERE id = p_evento_id;
+    UPDATE public.push_cola SET estado = CASE WHEN EXISTS (SELECT 1 FROM public.push_envios e WHERE e.evento_id = p_evento_id AND e.estado = 'ok') OR NOT EXISTS (SELECT 1 FROM public.push_envios e WHERE e.evento_id = p_evento_id) THEN 'enviado' ELSE 'fallido' END,
+           cerrado_en = now(), reclamado_hasta = NULL, reclamo_id = NULL WHERE id = p_evento_id;
     RETURN jsonb_build_object('ok', TRUE, 'reintento', FALSE);
   END IF;
   IF v_reint THEN
-    IF v_ev.intentos + 1 >= 5 THEN
-      UPDATE public.push_cola SET estado = 'fallido', intentos = intentos + 1, cerrado_en = now(), reclamado_hasta = NULL, reclamo_id = NULL, ultimo_error = 'sin respuesta del servicio de push' WHERE id = p_evento_id;
-      RETURN jsonb_build_object('ok', TRUE, 'reintento', FALSE);
-    END IF;
     UPDATE public.push_cola SET estado = 'pendiente', intentos = intentos + 1, reclamado_hasta = NULL, reclamo_id = NULL,
            enviar_desde = now() + make_interval(mins => (ARRAY[1, 2, 5, 15, 60])[LEAST(v_ev.intentos + 1, 5)]) WHERE id = p_evento_id;
   ELSE
-    -- Quedaron destinatarios sin intentar (no alcanzó el tiempo): vuelve pronto, sin contar como reintento.
+    -- Quedaron destinatarios sin intentar (no alcanzó el tiempo o eran más de 100): vuelve pronto, sin contar como reintento.
     UPDATE public.push_cola SET estado = 'pendiente', reclamado_hasta = NULL, reclamo_id = NULL, enviar_desde = now() + interval '20 seconds' WHERE id = p_evento_id;
   END IF;
   RETURN jsonb_build_object('ok', TRUE, 'reintento', TRUE);

@@ -292,7 +292,7 @@ module.exports = async function handler(req, res) {
   if (soloPush) {
     try {
       const limite = t0 + PRESUPUESTO_MS;
-      res.status(200).json({ push: await correrPush({ rpc: M.rpc, pres: M.presupuestoHasta(limite - RESERVA_MS, limite), restanteMs: () => limite - Date.now() }) });
+      res.status(200).json({ push: await correrPush({ rpc: M.rpc, pres: M.presupuestoHasta(limite - RESERVA_MS, limite), restanteMs: () => limite - RESERVA_MS - Date.now() }) });
     } catch (e) {
       console.error('meli/worker (push):', (e && e.codigo) || '', e && e.message);
       res.status(502).json({ error: 'No se pudieron enviar los avisos' });
@@ -330,7 +330,7 @@ module.exports = async function handler(req, res) {
     let push = null;
     try {
       const limitePush = t0 + PRESUPUESTO_MS;
-      push = await correrPush({ rpc: M.rpc, pres: M.presupuestoHasta(limitePush - RESERVA_MS, limitePush), restanteMs: () => limitePush - Date.now() });
+      push = await correrPush({ rpc: M.rpc, pres: M.presupuestoHasta(limitePush - RESERVA_MS, limitePush), restanteMs: () => limitePush - RESERVA_MS - Date.now() });
     } catch (e) {
       console.error('meli/worker (push):', (e && e.codigo) || '');
       push = { omitido: 'error' };

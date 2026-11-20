@@ -116,6 +116,15 @@ await caso('Si el servidor rechaza la suscripción (por ejemplo token inválido)
   const { P, log } = cargarPush(); const r = await P.activar(async () => ({ ok: false, motivo: 'token' }));
   igual(r, { ok: false, motivo: 'token' }); assert.ok(log.baja);
 });
+await caso('Si el servidor rechaza y la suscripción YA existía (sirve a otras reparaciones), NO se cancela en el teléfono', async () => {
+  const { P, log } = cargarPush({ suscripcion: { endpoint: 'https://fcm.googleapis.com/fcm/send/x', options: {}, toJSON: () => ({ endpoint: 'https://fcm.googleapis.com/fcm/send/x', keys: { p256dh: 'P'.repeat(87), auth: 'a'.repeat(22) } }), unsubscribe: async () => { log.baja = true; } } });
+  const r = await P.activar(async () => ({ ok: false, motivo: 'limite' }));
+  igual(r, { ok: false, motivo: 'limite' }); assert.ok(!log.baja);
+});
+await caso('Desactivar con otras reparaciones todavía atadas NO cancela la suscripción del teléfono', async () => {
+  const { P, log } = cargarPush({ suscripcion: { endpoint: 'https://fcm.googleapis.com/fcm/send/x', unsubscribe: async () => { log.baja = true; } } });
+  const r = await P.desactivar(async () => ({ restantes: 2 })); assert.equal(r.restantes, 2); assert.ok(!log.baja);
+});
 await caso('Desactivar cancela la suscripción y avisa al servidor para borrarla', async () => {
   const { P, log } = cargarPush({ suscripcion: { endpoint: 'https://fcm.googleapis.com/fcm/send/x', unsubscribe: async () => { log.baja = true; } } }); let borrado = null;
   await P.desactivar(async (ep) => { borrado = ep; }); assert.equal(borrado, 'https://fcm.googleapis.com/fcm/send/x'); assert.ok(log.baja);

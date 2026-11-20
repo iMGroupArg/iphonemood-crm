@@ -266,6 +266,64 @@ console.log('\n══ Notificaciones push: base de datos (Postgres en WebAssembl
   check('Un anónimo no puede consultar el estado del equipo', /permission denied/.test(await falla(() => comoRol(db, 'anon', null, () => q(db, `SELECT public.push_estado_equipo($1)`, [s1.endpoint])))));
 }
 
+// ── 6c. hallazgos de la segunda revisión ─────────────────────────────────
+{ // la suscripción se borra durante el envío: el resultado no falla
+  const db = await nueva();
+  const rep = await q(db, `INSERT INTO public.reparaciones (cliente, equipo) VALUES ('Ana','iPhone') RETURNING id, token_seguimiento t`);
+  const s1 = sub(), s2 = sub(); await cliente(db, rep[0].t, s1); await cliente(db, rep[0].t, s2);
+  await db.query(`UPDATE public.reparaciones SET estado='listo' WHERE id=$1`, [rep[0].id]);
+  const t = await tomar(db);
+  await db.query(`DELETE FROM public.push_suscripciones WHERE endpoint=$1`, [s1.endpoint]);        // el cliente se dio de baja mientras se enviaba
+  const e = await falla(() => resultado(db, t[0], t[0].destinos.map((d) => ({ id: d.id, estado: 'ok' }))));
+  check('Si una suscripción se borra mientras se envía, el resultado de los demás se anota igual (no se pierde todo ni se repite a los que ya lo recibieron)',
+    !e && (await q(db, `SELECT estado FROM public.push_cola`))[0].estado === 'enviado' && (await q(db, `SELECT count(*)::int n FROM public.push_envios`))[0].n === 1, e);
+}
+{ // más de 100 destinatarios: de a tandas
+  const db = await nueva();
+  for (let i = 0; i < 150; i++) await equipo(db, sub());
+  await venta(db); await vencer(db);
+  const t1 = await tomar(db);
+  check('Con 150 teléfonos el aviso sale en tandas: la primera vuelta trae 100', t1.length === 1 && t1[0].destinos.length === 100, String(t1[0] && t1[0].destinos.length));
+  const r1 = await resultado(db, t1[0], t1[0].destinos.map((d) => ({ id: d.id, estado: 'ok' })));
+  check('… y el aviso vuelve a la cola (sin gastar reintento) para los 50 que faltan', r1.ok === true && (await q(db, `SELECT estado, intentos FROM public.push_cola`))[0].estado === 'pendiente' && (await q(db, `SELECT intentos FROM public.push_cola`))[0].intentos === 0);
+  await vencer(db);
+  const t2 = await tomar(db);
+  check('La segunda vuelta trae los 50 restantes (ninguno repetido)', t2.length === 1 && t2[0].destinos.length === 50 && !t2[0].destinos.some((d) => t1[0].destinos.some((x) => x.id === d.id)));
+  await resultado(db, t2[0], t2[0].destinos.map((d) => ({ id: d.id, estado: 'ok' })));
+  check('… y al terminar queda enviado', (await q(db, `SELECT estado FROM public.push_cola`))[0].estado === 'enviado');
+}
+{ // el quinto reintento abandona sólo a quien siguió fallando
+  const db = await nueva();
+  const a = sub(), b = sub(); await equipo(db, a); await equipo(db, b);
+  await venta(db); await vencer(db);
+  const t0 = await tomar(db); const [da, dbb] = t0[0].destinos;
+  await db.query(`UPDATE public.push_cola SET intentos = 4`);
+  const r = await resultado(db, t0[0], [{ id: da.id, estado: 'reintentar' }]);          // el 2.º nunca se alcanzó a intentar
+  const c = (await q(db, `SELECT estado, intentos FROM public.push_cola`))[0];
+  check('Al agotar los reintentos se abandona SÓLO al que siguió fallando; el que nunca se intentó sigue pendiente', r.ok === true && c.estado === 'pendiente' && (await q(db, `SELECT estado FROM public.push_envios`))[0].estado === 'error', JSON.stringify(c));
+  await vencer(db);
+  const t1 = await tomar(db);
+  check('… y la vuelta siguiente le avisa a ese', t1.length === 1 && t1[0].destinos.length === 1 && t1[0].destinos[0].id === dbb.id);
+  await resultado(db, t1[0], [{ id: dbb.id, estado: 'ok' }]);
+  check('Si al final alguien lo recibió, el aviso queda enviado', (await q(db, `SELECT estado FROM public.push_cola`))[0].estado === 'enviado');
+}
+{ // instalación sobre una versión anterior del esquema
+  const { db } = await baseNueva({ conVentas: false });
+  await db.exec(REPARACIONES);
+  await db.exec(`CREATE TABLE public.push_config (clave TEXT PRIMARY KEY, valor TEXT NOT NULL);
+    CREATE TABLE public.push_suscripciones (id BIGSERIAL PRIMARY KEY, endpoint TEXT NOT NULL UNIQUE, p256dh TEXT NOT NULL, auth TEXT NOT NULL, tipo TEXT NOT NULL, usuario_email TEXT, reparacion_id TEXT, activa BOOLEAN NOT NULL DEFAULT TRUE, fallos INTEGER NOT NULL DEFAULT 0, creada_en TIMESTAMPTZ NOT NULL DEFAULT now(), ultimo_ok TIMESTAMPTZ);
+    CREATE TABLE public.push_cola (id BIGSERIAL PRIMARY KEY, tipo TEXT NOT NULL CHECK (tipo IN ('venta_nueva','reparacion_lista')), ref TEXT NOT NULL, enviar_desde TIMESTAMPTZ NOT NULL DEFAULT now(), estado TEXT NOT NULL DEFAULT 'pendiente', intentos INTEGER NOT NULL DEFAULT 0, reclamado_hasta TIMESTAMPTZ, ultimo_error TEXT, creado_en TIMESTAMPTZ NOT NULL DEFAULT now(), cerrado_en TIMESTAMPTZ, UNIQUE (tipo, ref));`);
+  const e = await falla(() => db.exec(SQL('notificaciones_push.sql')));
+  await db.query(`UPDATE public.push_config SET valor='true' WHERE clave='activo'`);
+  const rep = await q(db, `INSERT INTO public.reparaciones (cliente, equipo) VALUES ('Ana','x') RETURNING token_seguimiento t`);
+  const tel = sub(); await cliente(db, rep[0].t, tel);
+  const rep2 = await q(db, `INSERT INTO public.reparaciones (cliente, equipo) VALUES ('Ana','y') RETURNING token_seguimiento t`);
+  const r2 = await cliente(db, rep2[0].t, tel);
+  const p = await db.query(`SELECT public.push_probar('x') AS r`).catch(() => null);
+  check('Correr el script sobre una instalación de la versión anterior la actualiza: un teléfono puede seguir dos reparaciones y la cola acepta el aviso de prueba',
+    !e && r2.ok === true && (await q(db, `SELECT count(*)::int n FROM public.push_suscripciones WHERE endpoint=$1`, [tel.endpoint]))[0].n === 2 && (await q(db, `INSERT INTO public.push_cola (tipo, ref) VALUES ('prueba','1-1') RETURNING reclamos`))[0].reclamos === 0, e);
+}
+
 // ── 7. permisos y secreto ────────────────────────────────────────────────
 {
   const db = await nueva();

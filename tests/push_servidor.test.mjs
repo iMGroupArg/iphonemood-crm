@@ -65,6 +65,16 @@ await caso('Con poco tiempo NO se empieza a enviar a más destinatarios: sólo s
   const r = await P.enviarAviso(ev, P.configuracion(), { simultaneos: 1, minimoMs: 3000, restanteMs: () => (enviados >= 3 ? 500 : 100000), enviarImpl: async () => { enviados++; return { estado: 'ok' }; } });
   assert.equal(r.length, 3); assert.deepEqual(r.map((x) => x.id), [1, 2, 3]);
 });
+await caso('Cada envío acota su plazo a lo que queda (nunca más de 8 s) y el resultado se informa con el tramo de CIERRE del presupuesto', async () => {
+  const t = telefono(); const plazos = []; const usados = [];
+  const cierre = { hasta: 1 }, pres = { hasta: 0, final: cierre };
+  const rpc = async (n, a, p) => { if (n === 'push_tomar_pendientes') return [evento(1, [destino(1, t), destino(2, t)])]; usados.push(p); return {}; };
+  await P.correrPush({ rpc, pres, restanteMs: () => 6000, enviarImpl: async (s, m, o) => { plazos.push(o.plazoMs); return { estado: 'ok' }; } });
+  assert.ok(plazos.every((x) => x >= 1000 && x <= 4500), JSON.stringify(plazos));
+  assert.equal(usados[0], cierre);
+  const largo = []; await P.enviarAviso(evento(2, [destino(1, t)]), P.configuracion(), { restanteMs: () => 100000, enviarImpl: async (s, m, o) => { largo.push(o.plazoMs); return { estado: 'ok' }; } });
+  assert.equal(largo[0], 8000);
+});
 await caso('Sin tiempo para terminar, no empieza otro aviso (queda reclamado y otra corrida lo retoma)', async () => {
   const t = telefono(); let enviados = 0;
   const rpc = async (n) => (n === 'push_tomar_pendientes' ? [evento(1, [destino(1, t)]), evento(2, [destino(2, t)])] : {});

@@ -63,10 +63,12 @@
       const k = sub.options && sub.options.applicationServerKey;
       if (k && new Uint8Array(k).toString() !== base64urlABytes(clave).toString()) { await sub.unsubscribe(); sub = null; }
     }
-    if (!sub) sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: base64urlABytes(clave) });
+    let creada = false;
+    if (!sub) { sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: base64urlABytes(clave) }); creada = true; }
     const j = sub.toJSON();
     const r = await guardar({ endpoint: j.endpoint, p256dh: j.keys && j.keys.p256dh, auth: j.keys && j.keys.auth });
-    if (r && r.ok === false) { try { await sub.unsubscribe(); } catch { /* ya estaba */ } return { ok: false, motivo: (r && r.motivo) || 'rechazada' }; }
+    // Si el servidor la rechaza, sólo se cancela la suscripción que ESTA llamada acaba de crear: una que ya existía puede estar sirviendo a otras reparaciones.
+    if (r && r.ok === false) { if (creada) { try { await sub.unsubscribe(); } catch { /* ya estaba */ } } return { ok: false, motivo: (r && r.motivo) || 'rechazada' }; }
     return { ok: true, endpoint: j.endpoint };
   }
 

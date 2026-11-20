@@ -285,7 +285,7 @@ CREATE OR REPLACE FUNCTION public.push__estado_final(p_evento_id BIGINT)
 RETURNS TEXT LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public, pg_temp
 AS $$
   SELECT CASE WHEN EXISTS (SELECT 1 FROM public.push_envios e WHERE e.evento_id = p_evento_id AND e.estado = 'ok') THEN 'enviado'
-              WHEN EXISTS (SELECT 1 FROM public.push_envios e WHERE e.evento_id = p_evento_id) THEN 'fallido'
+              WHEN EXISTS (SELECT 1 FROM public.push_envios e WHERE e.evento_id = p_evento_id) OR EXISTS (SELECT 1 FROM public.push_intentos i WHERE i.evento_id = p_evento_id) THEN 'fallido'   -- hubo intentos que fallaron
               ELSE 'sin_destinos' END
 $$;
 
@@ -325,7 +325,8 @@ BEGIN
      ORDER BY enviar_desde, id LIMIT p_limite FOR UPDATE SKIP LOCKED
   LOOP
     IF ev.reclamos >= 20 THEN      -- tomado 20 veces sin que ninguna corrida informara el resultado
-      UPDATE public.push_cola SET estado = 'fallido', cerrado_en = now(), reclamado_hasta = NULL, reclamo_id = NULL, ultimo_error = COALESCE(ultimo_error, 'demasiados intentos') WHERE id = ev.id;
+      -- Se abandona, pero si alguien ya lo había recibido el aviso consta como enviado (no se contradice la constancia de entrega).
+      UPDATE public.push_cola SET estado = CASE WHEN public.push__estado_final(ev.id) = 'enviado' THEN 'enviado' ELSE 'fallido' END, cerrado_en = now(), reclamado_hasta = NULL, reclamo_id = NULL, ultimo_error = COALESCE(ultimo_error, 'demasiados intentos') WHERE id = ev.id;
       CONTINUE;
     END IF;
     v_msg := NULL;

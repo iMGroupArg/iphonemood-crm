@@ -323,6 +323,22 @@ console.log('\n══ Notificaciones push: base de datos (Postgres en WebAssembl
   await resultado(db, t2[0], [{ id: dbb.id, estado: 'baja' }]);
   check('… y al terminar queda "enviado" porque A sí lo recibió', (await q(db, `SELECT estado FROM public.push_cola`))[0].estado === 'enviado');
 }
+{ // parcialmente entregado y después abandonado: consta como enviado; un fallo transitorio en otro aviso no lo deja como "sin destinos"
+  const db = await nueva();
+  const a = sub(), b = sub(); await equipo(db, a); await equipo(db, b);
+  await venta(db); await vencer(db);
+  const t = await tomar(db);
+  await resultado(db, t[0], [{ id: t[0].destinos[0].id, estado: 'ok' }]);
+  for (let i = 0; i < 22; i++) { await vencer(db); const x = await tomar(db); if (!x.length) break; await db.query(`UPDATE public.push_cola SET reclamado_hasta = now() - interval '1 second' WHERE estado='en_curso'`); }
+  check('Un aviso entregado a uno y abandonado después por reclamos que nunca informan queda "enviado" (consta la entrega), no "fallido"', (await q(db, `SELECT estado FROM public.push_cola`))[0].estado === 'enviado');
+  const db2 = await nueva();
+  await equipo(db2, sub()); await venta(db2); await vencer(db2);
+  const t2 = await tomar(db2);
+  await resultado(db2, t2[0], [{ id: t2[0].destinos[0].id, estado: 'reintentar' }]);
+  await db2.query(`UPDATE public.push_suscripciones SET activa = false`);                 // otro aviso la desactivó por fallos
+  await vencer(db2); await tomar(db2);
+  check('Si hubo un intento fallido y la suscripción se desactiva por otro aviso, este queda "fallido" (no "sin destinos")', (await q(db2, `SELECT estado FROM public.push_cola`))[0].estado === 'fallido');
+}
 { // una lista vacía no reinicia el contador de reclamos: un aviso que nunca avanza no queda pendiente para siempre
   const db = await nueva();
   await equipo(db, sub()); await venta(db);

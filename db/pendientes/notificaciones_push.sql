@@ -84,7 +84,7 @@ CREATE INDEX IF NOT EXISTS push_cola_pendientes ON public.push_cola (enviar_desd
 
 CREATE TABLE IF NOT EXISTS public.push_envios (
   evento_id      BIGINT NOT NULL REFERENCES public.push_cola(id) ON DELETE CASCADE,
-  suscripcion_id BIGINT NOT NULL REFERENCES public.push_suscripciones(id) ON DELETE CASCADE,
+  suscripcion_id BIGINT NOT NULL,                 -- SIN clave foránea: si el teléfono se da de baja después de recibirlo, queda la constancia de que el aviso se entregó
   estado         TEXT NOT NULL CHECK (estado IN ('ok', 'baja', 'error')),
   hecho_en       TIMESTAMPTZ NOT NULL DEFAULT now(),
   PRIMARY KEY (evento_id, suscripcion_id)
@@ -99,6 +99,7 @@ CREATE TABLE IF NOT EXISTS public.push_intentos (
 
 -- Si ya se había corrido una versión anterior de este script: se pasa al esquema nuevo (un teléfono puede seguir varias reparaciones; reclamos con identificador).
 ALTER TABLE public.push_suscripciones DROP CONSTRAINT IF EXISTS push_suscripciones_endpoint_key;
+ALTER TABLE public.push_envios DROP CONSTRAINT IF EXISTS push_envios_suscripcion_id_fkey;
 ALTER TABLE public.push_cola ADD COLUMN IF NOT EXISTS reclamos INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE public.push_cola ADD COLUMN IF NOT EXISTS reclamo_id UUID;
 ALTER TABLE public.push_cola DROP CONSTRAINT IF EXISTS push_cola_tipo_check;
@@ -383,7 +384,8 @@ BEGIN
   IF NOT FOUND OR v_ev.estado <> 'en_curso' OR v_ev.reclamo_id IS DISTINCT FROM p_reclamo OR p_reclamo IS NULL THEN
     RETURN jsonb_build_object('ok', FALSE, 'motivo', 'reclamo_vencido');
   END IF;
-  UPDATE public.push_cola SET reclamos = 0 WHERE id = p_evento_id;      -- esta toma SÍ informó: sólo cuentan las que nunca informan
+  -- Una toma que informó AL MENOS un resultado hizo avance real: se reinicia el contador (sólo cuentan las tomas que nunca avanzan). Una lista vacía no cuenta.
+  IF jsonb_array_length(p_resultados) > 0 THEN UPDATE public.push_cola SET reclamos = 0 WHERE id = p_evento_id; END IF;
 
   FOR x IN SELECT * FROM jsonb_array_elements(p_resultados) LOOP
     v_id := (x ->> 'id')::BIGINT; v_est := x ->> 'estado';
@@ -397,6 +399,9 @@ BEGIN
       UPDATE public.push_suscripciones SET fallos = fallos + 1, activa = (fallos + 1 < 3) WHERE id = v_id;
     ELSE
       UPDATE public.push_suscripciones SET fallos = fallos + 1, activa = (fallos + 1 < 8) WHERE id = v_id;
+      IF EXISTS (SELECT 1 FROM public.push_suscripciones WHERE id = v_id AND NOT activa) THEN
+        PERFORM public.push__anotar(p_evento_id, v_id, 'error');      -- se desactivó por tantos fallos seguidos: queda anotado en este aviso
+      END IF;
       v_n := NULL;
       BEGIN
         INSERT INTO public.push_intentos (evento_id, suscripcion_id, n) VALUES (p_evento_id, v_id, 1)

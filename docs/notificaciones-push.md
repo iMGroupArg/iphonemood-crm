@@ -32,7 +32,7 @@ Primeros avisos: **venta nueva** (al equipo) y **reparación lista** (al cliente
 - Un teléfono del equipo no se puede atar a una reparación de cliente (ni al revés).
 
 ## Pruebas
-`tests/webpush.test.mjs` (cifrado contra el ejemplo oficial del RFC), `tests/push_servidor.test.mjs`, `tests/sw_push_cliente.test.mjs`, `tests/sql/push.sql.test.mjs` (pglite, 77), `tests/sql/push.concurrencia.test.mjs` (Postgres real con 12 conexiones: límite de 5 teléfonos, equipo-contra-cliente y reclamos) y `tests/worker_disparador.test.mjs`.
+`tests/webpush.test.mjs` (cifrado contra el ejemplo oficial del RFC), `tests/push_servidor.test.mjs`, `tests/sw_push_cliente.test.mjs`, `tests/sql/push.sql.test.mjs` (pglite, 81), `tests/sql/push.concurrencia.test.mjs` (Postgres real con 12 conexiones: límite de 5 teléfonos, equipo-contra-cliente y reclamos) y `tests/worker_disparador.test.mjs`.
 **No se pudo probar con un teléfono real ni con el servicio de push de verdad** (el navegador de pruebas no permite service workers): el paso 5 de arriba es la prueba de punta a punta.
 
 ## Pendiente / mejoras

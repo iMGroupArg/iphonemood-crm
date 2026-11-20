@@ -51,6 +51,8 @@ async function correrPush({ rpc, pres, env = process.env, enviarImpl = W.enviar,
     // Sin tiempo para terminar: se deja como está (el reclamo vence solo y otra corrida lo retoma).
     if (restanteMs() < minimoMs) { resumen.omitido = 'sin_tiempo'; break; }
     const resultados = await enviarAviso(ev, cfg, { enviarImpl, restanteMs, minimoMs: 4000 });
+    // Sin tiempo para intentar ni uno: no se informa nada (el reclamo vence solo y otra corrida lo retoma). Informar una lista vacía no sirve de nada.
+    if (resultados.length === 0) { resumen.omitido = 'sin_tiempo'; break; }
     for (const r of resultados) {
       if (r.estado === 'ok') resumen.enviados++; else if (r.estado === 'baja') resumen.bajas++; else if (r.estado === 'reintentar') resumen.reintentos++; else resumen.errores++;
     }

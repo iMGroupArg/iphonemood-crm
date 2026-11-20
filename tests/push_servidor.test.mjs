@@ -81,6 +81,12 @@ await caso('Sin tiempo para terminar, no empieza otro aviso (queda reclamado y o
   const r = await P.correrPush({ rpc, enviarImpl: async () => { enviados++; return { estado: 'ok' }; }, restanteMs: () => (enviados >= 1 ? 100 : 100000) });
   assert.equal(r.omitido, 'sin_tiempo'); assert.equal(r.eventos, 1);
 });
+await caso('Sin tiempo para intentar ni un envío, NO se informa una lista vacía a la base', async () => {
+  const t = telefono(); const llamadas = [];
+  const rpc = async (n) => { llamadas.push(n); return n === 'push_tomar_pendientes' ? [evento(1, [destino(1, t)])] : {}; };
+  const r = await P.correrPush({ rpc, restanteMs: () => 4500, enviarImpl: async () => { throw new Error('no debía enviar'); } });
+  assert.equal(r.omitido, 'sin_tiempo'); assert.deepEqual(llamadas, ['push_tomar_pendientes']);
+});
 await caso('Si la base devuelve algo que no es una lista, falla con claridad (no envía nada)', async () => {
   await assert.rejects(() => P.correrPush({ rpc: async () => ({ raro: true }), enviarImpl: async () => { throw new Error('no debía enviar'); } }), /RESPUESTA_INVALIDA/);
 });

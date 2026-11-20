@@ -276,7 +276,7 @@ console.log('\n══ Notificaciones push: base de datos (Postgres en WebAssembl
   await db.query(`DELETE FROM public.push_suscripciones WHERE endpoint=$1`, [s1.endpoint]);        // el cliente se dio de baja mientras se enviaba
   const e = await falla(() => resultado(db, t[0], t[0].destinos.map((d) => ({ id: d.id, estado: 'ok' }))));
   check('Si una suscripción se borra mientras se envía, el resultado de los demás se anota igual (no se pierde todo ni se repite a los que ya lo recibieron)',
-    !e && (await q(db, `SELECT estado FROM public.push_cola`))[0].estado === 'enviado' && (await q(db, `SELECT count(*)::int n FROM public.push_envios`))[0].n === 1, e);
+    !e && (await q(db, `SELECT estado FROM public.push_cola`))[0].estado === 'enviado' && (await q(db, `SELECT count(*)::int n FROM public.push_envios`))[0].n === 2, e);
 }
 { // más de 100 destinatarios: de a tandas
   const db = await nueva();
@@ -311,6 +311,33 @@ console.log('\n══ Notificaciones push: base de datos (Postgres en WebAssembl
   await resultado(db, t[0], [{ id: idB, estado: 'ok' }]);
   check('Si al final B lo recibió, el aviso queda enviado', (await q(db, `SELECT estado FROM public.push_cola`))[0].estado === 'enviado');
 }
+{ // un teléfono lo recibe y se da de baja mientras quedan otros: la constancia de la entrega no se pierde
+  const db = await nueva();
+  const a = sub(), b = sub(); await equipo(db, a); await equipo(db, b);
+  await venta(db); await vencer(db);
+  const t = await tomar(db); const [da, dbb] = t[0].destinos;
+  await resultado(db, { evento_id: t[0].evento_id, reclamo: t[0].reclamo }, [{ id: da.id, estado: 'ok' }]);
+  await db.query(`DELETE FROM public.push_suscripciones WHERE id=$1`, [da.id]);            // A se da de baja después de recibirlo
+  await vencer(db); const t2 = await tomar(db);
+  check('Un teléfono que ya lo recibió y después se da de baja no hace que el aviso quede "sin destinos"/"fallido": la constancia sigue', t2.length === 1 && t2[0].destinos.length === 1 && t2[0].destinos[0].id === dbb.id);
+  await resultado(db, t2[0], [{ id: dbb.id, estado: 'baja' }]);
+  check('… y al terminar queda "enviado" porque A sí lo recibió', (await q(db, `SELECT estado FROM public.push_cola`))[0].estado === 'enviado');
+}
+{ // una lista vacía no reinicia el contador de reclamos: un aviso que nunca avanza no queda pendiente para siempre
+  const db = await nueva();
+  await equipo(db, sub()); await venta(db);
+  for (let i = 0; i < 25; i++) { await vencer(db); const t = await tomar(db); if (!t.length) break; await resultado(db, t[0], []); }
+  check('Si las corridas informan listas VACÍAS una y otra vez (nunca avanzan), el aviso se abandona como "fallido" tras 20 tomas', (await q(db, `SELECT estado FROM public.push_cola`))[0].estado === 'fallido');
+}
+{ // se desactiva por fallos seguidos: queda anotado
+  const db = await nueva();
+  const x = sub(); await equipo(db, x); await venta(db); await vencer(db);
+  await db.query(`UPDATE public.push_suscripciones SET fallos = 7`);
+  const t = await tomar(db);
+  await resultado(db, t[0], [{ id: t[0].destinos[0].id, estado: 'reintentar' }]);
+  check('Una suscripción que llegaba con 7 fallos seguidos y falla otra vez se desactiva y queda anotada en este aviso (no queda colgado)', (await q(db, `SELECT estado FROM public.push_cola`))[0].estado === 'fallido' && (await q(db, `SELECT activa FROM public.push_suscripciones`))[0].activa === false);
+}
+
 { // un aviso que nadie recibió no queda "enviado"
   const db = await nueva();
   await equipo(db, sub()); await equipo(db, sub());

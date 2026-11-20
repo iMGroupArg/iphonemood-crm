@@ -90,6 +90,13 @@ CREATE TABLE IF NOT EXISTS public.push_envios (
   PRIMARY KEY (evento_id, suscripcion_id)
 );
 
+CREATE TABLE IF NOT EXISTS public.push_intentos (
+  evento_id      BIGINT NOT NULL REFERENCES public.push_cola(id) ON DELETE CASCADE,
+  suscripcion_id BIGINT NOT NULL REFERENCES public.push_suscripciones(id) ON DELETE CASCADE,
+  n              INTEGER NOT NULL DEFAULT 1,       -- veces que ESTE destinatario falló por una causa transitoria en ESTE aviso
+  PRIMARY KEY (evento_id, suscripcion_id)
+);
+
 -- Si ya se había corrido una versión anterior de este script: se pasa al esquema nuevo (un teléfono puede seguir varias reparaciones; reclamos con identificador).
 ALTER TABLE public.push_suscripciones DROP CONSTRAINT IF EXISTS push_suscripciones_endpoint_key;
 ALTER TABLE public.push_cola ADD COLUMN IF NOT EXISTS reclamos INTEGER NOT NULL DEFAULT 0;
@@ -101,7 +108,7 @@ ALTER TABLE public.push_cola ADD CONSTRAINT push_cola_tipo_check CHECK (tipo IN 
 DO $$
 DECLARE t TEXT;
 BEGIN
-  FOREACH t IN ARRAY ARRAY['push_config', 'push_suscripciones', 'push_cola', 'push_envios'] LOOP
+  FOREACH t IN ARRAY ARRAY['push_config', 'push_suscripciones', 'push_cola', 'push_envios', 'push_intentos'] LOOP
     EXECUTE format('ALTER TABLE public.%I ENABLE ROW LEVEL SECURITY', t);
     EXECUTE format('REVOKE ALL ON public.%I FROM PUBLIC, anon, authenticated', t);
     IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'service_role') THEN EXECUTE format('REVOKE ALL ON public.%I FROM service_role', t); END IF;
@@ -259,6 +266,28 @@ END $$;
 
 
 -- ─── 5 · RPC del servidor (con el secreto) ───────────────────────────────────
+-- Anota que un destinatario ya no necesita el aviso (ok o error). Si la suscripción se borró en el medio (baja, reparación entregada), no hay nada que anotar:
+-- se tolera la carrera con la clave foránea en vez de hacer fallar TODO el resultado del lote.
+CREATE OR REPLACE FUNCTION public.push__anotar(p_evento_id BIGINT, p_suscripcion_id BIGINT, p_estado TEXT)
+RETURNS VOID LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp
+AS $$
+BEGIN
+  BEGIN
+    INSERT INTO public.push_envios (evento_id, suscripcion_id, estado) VALUES (p_evento_id, p_suscripcion_id, p_estado) ON CONFLICT DO NOTHING;
+  EXCEPTION WHEN foreign_key_violation THEN NULL;
+  END;
+END $$;
+
+-- Cómo termina un aviso cuando ya no quedan destinatarios: 'enviado' si al menos uno lo recibió; 'fallido' si hubo destinatarios y ninguno lo recibió; 'sin_destinos' si
+-- nadie quedó (todos se dieron de baja o no había).
+CREATE OR REPLACE FUNCTION public.push__estado_final(p_evento_id BIGINT)
+RETURNS TEXT LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public, pg_temp
+AS $$
+  SELECT CASE WHEN EXISTS (SELECT 1 FROM public.push_envios e WHERE e.evento_id = p_evento_id AND e.estado = 'ok') THEN 'enviado'
+              WHEN EXISTS (SELECT 1 FROM public.push_envios e WHERE e.evento_id = p_evento_id) THEN 'fallido'
+              ELSE 'sin_destinos' END
+$$;
+
 -- Quiénes tienen que recibir un aviso y todavía no lo recibieron (el reintento y la segunda corrida nunca repiten a quien ya lo tiene).
 CREATE OR REPLACE FUNCTION public.push__destinos(p_evento_id BIGINT)
 RETURNS TABLE (id BIGINT, endpoint TEXT, p256dh TEXT, auth TEXT)
@@ -294,7 +323,7 @@ BEGIN
      WHERE ((estado = 'pendiente' AND enviar_desde <= now()) OR (estado = 'en_curso' AND reclamado_hasta < now())) AND (v_activo OR tipo = 'prueba')   -- la prueba funciona aunque el interruptor esté apagado
      ORDER BY enviar_desde, id LIMIT p_limite FOR UPDATE SKIP LOCKED
   LOOP
-    IF ev.intentos >= 5 OR ev.reclamos >= 20 THEN
+    IF ev.reclamos >= 20 THEN      -- tomado 20 veces sin que ninguna corrida informara el resultado
       UPDATE public.push_cola SET estado = 'fallido', cerrado_en = now(), reclamado_hasta = NULL, reclamo_id = NULL, ultimo_error = COALESCE(ultimo_error, 'demasiados intentos') WHERE id = ev.id;
       CONTINUE;
     END IF;
@@ -330,7 +359,7 @@ BEGIN
     -- De a 100 destinatarios por vuelta (push_resultado acepta hasta 200): los que falten van en la vuelta siguiente.
     SELECT COALESCE(jsonb_agg(jsonb_build_object('id', x.id, 'endpoint', x.endpoint, 'p256dh', x.p256dh, 'auth', x.auth) ORDER BY x.id), '[]'::JSONB) INTO d FROM (SELECT * FROM public.push__destinos(ev.id) LIMIT 100) x;
     IF jsonb_array_length(d) = 0 THEN
-      UPDATE public.push_cola SET estado = CASE WHEN EXISTS (SELECT 1 FROM public.push_envios e WHERE e.evento_id = ev.id) THEN 'enviado' ELSE 'sin_destinos' END, cerrado_en = now(), reclamado_hasta = NULL, reclamo_id = NULL WHERE id = ev.id;
+      UPDATE public.push_cola SET estado = public.push__estado_final(ev.id), cerrado_en = now(), reclamado_hasta = NULL, reclamo_id = NULL WHERE id = ev.id;
       CONTINUE;
     END IF;
     v_claim := gen_random_uuid();
@@ -341,12 +370,12 @@ BEGIN
 END $$;
 
 -- El servidor informa qué pasó con cada destinatario: [{id, estado: ok|baja|reintentar|error}], con el identificador de reclamo que recibió.
--- Si el reclamo ya no es el vigente (la corrida tardó y otra retomó el aviso) NO se anota nada. Los destinatarios que no se alcanzaron a intentar
--- (se acabó el tiempo) quedan pendientes y el aviso vuelve a la cola sin gastar un reintento.
+-- Si el reclamo ya no es el vigente (la corrida tardó y otra retomó el aviso) NO se anota nada. Los reintentos se cuentan POR DESTINATARIO (al quinto
+-- fallo transitorio se lo abandona a él solo). Los que no se alcanzaron a intentar quedan pendientes y el aviso vuelve a la cola sin gastar un reintento.
 CREATE OR REPLACE FUNCTION public.push_resultado(p_secreto TEXT, p_evento_id BIGINT, p_reclamo UUID, p_resultados JSONB)
 RETURNS JSONB LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp
 AS $$
-DECLARE x JSONB; v_id BIGINT; v_est TEXT; v_ev public.push_cola%ROWTYPE; v_reint BOOLEAN := FALSE; v_pend INTEGER;
+DECLARE x JSONB; v_id BIGINT; v_est TEXT; v_ev public.push_cola%ROWTYPE; v_reint BOOLEAN := FALSE; v_pend INTEGER; v_n INTEGER; v_max INTEGER := 1;
 BEGIN
   IF NOT public.meli_secreto_ok(p_secreto) THEN RAISE EXCEPTION 'SECRETO_INVALIDO'; END IF;
   IF p_resultados IS NULL OR jsonb_typeof(p_resultados) <> 'array' OR jsonb_array_length(p_resultados) > 200 THEN RAISE EXCEPTION 'RESULTADOS_INVALIDOS'; END IF;
@@ -354,44 +383,42 @@ BEGIN
   IF NOT FOUND OR v_ev.estado <> 'en_curso' OR v_ev.reclamo_id IS DISTINCT FROM p_reclamo OR p_reclamo IS NULL THEN
     RETURN jsonb_build_object('ok', FALSE, 'motivo', 'reclamo_vencido');
   END IF;
+  UPDATE public.push_cola SET reclamos = 0 WHERE id = p_evento_id;      -- esta toma SÍ informó: sólo cuentan las que nunca informan
 
   FOR x IN SELECT * FROM jsonb_array_elements(p_resultados) LOOP
     v_id := (x ->> 'id')::BIGINT; v_est := x ->> 'estado';
     IF v_est = 'ok' THEN
-      -- Si la suscripción se borró mientras se enviaba (baja del cliente, reparación entregada), no hay nada que anotar: sin esto la FK haría fallar TODO el resultado.
-      INSERT INTO public.push_envios (evento_id, suscripcion_id, estado) SELECT p_evento_id, v_id, 'ok' WHERE EXISTS (SELECT 1 FROM public.push_suscripciones WHERE id = v_id) ON CONFLICT DO NOTHING;
+      PERFORM public.push__anotar(p_evento_id, v_id, 'ok');
       UPDATE public.push_suscripciones SET ultimo_ok = now(), fallos = 0 WHERE id = v_id;
     ELSIF v_est = 'baja' THEN
       DELETE FROM public.push_suscripciones WHERE id = v_id;                      -- el servicio de push dice que ya no existe
     ELSIF v_est = 'error' THEN
-      INSERT INTO public.push_envios (evento_id, suscripcion_id, estado) SELECT p_evento_id, v_id, 'error' WHERE EXISTS (SELECT 1 FROM public.push_suscripciones WHERE id = v_id) ON CONFLICT DO NOTHING;
+      PERFORM public.push__anotar(p_evento_id, v_id, 'error');
       UPDATE public.push_suscripciones SET fallos = fallos + 1, activa = (fallos + 1 < 3) WHERE id = v_id;
     ELSE
-      v_reint := TRUE;
       UPDATE public.push_suscripciones SET fallos = fallos + 1, activa = (fallos + 1 < 8) WHERE id = v_id;
+      v_n := NULL;
+      BEGIN
+        INSERT INTO public.push_intentos (evento_id, suscripcion_id, n) VALUES (p_evento_id, v_id, 1)
+          ON CONFLICT (evento_id, suscripcion_id) DO UPDATE SET n = public.push_intentos.n + 1 RETURNING n INTO v_n;
+      EXCEPTION WHEN foreign_key_violation THEN v_n := NULL;       -- la suscripción se borró en el medio
+      END;
+      IF v_n IS NOT NULL THEN
+        IF v_n >= 5 THEN PERFORM public.push__anotar(p_evento_id, v_id, 'error');     -- se lo abandona a ÉL, no a los demás
+        ELSE v_reint := TRUE; v_max := GREATEST(v_max, v_n); END IF;
+      END IF;
     END IF;
   END LOOP;
 
-  -- Al quinto reintento se ABANDONA a los destinatarios que siguieron fallando (quedan como 'error'), pero NO a los que nunca se alcanzaron a intentar.
-  IF v_reint AND v_ev.intentos + 1 >= 5 THEN
-    FOR x IN SELECT * FROM jsonb_array_elements(p_resultados) LOOP
-      IF x ->> 'estado' NOT IN ('ok', 'baja', 'error') THEN
-        INSERT INTO public.push_envios (evento_id, suscripcion_id, estado) SELECT p_evento_id, (x ->> 'id')::BIGINT, 'error' WHERE EXISTS (SELECT 1 FROM public.push_suscripciones WHERE id = (x ->> 'id')::BIGINT) ON CONFLICT DO NOTHING;
-      END IF;
-    END LOOP;
-    v_reint := FALSE;
-    UPDATE public.push_cola SET ultimo_error = 'sin respuesta del servicio de push para algunos destinatarios' WHERE id = p_evento_id;
-  END IF;
-
   SELECT count(*) INTO v_pend FROM public.push__destinos(p_evento_id);
   IF v_pend = 0 THEN
-    UPDATE public.push_cola SET estado = CASE WHEN EXISTS (SELECT 1 FROM public.push_envios e WHERE e.evento_id = p_evento_id AND e.estado = 'ok') OR NOT EXISTS (SELECT 1 FROM public.push_envios e WHERE e.evento_id = p_evento_id) THEN 'enviado' ELSE 'fallido' END,
-           cerrado_en = now(), reclamado_hasta = NULL, reclamo_id = NULL WHERE id = p_evento_id;
+    UPDATE public.push_cola SET estado = public.push__estado_final(p_evento_id), cerrado_en = now(), reclamado_hasta = NULL, reclamo_id = NULL,
+           ultimo_error = CASE WHEN public.push__estado_final(p_evento_id) = 'fallido' THEN 'ningún destinatario lo recibió' END WHERE id = p_evento_id;
     RETURN jsonb_build_object('ok', TRUE, 'reintento', FALSE);
   END IF;
   IF v_reint THEN
     UPDATE public.push_cola SET estado = 'pendiente', intentos = intentos + 1, reclamado_hasta = NULL, reclamo_id = NULL,
-           enviar_desde = now() + make_interval(mins => (ARRAY[1, 2, 5, 15, 60])[LEAST(v_ev.intentos + 1, 5)]) WHERE id = p_evento_id;
+           enviar_desde = now() + make_interval(mins => (ARRAY[1, 2, 5, 15, 60])[LEAST(v_max, 5)]) WHERE id = p_evento_id;
   ELSE
     -- Quedaron destinatarios sin intentar (no alcanzó el tiempo o eran más de 100): vuelve pronto, sin contar como reintento.
     UPDATE public.push_cola SET estado = 'pendiente', reclamado_hasta = NULL, reclamo_id = NULL, enviar_desde = now() + interval '20 seconds' WHERE id = p_evento_id;
@@ -402,7 +429,7 @@ END $$;
 
 -- ─── 6 · Permisos ────────────────────────────────────────────────────────────
 REVOKE EXECUTE ON FUNCTION public.push_suscribir_equipo(TEXT, TEXT, TEXT), public.push_suscribir_cliente(TEXT, TEXT, TEXT, TEXT), public.push_baja(TEXT), public.push_baja_cliente(TEXT, TEXT),
-  public.push_estado_cliente(TEXT, TEXT), public.push_estado_equipo(TEXT), public.push_probar(TEXT), public.push__destinos(BIGINT),
+  public.push_estado_cliente(TEXT, TEXT), public.push_estado_equipo(TEXT), public.push_probar(TEXT), public.push__destinos(BIGINT), public.push__anotar(BIGINT, BIGINT, TEXT), public.push__estado_final(BIGINT),
   public.push_tomar_pendientes(TEXT, INTEGER, INTEGER), public.push_resultado(TEXT, BIGINT, UUID, JSONB) FROM PUBLIC, anon, authenticated;
 GRANT EXECUTE ON FUNCTION public.push_suscribir_equipo(TEXT, TEXT, TEXT), public.push_estado_equipo(TEXT), public.push_probar(TEXT) TO authenticated;
 GRANT EXECUTE ON FUNCTION public.push_suscribir_cliente(TEXT, TEXT, TEXT, TEXT), public.push_baja(TEXT), public.push_baja_cliente(TEXT, TEXT), public.push_estado_cliente(TEXT, TEXT) TO anon, authenticated;
@@ -411,7 +438,7 @@ GRANT EXECUTE ON FUNCTION public.push_tomar_pendientes(TEXT, INTEGER, INTEGER), 
 DO $$
 BEGIN
   IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'service_role') THEN
-    REVOKE EXECUTE ON FUNCTION public.push__activo(), public.push__encolar_venta(), public.push__reparacion_estado(), public.push__destinos(BIGINT) FROM service_role;
+    REVOKE EXECUTE ON FUNCTION public.push__activo(), public.push__encolar_venta(), public.push__reparacion_estado(), public.push__destinos(BIGINT), public.push__anotar(BIGINT, BIGINT, TEXT), public.push__estado_final(BIGINT) FROM service_role;
   END IF;
 END $$;
 

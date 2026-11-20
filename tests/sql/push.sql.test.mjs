@@ -292,20 +292,49 @@ console.log('\n══ Notificaciones push: base de datos (Postgres en WebAssembl
   await resultado(db, t2[0], t2[0].destinos.map((d) => ({ id: d.id, estado: 'ok' })));
   check('… y al terminar queda enviado', (await q(db, `SELECT estado FROM public.push_cola`))[0].estado === 'enviado');
 }
-{ // el quinto reintento abandona sólo a quien siguió fallando
+{ // los reintentos se cuentan POR DESTINATARIO: al quinto se abandona a él solo
   const db = await nueva();
   const a = sub(), b = sub(); await equipo(db, a); await equipo(db, b);
   await venta(db); await vencer(db);
-  const t0 = await tomar(db); const [da, dbb] = t0[0].destinos;
-  await db.query(`UPDATE public.push_cola SET intentos = 4`);
-  const r = await resultado(db, t0[0], [{ id: da.id, estado: 'reintentar' }]);          // el 2.º nunca se alcanzó a intentar
-  const c = (await q(db, `SELECT estado, intentos FROM public.push_cola`))[0];
-  check('Al agotar los reintentos se abandona SÓLO al que siguió fallando; el que nunca se intentó sigue pendiente', r.ok === true && c.estado === 'pendiente' && (await q(db, `SELECT estado FROM public.push_envios`))[0].estado === 'error', JSON.stringify(c));
-  await vencer(db);
-  const t1 = await tomar(db);
-  check('… y la vuelta siguiente le avisa a ese', t1.length === 1 && t1[0].destinos.length === 1 && t1[0].destinos[0].id === dbb.id);
-  await resultado(db, t1[0], [{ id: dbb.id, estado: 'ok' }]);
-  check('Si al final alguien lo recibió, el aviso queda enviado', (await q(db, `SELECT estado FROM public.push_cola`))[0].estado === 'enviado');
+  let t = await tomar(db); const idA = t[0].destinos[0].id, idB = t[0].destinos[1].id;
+  for (let i = 0; i < 5; i++) {
+    await resultado(db, t[0], [{ id: idA, estado: 'reintentar' }]);           // el 2.º nunca se alcanzó a intentar
+    await vencer(db); t = await tomar(db);
+    if (i < 4) check(`Reintento ${i + 1} de A: el aviso sigue vivo y le vuelve a tocar a los dos`, t.length === 1 && t[0].destinos.length === 2);
+  }
+  check('Al quinto fallo transitorio de A se lo abandona a ÉL (queda "error"), y B —que nunca se había intentado— sigue pendiente SIN heredar los intentos de A',
+    t.length === 1 && t[0].destinos.length === 1 && t[0].destinos[0].id === idB && (await q(db, `SELECT estado FROM public.push_envios WHERE suscripcion_id=$1`, [idA]))[0].estado === 'error'
+    && (await q(db, `SELECT count(*)::int n FROM public.push_intentos WHERE suscripcion_id=$1`, [idB]))[0].n === 0);
+  const r = await resultado(db, t[0], [{ id: idB, estado: 'reintentar' }]);
+  check('El primer fallo transitorio de B es sólo el primero (no lo abandona): el aviso vuelve a intentar', r.reintento === true && (await q(db, `SELECT estado FROM public.push_cola`))[0].estado === 'pendiente' && (await q(db, `SELECT n FROM public.push_intentos WHERE suscripcion_id=$1`, [idB]))[0].n === 1);
+  await vencer(db); t = await tomar(db);
+  await resultado(db, t[0], [{ id: idB, estado: 'ok' }]);
+  check('Si al final B lo recibió, el aviso queda enviado', (await q(db, `SELECT estado FROM public.push_cola`))[0].estado === 'enviado');
+}
+{ // un aviso que nadie recibió no queda "enviado"
+  const db = await nueva();
+  await equipo(db, sub()); await equipo(db, sub());
+  await venta(db); await vencer(db);
+  let t = await tomar(db);
+  await resultado(db, t[0], t[0].destinos.map((d) => ({ id: d.id, estado: 'baja' })));
+  check('Si todos los servicios responden "baja" (nadie lo recibió), el aviso queda "sin destinos", NO "enviado"', (await q(db, `SELECT estado FROM public.push_cola`))[0].estado === 'sin_destinos');
+  const db2 = await nueva();
+  await equipo(db2, sub()); await venta(db2); await vencer(db2);
+  t = await tomar(db2);
+  await resultado(db2, t[0], [{ id: t[0].destinos[0].id, estado: 'error' }]);
+  check('Si el único destinatario dio "error", el aviso queda "fallido" (no "enviado")', (await q(db2, `SELECT estado FROM public.push_cola`))[0].estado === 'fallido');
+}
+{ // un aviso en tandas no se abandona por "demasiados reclamos" cuando cada toma sí informó
+  const db = await nueva();
+  await equipo(db, sub()); await venta(db);
+  for (let i = 0; i < 30; i++) {
+    await vencer(db);
+    const t = await tomar(db);
+    if (!t.length) break;
+    await resultado(db, t[0], [{ id: t[0].destinos[0].id, estado: 'reintentar' }]);   // informa (aunque sea un reintento)
+    if (i === 3) break;
+  }
+  check('El contador de reclamos se pone en cero cuando la corrida informa: sólo cuentan las tomas que nunca informan', (await q(db, `SELECT reclamos FROM public.push_cola`))[0].reclamos === 0);
 }
 { // instalación sobre una versión anterior del esquema
   const { db } = await baseNueva({ conVentas: false });
@@ -333,11 +362,11 @@ console.log('\n══ Notificaciones push: base de datos (Postgres en WebAssembl
   const e3 = await falla(() => q(db, `SELECT public.push_tomar_pendientes(NULL, 5)`));
   check('Sin el secreto correcto, el servidor NO puede tomar avisos ni anotar resultados', [e1, e2, e3].every((e) => e && /SECRETO_INVALIDO/.test(e)), JSON.stringify([e1, e2, e3]));
   const leer = [];
-  for (const rol of ['anon', 'authenticated']) for (const t of ['push_suscripciones', 'push_cola', 'push_envios', 'push_config']) leer.push(await falla(() => comoRol(db, rol, 'franco@x.com', () => q(db, `SELECT * FROM public.${t}`))));
+  for (const rol of ['anon', 'authenticated']) for (const t of ['push_suscripciones', 'push_cola', 'push_envios', 'push_config', 'push_intentos']) leer.push(await falla(() => comoRol(db, rol, 'franco@x.com', () => q(db, `SELECT * FROM public.${t}`))));
   check('El navegador (anon y usuario del CRM) NO puede leer ninguna de las tablas de avisos', leer.every((e) => e && /permission denied/.test(e)), JSON.stringify(leer));
   const esc = await falla(() => comoRol(db, 'authenticated', 'franco@x.com', () => q(db, `UPDATE public.push_config SET valor='false'`)));
   const internas = [];
-  for (const f of ['public.push__activo()', 'public.push__encolar_venta()', 'public.push__reparacion_estado()', 'public.push__destinos(1)']) internas.push(await falla(() => comoRol(db, 'authenticated', 'franco@x.com', () => q(db, `SELECT ${f}`))));
+  for (const f of ['public.push__activo()', 'public.push__encolar_venta()', 'public.push__reparacion_estado()', 'public.push__destinos(1)', 'public.push__anotar(1,1,$$ok$$)', 'public.push__estado_final(1)']) internas.push(await falla(() => comoRol(db, 'authenticated', 'franco@x.com', () => q(db, `SELECT ${f}`))));
   check('… ni apagar el interruptor ni ejecutar las funciones internas', esc && /permission denied/.test(esc) && internas.every((e) => e && /permission denied/.test(e)), JSON.stringify([esc, ...internas]));
 }
 

@@ -556,10 +556,16 @@ async function pintarAvisoPush() {
   if (!['ingresado', 'diagnosticado', 'en_reparacion'].includes(repData.estado)) { caja.innerHTML = ''; return; }
   const e = await Push.estado();
   if (e.motivo === 'no_soportado') { caja.innerHTML = ''; return; }       // sin soporte: no se ofrece lo que no se puede
+  // El navegador puede tener una suscripción hecha para OTRA reparación: sólo cuenta si el servidor dice que está atada a ESTA.
+  if (e.suscripta) {
+    const sub = await Push.suscripcion();
+    const { data } = sub ? await supa.rpc('push_estado_cliente', { p_token: token, p_endpoint: sub.endpoint }) : { data: null };
+    e.suscripta = !!(data && data.suscripta);
+  }
   const tarjeta = (clase, titulo, texto, botones = '') => { caja.innerHTML = `<div class="aviso-card ${clase}"><div class="t"><i class="ti ti-bell-ringing"></i> ${titulo}</div><div class="s">${texto}</div>${botones}</div>`; };
   if (e.suscripta) {
     tarjeta('ok', 'Te vamos a avisar', 'Cuando tu reparación esté lista te llega una notificación a este teléfono.', '<button class="sec" id="aviso-baja">Dejar de recibir avisos</button>');
-    document.getElementById('aviso-baja').onclick = async (ev) => { ev.target.disabled = true; await Push.desactivar(async (endpoint) => { await supa.rpc('push_baja', { p_endpoint: endpoint }); }); pintarAvisoPush(); };
+    document.getElementById('aviso-baja').onclick = async (ev) => { ev.target.disabled = true; await Push.desactivar(async (endpoint) => { const { data } = await supa.rpc('push_baja_cliente', { p_token: token, p_endpoint: endpoint }); return data; }); pintarAvisoPush(); };
     return;
   }
   if (e.motivo === 'ios_sin_instalar') { tarjeta('', 'Avisame cuando esté lista', TEXTOS_AVISO.ios_sin_instalar); return; }

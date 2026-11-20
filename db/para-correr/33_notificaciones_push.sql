@@ -7,7 +7,7 @@
 --    · push_cola / push_envios: los avisos por enviar (uno por venta nueva y uno por reparación que pasa a "listo", sin duplicar) y a quién
 --      ya se le mandó cada uno (un reintento NO repite a quien ya lo recibió).
 --    · Disparadores en ventas (alta) y reparaciones (estado → listo): sólo ENCOLAN; nunca pueden romper una venta ni una reparación.
---    · RPC del NAVEGADOR: suscribir (equipo: sesión del CRM; cliente: el token de su link), mandarse un aviso de PRUEBA (equipo) y darse de baja.
+--    · RPC del NAVEGADOR: suscribir (equipo: sesión del CRM; cliente: el token de su link), consultar si ESE teléfono ya está suscripto, mandarse un aviso de PRUEBA (equipo) y darse de baja.
 --    · RPC del SERVIDOR (con el secreto de Mercado Libre, igual que meli_*): tomar avisos pendientes (ya con texto y destinatarios) y anotar el
 --      resultado. El envío lo hace api/meli/worker.js (?modo=push); no hay funciones nuevas de Vercel.
 --    · Reloj: cada minuto, SÓLO si hay algo por enviar, llama al worker (misma clave de la bóveda que el script 24: «disparador_secret»).
@@ -42,7 +42,7 @@ INSERT INTO public.push_config (clave, valor) VALUES ('activo', 'false') ON CONF
 
 CREATE TABLE IF NOT EXISTS public.push_suscripciones (
   id             BIGSERIAL PRIMARY KEY,
-  endpoint       TEXT NOT NULL UNIQUE,
+  endpoint       TEXT NOT NULL,
   p256dh         TEXT NOT NULL,
   auth           TEXT NOT NULL,
   tipo           TEXT NOT NULL CHECK (tipo IN ('equipo', 'cliente')),
@@ -58,6 +58,10 @@ CREATE TABLE IF NOT EXISTS public.push_suscripciones (
   CONSTRAINT push_sus_destino CHECK ((tipo = 'equipo' AND usuario_email IS NOT NULL AND reparacion_id IS NULL)
                                   OR (tipo = 'cliente' AND reparacion_id IS NOT NULL AND usuario_email IS NULL))
 );
+-- Un teléfono del equipo es UNA fila; un teléfono de cliente tiene UNA fila por reparación que sigue (puede seguir varias a la vez).
+CREATE UNIQUE INDEX IF NOT EXISTS push_sus_equipo_unica ON public.push_suscripciones (endpoint) WHERE tipo = 'equipo';
+CREATE UNIQUE INDEX IF NOT EXISTS push_sus_cliente_unica ON public.push_suscripciones (endpoint, reparacion_id) WHERE tipo = 'cliente';
+CREATE INDEX IF NOT EXISTS push_sus_endpoint ON public.push_suscripciones (endpoint);
 CREATE INDEX IF NOT EXISTS push_sus_tipo ON public.push_suscripciones (tipo) WHERE activa;
 CREATE INDEX IF NOT EXISTS push_sus_reparacion ON public.push_suscripciones (reparacion_id) WHERE reparacion_id IS NOT NULL;
 
@@ -67,7 +71,9 @@ CREATE TABLE IF NOT EXISTS public.push_cola (
   ref             TEXT NOT NULL,
   enviar_desde    TIMESTAMPTZ NOT NULL DEFAULT now(),
   estado          TEXT NOT NULL DEFAULT 'pendiente' CHECK (estado IN ('pendiente', 'en_curso', 'enviado', 'sin_destinos', 'fallido', 'descartado')),
-  intentos        INTEGER NOT NULL DEFAULT 0,
+  intentos        INTEGER NOT NULL DEFAULT 0,       -- reintentos REALES (un destinatario falló y se vuelve a probar)
+  reclamos        INTEGER NOT NULL DEFAULT 0,       -- veces que una corrida tomó el aviso (si nunca termina, se abandona)
+  reclamo_id      UUID,                              -- quién lo tiene ahora: sólo esa corrida puede informar el resultado
   reclamado_hasta TIMESTAMPTZ,
   ultimo_error    TEXT,
   creado_en       TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -137,7 +143,7 @@ BEGIN
   RETURN NEW;
 END $$;
 
-REVOKE EXECUTE ON FUNCTION public.push__activo(), public.push__encolar_venta(), public.push__reparacion_estado() FROM PUBLIC, anon, authenticated;
+REVOKE EXECUTE ON FUNCTION public.push__activo(), public.push__encolar_venta(), public.push__reparacion_estado() FROM PUBLIC, anon, authenticated;   -- push__destinos se cierra más abajo
 
 DROP TRIGGER IF EXISTS push_venta_nueva ON public.ventas;
 CREATE TRIGGER push_venta_nueva AFTER INSERT ON public.ventas FOR EACH ROW EXECUTE FUNCTION public.push__encolar_venta();
@@ -146,17 +152,21 @@ CREATE TRIGGER push_reparacion_estado AFTER UPDATE OF estado ON public.reparacio
 
 
 -- ─── 4 · RPC del navegador ───────────────────────────────────────────────────
+-- Todas toman un candado por endpoint (pg_advisory_xact_lock): dos llamadas simultáneas sobre el mismo teléfono se turnan y no pueden saltearse
+-- las comprobaciones (tipo del teléfono, límite de dispositivos por reparación).
+
 -- Equipo: sesión del CRM (usuario autorizado).
 CREATE OR REPLACE FUNCTION public.push_suscribir_equipo(p_endpoint TEXT, p_p256dh TEXT, p_auth TEXT)
 RETURNS JSONB LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp
 AS $$
-DECLARE v_email TEXT := lower(COALESCE(auth.jwt() ->> 'email', '')); v_tipo TEXT;
+DECLARE v_email TEXT := lower(COALESCE(auth.jwt() ->> 'email', ''));
 BEGIN
   IF NOT public.is_authorized_user() OR v_email = '' THEN RAISE EXCEPTION 'NO_AUTORIZADO'; END IF;
-  SELECT tipo INTO v_tipo FROM public.push_suscripciones WHERE endpoint = p_endpoint;
-  IF v_tipo = 'cliente' THEN DELETE FROM public.push_suscripciones WHERE endpoint = p_endpoint; END IF;   -- el mismo teléfono ahora es del equipo
+  PERFORM pg_advisory_xact_lock(hashtext('push_ep:' || p_endpoint));
+  DELETE FROM public.push_suscripciones WHERE endpoint = p_endpoint AND tipo = 'cliente';   -- el mismo teléfono ahora es del equipo
   INSERT INTO public.push_suscripciones (endpoint, p256dh, auth, tipo, usuario_email) VALUES (p_endpoint, p_p256dh, p_auth, 'equipo', v_email)
-    ON CONFLICT (endpoint) DO UPDATE SET p256dh = EXCLUDED.p256dh, auth = EXCLUDED.auth, usuario_email = EXCLUDED.usuario_email, activa = TRUE, fallos = 0;
+    ON CONFLICT (endpoint) WHERE tipo = 'equipo'
+    DO UPDATE SET p256dh = EXCLUDED.p256dh, auth = EXCLUDED.auth, usuario_email = EXCLUDED.usuario_email, activa = TRUE, fallos = 0;
   RETURN jsonb_build_object('ok', TRUE);
 END $$;
 
@@ -164,19 +174,40 @@ END $$;
 CREATE OR REPLACE FUNCTION public.push_suscribir_cliente(p_token TEXT, p_endpoint TEXT, p_p256dh TEXT, p_auth TEXT)
 RETURNS JSONB LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp
 AS $$
-DECLARE v_rep RECORD; v_tipo TEXT; v_n INTEGER;
+DECLARE v_rep RECORD; v_n INTEGER;
 BEGIN
   IF p_token IS NULL OR btrim(p_token) = '' THEN RETURN jsonb_build_object('ok', FALSE, 'motivo', 'token'); END IF;
   SELECT r.id::TEXT AS id, r.estado INTO v_rep FROM public.reparaciones r WHERE r.token_seguimiento = p_token;
   IF NOT FOUND THEN RETURN jsonb_build_object('ok', FALSE, 'motivo', 'token'); END IF;
   IF v_rep.estado NOT IN ('ingresado', 'diagnosticado', 'en_reparacion') THEN RETURN jsonb_build_object('ok', FALSE, 'motivo', 'estado'); END IF;
-  SELECT tipo INTO v_tipo FROM public.push_suscripciones WHERE endpoint = p_endpoint;
-  IF v_tipo = 'equipo' THEN RETURN jsonb_build_object('ok', FALSE, 'motivo', 'dispositivo_del_equipo'); END IF;
+  PERFORM pg_advisory_xact_lock(hashtext('push_ep:' || p_endpoint));
+  PERFORM pg_advisory_xact_lock(hashtext('push_rep:' || v_rep.id));
+  IF EXISTS (SELECT 1 FROM public.push_suscripciones WHERE endpoint = p_endpoint AND tipo = 'equipo') THEN RETURN jsonb_build_object('ok', FALSE, 'motivo', 'dispositivo_del_equipo'); END IF;
   SELECT count(*) INTO v_n FROM public.push_suscripciones WHERE tipo = 'cliente' AND reparacion_id = v_rep.id AND endpoint <> p_endpoint;
   IF v_n >= 5 THEN RETURN jsonb_build_object('ok', FALSE, 'motivo', 'limite'); END IF;
   INSERT INTO public.push_suscripciones (endpoint, p256dh, auth, tipo, reparacion_id) VALUES (p_endpoint, p_p256dh, p_auth, 'cliente', v_rep.id)
-    ON CONFLICT (endpoint) DO UPDATE SET p256dh = EXCLUDED.p256dh, auth = EXCLUDED.auth, reparacion_id = EXCLUDED.reparacion_id, activa = TRUE, fallos = 0;
+    ON CONFLICT (endpoint, reparacion_id) WHERE tipo = 'cliente'
+    DO UPDATE SET p256dh = EXCLUDED.p256dh, auth = EXCLUDED.auth, activa = TRUE, fallos = 0;
   RETURN jsonb_build_object('ok', TRUE);
+END $$;
+
+-- ¿Este teléfono ya recibe avisos de ESTA reparación? (la pantalla no puede fiarse de que el navegador tenga "alguna" suscripción)
+CREATE OR REPLACE FUNCTION public.push_estado_cliente(p_token TEXT, p_endpoint TEXT)
+RETURNS JSONB LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public, pg_temp
+AS $$
+  SELECT jsonb_build_object('suscripta', EXISTS (
+    SELECT 1 FROM public.push_suscripciones s JOIN public.reparaciones r ON r.id::TEXT = s.reparacion_id
+     WHERE r.token_seguimiento = p_token AND btrim(COALESCE(p_token, '')) <> '' AND s.endpoint = p_endpoint AND s.tipo = 'cliente' AND s.activa))
+$$;
+
+-- ¿Este teléfono es del equipo y está activo para MI usuario?
+CREATE OR REPLACE FUNCTION public.push_estado_equipo(p_endpoint TEXT)
+RETURNS JSONB LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = public, pg_temp
+AS $$
+DECLARE v_email TEXT := lower(COALESCE(auth.jwt() ->> 'email', ''));
+BEGIN
+  IF NOT public.is_authorized_user() OR v_email = '' THEN RAISE EXCEPTION 'NO_AUTORIZADO'; END IF;
+  RETURN jsonb_build_object('suscripta', EXISTS (SELECT 1 FROM public.push_suscripciones WHERE endpoint = p_endpoint AND tipo = 'equipo' AND activa AND usuario_email = v_email));
 END $$;
 
 -- Aviso de prueba al PROPIO teléfono del equipo (para comprobar que quedó bien configurado). Uno cada 30 segundos por teléfono.
@@ -195,7 +226,7 @@ BEGIN
   RETURN jsonb_build_object('ok', TRUE);
 END $$;
 
--- Baja: quien tiene el endpoint (sólo lo conoce el propio teléfono) puede desuscribirlo.
+-- Baja: quien tiene el endpoint (sólo lo conoce el propio teléfono, es la "llave") borra todo lo de ese teléfono.
 CREATE OR REPLACE FUNCTION public.push_baja(p_endpoint TEXT)
 RETURNS JSONB LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp
 AS $$
@@ -204,20 +235,51 @@ BEGIN
   RETURN jsonb_build_object('ok', TRUE);
 END $$;
 
+-- Baja de UNA reparación (el cliente deja de recibir avisos de esa, pero sigue con las otras). Devuelve cuántas le quedan a ese teléfono:
+-- si queda 0, la pantalla cancela también la suscripción del navegador.
+CREATE OR REPLACE FUNCTION public.push_baja_cliente(p_token TEXT, p_endpoint TEXT)
+RETURNS JSONB LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp
+AS $$
+DECLARE v_id TEXT; v_resto INTEGER;
+BEGIN
+  IF p_token IS NOT NULL AND btrim(p_token) <> '' THEN
+    SELECT r.id::TEXT INTO v_id FROM public.reparaciones r WHERE r.token_seguimiento = p_token;
+    IF v_id IS NOT NULL THEN DELETE FROM public.push_suscripciones WHERE endpoint = p_endpoint AND tipo = 'cliente' AND reparacion_id = v_id; END IF;
+  END IF;
+  SELECT count(*) INTO v_resto FROM public.push_suscripciones WHERE endpoint = p_endpoint AND tipo = 'cliente';
+  RETURN jsonb_build_object('ok', TRUE, 'restantes', v_resto);
+END $$;
+
 
 -- ─── 5 · RPC del servidor (con el secreto) ───────────────────────────────────
--- Toma hasta p_limite avisos listos, los reclama (un reintento o una segunda corrida no los repite) y devuelve cada uno con su texto y sus
--- destinatarios PENDIENTES (los que ya lo recibieron no vuelven). Un aviso sin destinatarios se cierra acá.
-CREATE OR REPLACE FUNCTION public.push_tomar_pendientes(p_secreto TEXT, p_limite INTEGER DEFAULT 5, p_segundos INTEGER DEFAULT 120)
+-- Quiénes tienen que recibir un aviso y todavía no lo recibieron (el reintento y la segunda corrida nunca repiten a quien ya lo tiene).
+CREATE OR REPLACE FUNCTION public.push__destinos(p_evento_id BIGINT)
+RETURNS TABLE (id BIGINT, endpoint TEXT, p256dh TEXT, auth TEXT)
+LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public, pg_temp
+AS $$
+  SELECT s.id, s.endpoint, s.p256dh, s.auth
+    FROM public.push_cola c
+    JOIN public.push_suscripciones s ON s.activa AND (
+         (c.tipo = 'venta_nueva'      AND s.tipo = 'equipo')
+      OR (c.tipo = 'reparacion_lista' AND s.tipo = 'cliente' AND s.reparacion_id = c.ref)
+      OR (c.tipo = 'prueba'           AND s.tipo = 'equipo'  AND s.id::TEXT = split_part(c.ref, '-', 1)))
+   WHERE c.id = p_evento_id
+     AND NOT EXISTS (SELECT 1 FROM public.push_envios e WHERE e.evento_id = c.id AND e.suscripcion_id = s.id)
+   ORDER BY s.id
+$$;
+
+-- Toma hasta p_limite avisos listos y los RECLAMA con un identificador propio (sólo esa corrida puede informar el resultado). Devuelve cada uno con su
+-- texto y sus destinatarios pendientes. Un aviso sin destinatarios se cierra acá.
+CREATE OR REPLACE FUNCTION public.push_tomar_pendientes(p_secreto TEXT, p_limite INTEGER DEFAULT 3, p_segundos INTEGER DEFAULT 120)
 RETURNS JSONB LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp
 AS $$
 DECLARE
-  ev RECORD; v RECORD; r RECORD; d JSONB; v_out JSONB := '[]'::JSONB; v_msg JSONB;
+  ev RECORD; v RECORD; r RECORD; d JSONB; v_out JSONB := '[]'::JSONB; v_msg JSONB; v_claim UUID;
   v_total NUMERIC; v_n INTEGER; v_primero TEXT; v_cuerpo TEXT; v_activo BOOLEAN;
 BEGIN
   IF NOT public.meli_secreto_ok(p_secreto) THEN RAISE EXCEPTION 'SECRETO_INVALIDO'; END IF;
   v_activo := public.push__activo();
-  p_limite := LEAST(GREATEST(COALESCE(p_limite, 5), 1), 20);
+  p_limite := LEAST(GREATEST(COALESCE(p_limite, 3), 1), 10);
   p_segundos := LEAST(GREATEST(COALESCE(p_segundos, 120), 30), 600);
 
   FOR ev IN
@@ -225,11 +287,11 @@ BEGIN
      WHERE ((estado = 'pendiente' AND enviar_desde <= now()) OR (estado = 'en_curso' AND reclamado_hasta < now())) AND (v_activo OR tipo = 'prueba')   -- la prueba funciona aunque el interruptor esté apagado
      ORDER BY enviar_desde, id LIMIT p_limite FOR UPDATE SKIP LOCKED
   LOOP
-    IF ev.intentos >= 5 THEN
-      UPDATE public.push_cola SET estado = 'fallido', cerrado_en = now(), ultimo_error = COALESCE(ultimo_error, 'demasiados intentos') WHERE id = ev.id;
+    IF ev.intentos >= 5 OR ev.reclamos >= 20 THEN
+      UPDATE public.push_cola SET estado = 'fallido', cerrado_en = now(), reclamado_hasta = NULL, reclamo_id = NULL, ultimo_error = COALESCE(ultimo_error, 'demasiados intentos') WHERE id = ev.id;
       CONTINUE;
     END IF;
-    v_msg := NULL; d := NULL;
+    v_msg := NULL;
 
     IF ev.tipo = 'venta_nueva' THEN
       SELECT v2.id, v2.cliente, v2.estado, v2.creado_en INTO v FROM public.ventas v2 WHERE v2.id::TEXT = ev.ref;
@@ -244,9 +306,6 @@ BEGIN
       v_cuerpo := left(btrim(COALESCE(NULLIF(btrim(v.cliente), ''), 'Cliente')) || ' · USD ' || round(v_total)::TEXT
                   || CASE WHEN v_primero IS NOT NULL THEN ' · ' || left(v_primero, 60) || CASE WHEN v_n > 1 THEN ' +' || (v_n - 1) ELSE '' END ELSE '' END, 200);
       v_msg := jsonb_build_object('titulo', 'Venta nueva 🎉', 'cuerpo', v_cuerpo, 'url', '/login', 'tag', 'venta-' || ev.ref);
-      SELECT COALESCE(jsonb_agg(jsonb_build_object('id', s.id, 'endpoint', s.endpoint, 'p256dh', s.p256dh, 'auth', s.auth) ORDER BY s.id), '[]'::JSONB) INTO d
-        FROM public.push_suscripciones s
-       WHERE s.tipo = 'equipo' AND s.activa AND NOT EXISTS (SELECT 1 FROM public.push_envios e WHERE e.evento_id = ev.id AND e.suscripcion_id = s.id);
 
     ELSIF ev.tipo = 'reparacion_lista' THEN
       SELECT r2.id::TEXT AS id, r2.equipo, r2.token_seguimiento, r2.estado INTO r FROM public.reparaciones r2 WHERE r2.id::TEXT = ev.ref;
@@ -256,38 +315,37 @@ BEGIN
       v_msg := jsonb_build_object('titulo', 'Tu reparación está lista ✅',
         'cuerpo', left('Tu ' || COALESCE(NULLIF(btrim(r.equipo), ''), 'equipo') || ' ya se puede retirar. ¡Gracias por confiar en iPhoneMood!', 200),
         'url', '/seguimiento.html?t=' || r.token_seguimiento, 'tag', 'reparacion-' || ev.ref);
-      SELECT COALESCE(jsonb_agg(jsonb_build_object('id', s.id, 'endpoint', s.endpoint, 'p256dh', s.p256dh, 'auth', s.auth) ORDER BY s.id), '[]'::JSONB) INTO d
-        FROM public.push_suscripciones s
-       WHERE s.tipo = 'cliente' AND s.activa AND s.reparacion_id = ev.ref AND NOT EXISTS (SELECT 1 FROM public.push_envios e WHERE e.evento_id = ev.id AND e.suscripcion_id = s.id);
-    END IF;
 
-    IF ev.tipo = 'prueba' THEN
+    ELSIF ev.tipo = 'prueba' THEN
       v_msg := jsonb_build_object('titulo', 'Aviso de prueba ✅', 'cuerpo', 'Si ves esto, los avisos de iPhoneMood funcionan en este dispositivo.', 'url', '/login', 'tag', 'prueba');
-      SELECT COALESCE(jsonb_agg(jsonb_build_object('id', s.id, 'endpoint', s.endpoint, 'p256dh', s.p256dh, 'auth', s.auth)), '[]'::JSONB) INTO d
-        FROM public.push_suscripciones s
-       WHERE s.id::TEXT = split_part(ev.ref, '-', 1) AND s.tipo = 'equipo' AND s.activa AND NOT EXISTS (SELECT 1 FROM public.push_envios e WHERE e.evento_id = ev.id AND e.suscripcion_id = s.id);
     END IF;
 
-    IF d IS NULL OR jsonb_array_length(d) = 0 THEN
-      UPDATE public.push_cola SET estado = CASE WHEN EXISTS (SELECT 1 FROM public.push_envios e WHERE e.evento_id = ev.id) THEN 'enviado' ELSE 'sin_destinos' END, cerrado_en = now() WHERE id = ev.id;
+    SELECT COALESCE(jsonb_agg(jsonb_build_object('id', x.id, 'endpoint', x.endpoint, 'p256dh', x.p256dh, 'auth', x.auth) ORDER BY x.id), '[]'::JSONB) INTO d FROM public.push__destinos(ev.id) x;
+    IF jsonb_array_length(d) = 0 THEN
+      UPDATE public.push_cola SET estado = CASE WHEN EXISTS (SELECT 1 FROM public.push_envios e WHERE e.evento_id = ev.id) THEN 'enviado' ELSE 'sin_destinos' END, cerrado_en = now(), reclamado_hasta = NULL, reclamo_id = NULL WHERE id = ev.id;
       CONTINUE;
     END IF;
-    UPDATE public.push_cola SET estado = 'en_curso', intentos = intentos + 1, reclamado_hasta = now() + make_interval(secs => p_segundos) WHERE id = ev.id;
-    v_out := v_out || jsonb_build_object('evento_id', ev.id, 'tipo', ev.tipo, 'mensaje', v_msg, 'destinos', d);
+    v_claim := gen_random_uuid();
+    UPDATE public.push_cola SET estado = 'en_curso', reclamos = reclamos + 1, reclamo_id = v_claim, reclamado_hasta = now() + make_interval(secs => p_segundos) WHERE id = ev.id;
+    v_out := v_out || jsonb_build_object('evento_id', ev.id, 'reclamo', v_claim, 'tipo', ev.tipo, 'mensaje', v_msg, 'destinos', d);
   END LOOP;
   RETURN v_out;
 END $$;
 
--- El servidor informa qué pasó con cada destinatario: [{id, estado: ok|baja|reintentar|error}].
-CREATE OR REPLACE FUNCTION public.push_resultado(p_secreto TEXT, p_evento_id BIGINT, p_resultados JSONB)
+-- El servidor informa qué pasó con cada destinatario: [{id, estado: ok|baja|reintentar|error}], con el identificador de reclamo que recibió.
+-- Si el reclamo ya no es el vigente (la corrida tardó y otra retomó el aviso) NO se anota nada. Los destinatarios que no se alcanzaron a intentar
+-- (se acabó el tiempo) quedan pendientes y el aviso vuelve a la cola sin gastar un reintento.
+CREATE OR REPLACE FUNCTION public.push_resultado(p_secreto TEXT, p_evento_id BIGINT, p_reclamo UUID, p_resultados JSONB)
 RETURNS JSONB LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp
 AS $$
 DECLARE x JSONB; v_id BIGINT; v_est TEXT; v_ev public.push_cola%ROWTYPE; v_reint BOOLEAN := FALSE; v_pend INTEGER;
 BEGIN
   IF NOT public.meli_secreto_ok(p_secreto) THEN RAISE EXCEPTION 'SECRETO_INVALIDO'; END IF;
-  IF p_resultados IS NULL OR jsonb_typeof(p_resultados) <> 'array' THEN RAISE EXCEPTION 'RESULTADOS_INVALIDOS'; END IF;
+  IF p_resultados IS NULL OR jsonb_typeof(p_resultados) <> 'array' OR jsonb_array_length(p_resultados) > 200 THEN RAISE EXCEPTION 'RESULTADOS_INVALIDOS'; END IF;
   SELECT * INTO v_ev FROM public.push_cola WHERE id = p_evento_id FOR UPDATE;
-  IF NOT FOUND THEN RETURN jsonb_build_object('ok', FALSE); END IF;
+  IF NOT FOUND OR v_ev.estado <> 'en_curso' OR v_ev.reclamo_id IS DISTINCT FROM p_reclamo OR p_reclamo IS NULL THEN
+    RETURN jsonb_build_object('ok', FALSE, 'motivo', 'reclamo_vencido');
+  END IF;
 
   FOR x IN SELECT * FROM jsonb_array_elements(p_resultados) LOOP
     v_id := (x ->> 'id')::BIGINT; v_est := x ->> 'estado';
@@ -305,31 +363,38 @@ BEGIN
     END IF;
   END LOOP;
 
-  IF v_reint AND v_ev.intentos < 5 THEN
-    UPDATE public.push_cola SET estado = 'pendiente', reclamado_hasta = NULL,
-           enviar_desde = now() + make_interval(mins => (ARRAY[1, 2, 5, 15, 60])[LEAST(v_ev.intentos, 5)]) WHERE id = p_evento_id;
-    RETURN jsonb_build_object('ok', TRUE, 'reintento', TRUE);
+  SELECT count(*) INTO v_pend FROM public.push__destinos(p_evento_id);
+  IF v_pend = 0 THEN
+    UPDATE public.push_cola SET estado = 'enviado', cerrado_en = now(), reclamado_hasta = NULL, reclamo_id = NULL WHERE id = p_evento_id;
+    RETURN jsonb_build_object('ok', TRUE, 'reintento', FALSE);
   END IF;
-  UPDATE public.push_cola SET estado = CASE WHEN v_reint THEN 'fallido' ELSE 'enviado' END, cerrado_en = now(), reclamado_hasta = NULL,
-         ultimo_error = CASE WHEN v_reint THEN 'sin respuesta del servicio de push' END WHERE id = p_evento_id;
-  RETURN jsonb_build_object('ok', TRUE, 'reintento', FALSE);
+  IF v_reint THEN
+    IF v_ev.intentos + 1 >= 5 THEN
+      UPDATE public.push_cola SET estado = 'fallido', intentos = intentos + 1, cerrado_en = now(), reclamado_hasta = NULL, reclamo_id = NULL, ultimo_error = 'sin respuesta del servicio de push' WHERE id = p_evento_id;
+      RETURN jsonb_build_object('ok', TRUE, 'reintento', FALSE);
+    END IF;
+    UPDATE public.push_cola SET estado = 'pendiente', intentos = intentos + 1, reclamado_hasta = NULL, reclamo_id = NULL,
+           enviar_desde = now() + make_interval(mins => (ARRAY[1, 2, 5, 15, 60])[LEAST(v_ev.intentos + 1, 5)]) WHERE id = p_evento_id;
+  ELSE
+    -- Quedaron destinatarios sin intentar (no alcanzó el tiempo): vuelve pronto, sin contar como reintento.
+    UPDATE public.push_cola SET estado = 'pendiente', reclamado_hasta = NULL, reclamo_id = NULL, enviar_desde = now() + interval '20 seconds' WHERE id = p_evento_id;
+  END IF;
+  RETURN jsonb_build_object('ok', TRUE, 'reintento', TRUE);
 END $$;
-
--- Clave PÚBLICA para el navegador: la entrega el servidor (variable de Vercel); acá sólo se guarda para poder mostrar si está configurada.
--- (no se guarda nada secreto)
 
 
 -- ─── 6 · Permisos ────────────────────────────────────────────────────────────
-REVOKE EXECUTE ON FUNCTION public.push_suscribir_equipo(TEXT, TEXT, TEXT), public.push_suscribir_cliente(TEXT, TEXT, TEXT, TEXT), public.push_baja(TEXT), public.push_probar(TEXT),
-  public.push_tomar_pendientes(TEXT, INTEGER, INTEGER), public.push_resultado(TEXT, BIGINT, JSONB) FROM PUBLIC, anon, authenticated;
-GRANT EXECUTE ON FUNCTION public.push_suscribir_equipo(TEXT, TEXT, TEXT), public.push_probar(TEXT) TO authenticated;
-GRANT EXECUTE ON FUNCTION public.push_suscribir_cliente(TEXT, TEXT, TEXT, TEXT), public.push_baja(TEXT) TO anon, authenticated;
+REVOKE EXECUTE ON FUNCTION public.push_suscribir_equipo(TEXT, TEXT, TEXT), public.push_suscribir_cliente(TEXT, TEXT, TEXT, TEXT), public.push_baja(TEXT), public.push_baja_cliente(TEXT, TEXT),
+  public.push_estado_cliente(TEXT, TEXT), public.push_estado_equipo(TEXT), public.push_probar(TEXT), public.push__destinos(BIGINT),
+  public.push_tomar_pendientes(TEXT, INTEGER, INTEGER), public.push_resultado(TEXT, BIGINT, UUID, JSONB) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.push_suscribir_equipo(TEXT, TEXT, TEXT), public.push_estado_equipo(TEXT), public.push_probar(TEXT) TO authenticated;
+GRANT EXECUTE ON FUNCTION public.push_suscribir_cliente(TEXT, TEXT, TEXT, TEXT), public.push_baja(TEXT), public.push_baja_cliente(TEXT, TEXT), public.push_estado_cliente(TEXT, TEXT) TO anon, authenticated;
 -- Del servidor: usa la clave anon + el secreto (como meli_*); sin el secreto fallan en la primera línea.
-GRANT EXECUTE ON FUNCTION public.push_tomar_pendientes(TEXT, INTEGER, INTEGER), public.push_resultado(TEXT, BIGINT, JSONB) TO anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.push_tomar_pendientes(TEXT, INTEGER, INTEGER), public.push_resultado(TEXT, BIGINT, UUID, JSONB) TO anon, authenticated;
 DO $$
 BEGIN
   IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'service_role') THEN
-    REVOKE EXECUTE ON FUNCTION public.push__activo(), public.push__encolar_venta(), public.push__reparacion_estado() FROM service_role;
+    REVOKE EXECUTE ON FUNCTION public.push__activo(), public.push__encolar_venta(), public.push__reparacion_estado(), public.push__destinos(BIGINT) FROM service_role;
   END IF;
 END $$;
 

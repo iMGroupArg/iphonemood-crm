@@ -26,7 +26,7 @@ async function nueva({ activo = true } = {}) {
 }
 const q = async (db, sql, p = []) => (await db.query(sql, p)).rows;
 const tomar = (db, lim = 5) => q(db, `SELECT public.push_tomar_pendientes($1, $2) AS r`, [SECRETO, lim]).then((x) => x[0].r);
-const resultado = (db, ev, res) => q(db, `SELECT public.push_resultado($1,$2,$3::jsonb) AS r`, [SECRETO, ev, JSON.stringify(res)]).then((x) => x[0].r);
+const resultado = (db, ev, res) => q(db, `SELECT public.push_resultado($1,$2,$3::uuid,$4::jsonb) AS r`, [SECRETO, ev.evento_id, ev.reclamo, JSON.stringify(res)]).then((x) => x[0].r);
 const venta = async (db, { cliente = 'Martín Gómez', items = [['iPhone 15 Pro 256GB', 1840]] } = {}) => {
   const id = (await q(db, `INSERT INTO public.ventas (cliente, estado, tipo_venta, fecha_venta) VALUES ($1,'cerrada','minorista', now()::date) RETURNING id`, [cliente]))[0].id;
   for (const [n, p] of items) await db.query(`INSERT INTO public.venta_items (venta_id, nombre, precio_usd) VALUES ($1,$2,$3)`, [id, n, p]);
@@ -78,7 +78,7 @@ console.log('\n══ Notificaciones push: base de datos (Postgres en WebAssembl
     t.length === 1 && t[0].tipo === 'venta_nueva' && t[0].destinos.length === 1 && t[0].destinos[0].endpoint === eq.endpoint, JSON.stringify(t));
   check('El texto lleva cliente, monto y producto', /Martín Gómez · USD 1840 · iPhone 15 Pro 256GB/.test(t[0].mensaje.cuerpo) && t[0].mensaje.titulo.includes('Venta nueva'), JSON.stringify(t[0].mensaje));
   check('Reclamado: una segunda corrida inmediata no lo repite', (await tomar(db)).length === 0);
-  const r = await resultado(db, t[0].evento_id, [{ id: t[0].destinos[0].id, estado: 'ok' }]);
+  const r = await resultado(db, t[0], [{ id: t[0].destinos[0].id, estado: 'ok' }]);
   check('Con el resultado "ok" el aviso queda enviado y no vuelve', r.reintento === false && (await q(db, `SELECT estado FROM public.push_cola`))[0].estado === 'enviado' && (await tomar(db)).length === 0);
   await venta(db);   // otra venta
   check('Dos ventas distintas son dos avisos', (await q(db, `SELECT count(*)::int n FROM public.push_cola`))[0].n === 2);
@@ -113,7 +113,7 @@ console.log('\n══ Notificaciones push: base de datos (Postgres en WebAssembl
   const t = await tomar(db);
   check('Al pasar a "listo" se avisa SÓLO al cliente de esa reparación (no al otro cliente ni al equipo)', t.length === 1 && t[0].tipo === 'reparacion_lista' && t[0].destinos.length === 1 && t[0].destinos[0].endpoint === sa.endpoint, JSON.stringify(t));
   check('El aviso lleva el equipo y abre SU link de seguimiento', /iPhone 13/.test(t[0].mensaje.cuerpo) && t[0].mensaje.url === `/seguimiento.html?t=${a[0].t}` && t[0].mensaje.titulo.includes('lista'), JSON.stringify(t[0].mensaje));
-  await resultado(db, t[0].evento_id, [{ id: t[0].destinos[0].id, estado: 'ok' }]);
+  await resultado(db, t[0], [{ id: t[0].destinos[0].id, estado: 'ok' }]);
   await db.query(`UPDATE public.reparaciones SET estado='en_reparacion' WHERE id=$1`, [a[0].id]);
   await db.query(`UPDATE public.reparaciones SET estado='listo' WHERE id=$1`, [a[0].id]);
   check('Si vuelve a "listo" no se repite el aviso (uno por reparación)', (await q(db, `SELECT count(*)::int n FROM public.push_cola`))[0].n === 1 && (await tomar(db)).length === 0);
@@ -168,19 +168,19 @@ console.log('\n══ Notificaciones push: base de datos (Postgres en WebAssembl
   await venta(db); await vencer(db);
   let t = await tomar(db);
   const ids = t[0].destinos.map((d) => d.id);
-  let r = await resultado(db, t[0].evento_id, [{ id: ids[0], estado: 'ok' }, { id: ids[1], estado: 'reintentar' }, { id: ids[2], estado: 'baja' }]);
+  let r = await resultado(db, t[0], [{ id: ids[0], estado: 'ok' }, { id: ids[1], estado: 'reintentar' }, { id: ids[2], estado: 'baja' }]);
   check('Si uno falla por ocupación, el aviso se reintenta más tarde (1 minuto)', r.reintento === true && (await q(db, `SELECT estado, enviar_desde > now() AS futuro FROM public.push_cola`))[0].futuro === true);
   check('Una baja (410) borra esa suscripción', (await q(db, `SELECT count(*)::int n FROM public.push_suscripciones WHERE id=$1`, [ids[2]]))[0].n === 0);
   await vencer(db);
   t = await tomar(db);
   check('El reintento SÓLO va a quien todavía no lo recibió (no se repite a quien ya lo tiene)', t.length === 1 && t[0].destinos.length === 1 && t[0].destinos[0].id === ids[1], JSON.stringify(t));
-  await resultado(db, t[0].evento_id, [{ id: ids[1], estado: 'ok' }]);
+  await resultado(db, t[0], [{ id: ids[1], estado: 'ok' }]);
   check('Cuando todos lo recibieron queda enviado', (await q(db, `SELECT estado FROM public.push_cola`))[0].estado === 'enviado');
 }
 {
   const db = await nueva();
   const s = sub(); await equipo(db, s);
-  for (let i = 0; i < 3; i++) { await venta(db); await vencer(db); const t = await tomar(db); await resultado(db, t[0].evento_id, [{ id: t[0].destinos[0].id, estado: 'error' }]); }
+  for (let i = 0; i < 3; i++) { await venta(db); await vencer(db); const t = await tomar(db); await resultado(db, t[0], [{ id: t[0].destinos[0].id, estado: 'error' }]); }
   check('Una suscripción que da "error" 3 veces seguidas se desactiva (el aviso 4 ya no la usa)', (await q(db, `SELECT activa FROM public.push_suscripciones`))[0].activa === false);
 }
 {
@@ -189,7 +189,7 @@ console.log('\n══ Notificaciones push: base de datos (Postgres en WebAssembl
   for (let i = 0; i < 5; i++) {
     await vencer(db);
     const t = await tomar(db);
-    if (t.length) await resultado(db, t[0].evento_id, [{ id: t[0].destinos[0].id, estado: 'reintentar' }]);
+    if (t.length) await resultado(db, t[0], [{ id: t[0].destinos[0].id, estado: 'reintentar' }]);
   }
   await vencer(db); await tomar(db);
   check('Tras 5 intentos fallidos el aviso queda "fallido" y deja de intentar', (await q(db, `SELECT estado FROM public.push_cola`))[0].estado === 'fallido');
@@ -203,12 +203,75 @@ console.log('\n══ Notificaciones push: base de datos (Postgres en WebAssembl
   check('Si una corrida se cayó a medio camino, el reclamo vence y otra retoma el aviso', t1.length === 1 && t2.length === 1 && t2[0].evento_id === t1[0].evento_id);
 }
 
+// ── 6b. reclamos, tiempo y una sola pantalla por reparación ───────────────
+{ // un reclamo viejo no pisa al vigente
+  const db = await nueva();
+  await equipo(db, sub()); await venta(db); await vencer(db);
+  const t1 = await tomar(db);
+  await db.query(`UPDATE public.push_cola SET reclamado_hasta = now() - interval '1 second'`);
+  const t2 = await tomar(db);
+  check('Cada toma lleva su propio identificador de reclamo', t1[0].reclamo && t2[0].reclamo && t1[0].reclamo !== t2[0].reclamo);
+  const viejo = await resultado(db, t1[0], [{ id: t1[0].destinos[0].id, estado: 'ok' }]);
+  check('Una corrida lenta que informa DESPUÉS de que otra retomó el aviso es ignorada (no pisa nada)', viejo.ok === false && viejo.motivo === 'reclamo_vencido' && (await q(db, `SELECT estado FROM public.push_cola`))[0].estado === 'en_curso' && (await q(db, `SELECT count(*)::int n FROM public.push_envios`))[0].n === 0);
+  const vigente = await resultado(db, t2[0], [{ id: t2[0].destinos[0].id, estado: 'ok' }]);
+  check('La corrida vigente sí cierra el aviso', vigente.ok === true && (await q(db, `SELECT estado FROM public.push_cola`))[0].estado === 'enviado');
+  const otra = await resultado(db, { evento_id: t2[0].evento_id, reclamo: null }, []);
+  check('Sin identificador de reclamo no se anota nada', otra.ok === false);
+}
+{ // se acabó el tiempo: los destinatarios sin intentar quedan pendientes y no gastan un reintento
+  const db = await nueva();
+  const a = sub(), b = sub(); await equipo(db, a); await equipo(db, b);
+  await venta(db); await vencer(db);
+  const t = await tomar(db);
+  const r = await resultado(db, t[0], [{ id: t[0].destinos[0].id, estado: 'ok' }]);   // sólo se alcanzó a mandar al primero
+  const c = (await q(db, `SELECT estado, intentos FROM public.push_cola`))[0];
+  check('Si sólo se alcanzó a enviar a algunos, el aviso vuelve a la cola SIN gastar un reintento', r.reintento === true && c.estado === 'pendiente' && c.intentos === 0, JSON.stringify(c));
+  await db.query(`UPDATE public.push_cola SET enviar_desde = now() - interval '1 second'`);
+  const t2 = await tomar(db);
+  check('… y la siguiente vuelta va SÓLO a los que faltaban', t2.length === 1 && t2[0].destinos.length === 1 && t2[0].destinos[0].id !== t[0].destinos[0].id);
+}
+{ // abandonado: nunca termina
+  const db = await nueva();
+  await equipo(db, sub()); await venta(db);
+  for (let i = 0; i < 21; i++) { await vencer(db); await db.query(`UPDATE public.push_cola SET reclamado_hasta = now() - interval '1 second' WHERE estado = 'en_curso'`); await tomar(db); }
+  check('Un aviso que se reclama una y otra vez sin terminar nunca se abandona en silencio: después de 20 tomas queda "fallido"', (await q(db, `SELECT estado FROM public.push_cola`))[0].estado === 'fallido');
+}
+{ // un teléfono, dos reparaciones
+  const db = await nueva();
+  const a = await q(db, `INSERT INTO public.reparaciones (cliente, equipo) VALUES ('Ana','iPhone 13') RETURNING id, token_seguimiento t`);
+  const b = await q(db, `INSERT INTO public.reparaciones (cliente, equipo) VALUES ('Ana','iPad') RETURNING id, token_seguimiento t`);
+  const tel = sub();
+  await cliente(db, a[0].t, tel); await cliente(db, b[0].t, tel);
+  const estC = (t, ep) => comoRol(db, 'anon', null, () => q(db, `SELECT public.push_estado_cliente($1,$2) AS r`, [t, ep]).then((x) => x[0].r.suscripta));
+  check('Un mismo teléfono puede seguir DOS reparaciones a la vez (una fila por reparación)', (await q(db, `SELECT count(*)::int n FROM public.push_suscripciones WHERE endpoint=$1`, [tel.endpoint]))[0].n === 2);
+  check('El estado se consulta POR REPARACIÓN: ese teléfono figura en las dos, y en una tercera no', await estC(a[0].t, tel.endpoint) && await estC(b[0].t, tel.endpoint) && !(await estC('otro-token', tel.endpoint)) && !(await estC(a[0].t, sub().endpoint)));
+  await db.query(`UPDATE public.reparaciones SET estado='listo' WHERE id=$1`, [a[0].id]);
+  const t = await tomar(db);
+  check('El aviso de una reparación llega a ese teléfono una sola vez y con SU link', t.length === 1 && t[0].destinos.length === 1 && t[0].mensaje.url === `/seguimiento.html?t=${a[0].t}`);
+  const baja = await comoRol(db, 'anon', null, () => q(db, `SELECT public.push_baja_cliente($1,$2) AS r`, [a[0].t, tel.endpoint]).then((x) => x[0].r));
+  check('Darse de baja de UNA reparación deja la otra (y avisa cuántas quedan para no cancelar el teléfono)', baja.restantes === 1 && !(await estC(a[0].t, tel.endpoint)) && await estC(b[0].t, tel.endpoint));
+  const baja2 = await comoRol(db, 'anon', null, () => q(db, `SELECT public.push_baja_cliente($1,$2) AS r`, [b[0].t, tel.endpoint]).then((x) => x[0].r));
+  check('Al darse de baja de la última, quedan 0', baja2.restantes === 0);
+  const ajena = await comoRol(db, 'anon', null, () => q(db, `SELECT public.push_baja_cliente($1,$2) AS r`, ['token-ajeno', tel.endpoint]).then((x) => x[0].r));
+  check('Con un token que no existe no se borra nada ajeno', ajena.ok === true);
+}
+{ // estado del equipo
+  const db = await nueva();
+  const s1 = sub(); await equipo(db, s1);
+  const est = (ep, email = 'franco@x.com') => comoRol(db, 'authenticated', email, () => q(db, `SELECT public.push_estado_equipo($1) AS r`, [ep]).then((x) => x[0].r.suscripta));
+  check('El estado del equipo se confirma en el servidor: mi teléfono sí, uno cualquiera no', await est(s1.endpoint) && !(await est(sub().endpoint)));
+  const rep = await q(db, `INSERT INTO public.reparaciones (cliente, equipo) VALUES ('Ana','x') RETURNING token_seguimiento t`);
+  const cl = sub(); await cliente(db, rep[0].t, cl);
+  check('Un teléfono de CLIENTE no figura como del equipo (aunque el navegador tenga una suscripción)', !(await est(cl.endpoint)));
+  check('Un anónimo no puede consultar el estado del equipo', /permission denied/.test(await falla(() => comoRol(db, 'anon', null, () => q(db, `SELECT public.push_estado_equipo($1)`, [s1.endpoint])))));
+}
+
 // ── 7. permisos y secreto ────────────────────────────────────────────────
 {
   const db = await nueva();
   await equipo(db, sub()); await venta(db);
   const e1 = await falla(() => q(db, `SELECT public.push_tomar_pendientes('secreto-incorrecto-0123456789', 5)`));
-  const e2 = await falla(() => q(db, `SELECT public.push_resultado('secreto-incorrecto-0123456789', 1, '[]')`));
+  const e2 = await falla(() => q(db, `SELECT public.push_resultado('secreto-incorrecto-0123456789', 1, gen_random_uuid(), '[]')`));
   const e3 = await falla(() => q(db, `SELECT public.push_tomar_pendientes(NULL, 5)`));
   check('Sin el secreto correcto, el servidor NO puede tomar avisos ni anotar resultados', [e1, e2, e3].every((e) => e && /SECRETO_INVALIDO/.test(e)), JSON.stringify([e1, e2, e3]));
   const leer = [];
@@ -216,7 +279,7 @@ console.log('\n══ Notificaciones push: base de datos (Postgres en WebAssembl
   check('El navegador (anon y usuario del CRM) NO puede leer ninguna de las tablas de avisos', leer.every((e) => e && /permission denied/.test(e)), JSON.stringify(leer));
   const esc = await falla(() => comoRol(db, 'authenticated', 'franco@x.com', () => q(db, `UPDATE public.push_config SET valor='false'`)));
   const internas = [];
-  for (const f of ['public.push__activo()', 'public.push__encolar_venta()', 'public.push__reparacion_estado()']) internas.push(await falla(() => comoRol(db, 'authenticated', 'franco@x.com', () => q(db, `SELECT ${f}`))));
+  for (const f of ['public.push__activo()', 'public.push__encolar_venta()', 'public.push__reparacion_estado()', 'public.push__destinos(1)']) internas.push(await falla(() => comoRol(db, 'authenticated', 'franco@x.com', () => q(db, `SELECT ${f}`))));
   check('… ni apagar el interruptor ni ejecutar las funciones internas', esc && /permission denied/.test(esc) && internas.every((e) => e && /permission denied/.test(e)), JSON.stringify([esc, ...internas]));
 }
 

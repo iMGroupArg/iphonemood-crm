@@ -26,6 +26,12 @@ const Avisos = {
   async pintar() {
     const h = this._h; if (!h) return;
     const e = await Push.estado();
+    // Que el navegador tenga una suscripción no alcanza: se confirma con el servidor que es de ESTE usuario y está activa.
+    if (e.suscripta) {
+      const sub = await Push.suscripcion();
+      const { data } = sub ? await supa.rpc('push_estado_equipo', { p_endpoint: sub.endpoint }) : { data: null };
+      e.suscripta = !!(data && data.suscripta);
+    }
     const motivo = e.motivo;
     const caja = (html) => { h.cuerpo.innerHTML = html; };
     const par = (t) => `<p style="font-size:14px;line-height:1.5;margin:0 0 12px">${t}</p>`;

@@ -20,13 +20,15 @@ function configuracion(env = process.env) {
 }
 
 // Manda a cada destinatario de un aviso (de a pocos a la vez) y devuelve [{ id, estado }].
-async function enviarAviso(evento, cfg, { enviarImpl = W.enviar, simultaneos = 6 } = {}) {
+async function enviarAviso(evento, cfg, { enviarImpl = W.enviar, simultaneos = 6, restanteMs = () => Infinity, minimoMs = 3000 } = {}) {
   const destinos = Array.isArray(evento.destinos) ? evento.destinos : [];
   const mensaje = { titulo: String(evento.mensaje.titulo || ''), cuerpo: String(evento.mensaje.cuerpo || ''), url: String(evento.mensaje.url || '/'), tag: String(evento.mensaje.tag || '') };
   const out = new Array(destinos.length);
   let i = 0;
   const trabajo = async () => {
     for (;;) {
+      // Sin tiempo para otro envío: se deja de empezar (los que faltan quedan pendientes en la base y el aviso vuelve a la cola).
+      if (restanteMs() < minimoMs) return;
       const k = i++; if (k >= destinos.length) return;
       const d = destinos[k];
       const r = await enviarImpl({ endpoint: d.endpoint, p256dh: d.p256dh, auth: d.auth }, mensaje, { ...cfg, ttl: TTL_POR_TIPO[evento.tipo] || 3600 });
@@ -34,10 +36,10 @@ async function enviarAviso(evento, cfg, { enviarImpl = W.enviar, simultaneos = 6
     }
   };
   await Promise.all(Array.from({ length: Math.min(simultaneos, destinos.length) }, trabajo));
-  return out;
+  return out.filter(Boolean);    // sólo los que se alcanzaron a intentar
 }
 
-async function correrPush({ rpc, pres, env = process.env, enviarImpl = W.enviar, restanteMs = () => Infinity, minimoMs = 6000, maxEventos = 5 } = {}) {
+async function correrPush({ rpc, pres, env = process.env, enviarImpl = W.enviar, restanteMs = () => Infinity, minimoMs = 6000, maxEventos = 3 } = {}) {
   const resumen = { omitido: null, eventos: 0, enviados: 0, bajas: 0, reintentos: 0, errores: 0 };
   const cfg = configuracion(env);
   if (!cfg) { resumen.omitido = 'sin_config'; return resumen; }
@@ -46,12 +48,12 @@ async function correrPush({ rpc, pres, env = process.env, enviarImpl = W.enviar,
   for (const ev of eventos) {
     // Sin tiempo para terminar: se deja como está (el reclamo vence solo y otra corrida lo retoma).
     if (restanteMs() < minimoMs) { resumen.omitido = 'sin_tiempo'; break; }
-    const resultados = await enviarAviso(ev, cfg, { enviarImpl });
+    const resultados = await enviarAviso(ev, cfg, { enviarImpl, restanteMs, minimoMs: 3000 });
     for (const r of resultados) {
       if (r.estado === 'ok') resumen.enviados++; else if (r.estado === 'baja') resumen.bajas++; else if (r.estado === 'reintentar') resumen.reintentos++; else resumen.errores++;
     }
     resumen.eventos++;
-    try { await rpc('push_resultado', { p_evento_id: ev.evento_id, p_resultados: resultados }, pres); }
+    try { await rpc('push_resultado', { p_evento_id: ev.evento_id, p_reclamo: ev.reclamo, p_resultados: resultados }, pres); }
     catch (e) { console.error('push: no se pudo anotar el resultado:', (e && e.codigo) || ''); }
   }
   return resumen;

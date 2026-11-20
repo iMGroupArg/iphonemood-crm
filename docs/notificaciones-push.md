@@ -9,7 +9,8 @@ Primeros avisos: **venta nueva** (al equipo) y **reparación lista** (al cliente
   El reloj de Supabase llama cada minuto a `/api/meli/worker?modo=push` **sólo si hay algo por enviar**; el worker pide los avisos pendientes a la base (que ya trae texto y destinatarios), los cifra (Web Push, RFC 8291/8292, sin librerías) y los manda al servicio de push de cada navegador. Después anota el resultado.
 - **Sin funciones nuevas de Vercel** (seguimos en 12): el envío vive en `api/_push.js`, detrás del worker; la clave pública sale por `/api/push/clave` (reescritura a `conectar.js?_f=push`).
 - **Equipo:** menú del usuario → «Avisos en este dispositivo» → Activar. Hay botón de **aviso de prueba**.
-- **Cliente:** en su link de seguimiento aparece «Avisame cuando esté lista» mientras la reparación está en curso. Al entregarse la reparación se borran sus suscripciones.
+- **Cliente:** en su link de seguimiento aparece «Avisame cuando esté lista» mientras la reparación está en curso. Un mismo teléfono puede seguir varias reparaciones (una fila por reparación) y la pantalla pregunta al servidor si ESE teléfono ya está atado a ESA reparación. Al entregarse la reparación se borran sus suscripciones.
+- **Envío sin repetidos:** cada toma de un aviso lleva un identificador de reclamo; sólo esa corrida puede informar el resultado, y lo que no alcanzó a enviarse por falta de tiempo vuelve a la cola sin gastar un reintento.
 
 ## Qué dice la plataforma (verificado en la web el 2026-11-20)
 - **iPhone/iPad:** iOS 16.4+ y **sólo con la app instalada** en la pantalla de inicio; el permiso se pide con un toque; si dice «No permitir», iOS no vuelve a preguntar (hay que ir a Ajustes).
@@ -31,7 +32,7 @@ Primeros avisos: **venta nueva** (al equipo) y **reparación lista** (al cliente
 - Un teléfono del equipo no se puede atar a una reparación de cliente (ni al revés).
 
 ## Pruebas
-`tests/webpush.test.mjs` (cifrado contra el ejemplo oficial del RFC), `tests/push_servidor.test.mjs`, `tests/sw_push_cliente.test.mjs`, `tests/sql/push.sql.test.mjs` (pglite) y `tests/worker_disparador.test.mjs`.
+`tests/webpush.test.mjs` (cifrado contra el ejemplo oficial del RFC), `tests/push_servidor.test.mjs`, `tests/sw_push_cliente.test.mjs`, `tests/sql/push.sql.test.mjs` (pglite, 61), `tests/sql/push.concurrencia.test.mjs` (Postgres real con 12 conexiones: límite de 5 teléfonos, equipo-contra-cliente y reclamos) y `tests/worker_disparador.test.mjs`.
 **No se pudo probar con un teléfono real ni con el servicio de push de verdad** (el navegador de pruebas no permite service workers): el paso 5 de arriba es la prueba de punta a punta.
 
 ## Pendiente / mejoras

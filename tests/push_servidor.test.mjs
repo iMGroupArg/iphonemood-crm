@@ -23,7 +23,7 @@ const telefono = () => {
   return { priv: jwk.d, p256dh: W.b64u(Buffer.concat([Buffer.from([4]), W.deB64u(jwk.x), W.deB64u(jwk.y)])), auth: W.b64u(crypto.randomBytes(16)) };
 };
 const destino = (id, t, host = 'fcm.googleapis.com') => ({ id, endpoint: `https://${host}/fcm/send/${id}`, p256dh: t.p256dh, auth: t.auth });
-const evento = (id, destinos, tipo = 'venta_nueva') => ({ evento_id: id, tipo, mensaje: { titulo: 'Venta nueva 🎉', cuerpo: 'Martín · USD 1840', url: '/login', tag: `venta-${id}` }, destinos });
+const evento = (id, destinos, tipo = 'venta_nueva') => ({ evento_id: id, reclamo: `reclamo-${id}`, tipo, mensaje: { titulo: 'Venta nueva 🎉', cuerpo: 'Martín · USD 1840', url: '/login', tag: `venta-${id}` }, destinos });
 
 console.log('\n══ Avisos push: servidor ══\n');
 
@@ -44,6 +44,7 @@ await caso('Con claves: toma los avisos, los envía a cada destinatario e inform
   const r = await P.correrPush({ rpc, enviarImpl });
   assert.deepEqual([r.eventos, r.enviados, r.bajas, r.reintentos, r.errores], [1, 1, 1, 1, 0]);
   assert.equal(anotado.length, 1); assert.equal(anotado[0][0], 'push_resultado'); assert.equal(anotado[0][1].p_evento_id, 7);
+  assert.equal(anotado[0][1].p_reclamo, 'reclamo-7');   // la base sólo acepta el resultado de quien tiene el reclamo
   assert.deepEqual(anotado[0][1].p_resultados, [{ id: 1, estado: 'ok' }, { id: 2, estado: 'baja' }, { id: 3, estado: 'reintentar' }]);
 });
 await caso('La reparación lista dura 24 h en el servicio de push; la venta, 1 h', async () => {
@@ -57,6 +58,12 @@ await caso('Con muchos destinatarios se manda de a pocos a la vez (no todos de g
   const ev = evento(1, Array.from({ length: 20 }, (_, i) => destino(i + 1, t)));
   const r = await P.enviarAviso(ev, P.configuracion(), { simultaneos: 6, enviarImpl: async () => { activos++; maximo = Math.max(maximo, activos); await new Promise((x) => setTimeout(x, 5)); activos--; return { estado: 'ok' }; } });
   assert.equal(r.length, 20); assert.ok(maximo <= 6 && maximo > 1, `máximo simultáneo ${maximo}`);
+});
+await caso('Con poco tiempo NO se empieza a enviar a más destinatarios: sólo se informan los que se alcanzaron a intentar', async () => {
+  const t = telefono(); let enviados = 0;
+  const ev = evento(1, Array.from({ length: 10 }, (_, i) => destino(i + 1, t)));
+  const r = await P.enviarAviso(ev, P.configuracion(), { simultaneos: 1, minimoMs: 3000, restanteMs: () => (enviados >= 3 ? 500 : 100000), enviarImpl: async () => { enviados++; return { estado: 'ok' }; } });
+  assert.equal(r.length, 3); assert.deepEqual(r.map((x) => x.id), [1, 2, 3]);
 });
 await caso('Sin tiempo para terminar, no empieza otro aviso (queda reclamado y otra corrida lo retoma)', async () => {
   const t = telefono(); let enviados = 0;

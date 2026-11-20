@@ -45,6 +45,9 @@
     return { soportado: m !== 'no_soportado', ios: ES_IOS, instalada: instalada(), permiso: ('Notification' in window) ? Notification.permission : 'denied', suscripta: !!s, motivo: m };
   }
 
+  // La suscripción que ya tiene ESTE navegador (o null). Que exista NO quiere decir que esté atada a una reparación o a un usuario: eso lo dice el servidor.
+  async function suscripcion() { return suscripcionActual(); }
+
   async function activar(guardar) {
     const m = motivo();
     if (m) return { ok: false, motivo: m };
@@ -67,17 +70,21 @@
     return { ok: true, endpoint: j.endpoint };
   }
 
+  // `borrar(endpoint)` borra del servidor y puede devolver { restantes }: si todavía quedan otras reparaciones atadas a este teléfono, la suscripción del
+  // navegador NO se cancela (seguiría sirviendo a las otras).
   async function desactivar(borrar) {
     const s = await suscripcionActual();
     if (!s) return { ok: true };
     const endpoint = s.endpoint;
-    try { await borrar(endpoint); } catch { /* si falla el borrado del servidor igual se cancela acá: el próximo envío recibe 410 y se limpia solo */ }
+    let restantes = 0;
+    try { const r = await borrar(endpoint); restantes = (r && Number(r.restantes)) || 0; } catch { /* si falla el borrado del servidor igual se cancela acá: el próximo envío recibe 410 y se limpia solo */ }
+    if (restantes > 0) return { ok: true, restantes };
     try { await s.unsubscribe(); } catch { /* ya estaba */ }
-    return { ok: true };
+    return { ok: true, restantes: 0 };
   }
 
   // Alcanza con registrar el service worker para que el sitio se pueda instalar como app.
   registro();
 
-  window.Push = { estado, activar, desactivar, motivo, esIOS: ES_IOS, instalada };
+  window.Push = { estado, activar, desactivar, suscripcion, motivo, esIOS: ES_IOS, instalada };
 })();

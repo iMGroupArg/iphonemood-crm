@@ -25,6 +25,11 @@ const MeliComparar = {
   _pedirPausa: false, _sinAvance: 0, _corrida: 0,
   _limite: 100,
   _flex: { total: 0, ordenes: 0, lista: [] },   // bonificaciones Flex (cashback por envío): se acreditan APARTE, no son diferencia
+  _fx: { abierto: false, texto: '', otros: false, sinAdelanto: false, cargando: false, plan: null, ops: null, error: '', hecho: null },   // «Registrar en caja»: formulario → plan (simulación) → confirmación
+  _fxGen: 0,                      // se incrementa cuando una simulación en vuelo deja de valer (se volvió a comparar): su respuesta se descarta
+  _fxReg: {},
+  _fxEstGen: 0,                   // generación de la consulta de «ya registradas»
+  _fxEstado: 'desconocido',       // 'ok' si se pudo consultar cuáles de la lista ya están registradas; 'desconocido' si no (no se muestra como pendiente)                     // orden → referencia de la bonificación ya registrada en caja (de meli_flex_estado)
   _ret: { total: 0, ordenes: 0, por_cargo: {}, incompletas: 0 },   // retenciones/impuestos de TODAS las órdenes revisadas (parte normal del costo de canal)
   _dgForm: { orden: '', buscar: '', explorar: false },   // el formulario «Desglose de una orden»
   _desg: null,                    // { orden, cargando, datos, error } — desglose de UNA orden
@@ -116,7 +121,7 @@ const MeliComparar = {
 
   // ── Flujo ──
   async iniciar() {
-    if (this._est === 'corriendo') return;
+    if (this._est === 'corriendo' || this._fx.cargando) return;          // tampoco mientras se está registrando en caja
     const c = this._cuenta();
     if (!c) { toast('No hay una cuenta de Mercado Libre conectada.'); return; }
     const desde = (document.getElementById('mc-desde') || {}).value || this._selDesde || this.DESDE_INICIAL;
@@ -135,6 +140,7 @@ const MeliComparar = {
   _reiniciar() {
     this._est = 'inactivo'; this._cursor = null; this._rev = 0; this._pagos = 0; this._conErrores = 0; this._total = null;
     this._filas = []; this._titulos = {}; this._sinAvance = 0; this._limite = this.LIMITE_FILAS; this._desg = null;
+    this._fx = { abierto: false, texto: '', otros: false, sinAdelanto: false, cargando: false, plan: null, ops: null, error: '', hecho: null }; this._fxReg = {}; this._fxEstado = 'desconocido'; this._fxEstGen++;
     this._flex = { total: 0, ordenes: 0, lista: [] }; this._ret = { total: 0, ordenes: 0, por_cargo: {}, incompletas: 0 }; this._pedirPausa = false; this._aviso('');
   },
 
@@ -151,7 +157,7 @@ const MeliComparar = {
     const ar = new Date(Date.now() - 3 * 3600e3), y = ar.getUTCFullYear(), m = ar.getUTCMonth();
     const f = (yy, mm, dd) => `${yy}-${String(mm + 1).padStart(2, '0')}-${String(dd).padStart(2, '0')}`;
     const mas = (yy, mm) => (mm > 11 ? [yy + 1, mm - 12] : [yy, mm]);
-    if (this._est === 'corriendo') return;
+    if (this._est === 'corriendo' || this._fx.cargando) return;
     this._reiniciar(); this._desde = ''; this._hasta = '';   // otro rango = otra comparación (no se mezcla con el cursor ni los resultados anteriores)
     if (cual === 'octubre') { this._selDesde = this.DESDE_INICIAL; this._selHasta = ''; }
     else if (cual === 'mes') { const [y2, m2] = mas(y, m + 1); this._selDesde = f(y, m, 1); this._selHasta = f(y2, m2, 1); }
@@ -159,12 +165,13 @@ const MeliComparar = {
     this.pintar();
   },
 
-  reanudar() { if (this._est === 'pausado' || this._est === 'error') { this._pedirPausa = false; return this._correr(); } },
+  reanudar() { if (this._fx.cargando) return;          // no se vuelve a comparar mientras la base está acreditando
+    if (this._est === 'pausado' || this._est === 'error') { this._pedirPausa = false; return this._correr(); } },
   pausar() { if (this._est === 'corriendo') { this._pedirPausa = true; this._aviso('Se pausa al terminar la tanda en curso…'); this.pintar(); } },
 
   async _correr() {
     const mia = ++this._corrida;
-    this._est = 'corriendo'; this._aviso(''); this.pintar();          // OJO: no se borra _pedirPausa acá: un «Pausar» pedido durante el conteo inicial debe respetarse
+    this._est = 'corriendo'; this._fxGen++; this._fxEstGen++; this._fxEstado = 'desconocido'; this._fx.plan = null; this._fx.ops = null; this._aviso(''); this.pintar();          // el plan de «Registrar en caja» ya no vale si se vuelve a comparar. OJO: no se borra _pedirPausa acá: un «Pausar» pedido durante el conteo inicial debe respetarse
     try {
       for (;;) {
         if (this._pedirPausa) { this._est = 'pausado'; this._aviso('En pausa. Podés reanudar cuando quieras.', 'info'); break; }
@@ -189,7 +196,7 @@ const MeliComparar = {
         await this._cargarTitulos(nuevas.map(d => d.orden));
         if (mia !== this._corrida) return;
 
-        if (j.completo) { this._est = 'listo'; this._aviso(''); break; }
+        if (j.completo) { this._est = 'listo'; this._aviso(''); await this._cargarFlexRegistradas(); break; }
         if (j.cortado === 'MELI_LIMITANDO') {
           this._est = 'pausado';
           this._aviso('Mercado Pago pidió esperar (muchos pedidos seguidos). Esperá un minuto y apretá «Reanudar»: sigue desde donde quedó.', 'aviso');
@@ -207,9 +214,175 @@ const MeliComparar = {
     } catch {
       if (mia === this._corrida) { this._est = 'pausado'; this._aviso('Se cortó la comunicación. Reanudá para seguir desde donde quedó.', 'error'); }
     }
+    if (mia === this._corrida && (this._est === 'pausado' || this._est === 'error') && this._flex.lista.length) await this._cargarFlexRegistradas();          // también en pausa: la lista parcial ya se puede registrar
     if (mia === this._corrida) this.pintar();
   },
 
+  flexTsv() {
+    const f = x => String(x.toFixed(2)).replace('.', ',');
+    return [['Orden', 'Bonificación Flex'], ...this._flex.lista.map(x => [x.orden, f(x.monto)]), ['TOTAL', f(this._flex.total)]].map(r => r.join('\t')).join('\n');
+  },
+  async copiarFlex() {
+    if (!this._flex.lista.length) { toast('No hay bonificaciones Flex para copiar.'); return; }
+    const ok = window.Portapapeles ? await window.Portapapeles.copiar(this.flexTsv()) : false;
+    toast(ok ? 'Lista de bonificaciones Flex copiada.' : 'No se pudo copiar.');
+  },
+  // ── Registrar las bonificaciones Flex en la caja (ESCRIBE, con confirmación): RPC meli_flex_estado / meli_flex_acreditar (script 33) con la sesión del usuario ──
+  // Flujo: formulario → «Revisar» (SIMULA: no escribe nada y devuelve cuenta, caja y total) → «Confirmar» (acredita de verdad, exigiendo LA MISMA caja que se mostró).
+  FLEX_MONTO: 499,
+  ERRORES_FLEX: {
+    OPERACION_INVALIDA: 'Hay una línea con un código, un monto o una orden mal escritos.', OPERACIONES_INVALIDAS: 'La lista está vacía o tiene más de 200 bonificaciones.',
+    OPERACIONES_REPETIDAS: 'Hay códigos repetidos en la lista.', ORDENES_REPETIDAS: 'Hay una orden repetida en la lista (una sola bonificación por orden).', TOTAL_EXCESIVO: 'El total supera el tope de $100.000 por vez.',
+    MONTO_FLEX_INUSUAL: 'Hay montos distintos de $499. Si son correctos, tildá «Confirmo que los montos son correctos» y volvé a revisar.',
+    REFERENCIA_EN_ADELANTO: 'Alguno de esos códigos ya está en un adelanto: se acredita desde el adelanto, no desde acá. No se acreditó nada.',
+    REFERENCIA_YA_ACREDITADA_SUELTA: 'Ese código ya se acreditó suelto: no se puede incluir en un adelanto.',
+    REFERENCIA_CON_OTRO_MONTO: 'Alguno de esos códigos ya se registró con otro monto u otra cuenta. No se acreditó nada.',
+    ORDEN_CON_OTRA_BONIFICACION: 'Alguna de esas órdenes ya tiene su bonificación registrada con otro código: una sola por orden. No se acreditó nada.',
+    REFERENCIA_YA_EN_CAJA: 'Alguno de esos códigos ya figura en el libro de cajas por otro motivo. No se acreditó nada: hay que resolverlo a mano.',
+    ORDEN_INEXISTENTE: 'Alguna de las órdenes escritas no existe en el CRM.', ORDEN_DE_OTRA_CUENTA: 'Alguna de las órdenes escritas es de otra cuenta de Mercado Libre.',
+    CUENTA_REQUERIDA: 'Hay más de una cuenta de Mercado Libre: no se sabe a qué caja acreditar.', CUENTA_SIN_CAJA: 'La cuenta de Mercado Libre no tiene una caja asignada.',
+    CUENTA_INACTIVA: 'La cuenta de Mercado Libre está inactiva.', 'no autorizado': 'Tu usuario no está autorizado para esto.',
+    REFERENCIA_CON_OTRA_ORDEN: 'Alguno de esos códigos ya se registró para otra orden. No se acreditó nada.',
+    ADELANTO_NO_VERIFICADO: 'Falta confirmar que esas bonificaciones no están ya dentro de un adelanto (tildá la confirmación). No se acreditó nada.',
+    ADELANTOS_CAMBIARON: 'Mientras revisabas se registró un adelanto con bonificaciones. No se acreditó nada: volvé a apretar «Revisar» para ver la lista actual.',
+    DEMASIADAS_ORDENES: 'Son demasiadas órdenes para consultar de una vez.',
+    CAJA_CAMBIO: 'La caja de la cuenta cambió desde que revisaste. No se acreditó nada: volvé a apretar «Revisar» para ver la caja actual.',
+    CAJA_ESPERADA_REQUERIDA: 'Falta confirmar la caja: apretá «Revisar» de nuevo. No se acreditó nada.',
+  },
+  // Cada línea: «número de orden» (se registra como flex-<orden>) · «orden;monto» · «código» · «código;monto» · «código;monto;orden». Separadores ; , o tabulador; monto con coma o punto. Sin monto se usa $499.
+  _leerFlex(texto) {
+    const ops = [], errores = [], refs = new Set(), ords = new Set();
+    String(texto || '').split(/\r?\n/).map(l => l.trim()).filter(Boolean).forEach((linea, i) => {
+      const cols = linea.split(/[;\t]|,(?!\d{1,2}(?:[;\t]|$))/).map(x => x.trim());
+      const n = i + 1, porOrden = /^\d{6,20}$/.test(cols[0] || '');
+      if (cols.length > (porOrden ? 2 : 3)) { errores.push(`Línea ${n}: tiene más columnas de las que se esperan (${porOrden ? 'orden;monto' : 'código;monto;orden'}).`); return; }
+      const ref = porOrden ? 'flex-' + cols[0] : cols[0];
+      const monto = porOrden ? cols[1] : cols[1];
+      const orden = porOrden ? cols[0] : cols[2];
+      if (!orden) { errores.push(`Línea ${n}: falta la orden de la venta (código;monto;orden): la bonificación se registra por orden.`); return; }
+      if (!/^[A-Za-z0-9_-]{1,60}$/.test(ref || '')) { errores.push(`Línea ${n}: el código «${String(ref || '').slice(0, 30)}» no es válido (solo letras, números, - y _).`); return; }
+      let m = this.FLEX_MONTO;
+      if (monto !== undefined && monto !== '') {
+        const t = monto.replace(',', '.');
+        if (!/^\d{1,9}(\.\d{1,2})?$/.test(t) || !(Number(t) > 0)) { errores.push(`Línea ${n}: el monto «${monto.slice(0, 20)}» no es válido.`); return; }
+        m = Number(t);
+      }
+      if (orden !== undefined && orden !== '' && !/^\d{1,20}$/.test(orden)) { errores.push(`Línea ${n}: la orden «${orden.slice(0, 25)}» no es válida (solo números).`); return; }
+      if (refs.has(ref)) { errores.push(`Línea ${n}: el código ${ref} está repetido.`); return; }
+      if (orden && ords.has(orden)) { errores.push(`Línea ${n}: la orden ${orden} está repetida (una sola bonificación por orden).`); return; }
+      refs.add(ref); if (orden) ords.add(orden);
+      ops.push({ referencia: ref, monto: m, ...(orden ? { orden } : {}) });
+    });
+    if (ops.length > 200) errores.push('Son más de 200 bonificaciones: pegá la lista en partes.');
+    return { ops, errores };
+  },
+  // Pendientes = las de la lista de comparar que todavía no están registradas en caja.
+  _pendientesFlex() { return this._fxEstado === 'ok' ? this._flex.lista.filter(x => !this._fxReg[x.orden]) : []; },          // si el estado es desconocido no se sugiere nada
+  _bloqueadoFlex() { return this._est === 'corriendo'; },          // mientras compara no se registra nada (la lista se está armando)
+  abrirFlex() {
+    if (this._bloqueadoFlex()) return;
+    this._fx.abierto = true; this._fx.error = ''; this._fx.hecho = null; this._fx.plan = null; this._fx.ops = null;
+    if (!this._fx.texto && this._fxEstado === 'ok') this._fx.texto = this._pendientesFlex().map(x => x.orden + (x.monto !== this.FLEX_MONTO ? ';' + String(x.monto).replace('.', ',') : '')).join('\n');
+    this.pintar();
+  },
+  cerrarFlexForm() { if (this._fx.cargando) return;          // no se descarta el formulario mientras la base está trabajando (el resultado quedaría oculto)
+    this._fx = { abierto: false, texto: '', otros: false, sinAdelanto: false, cargando: false, plan: null, ops: null, error: '', hecho: null }; this.pintar(); },
+  cambiaFlex() {                                   // guarda lo escrito (la tarjeta se redibuja) y, si se cambia la lista, el plan anterior ya no vale
+    const t = document.getElementById('mc-flex-texto'), c = document.getElementById('mc-flex-otros');
+    if (t && t.value !== undefined && t.value !== this._fx.texto) { this._fx.texto = t.value; this._fx.plan = null; this._fx.ops = null; this._fx.hecho = null; this._fx.sinAdelanto = false; }
+    if (c && c.checked !== undefined && !!c.checked !== this._fx.otros) { this._fx.otros = !!c.checked; this._fx.plan = null; this._fx.ops = null; this._fx.sinAdelanto = false; }
+    const a = document.getElementById('mc-flex-sinadelanto');
+    if (a && a.checked !== undefined && this._fx.plan) this._fx.sinAdelanto = !!a.checked;          // solo cuenta con un plan vigente (si no, la casilla ya no está)          // solo es una confirmación: no invalida el plan
+  },
+  _errorFlex(e) {
+    const msg = String((e && (e.message || e.details || e.hint)) || e || '');
+    const cod = Object.keys(this.ERRORES_FLEX).find(k => msg.includes(k));
+    return cod ? this.ERRORES_FLEX[cod] : 'No se pudo completar y no se sabe si llegó a acreditarse. Apretá «Revisar» de nuevo: si ya se acreditó, va a figurar como «ya estaba». No repitas antes de revisar.';
+  },
+  // Paso 1: SIMULA (no escribe nada): valida todo en la base y devuelve el plan (cuenta, caja, total, cuáles ya estaban).
+  async revisarFlex() {
+    this.cambiaFlex();
+    const fx = this._fx;
+    if (fx.cargando || this._bloqueadoFlex()) return;
+    const { ops, errores } = this._leerFlex(fx.texto);
+    fx.plan = null; fx.ops = null; fx.hecho = null; fx.sinAdelanto = false;          // la confirmación de «no está en un adelanto» vale solo para ESTA revisión
+    if (errores.length) { fx.error = errores.slice(0, 5).join(' '); this.pintar(); return; }
+    if (!ops.length) { fx.error = 'Pegá al menos un número de orden o un código de Mercado Libre.'; this.pintar(); return; }
+    const c = this._cuenta(), gen = this._fxGen;
+    fx.cargando = true; fx.error = ''; this.pintar();
+    try {
+      const r = await supa.rpc('meli_flex_acreditar', { p_ops: ops, p_cuenta_id: c ? c.id : null, p_otros_montos: !!fx.otros, p_simular: true });
+      if (gen !== this._fxGen) { fx.cargando = false; this.pintar(); return; }          // mientras tanto se volvió a comparar: ese plan ya no vale
+      if (r.error) fx.error = this._errorFlex(r.error);
+      else if (!r.data || r.data.ok !== true || !r.data.persona_id || !r.data.bolsillo) fx.error = 'La base no devolvió el plan completo. No se acreditó nada (era una simulación).';
+      else { fx.plan = r.data; fx.ops = ops; }
+    } catch (e) { fx.error = this._errorFlex(e); }
+    fx.cargando = false; this.pintar();
+  },
+  // Paso 2: SOLO con un plan revisado y la misma lista y opciones: acredita de verdad (todo o nada) exigiendo la MISMA caja que se mostró.
+  async confirmarFlex() {
+    const fx = this._fx;
+    if (fx.cargando || !fx.plan || !fx.ops || this._bloqueadoFlex()) return;
+    if (!fx.plan.en_adelantos || !fx.plan.en_adelantos.huella) { fx.error = 'La base no devolvió el estado de los adelantos. No se acreditó nada: volvé a revisar.'; fx.plan = null; fx.ops = null; this.pintar(); return; }
+    if (fx.plan.en_adelantos && fx.plan.en_adelantos.truncada) { fx.error = 'Hay demasiadas bonificaciones dentro de adelantos para listarlas todas: desde acá no se puede verificar que estas no estén ya cargadas. No se acreditó nada.'; this.pintar(); return; }
+    if (fx.plan.acreditadas && !fx.sinAdelanto) { fx.error = this.ERRORES_FLEX.ADELANTO_NO_VERIFICADO; this.pintar(); return; }
+    if (!fx.plan.acreditadas) { fx.error = 'No hay nada nuevo para acreditar: todas ya estaban registradas.'; this.pintar(); return; }
+    fx.cargando = true; fx.error = ''; this.pintar();
+    try {
+      const r = await supa.rpc('meli_flex_acreditar', { p_ops: fx.ops, p_cuenta_id: fx.plan.cuenta_id, p_otros_montos: !!fx.otros, p_simular: false, p_persona_esperada: fx.plan.persona_id, p_bolsillo_esperado: fx.plan.bolsillo, p_sin_adelanto_confirmado: !!fx.sinAdelanto, p_huella_adelantos: fx.plan.en_adelantos.huella });
+      if (r.error) { fx.error = this._errorFlex(r.error); fx.plan = null; fx.ops = null; fx.sinAdelanto = false; }          // sea cual sea el error, hay que revisar de nuevo
+      else if (!r.data || r.data.ok !== true) { fx.plan = null; fx.ops = null; fx.sinAdelanto = false; fx.error = 'La base no confirmó y no se sabe si se acreditó. Apretá «Revisar» de nuevo antes de repetir: lo ya acreditado figura como «ya estaba».'; }
+      else {
+        fx.hecho = r.data; fx.plan = null; fx.ops = null; fx.texto = ''; fx.sinAdelanto = false;
+        toast(`Se acreditaron ${Number(r.data.acreditadas) || 0} bonificación(es) por ${State.fmtARS(Number(r.data.monto) || 0)}.`);
+        await this._cargarFlexRegistradas();
+      }
+    } catch (e) { fx.error = this._errorFlex(e); fx.plan = null; fx.ops = null; fx.sinAdelanto = false; }
+    fx.cargando = false; this.pintar();
+  },
+  // Qué órdenes de la lista ya tienen su bonificación registrada (solo lectura): para no pedir registrar dos veces.
+  // Estado de la lista: «ok» (se consultó entera) o «desconocido» (error o sin consultar): lo desconocido NO se muestra como pendiente ni se precarga. Se consulta en lotes de 1000 órdenes.
+  async _cargarFlexRegistradas() {
+    const gen = ++this._fxEstGen;          // cada consulta invalida a las anteriores: una respuesta vieja nunca pisa el estado de otra lista o corrida
+    const ordenes = this._flex.lista.map(x => x.orden);
+    this._fxEstado = 'desconocido';
+    if (!ordenes.length) { this._fxEstado = 'ok'; this._fxReg = {}; return; }
+    const m = {};
+    try {
+      for (let k = 0; k < ordenes.length; k += 1000) {
+        const r = await supa.rpc('meli_flex_estado', { p_ordenes: ordenes.slice(k, k + 1000) });
+        if (gen !== this._fxEstGen) return;
+        if (r.error || !Array.isArray(r.data)) return;          // queda «desconocido»
+        r.data.forEach(x => { const o = String((x && x.orden) || '').replace(/\D/g, ''); if (o && x.referencia) m[o] = String(x.referencia); });
+      }
+      if (gen !== this._fxEstGen) return;
+      this._fxReg = m; this._fxEstado = 'ok';
+    } catch { /* queda «desconocido» */ }
+  },
+  _vistaFlexRegistrar() {
+    const e = s => this._e(s), fx = this._fx, bloq = this._bloqueadoFlex();
+    const pendientes = this._pendientesFlex().length;
+    const hechas = this._flex.lista.length - pendientes;
+    const estado = !this._flex.lista.length ? '' : (this._fxEstado !== 'ok' ? '<div style="font-size:11.5px;margin-top:4px;color:var(--amber)">No se pudo consultar cuáles de estas órdenes ya están registradas en caja: no se sugiere ninguna. Al apretar «Revisar» la base marca las que ya estaban.</div>' : `<div style="font-size:11.5px;margin-top:4px">${hechas ? `<span style="color:var(--green)">${e(hechas)} ya registrada(s) en caja.</span> ` : ''}${pendientes ? `Faltan registrar <b>${e(pendientes)}</b>.` : 'Todas las de esta lista ya están registradas.'}</div>`);
+    if (!fx.abierto) return `${estado}<div class="mf-acciones" style="justify-content:flex-start"><button class="btn btn-sm btn-primary" id="mc-btn-flex-registrar" onclick="MeliComparar.abrirFlex()"${bloq ? ' disabled' : ''}><i class="ti ti-cash"></i> Registrar en caja</button></div>`;
+    const plan = fx.plan;
+    const caja = plan ? `${e(plan.persona)} · ${e(plan.bolsillo)}` : '';
+    const detalle = plan ? `<div style="margin-top:8px;padding:8px;border:1px solid var(--border);border-radius:8px">
+        <b>Vas a acreditar ${e(plan.acreditadas)} bonificación(es) por ${e(this._pesos(plan.monto))} en la caja ${caja}.</b>
+        ${plan.ya_acreditadas ? `<div style="color:var(--text-secondary)">${e(plan.ya_acreditadas)} de la lista ya estaba(n) registrada(s): no se vuelve a acreditar.</div>` : ''}
+        <div style="font-size:11.5px;color:var(--text-secondary);word-break:break-all;margin-top:4px">${(plan.detalle || []).slice(0, 40).map(d => `${e(d.referencia)} ${e(this._pesos(d.monto))}${d.resultado === 'ya_acreditada' ? ' (ya estaba)' : ''}`).join(' · ')}</div>
+        ${plan.acreditadas ? `<label style="display:flex;gap:6px;align-items:flex-start;font-size:12px;margin-top:6px"><input type="checkbox" id="mc-flex-sinadelanto" onchange="MeliComparar.cambiaFlex()"${fx.sinAdelanto ? ' checked' : ''}${fx.cargando || bloq ? ' disabled' : ''}> <span>Confirmo que estas bonificaciones <b>NO están ya dentro de un adelanto</b> (un adelanto las guarda por código, no por orden, y la base no puede cruzarlas). ${plan.en_adelantos && Number(plan.en_adelantos.cantidad) ? `Hoy hay <b>${e(plan.en_adelantos.cantidad)}</b> bonificación(es) por <b>${e(this._pesos(plan.en_adelantos.monto))}</b> dentro de adelantos.` : ''}</span></label>` : ''}
+        ${plan.en_adelantos && Array.isArray(plan.en_adelantos.lista) && plan.en_adelantos.lista.length ? `${plan.en_adelantos.truncada ? `<div style="color:var(--red);font-size:12px;margin-top:4px"><b>La lista de bonificaciones en adelantos está INCOMPLETA</b> (hay ${e(plan.en_adelantos.cantidad)} y se muestran ${e(plan.en_adelantos.lista.length)}): no se puede confirmar desde acá.</div>` : ''}<details style="font-size:11.5px;margin-top:4px"><summary>Ver las bonificaciones que ya están en adelantos (código · monto · adelanto) para contrastarlas con Mercado Pago</summary><div style="word-break:break-all;color:var(--text-secondary)">${plan.en_adelantos.lista.slice(0, 2000).map(x => `${e(x.referencia)} ${e(this._pesos(x.monto))} (adelanto ${e(x.adelanto_id)})`).join(' · ')}</div><div>Si alguna de estas órdenes figura ahí con su código <b>cashback_…</b>, NO la cargues por acá. Un adelanto que se registre después con otro código para la misma bonificación tampoco se detecta.</div></details>` : ''}
+        <div class="mf-acciones" style="justify-content:flex-start"><button class="btn btn-sm btn-primary" id="mc-btn-flex-confirmar" onclick="MeliComparar.confirmarFlex()"${fx.cargando || bloq || !plan.acreditadas || !fx.sinAdelanto || (plan.en_adelantos && plan.en_adelantos.truncada) ? ' disabled' : ''}>Confirmar y acreditar ${e(this._pesos(plan.monto))}</button></div></div>` : '';
+    const hecho = fx.hecho ? `<div style="margin-top:8px;color:var(--green)"><b>Listo: se acreditaron ${e(fx.hecho.acreditadas)} bonificación(es) por ${e(this._pesos(fx.hecho.monto))} en ${e(fx.hecho.persona)} · ${e(fx.hecho.bolsillo)}.</b>${fx.hecho.ya_acreditadas ? ` (${e(fx.hecho.ya_acreditadas)} ya estaban)` : ''}</div>` : '';
+    return `${estado}<div style="margin-top:8px"><div style="font-size:12px">Una línea por bonificación: el <b>número de orden</b> (se registra como <code>flex-orden</code> por $499), o un código <b>cashback_…</b> con su orden (<code>código;monto;orden</code>, monto $499 si lo dejás vacío: <code>código;;orden</code>). Se cargan solas las órdenes que faltan registrar. La plata entra una sola vez por bonificación y una sola por orden.</div>
+      <textarea id="mc-flex-texto" rows="6" onchange="MeliComparar.cambiaFlex()" oninput="MeliComparar.cambiaFlex()" style="width:100%;box-sizing:border-box;font-family:monospace;font-size:12px;margin-top:4px"${fx.cargando || bloq ? ' disabled' : ''}>${e(fx.texto)}</textarea>
+      <label style="display:flex;gap:6px;align-items:center;font-size:12px;margin-top:4px"><input type="checkbox" id="mc-flex-otros" onchange="MeliComparar.cambiaFlex()"${fx.otros ? ' checked' : ''}${fx.cargando || bloq ? ' disabled' : ''}> Confirmo que los montos son correctos aunque no sean $499</label>
+      ${fx.error ? `<div style="color:var(--red);font-size:12px;margin-top:4px" id="mc-flex-error">${e(fx.error)}</div>` : ''}
+      ${bloq ? '<div style="color:var(--amber);font-size:12px;margin-top:4px">Se está comparando: esperá a que termine para registrar.</div>' : ''}
+      <div class="mf-acciones" style="justify-content:flex-start"><button class="btn btn-sm" id="mc-btn-flex-revisar" onclick="MeliComparar.revisarFlex()"${fx.cargando || bloq ? ' disabled' : ''}>Revisar (no acredita todavía)</button><button class="btn btn-sm" onclick="MeliComparar.cerrarFlexForm()"${fx.cargando ? ' disabled' : ''}>Cancelar</button></div>
+      ${detalle}${hecho}</div>`;
+  },
   _sumarFlex(f) {
     if (!f || typeof f !== 'object') return;
     for (const x of (Array.isArray(f.lista) ? f.lista : [])) {
@@ -300,9 +473,11 @@ const MeliComparar = {
 
   // ── Desglose de UNA orden (solo lectura): cada monto que Mercado Libre/Pago expone, con su fuente, y cuáles coinciden con la diferencia ──
   async verDesglose(orden) {
+    // La orden puede estar en la tabla de diferencias o SOLO en la lista de bonificaciones Flex (no es una diferencia): del desglose se confirma el tipo logístico.
     const d = this._filas.find(f => String(f.orden) === String(orden));
-    if (!d || !this._cuentaId) return;
-    const buscar = Math.abs(this._difNeto(d) ?? this._cambioNeto(d) ?? this._num(d.extra_pagado_por_el_comprador) ?? this._num(d.dif_cobrado) ?? 0) || undefined;
+    const f = this._flex.lista.find(x => x.orden === String(orden));
+    if ((!d && !f) || !this._cuentaId) return;
+    const buscar = d ? (Math.abs(this._difNeto(d) ?? this._cambioNeto(d) ?? this._num(d.extra_pagado_por_el_comprador) ?? this._num(d.dif_cobrado) ?? 0) || undefined) : f.monto;
     return this._pedirDesglose(String(orden), buscar, false);
   },
   // Desglose de CUALQUIER orden por su número (no hace falta que figure en la tabla): para verificar contra el detalle de la venta de Mercado Libre.
@@ -401,14 +576,23 @@ const MeliComparar = {
         </div>` : '';
     const colorAviso = { error: 'var(--red)', aviso: 'var(--amber)', info: 'var(--text-secondary)' }[this._msgTipo] || 'var(--text-secondary)';
     const botones = [];
-    if (!corriendo) botones.push(`<button class="btn btn-sm btn-primary" id="mc-btn-iniciar" onclick="MeliComparar.iniciar()"${hayCuenta ? '' : ' disabled'}><i class="ti ti-scale"></i> ${this._est === 'inactivo' ? 'Comparar pagos' : 'Empezar de nuevo'}</button>`);
+    if (!corriendo) botones.push(`<button class="btn btn-sm btn-primary" id="mc-btn-iniciar" onclick="MeliComparar.iniciar()"${hayCuenta && !this._fx.cargando ? '' : ' disabled'}><i class="ti ti-scale"></i> ${this._est === 'inactivo' ? 'Comparar pagos' : 'Empezar de nuevo'}</button>`);
     if (corriendo) botones.push(`<button class="btn btn-sm" id="mc-btn-pausar" onclick="MeliComparar.pausar()"${this._pedirPausa ? ' disabled' : ''}><i class="ti ti-player-pause"></i> Pausar</button>`);
-    if (this._est === 'pausado' || this._est === 'error') botones.push(`<button class="btn btn-sm btn-primary" id="mc-btn-reanudar" onclick="MeliComparar.reanudar()"><i class="ti ti-player-play"></i> Reanudar</button>`);
+    if (this._est === 'pausado' || this._est === 'error') botones.push(`<button class="btn btn-sm btn-primary" id="mc-btn-reanudar" onclick="MeliComparar.reanudar()"${this._fx.cargando ? ' disabled' : ''}><i class="ti ti-player-play"></i> Reanudar</button>`);
     const exportar = this._filas.length
       ? `<button class="btn btn-sm" id="mc-btn-copiar" onclick="MeliComparar.copiar()"><i class="ti ti-copy"></i> Copiar lista</button>
          <button class="btn btn-sm" id="mc-btn-excel" onclick="MeliComparar.descargar()"><i class="ti ti-file-spreadsheet"></i> Descargar para Excel</button>` : '';
 
-    let cuerpo = '';
+    // Panel de bonificaciones Flex: SIEMPRE disponible (también sin haber comparado), porque comparar no ve las bonificaciones que Mercado Libre acredita como movimiento aparte:
+    // el botón permite cargarlas por lista de órdenes (flex-<orden>, $499) sin depender de la comparación.
+    const hayFlex = this._flex.lista.length > 0;
+    const flex = `<div class="mf-panel" id="mc-flex"><b>Bonificaciones Flex por envío</b> (cashback que Mercado Libre suma al «Total» pero acredita <b>aparte</b>; no son una diferencia: la orden se acredita por su neto)
+            ${hayFlex ? `<div style="font-size:11.5px;color:var(--amber)">Se reconoce por el monto (exactamente $499 de envío): confirmá en «desglose» que el envío sea Flex (tipo logístico «self_service»). Un envío común de $499 pagado por el comprador también quedaría acá y no se marcaría como diferencia.</div>
+            <div style="margin-top:4px">${e(this._flex.ordenes)} orden(es) · <b>${e(this._pesos(this._flex.total))}</b> en total</div>
+            <div style="font-size:11.5px;color:var(--text-secondary);word-break:break-all">${this._flex.lista.slice(0, 30).map(x => `${e(x.orden)} <a href="#" onclick="MeliComparar.verDesglose('${String(x.orden).replace(/\D/g, '')}');return false">desglose</a>`).join(' · ')}${this._flex.lista.length > 30 ? ' …' : ''}</div>
+            <div class="mf-acciones" style="justify-content:flex-start"><button class="btn btn-sm" id="mc-btn-copiar-flex" onclick="MeliComparar.copiarFlex()"><i class="ti ti-copy"></i> Copiar órdenes</button></div>` : `<div style="margin-top:4px;font-size:12px">Comparar no siempre ve estas bonificaciones (Mercado Libre las acredita como un movimiento aparte). Cargalas por <b>lista de órdenes</b> (número de orden, $499 cada una): no hace falta comparar antes. Antes de acreditar se muestra el total y la caja.</div>`}
+            ${this._vistaFlexRegistrar()}</div>`;
+    let cuerpo = this._est === 'inactivo' ? flex : '';
     if (this._est !== 'inactivo') {
       const lista = this.ordenadas(), visibles = lista.slice(0, this._limite);
       const sumaNeto = lista.reduce((t, d) => t + (this._difNeto(d) || 0), 0);
@@ -426,8 +610,6 @@ const MeliComparar = {
             <tr><td style="padding:3px 14px 1px 0"><b>Total</b> (${e(this._ret.ordenes)} orden(es) con retención)</td><td class="mf-der"><b>${e(this._pesos(this._ret.total))}</b></td></tr></table>
             ${this._ret.incompletas ? `<div style="color:var(--amber);font-size:11.5px">${e(this._ret.incompletas)} orden(es) no se pudieron revisar por completo (un pago sin leer o más pagos de los que se revisan): su retención NO está sumada, el total puede ser mayor.</div>` : ''}
             <div class="mf-acciones" style="justify-content:flex-start"><button class="btn btn-sm" id="mc-btn-copiar-ret" onclick="MeliComparar.copiarRetenciones()"><i class="ti ti-copy"></i> Copiar retenciones</button></div></div>` : '';
-      const flex = this._flex.lista.length
-        ? `<div class="mf-panel" id="mc-flex"><b>Bonificaciones Flex</b> (cashback por envío): <b>${e(this._flex.ordenes)}</b> orden(es), <b>${e(this._pesos(this._flex.total))}</b>. Se acreditan <b>aparte</b>: no suman a «lo que llega» ni son una diferencia.<div style="font-size:11.5px;color:var(--text-secondary);margin-top:3px">Órdenes: ${this._flex.lista.slice(0, 30).map(x => e(x.orden)).join(', ')}${this._flex.lista.length > 30 ? '…' : ''}</div></div>` : '';
       const filas = visibles.map(d => {
         const dif = this._difNeto(d);
         const colorDif = dif === null ? 'inherit' : (dif > 0 ? 'var(--green)' : 'var(--red)');
@@ -453,7 +635,7 @@ const MeliComparar = {
 
     return `
       <div class="mf-cab"><b>Comparar pagos con Mercado Pago</b><span>${corriendo ? 'Comparando…' : ''}</span></div>
-      <div class="mf-nota">Solo lectura: no cambia ventas, cajas, stock ni facturas. Compara lo que el CRM guardó de cada orden (monto cobrado, lo que llega a la cuenta, estado y fecha de liberación) con lo que Mercado Pago informa hoy,
+      <div class="mf-nota">La comparación es de solo lectura: no cambia ventas, cajas, stock ni facturas. Lo único que escribe es «Registrar en caja» de las bonificaciones Flex, y solo después de que lo revises y confirmes. Compara lo que el CRM guardó de cada orden (monto cobrado, lo que llega a la cuenta, estado y fecha de liberación) con lo que Mercado Pago informa hoy,
         y lista las que difieren (por ejemplo, un pago que se ajustó después de la venta). Mira solo el pago; no trae datos del comprador.</div>
       <div class="mf-filtros" style="grid-template-columns:repeat(2,minmax(150px,220px))">
         <label>Desde<input id="mc-desde" type="date" value="${e(this._selDesde || this.DESDE_INICIAL)}" onchange="MeliComparar.cambiaRango()"${corriendo ? ' disabled' : ''}></label>

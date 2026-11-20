@@ -4,6 +4,13 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>iPhoneMood — CRM</title>
+<link rel="manifest" href="/crm.webmanifest">
+<meta name="theme-color" content="#0071E3">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="iPhoneMood">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<link rel="apple-touch-icon" href="/assets/apple-touch-icon.png">
 <link rel="stylesheet" href="/assets/vendor/tabler-icons/tabler-icons.min.css">
 <link rel="stylesheet" href="src/css/main.css">
 <link rel="stylesheet" href="src/css/movil.css?v=20261026h">
@@ -11,6 +18,7 @@
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js" crossorigin="anonymous"></script>
 <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js" crossorigin="anonymous"></script>
 <script src="config.js"></script>
+<script src="push.js"></script>
 </head>
 <body>
 <div id="login-screen" style="position:fixed;inset:0;background:var(--bg);display:flex;align-items:center;justify-content:center;z-index:500;flex-direction:column;gap:24px;padding:20px">
@@ -100,6 +108,7 @@
           </button>
           <div id="user-menu-dropdown" style="display:none;position:absolute;top:38px;right:0;background:var(--bg-elevated);border:1px solid var(--border);border-radius:var(--radius-lg);box-shadow:var(--shadow-md);min-width:190px;z-index:300;overflow:hidden">
             <div id="user-email-full" style="padding:10px 14px;font-size:11px;color:var(--text-secondary);border-bottom:1px solid var(--border);word-break:break-all"></div>
+            <div onclick="App.toggleUserMenu(); Avisos.abrir()" style="padding:12px 14px;font-size:14px;cursor:pointer;display:flex;align-items:center;gap:8px;border-bottom:1px solid var(--border)"><i class="ti ti-bell-ringing"></i> Avisos en este dispositivo</div>
             <div onclick="Auth.cerrarSesion()" style="padding:12px 14px;font-size:14px;cursor:pointer;display:flex;align-items:center;gap:8px;color:var(--red)"><i class="ti ti-logout"></i> Cerrar sesión</div>
           </div>
         </div>
@@ -123,6 +132,6 @@
 
 <div class="toast" id="toast"></div>
 
-<script type="module" src="src/modules/app.js?v=20250716"></script>
+<script type="module" src="src/modules/app.js?v=20261120a"></script>
 </body>
 </html>

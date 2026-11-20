@@ -26,5 +26,18 @@ await caso('Sin DISPARADOR_SECRET cargado el modo frecuente queda cerrado, aunqu
   finally { process.env.DISPARADOR_SECRET = guardado; }
 });
 await caso('Un modo desconocido se trata como el GET normal (pide CRON_SECRET)', async () => { assert.equal((await llamar({ url: '/api/meli/worker?modo=otro', auth: process.env.DISPARADOR_SECRET })).code, 401); });
+await caso('El modo push sin secreto o con un secreto equivocado → 401', async () => {
+  assert.equal((await llamar({ url: '/api/meli/worker?modo=push' })).code, 401);
+  assert.equal((await llamar({ url: '/api/meli/worker?modo=push', auth: 'otro-secreto-cualquiera-0123456789' })).code, 401);
+});
+await caso('El modo push NO acepta el CRON_SECRET (usa el del disparador) y el GET normal NO acepta el del disparador', async () => {
+  assert.equal((await llamar({ url: '/api/meli/worker?modo=push', auth: process.env.CRON_SECRET })).code, 401);
+  assert.equal((await llamar({ url: '/api/meli/worker', auth: process.env.DISPARADOR_SECRET })).code, 401);
+});
+await caso('Sin DISPARADOR_SECRET cargado el modo push queda cerrado', async () => {
+  const guardado = process.env.DISPARADOR_SECRET; delete process.env.DISPARADOR_SECRET;
+  try { assert.equal((await llamar({ url: '/api/meli/worker?modo=push', auth: '' })).code, 401); }
+  finally { process.env.DISPARADOR_SECRET = guardado; }
+});
 await caso('Los métodos que no son GET/POST se rechazan', async () => { assert.equal((await llamar({ url: '/api/meli/worker', method: 'DELETE' })).code, 405); });
 console.log(`\n${n - fallos}/${n} ok`); process.exit(fallos ? 1 : 0);

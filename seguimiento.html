@@ -4,9 +4,17 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>Seguimiento de reparación — iPhoneMood</title>
+<link rel="manifest" href="/seguimiento.webmanifest">
+<meta name="theme-color" content="#000000">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Mi reparación">
+<meta name="apple-mobile-web-app-status-bar-style" content="black">
+<link rel="apple-touch-icon" href="/assets/apple-touch-icon.png">
 <link rel="stylesheet" href="/assets/vendor/tabler-icons/tabler-icons.min.css">
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
 <script src="config.js"></script>
+<script src="push.js"></script>
 <style>
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
   :root {
@@ -65,6 +73,15 @@
   .state-screen p { font-size: 13px; color: var(--text-secondary); max-width: 280px; line-height: 1.5; }
 
   /* Card del equipo */
+  .aviso-card { background: var(--bg-secondary); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 14px 16px; margin-bottom: 14px; }
+  .aviso-card .t { font-size: 14px; font-weight: 700; display: flex; align-items: center; gap: 8px; }
+  .aviso-card .t i { color: var(--blue); font-size: 18px; }
+  .aviso-card .s { font-size: 12.5px; color: var(--text-secondary); line-height: 1.5; margin-top: 6px; }
+  .aviso-card button { margin-top: 10px; width: 100%; min-height: 44px; border: 0; border-radius: 12px; background: var(--blue); color: #fff; font: inherit; font-size: 14px; font-weight: 700; cursor: pointer; }
+  .aviso-card button.sec { background: var(--bg-elevated); color: var(--text); }
+  .aviso-card button:disabled { opacity: .6; cursor: default; }
+  .aviso-card.ok { border-color: rgba(48,209,88,.4); background: var(--green-light); }
+  .aviso-card.ok .t i { color: var(--green); }
   .equipo-card {
     background: var(--bg-secondary);
     border: 1px solid var(--border);
@@ -407,6 +424,9 @@ async function renderPage() {
       </div>
     </div>
 
+    <!-- Aviso cuando esté lista (push) -->
+    <div id="aviso-push"></div>
+
     <!-- Condición al ingreso -->
     ${(() => {
       const c = r.condicion_ingreso || {};
@@ -515,6 +535,49 @@ async function renderPage() {
       <i class="ti ti-chevron-right" style="color:var(--text-tertiary);margin-left:auto"></i>
     </a>` : ''}
   `;
+  pintarAvisoPush();
+}
+
+// ── Aviso cuando la reparación esté lista (notificación push) ────────────────
+// Sólo mientras la reparación sigue en curso. En iPhone hace falta instalar la página como app (iOS 16.4+): se explica el paso.
+const TEXTOS_AVISO = {
+  ios_sin_instalar: 'En iPhone, para recibir avisos tenés que guardar esta página como app: tocá el botón Compartir (el cuadrado con la flecha) y elegí «Agregar a pantalla de inicio». Después abrila desde el ícono nuevo y tocá «Avisarme».',
+  no_soportado: 'Este navegador no permite avisos. Podés volver a mirar esta página cuando quieras, o escribirnos por WhatsApp.',
+  bloqueado: 'Los avisos están bloqueados para este sitio. Si querés recibirlos, activalos en los Ajustes del teléfono y volvé a esta página.',
+  sin_servidor: 'Los avisos todavía no están disponibles. Probá de nuevo más tarde.',
+  cancelado: 'No diste el permiso. Si querés el aviso, tocá «Avisarme» y elegí «Permitir».',
+  estado: 'Esta reparación ya no admite avisos.',
+  limite: 'Ya hay varios teléfonos recibiendo avisos de esta reparación.',
+  token: 'No se pudo activar el aviso con este link.',
+};
+async function pintarAvisoPush() {
+  const caja = document.getElementById('aviso-push');
+  if (!caja || !window.Push || !repData) return;
+  if (!['ingresado', 'diagnosticado', 'en_reparacion'].includes(repData.estado)) { caja.innerHTML = ''; return; }
+  const e = await Push.estado();
+  if (e.motivo === 'no_soportado') { caja.innerHTML = ''; return; }       // sin soporte: no se ofrece lo que no se puede
+  const tarjeta = (clase, titulo, texto, botones = '') => { caja.innerHTML = `<div class="aviso-card ${clase}"><div class="t"><i class="ti ti-bell-ringing"></i> ${titulo}</div><div class="s">${texto}</div>${botones}</div>`; };
+  if (e.suscripta) {
+    tarjeta('ok', 'Te vamos a avisar', 'Cuando tu reparación esté lista te llega una notificación a este teléfono.', '<button class="sec" id="aviso-baja">Dejar de recibir avisos</button>');
+    document.getElementById('aviso-baja').onclick = async (ev) => { ev.target.disabled = true; await Push.desactivar(async (endpoint) => { await supa.rpc('push_baja', { p_endpoint: endpoint }); }); pintarAvisoPush(); };
+    return;
+  }
+  if (e.motivo === 'ios_sin_instalar') { tarjeta('', 'Avisame cuando esté lista', TEXTOS_AVISO.ios_sin_instalar); return; }
+  if (e.motivo === 'bloqueado') { tarjeta('', 'Avisame cuando esté lista', TEXTOS_AVISO.bloqueado); return; }
+  tarjeta('', 'Avisame cuando esté lista', 'Te mandamos una notificación a este teléfono apenas tu reparación esté lista para retirar. Sólo ese aviso, nada más.', '<button id="aviso-alta">Avisarme</button>');
+  document.getElementById('aviso-alta').onclick = async (ev) => {
+    const b = ev.target; b.disabled = true;
+    try {
+      const r = await Push.activar(async ({ endpoint, p256dh, auth }) => {
+        const { data, error } = await supa.rpc('push_suscribir_cliente', { p_token: token, p_endpoint: endpoint, p_p256dh: p256dh, p_auth: auth });
+        return error ? { ok: false, motivo: 'rechazada' } : (data && data.ok ? { ok: true } : { ok: false, motivo: (data && data.motivo) || 'rechazada' });
+      });
+      if (r.ok) { pintarAvisoPush(); return; }
+      b.disabled = false;
+      const txt = TEXTOS_AVISO[r.motivo] || 'No se pudo activar el aviso. Probá de nuevo.';
+      const s = b.parentElement.querySelector('.s'); if (s) s.textContent = txt;
+    } catch (err) { b.disabled = false; }
+  };
 }
 
 function renderMensajes(msgs) {

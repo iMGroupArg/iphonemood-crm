@@ -14,12 +14,14 @@ const crypto = require('crypto');
 const { limitar } = require('../_ratelimit.js');
 const M = require('../_meli.js');
 const publicaciones = require('../_meli_publicaciones.js');
+const push = require('../_push.js');
 
 module.exports = async function handler(req, res) {
   // El plan Hobby de Vercel limita a 12 funciones: `/api/meli/publicaciones` (reescritura en vercel.json)
   // entra por acá y se atiende con su propio módulo, con su propia autenticación y límites.
   const f = (req.query && req.query._f) || new URL(req.url || '/', 'http://x').searchParams.get('_f');
   if (f === 'publicaciones') return publicaciones(req, res);
+  if (f === 'push') return push.clavePublica(req, res);   // GET /api/push/clave: la clave pública para suscribirse a los avisos
 
   res.setHeader('Cache-Control', 'no-store');
 

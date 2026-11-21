@@ -2,6 +2,7 @@ import './supabase-config.js';
 import './state.js';
 import './portapapeles.js';
 import './movil.js';
+import './avisos.js';
 import './dashboard.js';
 import './stock.js';
 import './ventas.js';

@@ -26,6 +26,10 @@
       "destination": "/api/meli/conectar?_f=publicaciones"
     },
     {
+      "source": "/api/push/clave",
+      "destination": "/api/meli/conectar?_f=push"
+    },
+    {
       "source": "/api/presupuesto-bot",
       "destination": "/api/catalogo?_f=presupuesto"
     },
@@ -115,6 +119,19 @@
         {
           "key": "X-Robots-Tag",
           "value": "noindex, nofollow"
+        }
+      ]
+    },
+    {
+      "source": "/sw.js",
+      "headers": [
+        {
+          "key": "Cache-Control",
+          "value": "no-cache"
+        },
+        {
+          "key": "Content-Type",
+          "value": "application/javascript; charset=utf-8"
         }
       ]
     },

@@ -21,7 +21,7 @@ class H(http.server.SimpleHTTPRequestHandler):
             html = re.sub(r'<script src="https://cdn\.jsdelivr\.net/npm/@supabase/[^"]*"[^>]*></script>',
                           '<script src="/tests/preview-movil/fake-supabase.js"></script>', html)
             html = html.replace('<script src="config.js"></script>', '')
-            html = re.sub(r'(src/modules/app\.js)\?v=\d+', r'\1', html)
+            html = re.sub(r'(src/modules/app\.js)\?v=\w+', r'\1', html)
             cuerpo = html.encode('utf-8')
             self.send_response(200)
             self.send_header('Content-Type', 'text/html; charset=utf-8')

@@ -24,6 +24,7 @@ const { correrAtrasadas } = require('../_facturacion_atrasadas.js');
 const { datosComprobante } = require('../_arca_comprobante.js');
 const { ErrorArca } = require('../_arca.js');
 const { barrer, barrerTodas } = require('../_meli_barrido.js');
+const { correrPush } = require('../_push.js');
 
 // Debe coincidir con `functions` en vercel.json.
 const MAX_DURATION_S = 30;
@@ -127,6 +128,7 @@ module.exports = async function handler(req, res) {
 
   let email = null;
   let frecuente = false;
+  let soloPush = false;
   if (req.method === 'GET') {
     // Dos formas, cada una con SU secreto y sin que se mezclen:
     //   · el cron diario de Vercel (CRON_SECRET): barrido + drenaje + automatización;
@@ -136,7 +138,10 @@ module.exports = async function handler(req, res) {
     let modo = null;
     try { modo = new URL(req.url || '', 'http://localhost').searchParams.get('modo'); } catch { /* sin modo */ }
     frecuente = modo === 'frecuente';
-    const cron = frecuente ? process.env.DISPARADOR_SECRET : process.env.CRON_SECRET;
+    // ?modo=push: SÓLO envía los avisos push pendientes (script 34). Lo llama el reloj de Supabase cada minuto, y únicamente si hay algo por enviar. Usa el mismo secreto
+    // que el disparador frecuente y no drena ni factura nada.
+    soloPush = modo === 'push';
+    const cron = (frecuente || soloPush) ? process.env.DISPARADOR_SECRET : process.env.CRON_SECRET;
     const dado = (req.headers.authorization || '').replace(/^Bearer\s+/i, '');
     if (!cron || !M.comparar(dado, cron)) {
       res.status(401).json({ error: 'No autorizado' });
@@ -284,6 +289,17 @@ module.exports = async function handler(req, res) {
     return;
   }
 
+  if (soloPush) {
+    try {
+      const limite = t0 + PRESUPUESTO_MS;
+      res.status(200).json({ push: await correrPush({ rpc: M.rpc, pres: M.presupuestoHasta(limite - RESERVA_MS, limite), restanteMs: () => limite - RESERVA_MS - Date.now() }) });
+    } catch (e) {
+      console.error('meli/worker (push):', (e && e.codigo) || '', e && e.message);
+      res.status(502).json({ error: 'No se pudieron enviar los avisos' });
+    }
+    return;
+  }
+
   try {
     // El cron diario hace primero el barrido (encola lo que falte) y con el tiempo que queda drena. El barrido se
     // topea a ~12 s para que el drenaje conserve el resto. Si el barrido falla, el drenaje corre igual.
@@ -310,8 +326,18 @@ module.exports = async function handler(req, res) {
       console.error('meli/worker (facturación automática):', (e && e.codigo) || '');
       auto = { omitido: 'error' };
     }
+    // Avisos push pendientes (respaldo del reloj de cada minuto). Una falla acá nunca afecta a lo anterior.
+    let push = null;
+    try {
+      const limitePush = t0 + PRESUPUESTO_MS;
+      push = await correrPush({ rpc: M.rpc, pres: M.presupuestoHasta(limitePush - RESERVA_MS, limitePush), restanteMs: () => limitePush - RESERVA_MS - Date.now() });
+    } catch (e) {
+      console.error('meli/worker (push):', (e && e.codigo) || '');
+      push = { omitido: 'error' };
+    }
     const salida = barrido ? { ...r, barrido } : r;
-    res.status(200).json(auto && !auto.omitido ? { ...salida, facturacion_auto: auto } : salida);
+    const conAuto = auto && !auto.omitido ? { ...salida, facturacion_auto: auto } : salida;
+    res.status(200).json(push && !push.omitido ? { ...conAuto, push } : conAuto);
   } catch (e) {
     console.error('meli/worker:', e.codigo || '', e.message);
     res.status(502).json({ error: 'No se pudo procesar la cola' });

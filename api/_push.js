@@ -1,6 +1,6 @@
 // Avisos push al celular: el envío (lo llama api/meli/worker.js, sin funciones nuevas de Vercel) y la clave pública para el navegador.
 //
-//   · Qué se manda, a quién y cuándo lo decide la BASE (script 33: push_tomar_pendientes). Acá sólo se cifra, se envía y se informa el resultado.
+//   · Qué se manda, a quién y cuándo lo decide la BASE (script 34: push_tomar_pendientes). Acá sólo se cifra, se envía y se informa el resultado.
 //   · Las claves VAPID viven en variables de entorno de Vercel: VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY y VAPID_SUBJECT (mailto:…). Sin ellas no se hace nada.
 //   · Una falla de envío nunca toca una venta ni una reparación: el aviso se reintenta (la base lleva la cuenta) y a lo sumo queda "fallido".
 

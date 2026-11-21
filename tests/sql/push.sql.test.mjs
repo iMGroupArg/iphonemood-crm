@@ -1,4 +1,4 @@
-// Banco de pruebas de db/pendientes/notificaciones_push.sql (script 33) contra Postgres real (pglite):
+// Banco de pruebas de db/pendientes/notificaciones_push.sql (script 34) contra Postgres real (pglite):
 // cola y destinatarios correctos, apagado de fábrica, registro del equipo y de clientes (con su token), reintentos sin duplicar, bajas,
 // permisos cerrados y disparadores que nunca rompen una venta.
 //
@@ -42,7 +42,7 @@ console.log('\n══ Notificaciones push: base de datos (Postgres en WebAssembl
 {
   const db = await nueva({ activo: false });
   const e = await falla(() => db.exec(SQL('notificaciones_push.sql')));
-  check('El script 33 corre otra vez sin romper (idempotente)', !e, e);
+  check('El script 34 corre otra vez sin romper (idempotente)', !e, e);
   const v = await q(db, `SELECT control, resultado FROM (${SQL('notificaciones_push.sql').slice(SQL('notificaciones_push.sql').indexOf('SELECT \'tablas cerradas'))}) t`).catch(() => null);
   const filas = (await db.exec(SQL('notificaciones_push.sql'))).pop().rows;
   const por = Object.fromEntries(filas.map((f) => [f.control, f.resultado]));

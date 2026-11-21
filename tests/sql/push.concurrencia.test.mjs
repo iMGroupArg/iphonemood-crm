@@ -1,4 +1,4 @@
-// Banco de CONCURRENCIA de los avisos push (script 33): Postgres REAL (embedded-postgres) y VARIAS CONEXIONES a la vez.
+// Banco de CONCURRENCIA de los avisos push (script 34): Postgres REAL (embedded-postgres) y VARIAS CONEXIONES a la vez.
 // Prueba las carreras que un banco de una sola conexión no ve: el límite de 5 teléfonos por reparación con llamadas simultáneas, un mismo teléfono
 // intentando ser del equipo y de un cliente a la vez, y dos corridas del servidor tomando avisos a la vez.
 //
@@ -67,7 +67,7 @@ try {
   await admin.query(`INSERT INTO public.usuarios_autorizados VALUES ('franco@x.com', true) ON CONFLICT DO NOTHING`);
   await admin.query(SQL('notificaciones_push.sql'));
   await admin.query(`UPDATE public.push_config SET valor='true' WHERE clave='activo'`);
-  check(`Postgres real arrancado (versión ${(await admin.query('SHOW server_version')).rows[0].server_version}) y el script 33 carga sin errores`, true);
+  check(`Postgres real arrancado (versión ${(await admin.query('SHOW server_version')).rows[0].server_version}) y el script 34 carga sin errores`, true);
   const cs = []; for (let i = 0; i < 12; i++) cs.push(await conn());
   const cliente = (c, token, s) => c.query(`SELECT public.push_suscribir_cliente($1,$2,$3,$4) AS r`, [token, s.endpoint, s.p256dh, s.auth]).then((x) => x.rows[0].r);
   const equipo = (c, s) => c.query(`SELECT public.push_suscribir_equipo($1,$2,$3) AS r`, [s.endpoint, s.p256dh, s.auth]).then((x) => x.rows[0].r);

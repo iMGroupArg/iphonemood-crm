@@ -1,5 +1,5 @@
 -- ============================================================================
---  notificaciones_push.sql  (script 33) — AVISOS PUSH AL CELULAR: equipo (venta nueva) y clientes (reparación lista)
+--  notificaciones_push.sql  (script 34) — AVISOS PUSH AL CELULAR: equipo (venta nueva) y clientes (reparación lista)
 --
 --  QUÉ HACE
 --    · push_suscripciones: los teléfonos/navegadores que aceptaron recibir avisos (endpoint + claves que entrega el navegador).

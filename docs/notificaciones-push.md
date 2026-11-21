@@ -5,7 +5,7 @@ Primeros avisos: **venta nueva** (al equipo) y **reparación lista** (al cliente
 
 ## Cómo funciona
 - **App sin tienda:** es una PWA. El CRM (`/login`) y la página de seguimiento tienen manifiesto + `sw.js`; se instalan con «Agregar a pantalla de inicio» (iPhone) o «Instalar» (Chrome).
-- **Aviso:** la base (script 33) deja un renglón en `push_cola` cuando entra una venta (con 30 s de margen para que el CRM cargue los renglones) o una reparación pasa a «listo».
+- **Aviso:** la base (script 34) deja un renglón en `push_cola` cuando entra una venta (con 30 s de margen para que el CRM cargue los renglones) o una reparación pasa a «listo».
   El reloj de Supabase llama cada minuto a `/api/meli/worker?modo=push` **sólo si hay algo por enviar**; el worker pide los avisos pendientes a la base (que ya trae texto y destinatarios), los cifra (Web Push, RFC 8291/8292, sin librerías) y los manda al servicio de push de cada navegador. Después anota el resultado.
 - **Sin funciones nuevas de Vercel** (seguimos en 12): el envío vive en `api/_push.js`, detrás del worker; la clave pública sale por `/api/push/clave` (reescritura a `conectar.js?_f=push`).
 - **Equipo:** menú del usuario → «Avisos en este dispositivo» → Activar. Hay botón de **aviso de prueba**.
@@ -19,7 +19,7 @@ Primeros avisos: **venta nueva** (al equipo) y **reparación lista** (al cliente
 
 ## Puesta en marcha (paso manual de Franco, en este orden)
 1. **Claves** (una sola vez, en tu compu): `node db/scripts/generar_vapid.mjs` → cargar `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY` y `VAPID_SUBJECT` en Vercel (Production). La privada no va a ningún archivo ni al chat.
-2. **Base:** correr `db/para-correr/33_notificaciones_push.sql` en el SQL Editor de Supabase (requiere el script 3). Las 5 verificaciones tienen que dar ✅ (si el proyecto no tiene `pg_cron`/`pg_net`, la del reloj da ❌ y hay que activarlos en Database → Extensions y volver a correr). Después, volver a correr el script 26 (control 26.9: los agentes no heredan permisos de funciones nuevas).
+2. **Base:** correr `db/para-correr/34_notificaciones_push.sql` en el SQL Editor de Supabase (requiere el script 3). Las 5 verificaciones tienen que dar ✅ (si el proyecto no tiene `pg_cron`/`pg_net`, la del reloj da ❌ y hay que activarlos en Database → Extensions y volver a correr). Después, volver a correr el script 26 (control 26.9: los agentes no heredan permisos de funciones nuevas).
 3. **Clave del reloj:** es la misma «disparador_secret» del script 24 (bóveda). Si el reloj de facturación ya anda, no hay que hacer nada.
 4. **Desplegar** (PR → OK de Franco → `main`).
 5. **Probar en un teléfono:** instalar el CRM, menú del usuario → Avisos en este dispositivo → Activar → «Enviarme un aviso de prueba» (llega en menos de un minuto; funciona aunque el interruptor general esté apagado).

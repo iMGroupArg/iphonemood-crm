@@ -138,7 +138,7 @@ module.exports = async function handler(req, res) {
     let modo = null;
     try { modo = new URL(req.url || '', 'http://localhost').searchParams.get('modo'); } catch { /* sin modo */ }
     frecuente = modo === 'frecuente';
-    // ?modo=push: SÓLO envía los avisos push pendientes (script 33). Lo llama el reloj de Supabase cada minuto, y únicamente si hay algo por enviar. Usa el mismo secreto
+    // ?modo=push: SÓLO envía los avisos push pendientes (script 34). Lo llama el reloj de Supabase cada minuto, y únicamente si hay algo por enviar. Usa el mismo secreto
     // que el disparador frecuente y no drena ni factura nada.
     soloPush = modo === 'push';
     const cron = (frecuente || soloPush) ? process.env.DISPARADOR_SECRET : process.env.CRON_SECRET;

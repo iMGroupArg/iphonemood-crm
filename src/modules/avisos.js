@@ -1,4 +1,4 @@
-// Avisos push en este dispositivo (equipo): pantalla para activarlos, probarlos y desactivarlos. Usa push.js (global `Push`) y las RPC del script 33.
+// Avisos push en este dispositivo (equipo): pantalla para activarlos, probarlos y desactivarlos. Usa push.js (global `Push`) y las RPC del script 34.
 //
 // Qué llega: "Venta nueva" (cliente, monto y producto). Los avisos a clientes ("tu reparación está lista") se activan desde su link de seguimiento.
 // iPhone: sólo con la app instalada en la pantalla de inicio (iOS 16.4 o más). Ver push.js.

@@ -329,7 +329,9 @@ const MeliOrdenes = {
       const d = await this._llamar(btn, 'meli_procesar_orden', { p_orden_id: id, p_cotizacion: cot },
         d => d.ya_procesada ? 'La orden ya estaba procesada.' : `Orden procesada: venta #${d.venta_id} creada y stock descontado.`);
       // La factura va DESPUÉS y aparte: si falla, la venta, el stock y la plata ya quedaron bien (se puede reintentar).
-      if (d && d.ya_procesada === false) await this.facturar(id, null, true);
+      // Procesar SOLO factura si la facturación automática de ventas está ENCENDIDA (si no se pudo leer el interruptor, no factura).
+      // Antes facturaba siempre y duplicaba las facturas que Mercado Libre ya emite (punto de venta 2). La factura queda en el botón «Factura».
+      if (d && d.ya_procesada === false && State.facturacionAuto && State.facturacionAuto.factura_auto === true) await this.facturar(id, null, true);
     } finally { if (btn) btn.disabled = false; this.cerrarCuadro(tok); }
   },
 
@@ -388,6 +390,12 @@ const MeliOrdenes = {
   async facturar(id, btn, auto) {
     const o = (State.meliOrdenes || []).find(x => x.id === id);
     if (!o || !o.orderId) return;
+    // Botón «Factura» (no el automático): si el CRM todavía no emitió ninguna para esta orden, se pide confirmar, porque Mercado Libre
+    // (punto de venta 2) probablemente ya la facturó. Si ya hay una emitida, el botón solo verifica y no duplica: no se pregunta.
+    if (!auto) {
+      const ya = (State.meliFacturas || []).some(f => String(f.orden_id) === String(o.orderId) && f.estado === 'emitida');
+      if (!ya && !confirm('Esta venta probablemente ya fue facturada por Mercado Libre (punto de venta 2). ¿Emitir otra factura igual?')) return;
+    }
     if (btn) btn.disabled = true;
     try {
       const token = await window.Meli?._token?.();

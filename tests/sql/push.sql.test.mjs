@@ -15,7 +15,7 @@ const b64u = (n) => crypto.randomBytes(n).toString('base64url');
 const sub = (host = 'fcm.googleapis.com') => ({ endpoint: `https://${host}/fcm/send/${b64u(20)}`, p256dh: b64u(65), auth: b64u(16) });
 
 const REPARACIONES = `CREATE TABLE IF NOT EXISTS public.reparaciones (id BIGSERIAL PRIMARY KEY, cliente TEXT, equipo TEXT, estado TEXT DEFAULT 'ingresado',
-  token_seguimiento TEXT UNIQUE DEFAULT gen_random_uuid()::text, creado_en TIMESTAMPTZ DEFAULT now())`;
+  token_seguimiento UUID UNIQUE DEFAULT gen_random_uuid(), creado_en TIMESTAMPTZ DEFAULT now())`;
 
 async function nueva({ activo = true } = {}) {
   const { db } = await baseNueva({ conVentas: false });

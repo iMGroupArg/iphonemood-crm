@@ -36,6 +36,7 @@ BEGIN
 END $$;
 
 
+-- (reparaciones.token_seguimiento es UUID en la base real: toda comparación con el token que llega como texto lo convierte con ::TEXT.)
 -- ─── 1 · Tablas ──────────────────────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS public.push_config (clave TEXT PRIMARY KEY, valor TEXT NOT NULL);
 INSERT INTO public.push_config (clave, valor) VALUES ('activo', 'false') ON CONFLICT (clave) DO NOTHING;
@@ -192,7 +193,7 @@ AS $$
 DECLARE v_rep RECORD; v_n INTEGER;
 BEGIN
   IF p_token IS NULL OR btrim(p_token) = '' THEN RETURN jsonb_build_object('ok', FALSE, 'motivo', 'token'); END IF;
-  SELECT r.id::TEXT AS id, r.estado INTO v_rep FROM public.reparaciones r WHERE r.token_seguimiento = p_token;
+  SELECT r.id::TEXT AS id, r.estado INTO v_rep FROM public.reparaciones r WHERE r.token_seguimiento::TEXT = p_token;
   IF NOT FOUND THEN RETURN jsonb_build_object('ok', FALSE, 'motivo', 'token'); END IF;
   IF v_rep.estado NOT IN ('ingresado', 'diagnosticado', 'en_reparacion') THEN RETURN jsonb_build_object('ok', FALSE, 'motivo', 'estado'); END IF;
   PERFORM pg_advisory_xact_lock(hashtext('push_ep:' || p_endpoint));
@@ -212,7 +213,7 @@ RETURNS JSONB LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public, pg_
 AS $$
   SELECT jsonb_build_object('suscripta', EXISTS (
     SELECT 1 FROM public.push_suscripciones s JOIN public.reparaciones r ON r.id::TEXT = s.reparacion_id
-     WHERE r.token_seguimiento = p_token AND btrim(COALESCE(p_token, '')) <> '' AND s.endpoint = p_endpoint AND s.tipo = 'cliente' AND s.activa))
+     WHERE r.token_seguimiento::TEXT = p_token AND btrim(COALESCE(p_token, '')) <> '' AND s.endpoint = p_endpoint AND s.tipo = 'cliente' AND s.activa))
 $$;
 
 -- ¿Este teléfono es del equipo y está activo para MI usuario?
@@ -258,7 +259,7 @@ AS $$
 DECLARE v_id TEXT; v_resto INTEGER;
 BEGIN
   IF p_token IS NOT NULL AND btrim(p_token) <> '' THEN
-    SELECT r.id::TEXT INTO v_id FROM public.reparaciones r WHERE r.token_seguimiento = p_token;
+    SELECT r.id::TEXT INTO v_id FROM public.reparaciones r WHERE r.token_seguimiento::TEXT = p_token;
     IF v_id IS NOT NULL THEN DELETE FROM public.push_suscripciones WHERE endpoint = p_endpoint AND tipo = 'cliente' AND reparacion_id = v_id; END IF;
   END IF;
   SELECT count(*) INTO v_resto FROM public.push_suscripciones WHERE endpoint = p_endpoint AND tipo = 'cliente';
@@ -346,13 +347,13 @@ BEGIN
       v_msg := jsonb_build_object('titulo', 'Venta nueva 🎉', 'cuerpo', v_cuerpo, 'url', '/login', 'tag', 'venta-' || ev.ref);
 
     ELSIF ev.tipo = 'reparacion_lista' THEN
-      SELECT r2.id::TEXT AS id, r2.equipo, r2.token_seguimiento, r2.estado INTO r FROM public.reparaciones r2 WHERE r2.id::TEXT = ev.ref;
+      SELECT r2.id::TEXT AS id, r2.equipo, r2.token_seguimiento::TEXT AS token_seguimiento, r2.estado INTO r FROM public.reparaciones r2 WHERE r2.id::TEXT = ev.ref;
       IF NOT FOUND OR r.estado <> 'listo' THEN
         UPDATE public.push_cola SET estado = 'descartado', cerrado_en = now() WHERE id = ev.id; CONTINUE;
       END IF;
       v_msg := jsonb_build_object('titulo', 'Tu reparación está lista ✅',
         'cuerpo', left('Tu ' || COALESCE(NULLIF(btrim(r.equipo), ''), 'equipo') || ' ya se puede retirar. ¡Gracias por confiar en iPhoneMood!', 200),
-        'url', '/seguimiento.html?t=' || r.token_seguimiento, 'tag', 'reparacion-' || ev.ref);
+        'url', '/seguimiento.html?t=' || r.token_seguimiento::TEXT, 'tag', 'reparacion-' || ev.ref);
 
     ELSIF ev.tipo = 'prueba' THEN
       v_msg := jsonb_build_object('titulo', 'Aviso de prueba ✅', 'cuerpo', 'Si ves esto, los avisos de iPhoneMood funcionan en este dispositivo.', 'url', '/login', 'tag', 'prueba');

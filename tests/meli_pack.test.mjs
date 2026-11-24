@@ -9,7 +9,8 @@ const { leerPack, idNum } = require('../api/_meli_pack.js');
 let n = 0, fallos = 0;
 async function caso(nombre, fn) { n++; try { await fn(); console.log(`ok ${n} - ${nombre}`); } catch (e) { fallos++; console.log(`NO OK ${n} - ${nombre}\n   ${e && e.message}`); } }
 const original = M.meliGet;
-const simular = (resp) => { const llamadas = []; M.meliGet = async (cuenta, ruta) => { llamadas.push({ cuenta, ruta }); if (resp instanceof Error) throw resp; return resp; }; return llamadas; };
+// Misma forma que la real (api/_meli.js fetchJson): { status, ok, json }. `resp` es el CUERPO; `estado` el HTTP.
+const simular = (resp, estado = 200) => { const llamadas = []; M.meliGet = async (cuenta, ruta) => { llamadas.push({ cuenta, ruta }); if (resp instanceof Error) throw resp; return { status: estado, ok: estado >= 200 && estado < 300, json: resp }; }; return llamadas; };
 
 await caso('Devuelve SOLO orden, pack_id y envio_id (descarta comprador, importes y direcciones)', async () => {
   const ll = simular({ id: 2000019701976556, pack_id: 2000016191459325, shipping: { id: 48595749791, cost: 5000 }, buyer: { id: 1, nickname: 'X', email: 'a@b.c' }, total_amount: 99999, payments: [{ id: 1 }] });
@@ -35,6 +36,12 @@ for (const malo of ['', null, undefined, '12a', '../x', '2000/1', '1 2', '-5', '
     assert.equal(ll.length, 0);
   });
 }
+await caso('Mercado Libre responde 404/429/500 o sin cuerpo: falla con ML_NO_OK y no devuelve nada', async () => {
+  for (const [cuerpo, st] of [[{ message: 'not found' }, 404], [{ message: 'too many' }, 429], [null, 500], [null, 200]]) {
+    simular(cuerpo, st);
+    await assert.rejects(() => leerPack({ cuentaId: 1, orden: '2000000000005' }), (e) => e.codigo === 'ML_NO_OK');
+  }
+});
 await caso('Si Mercado Libre falla, el error sube (el worker responde 502 sin detalle)', async () => {
   simular(new Error('429'));
   await assert.rejects(() => leerPack({ cuentaId: 1, orden: '2000000000004' }), /429/);

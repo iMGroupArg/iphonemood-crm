@@ -13,7 +13,12 @@ const idNum = (x) => (x !== null && x !== undefined && /^\d{1,20}$/.test(String(
 async function leerPack({ cuentaId, orden }, pres) {
   const id = idNum(orden);
   if (!id) { const e = new Error('Número de orden inválido'); e.codigo = 'ORDEN_INVALIDA'; throw e; }
-  const o = await M.meliGet(cuentaId, `/orders/${id}`, pres);
+  // meliGet devuelve { status, ok, json }: el cuerpo está en .json (y si Mercado Libre no respondió bien, no hay nada que leer).
+  const r = await M.meliGet(cuentaId, `/orders/${id}`, pres);
+  if (!r || r.ok !== true || !r.json || typeof r.json !== 'object') {
+    const e = new Error('Mercado Libre respondió ' + ((r && r.status) || 'sin respuesta')); e.codigo = 'ML_NO_OK'; throw e;
+  }
+  const o = r.json;
   // Solo estos tres valores salen de acá; el resto de la respuesta se descarta.
   return {
     ok: true,

@@ -28,7 +28,7 @@ function cargar({ auto, facturas = [], confirma = true }) {
   M._revalidarOrden = async () => ({ ok: true });
   M._llamar = async () => ({ ya_procesada: false, venta_id: 77 });
   M.pintar = () => {}; M.cerrarCuadro = () => {};
-  return { M, toasts, llamadas, confirmaciones };
+  return { M, toasts, llamadas, confirmaciones, ctx };
 }
 
 await caso('Procesar con la automática APAGADA no llama a ARCA', async () => {
@@ -79,6 +79,18 @@ await caso('Botón «Factura»: una emitida de OTRA orden no evita la pregunta',
 await caso('Botón «Factura»: una fila pendiente (no emitida) no evita la pregunta', async () => {
   const { M, confirmaciones } = cargar({ auto: null, facturas: [{ orden_id: '2000000000005', estado: 'pendiente' }] });
   await M.facturar(5); assert.equal(confirmaciones.length, 1);
+});
+await caso('Lista de facturas sin cargar: igual pregunta, pero no dice «otra factura» y aclara que no se duplica', async () => {
+  const { M, confirmaciones, llamadas } = cargar({ auto: null, facturas: null });
+  await M.facturar(5);
+  assert.equal(confirmaciones.length, 1); assert.doesNotMatch(confirmaciones[0], /otra factura igual/); assert.match(confirmaciones[0], /no se duplica/); assert.match(confirmaciones[0], /punto de venta 2/);
+  assert.equal(llamadas.length, 1);
+});
+await caso('Lista de facturas con error de carga: mismo aviso prudente, y si se cancela no llama a ARCA', async () => {
+  const x = cargar({ auto: null, facturas: [{ orden_id: '2000000000005', estado: 'emitida' }], confirma: false });
+  x.M.constructor; vm.runInContext('State.meliFacturasError = true', x.ctx);
+  await x.M.facturar(5);
+  assert.equal(x.confirmaciones.length, 1); assert.match(x.confirmaciones[0], /no se duplica/); assert.equal(x.llamadas.length, 0);
 });
 await caso('El automático (auto=true) nunca pregunta', async () => {
   const { M, confirmaciones, llamadas } = cargar({ auto: { factura_auto: true } });

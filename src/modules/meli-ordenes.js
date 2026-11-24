@@ -393,8 +393,16 @@ const MeliOrdenes = {
     // Botón «Factura» (no el automático): si el CRM todavía no emitió ninguna para esta orden, se pide confirmar, porque Mercado Libre
     // (punto de venta 2) probablemente ya la facturó. Si ya hay una emitida, el botón solo verifica y no duplica: no se pregunta.
     if (!auto) {
-      const ya = (State.meliFacturas || []).some(f => String(f.orden_id) === String(o.orderId) && f.estado === 'emitida');
-      if (!ya && !confirm('Esta venta probablemente ya fue facturada por Mercado Libre (punto de venta 2). ¿Emitir otra factura igual?')) return;
+      // Si la lista de facturas todavía no cargó (o falló), NO se sabe si el CRM ya emitió la suya: se pregunta igual, pero sin dar por
+      // hecho que va a salir «otra» (el servidor no duplica una factura que el CRM ya emitió).
+      const cargadas = Array.isArray(State.meliFacturas) && !State.meliFacturasError;
+      const ya = cargadas && State.meliFacturas.some(f => String(f.orden_id) === String(o.orderId) && f.estado === 'emitida');
+      if (!ya) {
+        const texto = cargadas
+          ? 'Esta venta probablemente ya fue facturada por Mercado Libre (punto de venta 2). ¿Emitir otra factura igual?'
+          : 'Esta venta probablemente ya fue facturada por Mercado Libre (punto de venta 2). Todavía no se pudo comprobar si el CRM ya emitió la suya (si ya existe, solo se verifica y no se duplica). ¿Continuar?';
+        if (!confirm(texto)) return;
+      }
     }
     if (btn) btn.disabled = true;
     try {

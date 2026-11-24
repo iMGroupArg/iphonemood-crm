@@ -18,6 +18,7 @@ const { procesarNotificacion } = require('../_meli_ingesta.js');
 const { sonda, conciliar } = require('../_meli_sonda.js');
 const { comparar, desglose } = require('../_meli_comparar.js');
 const { leerPack } = require('../_meli_pack.js');
+const { rellenar: rellenarNumeros } = require('../_meli_numeros.js');
 const { diagnosticoArca } = require('../_arca_diagnostico.js');
 const { emitirFacturaOrden, emitirNotaCreditoOrden } = require('../_facturacion.js');
 const { correrAutomatizacion } = require('../_facturacion_auto.js');
@@ -350,9 +351,19 @@ module.exports = async function handler(req, res) {
       console.error('meli/worker (push):', (e && e.codigo) || '');
       push = { omitido: 'error' };
     }
+    // Completa de a poco el número de venta/envío de Mercado Libre de las órdenes viejas (script 35). Mejor esfuerzo: nunca afecta a lo anterior.
+    let numeros = null;
+    try {
+      const limiteNum = t0 + PRESUPUESTO_MS;
+      numeros = await rellenarNumeros({ rpc: M.rpc, meliGet: M.meliGet, pres: M.presupuestoHasta(limiteNum - RESERVA_MS, limiteNum), restanteMs: () => limiteNum - RESERVA_MS - Date.now() });
+    } catch (e) {
+      console.error('meli/worker (números de Mercado Libre):', (e && e.codigo) || '');
+      numeros = { omitido: 'error' };
+    }
     const salida = barrido ? { ...r, barrido } : r;
     const conAuto = auto && !auto.omitido ? { ...salida, facturacion_auto: auto } : salida;
-    res.status(200).json(push && !push.omitido ? { ...conAuto, push } : conAuto);
+    const conPush = push && !push.omitido ? { ...conAuto, push } : conAuto;
+    res.status(200).json(numeros && !numeros.omitido && (numeros.leidas || numeros.cortado) ? { ...conPush, numeros_ml: numeros } : conPush);
   } catch (e) {
     console.error('meli/worker:', e.codigo || '', e.message);
     res.status(502).json({ error: 'No se pudo procesar la cola' });

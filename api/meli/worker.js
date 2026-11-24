@@ -17,6 +17,7 @@ const M = require('../_meli.js');
 const { procesarNotificacion } = require('../_meli_ingesta.js');
 const { sonda, conciliar } = require('../_meli_sonda.js');
 const { comparar, desglose } = require('../_meli_comparar.js');
+const { leerPack } = require('../_meli_pack.js');
 const { diagnosticoArca } = require('../_arca_diagnostico.js');
 const { emitirFacturaOrden, emitirNotaCreditoOrden } = require('../_facturacion.js');
 const { correrAutomatizacion } = require('../_facturacion_auto.js');
@@ -270,6 +271,20 @@ module.exports = async function handler(req, res) {
     } catch (e) {
       console.error('meli/worker (comparar):', e.codigo || '', e.message);
       res.status(502).json({ error: 'No se pudo comparar' });
+    }
+    return;
+  }
+
+  // «Pack»: lee pack_id y shipping.id de UNA orden (api/_meli_pack.js). SOLO LECTURA: un GET, tres valores de salida, nada se escribe.
+  if (req.method === 'POST' && req.body && typeof req.body === 'object' && req.body.accion === 'pack') {
+    const cuentaId = Number(req.body.cuenta);
+    if (!Number.isSafeInteger(cuentaId) || cuentaId <= 0) { res.status(400).json({ error: 'Cuenta inválida' }); return; }
+    try {
+      const pres = M.presupuestoHasta(t0 + PRESUPUESTO_MS - RESERVA_MS, t0 + PRESUPUESTO_MS);
+      res.status(200).json(await leerPack({ cuentaId, orden: req.body.orden }, pres));
+    } catch (e) {
+      console.error('meli/worker (pack):', e.codigo || '', e.message);
+      res.status(e.codigo === 'ORDEN_INVALIDA' ? 400 : 502).json({ error: e.codigo === 'ORDEN_INVALIDA' ? 'Orden inválida' : 'No se pudo consultar' });
     }
     return;
   }

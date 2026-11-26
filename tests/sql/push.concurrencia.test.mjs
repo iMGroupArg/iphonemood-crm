@@ -63,7 +63,7 @@ try {
   const admin = await conn();
   await admin.query(`ALTER DATABASE postgres SET deadlock_timeout = '100ms'`);
   await cargarEsquema(admin);
-  await admin.query(`CREATE TABLE public.reparaciones (id BIGSERIAL PRIMARY KEY, cliente TEXT, equipo TEXT, estado TEXT DEFAULT 'ingresado', token_seguimiento TEXT UNIQUE DEFAULT gen_random_uuid()::text, creado_en TIMESTAMPTZ DEFAULT now())`);
+  await admin.query(`CREATE TABLE public.reparaciones (id BIGSERIAL PRIMARY KEY, cliente TEXT, equipo TEXT, estado TEXT DEFAULT 'ingresado', token_seguimiento UUID UNIQUE DEFAULT gen_random_uuid(), creado_en TIMESTAMPTZ DEFAULT now())`);
   await admin.query(`INSERT INTO public.usuarios_autorizados VALUES ('franco@x.com', true) ON CONFLICT DO NOTHING`);
   await admin.query(SQL('notificaciones_push.sql'));
   await admin.query(`UPDATE public.push_config SET valor='true' WHERE clave='activo'`);

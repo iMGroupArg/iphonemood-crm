@@ -9,7 +9,7 @@
 const W = require('./_webpush.js');
 const { limitar } = require('./_ratelimit.js');
 
-const TTL_POR_TIPO = { venta_nueva: 3600, reparacion_lista: 24 * 3600 };
+const TTL_POR_TIPO = { venta_nueva: 3600, reparacion_lista: 24 * 3600, bienvenida: 3600, difusion: 12 * 3600 };
 
 function configuracion(env = process.env) {
   const publica = (env.VAPID_PUBLIC_KEY || '').trim(), privada = (env.VAPID_PRIVATE_KEY || '').trim();

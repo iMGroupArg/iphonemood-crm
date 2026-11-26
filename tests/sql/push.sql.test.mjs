@@ -396,6 +396,114 @@ console.log('\n══ Notificaciones push: base de datos (Postgres en WebAssembl
     !e && r2.ok === true && (await q(db, `SELECT count(*)::int n FROM public.push_suscripciones WHERE endpoint=$1`, [tel.endpoint]))[0].n === 2 && (await q(db, `INSERT INTO public.push_cola (tipo, ref) VALUES ('prueba','1-1') RETURNING reclamos`))[0].reclamos === 0, e);
 }
 
+// ── 6d. visitantes de la tienda: suscripción, bienvenida, difusión y baja ──
+const visitante = (db, s) => comoRol(db, 'anon', null, () => q(db, `SELECT public.push_suscribir_visitante($1,$2,$3) AS r`, [s.endpoint, s.p256dh, s.auth]).then((x) => x[0].r));
+const difundir = (db, t, c, u = null, email = 'franco@x.com') => comoRol(db, 'authenticated', email, () => q(db, `SELECT public.push_difundir($1,$2,$3) AS r`, [t, c, u]).then((x) => x[0].r));
+const estV = (db, ep) => comoRol(db, 'anon', null, () => q(db, `SELECT public.push_estado_visitante($1) AS r`, [ep]).then((x) => x[0].r));
+{
+  const db = await nueva();
+  const v = sub();
+  const r = await visitante(db, v);
+  check('Un visitante se suscribe SIN sesión y queda SIN CONFIRMAR (todavía no recibe nada)', r.ok === true && r.confirmada === false && (await q(db, `SELECT activa, tipo, usuario_email, reparacion_id FROM public.push_suscripciones`))[0].activa === false);
+  check('Sólo se guarda el endpoint y las claves: ningún dato personal', (await q(db, `SELECT usuario_email, reparacion_id FROM public.push_suscripciones`))[0].usuario_email === null && (await q(db, `SELECT reparacion_id FROM public.push_suscripciones`))[0].reparacion_id === null);
+  const st0 = await estV(db, v.endpoint);
+  check('Mientras no llegue la bienvenida figura "pendiente", no "suscripta"', st0.suscripta === false && st0.pendiente === true);
+  const t = await tomar(db);
+  check('Se arma UN aviso de bienvenida dirigido SÓLO a ese visitante (aunque todavía no esté activo)', t.length === 1 && t[0].tipo === 'bienvenida' && t[0].destinos.length === 1 && t[0].destinos[0].endpoint === v.endpoint && /Listo/.test(t[0].mensaje.titulo), JSON.stringify(t));
+  await resultado(db, t[0], [{ id: t[0].destinos[0].id, estado: 'ok' }]);
+  const st1 = await estV(db, v.endpoint);
+  check('Cuando la bienvenida LLEGA, el visitante queda confirmado y figura "suscripta"', st1.suscripta === true && st1.pendiente === false && (await q(db, `SELECT activa FROM public.push_suscripciones`))[0].activa === true);
+  const r2 = await visitante(db, v);
+  check('Volver a suscribirse estando confirmado no duplica nada ni repite la bienvenida', r2.ok === true && r2.confirmada === true && (await q(db, `SELECT count(*)::int n FROM public.push_suscripciones`))[0].n === 1 && (await tomar(db)).length === 0);
+  await comoRol(db, 'anon', null, () => q(db, `SELECT public.push_baja_visitante($1)`, [v.endpoint]));
+  check('El visitante se da de baja solo y no queda nada de él', (await q(db, `SELECT count(*)::int n FROM public.push_suscripciones`))[0].n === 0 && (await estV(db, v.endpoint)).suscripta === false);
+}
+{ // bienvenida que no llega: no queda nada guardado
+  const db = await nueva();
+  const v = sub(); await visitante(db, v);
+  const t = await tomar(db);
+  await resultado(db, t[0], [{ id: t[0].destinos[0].id, estado: 'baja' }]);
+  check('Si la bienvenida rebota (dirección inventada o servicio de push que la rechaza), el visitante se BORRA: nunca se confirmó', (await q(db, `SELECT count(*)::int n FROM public.push_suscripciones`))[0].n === 0);
+  const db2 = await nueva(); const w = sub(); await visitante(db2, w);
+  const t2 = await tomar(db2);
+  await resultado(db2, t2[0], [{ id: t2[0].destinos[0].id, estado: 'error' }]);
+  check('… y también si el error es nuestro (rechazo permanente): no se acumulan direcciones sin confirmar', (await q(db2, `SELECT count(*)::int n FROM public.push_suscripciones`))[0].n === 0);
+}
+{ // topes anti-relleno y separación de tipos
+  const db = await nueva();
+  await db.query(`INSERT INTO public.push_suscripciones (endpoint, p256dh, auth, tipo, activa)
+                  SELECT 'https://fcm.googleapis.com/fcm/send/relleno' || g, repeat('A', 87), repeat('a', 22), 'visitante', false FROM generate_series(1, 3000) g`);
+  const r = await visitante(db, sub());
+  const total = (await q(db, `SELECT count(*)::int n FROM public.push_suscripciones`))[0].n;
+  check('Con 3.000 sin confirmar acumuladas, una persona real IGUAL se suscribe: se descartan las más viejas sin confirmar (el relleno no bloquea a nadie y la tabla no crece)', r.ok === true && total === 2501, JSON.stringify(r) + ' total=' + total);
+  const act = sub(); await visitante(db, act); await db.query(`UPDATE public.push_suscripciones SET activa = true WHERE endpoint = '${act.endpoint}'`);
+  const otra = { ...act, p256dh: 'B'.repeat(87) };
+  const r2 = await visitante(db, otra);
+  check('Una suscripción ya confirmada no se pisa con otras claves (quien conozca la dirección no puede dejarla muda)', r2.ok === true && r2.confirmada === true && (await q(db, `SELECT p256dh FROM public.push_suscripciones WHERE endpoint = '${act.endpoint}'`))[0].p256dh === act.p256dh);
+  const db2 = await nueva(); const e = sub(); await equipo(db2, e);
+  check('Un teléfono del EQUIPO no se suscribe como visitante', (await visitante(db2, e)).motivo === 'dispositivo_del_equipo');
+  const rep = await q(db2, `INSERT INTO public.reparaciones (cliente, equipo) VALUES ('Ana','x') RETURNING token_seguimiento t`);
+  const tel = sub(); await cliente(db2, rep[0].t, tel);
+  check('Un cliente con una reparación en curso SÍ puede además suscribirse a las novedades (son avisos distintos)', (await visitante(db2, tel)).ok === true && (await q(db2, `SELECT count(*)::int n FROM public.push_suscripciones WHERE endpoint=$1`, [tel.endpoint]))[0].n === 2);
+  await comoRol(db2, 'anon', null, () => q(db2, `SELECT public.push_baja_visitante($1)`, [tel.endpoint]));
+  check('Darse de baja de las novedades NO le saca los avisos de su reparación', (await q(db2, `SELECT tipo FROM public.push_suscripciones WHERE endpoint=$1`, [tel.endpoint]))[0].tipo === 'cliente');
+  const malo = await falla(() => visitante(db2, { endpoint: 'https://evil.com/x', p256dh: 'A'.repeat(87), auth: 'a'.repeat(22) }));
+  check('Un endpoint que no es de un servicio de push conocido se rechaza', malo && /violates check constraint/.test(malo), malo);
+}
+{ // difusiones
+  const db = await nueva();
+  const confirmados = [];
+  for (let i = 0; i < 3; i++) { const v = sub(); await visitante(db, v); confirmados.push(v); }
+  let t = await tomar(db);
+  for (const ev of t) await resultado(db, ev, ev.destinos.map((d) => ({ id: d.id, estado: 'ok' })));
+  const sinConfirmar = sub(); await visitante(db, sinConfirmar);
+  const eq = sub(); await equipo(db, eq);
+  const cl = await q(db, `INSERT INTO public.reparaciones (cliente, equipo) VALUES ('Ana','x') RETURNING token_seguimiento t`); const tc = sub(); await cliente(db, cl[0].t, tc);
+  await db.query(`UPDATE public.push_cola SET estado='enviado' WHERE tipo='bienvenida' AND estado<>'enviado'`);
+  const r = await difundir(db, 'Llegó stock nuevo 📱', 'iPhone 15 Pro y 16: mirá los precios de hoy.', '/');
+  check('Una persona autorizada manda una difusión: sale a los 3 visitantes CONFIRMADOS', r.ok === true && r.destinatarios === 3, JSON.stringify(r));
+  t = await tomar(db);
+  const dif = t.find((x) => x.tipo === 'difusion');
+  check('La difusión llega SÓLO a los visitantes confirmados: no al que no confirmó, ni al equipo, ni a los clientes de reparaciones', dif && dif.destinos.length === 3 && dif.destinos.every((d) => confirmados.some((c) => c.endpoint === d.endpoint)), JSON.stringify(dif && dif.destinos.length));
+  check('… con el texto exacto y el enlace que se pidieron', dif.mensaje.titulo === 'Llegó stock nuevo 📱' && dif.mensaje.cuerpo === 'iPhone 15 Pro y 16: mirá los precios de hoy.' && dif.mensaje.url === '/');
+  const otra = await difundir(db, 'Otra', 'Otra más');
+  check('Una SEGUNDA difusión enseguida se frena ("muy seguido"): como mucho una cada 20 horas', otra.ok === false && otra.motivo === 'muy_seguido' && !!otra.disponible_desde, JSON.stringify(otra));
+  await db.query(`UPDATE public.push_difusiones SET creada_en = now() - interval '21 hours'`);
+  check('Pasado el plazo se puede mandar otra', (await difundir(db, 'Segunda', 'Texto de la segunda')).ok === true);
+  const res = await comoRol(db, 'authenticated', 'franco@x.com', () => q(db, `SELECT public.push_difusiones_resumen() AS r`).then((x) => x[0].r));
+  check('El resumen del CRM trae suscriptos, el historial y cuánto falta para poder mandar otra', res.suscriptos === 3 && res.ultimas.length === 2 && res.ultimas[0].titulo === 'Segunda' && res.apagado === false && !!res.disponible_desde, JSON.stringify(res).slice(0, 200));
+}
+{ // validaciones y permisos de la difusión
+  const db = await nueva();
+  const v = sub(); await visitante(db, v); const t = await tomar(db); await resultado(db, t[0], [{ id: t[0].destinos[0].id, estado: 'ok' }]);
+  const malas = [['', 'cuerpo'], ['t'.repeat(61), 'cuerpo'], ['Título', ''], ['Título', 'c'.repeat(141)]];
+  const m = []; for (const [ti, cu] of malas) m.push((await difundir(db, ti, cu)).motivo);
+  check('Se rechazan títulos y textos vacíos o demasiado largos', JSON.stringify(m) === JSON.stringify(['titulo', 'titulo', 'cuerpo', 'cuerpo']), JSON.stringify(m));
+  const urls = ['https://evil.com/x', '//evil.com', 'javascript:alert(1)', 'http://iphonemood.com/x', '/a b', 'ftp://x'];
+  const mu = []; for (const u of urls) mu.push((await difundir(db, 'Hola', 'Texto', u)).motivo);
+  check('El enlace sólo puede ir a ESTE sitio: otros dominios, http, javascript: o rutas raras se rechazan', mu.every((x) => x === 'url'), JSON.stringify(mu));
+  const ok1 = await difundir(db, 'Hola', 'Texto', 'https://iphonemood.com/?p=iphone-15');
+  check('Un enlace completo a iphonemood.com se acepta y se guarda como ruta', ok1.ok === true && (await q(db, `SELECT url FROM public.push_difusiones`))[0].url === '/?p=iphone-15', JSON.stringify(ok1));
+  const e1 = await falla(() => difundir(db, 'Hola', 'Texto', null, 'baja@x.com'));
+  const e2 = await falla(() => comoRol(db, 'anon', null, () => q(db, `SELECT public.push_difundir('Hola','Texto',NULL)`)));
+  const e3 = await falla(() => comoRol(db, 'anon', null, () => q(db, `SELECT public.push_difusiones_resumen()`)));
+  check('Sólo un usuario autorizado del CRM puede difundir o ver el resumen (ni un usuario dado de baja ni un anónimo)', /NO_AUTORIZADO/.test(e1) && /permission denied/.test(e2) && /permission denied/.test(e3), JSON.stringify([e1, e2, e3]));
+  const db2 = await nueva({ activo: false });
+  const v2 = sub(); await visitante(db2, v2);
+  check('Con el interruptor general apagado no se puede difundir', (await difundir(db2, 'Hola', 'Texto')).motivo === 'apagado');
+  const db3 = await nueva();
+  check('Sin suscriptos confirmados no hay a quién mandar', (await difundir(db3, 'Hola', 'Texto')).motivo === 'sin_suscriptos');
+  const lee = await falla(() => comoRol(db, 'anon', null, () => q(db, `SELECT * FROM public.push_difusiones`)));
+  check('La tabla de difusiones está cerrada al navegador', /permission denied/.test(lee));
+}
+{ // limpieza programada: los sin confirmar de más de un día
+  const db = await nueva();
+  await visitante(db, sub()); await visitante(db, sub());
+  await db.query(`UPDATE public.push_suscripciones SET creada_en = now() - interval '2 days' WHERE id = (SELECT min(id) FROM public.push_suscripciones)`);
+  const sql = SQL('notificaciones_push.sql');
+  check('La limpieza diaria borra a los visitantes sin confirmar de más de 1 día (a los demás recién a los 30)', /CASE WHEN tipo = 'visitante' THEN interval '1 day' ELSE interval '30 days' END/.test(sql));
+}
+
 // ── 7. permisos y secreto ────────────────────────────────────────────────
 {
   const db = await nueva();

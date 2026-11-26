@@ -3,6 +3,7 @@ import './state.js';
 import './portapapeles.js';
 import './movil.js';
 import './avisos.js';
+import './avisos-clientes.js';
 import './dashboard.js';
 import './stock.js';
 import './ventas.js';
@@ -56,6 +57,7 @@ const App = {
     blog: { title: 'Blog', module: Blog },
     meli: { title: 'Mercado Libre', module: Meli },
     actividades: { title: 'Actividades', module: Actividades },
+    avisos: { title: 'Avisos a clientes', module: AvisosClientes },
     agentes: { title: 'Agentes', module: Agentes },
     panel: { title: 'Panel de control', module: Panel },
   },

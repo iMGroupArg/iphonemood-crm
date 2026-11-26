@@ -39,3 +39,11 @@ Primeros avisos: **venta nueva** (al equipo) y **reparación lista** (al cliente
 - Re-suscripción automática si el navegador cambia la suscripción (`pushsubscriptionchange`).
 - Más avisos: orden de Mercado Libre para procesar, liberación de plata, pago recibido. Cada uno es un tipo nuevo en `push_cola` + su texto en `push_tomar_pendientes`.
 - Avisos a clientes sobre cambios de estado intermedios (hoy sólo «lista»).
+
+## Avisos a clientes de la tienda («novedades y ofertas»)
+
+- **Tienda como app:** `precios.html` enlaza `tienda.webmanifest` y carga `push.js` (con `data-registro="al-usar"`: el service worker no se registra al cargar, para no restarle velocidad a la tienda) y `avisos-web.js`.
+- **Invitación amable (`avisos-web.js`):** no pide el permiso del navegador hasta que la persona toca «Sí, activar avisos». Aparece a los ~4 s (o al empezar a scrollear) con un botón grande de aceptar y una cruz chica, y nunca con un producto o el Plan canje abierto. Cerrarla la silencia 7 días (30 la segunda vez). En iPhone explica los 3 pasos de «Agregar a pantalla de inicio». Siempre se puede activar o dar de baja desde «🔔 Avisos de novedades» al pie.
+- **Base (script 34):** suscripción anónima `tipo='visitante'`, inactiva hasta que llega el aviso de bienvenida (si falla, se borra). RPC `push_suscribir_visitante`, `push_estado_visitante`, `push_baja_visitante` (anon) y `push_difundir`, `push_difusiones_resumen` (sólo el CRM autenticado). Máximo 1 difusión cada 20 h (`push_config.difusion_horas_min`), título ≤60 y texto ≤140, enlaces sólo a este sitio.
+- **CRM:** pantalla «Avisos a clientes» (`src/modules/avisos-clientes.js`): plantillas, vista previa, confirmación antes de enviar e historial.
+- **Pruebas:** `tests/avisos_web.test.mjs`, sección 6d de `tests/sql/push.sql.test.mjs`.

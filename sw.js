@@ -6,8 +6,7 @@
 self.addEventListener('install', () => self.skipWaiting());
 self.addEventListener('activate', (e) => e.waitUntil(self.clients.claim()));
 
-// Sin respuesta propia: la página y la API siguen su camino normal (algunos Chrome viejos piden este manejador para ofrecer "instalar").
-self.addEventListener('fetch', () => {});
+// Sin manejador de 'fetch' a propósito: no interviene en ningún pedido (ni los frena), y la tienda conserva toda su velocidad.
 
 self.addEventListener('push', (e) => {
   let d = {};

@@ -85,8 +85,10 @@
     return { ok: true, restantes: 0 };
   }
 
-  // Alcanza con registrar el service worker para que el sitio se pueda instalar como app.
-  registro();
+  // Registrar el service worker hace que el sitio se pueda instalar como app. En la TIENDA (visitantes anónimos) no se registra al cargar para no sumarle trabajo a la
+  // página: sólo cuando la persona usa los avisos o si ya abrió la tienda instalada como app (`data-registro="al-usar"` en la etiqueta <script>).
+  const alUsar = typeof document !== 'undefined' && document.currentScript && document.currentScript.dataset && document.currentScript.dataset.registro === 'al-usar';
+  if (!alUsar || instalada()) registro();
 
   window.Push = { estado, activar, desactivar, suscripcion, motivo, esIOS: ES_IOS, instalada };
 })();

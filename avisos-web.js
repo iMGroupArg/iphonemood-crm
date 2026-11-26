@@ -1,8 +1,8 @@
 // Avisos de la tienda (precios.html): invitar, con buenos modales, a recibir «novedades y ofertas» y poder instalar la tienda como app.
 //
-// Principios (que el cliente no se sienta molestado):
-//   · NUNCA se pide el permiso del navegador de entrada: primero una invitación propia que explica qué se manda y cada cuánto, con «Ahora no» igual de visible.
-//   · Aparece una sola vez y recién cuando la persona mostró interés (leyó un rato o scrolleó). Si dice que no, no vuelve por 30 días (90 si dice que no dos veces).
+// Principios (invitar rápido, sin engañar):
+//   · NUNCA se pide el permiso del navegador de entrada: primero una invitación propia que explica qué se manda y cada cuánto.
+//   · Aparece a los pocos segundos (o al empezar a scrollear), con un botón grande de aceptar y una cruz chica. Si la cierra, vuelve a los 7 días (30 si la cierra dos veces).
 //   · Si ya está suscripta, o el navegador las tiene bloqueadas, no se insiste.
 //   · En iPhone, donde los avisos sólo andan con la app instalada, se explica el paso en vez de fallar en silencio.
 //   · Para darse de baja basta un toque, desde el 🔔 al pie de la página. Sólo se guarda el identificador del navegador (sin nombre, mail ni teléfono).
@@ -19,7 +19,7 @@
     // Memoria en el navegador de la persona (localStorage); si no se puede usar, se trabaja sin memoria.
     leer(almacen) { try { return JSON.parse(almacen.getItem(CLAVE)) || {}; } catch { return {}; } },
     guardar(almacen, m) { try { almacen.setItem(CLAVE, JSON.stringify(m)); } catch { /* sin almacenamiento: no pasa nada */ } },
-    descartar(m, ahora) { const n = (m.n || 0) + 1; return { ...m, n, hasta: ahora + (n >= 2 ? 90 : 30) * DIA }; },
+    descartar(m, ahora) { const n = (m.n || 0) + 1; return { ...m, n, hasta: ahora + (n >= 2 ? 30 : 7) * DIA }; },
     // ¿Corresponde mostrar la invitación AHORA?
     debeOfrecer({ estado, memoria, ahora, tiempoMs, scroll, modalAbierto, instalada }) {
       if (!estado) return false;
@@ -28,7 +28,7 @@
       if (memoria && memoria.ok) return false;                                 // ya se suscribió
       if (memoria && memoria.hasta && ahora < memoria.hasta) return false;     // dijo «ahora no» hace poco
       if (modalAbierto) return false;                                          // está mirando un producto o el Plan canje
-      return tiempoMs >= 25000 || scroll >= 0.35 || (!!instalada && tiempoMs >= 6000);
+      return tiempoMs >= 4000 || scroll >= 0.1;
     },
     textoMotivo(motivo) {
       return ({
@@ -53,7 +53,7 @@
 .av-t{font-size:15.5px;font-weight:700;letter-spacing:-.2px;line-height:1.25}
 .av-s{font-size:13px;color:#6E6E73;line-height:1.5;margin-top:4px}
 .av-pasos{margin:8px 0 0 18px;padding:0;font-size:13px;line-height:1.55;color:#1D1D1F}
-.av-x{position:absolute;top:8px;right:10px;border:0;background:none;font-size:20px;line-height:1;color:#86868B;cursor:pointer;padding:6px}
+.av-x{position:absolute;top:2px;right:4px;border:0;background:none;font-size:15px;line-height:1;color:#B0B0B6;cursor:pointer;padding:10px}
 .av-botones{display:flex;gap:8px;margin-top:12px}
 .av-btn{flex:1;min-height:44px;border-radius:12px;border:1px solid #D2D2D7;background:#fff;color:#1D1D1F;font:inherit;font-size:14.5px;font-weight:600;cursor:pointer}
 .av-btn.av-pri{background:#0071E3;border-color:#0071E3;color:#fff}
@@ -151,8 +151,8 @@
       mostrar('Estás recibiendo avisos ✅', 'Te contamos cuando entra stock nuevo o hay ofertas. Como mucho uno por día.', { lista: [{ txt: 'Dejar de recibirlos', fn: darDeBaja }, { txt: 'Cerrar', pri: true, fn: () => cerrar(false) }] });
       return;
     }
-    mostrar('¿Te avisamos cuando haya novedades?', 'Stock nuevo y ofertas de iPhone Mood, directo a tu celular. Como mucho 1 aviso por día y te podés dar de baja cuando quieras.',
-      { lista: [{ txt: 'Ahora no', fn: () => cerrar(true) }, { txt: 'Sí, avisame', pri: true, fn: suscribir }], recordarAlCerrar: true }, { instalar: true });
+    mostrar('¿Querés enterarte primero?', 'Stock nuevo y ofertas de iPhone Mood, directo a tu celular. Como mucho 1 aviso por día; te das de baja cuando quieras.',
+      { lista: [{ txt: 'Sí, activar avisos', pri: true, fn: suscribir }], recordarAlCerrar: true }, { instalar: true });
   }
 
   // ── Cuándo se ofrece sola ───────────────────────────────────────────────────

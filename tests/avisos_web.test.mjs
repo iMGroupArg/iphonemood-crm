@@ -12,13 +12,12 @@ vm.runInNewContext(fs.readFileSync(RAIZ + 'avisos-web.js', 'utf8'), { module: mo
 const L = mod.exports.logica;
 const DIA = 24 * 3600 * 1000, ahora = 1e12;
 const ok = { soportado: true, motivo: null, suscripta: false, ios: false };
-const base = { estado: ok, memoria: {}, ahora, tiempoMs: 30000, scroll: 0, modalAbierto: false, instalada: false };
+const base = { estado: ok, memoria: {}, ahora, tiempoMs: 20000, scroll: 0, modalAbierto: false, instalada: false };
 const dec = (o) => L.debeOfrecer({ ...base, ...o });
 
-caso('no molesta de entrada: sin tiempo ni scroll no se ofrece', () => assert.equal(dec({ tiempoMs: 3000 }), false));
-caso('se ofrece tras 25 s de lectura', () => assert.equal(dec({ tiempoMs: 25000 }), true));
-caso('se ofrece si scrolleó un tercio', () => assert.equal(dec({ tiempoMs: 5000, scroll: 0.4 }), true));
-caso('app ya instalada: alcanza con 6 s', () => assert.equal(dec({ tiempoMs: 7000, instalada: true }), true));
+caso('no molesta de entrada: sin tiempo ni scroll no se ofrece', () => assert.equal(dec({ tiempoMs: 2000 }), false));
+caso('se ofrece a los 4 s', () => assert.equal(dec({ tiempoMs: 4000 }), true));
+caso('se ofrece si ya empezó a scrollear', () => assert.equal(dec({ tiempoMs: 1000, scroll: 0.15 }), true));
 caso('no se ofrece con un producto o el canje abierto', () => assert.equal(dec({ modalAbierto: true }), false));
 caso('no se ofrece si ya está suscripta', () => assert.equal(dec({ memoria: { ok: true } }), false));
 caso('no se insiste si el navegador las bloqueó', () => assert.equal(dec({ estado: { ...ok, motivo: 'bloqueado' } }), false));
@@ -26,15 +25,15 @@ caso('sin soporte (y no iPhone) no se ofrece', () => assert.equal(dec({ estado: 
 caso('iPhone sin instalar sí se ofrece (con la guía)', () => assert.equal(dec({ estado: { soportado: false, motivo: 'ios_sin_instalar', ios: true } }), true));
 caso('estado desconocido no ofrece', () => assert.equal(dec({ estado: null }), false));
 
-caso('«ahora no» espera 30 días y no vuelve antes', () => {
+caso('cerrar la invitación espera 7 días y no vuelve antes', () => {
   const m = L.descartar({}, ahora);
-  assert.equal(m.hasta, ahora + 30 * DIA);
-  assert.equal(dec({ memoria: m, ahora: ahora + 29 * DIA }), false);
-  assert.equal(dec({ memoria: m, ahora: ahora + 31 * DIA }), true);
+  assert.equal(m.hasta, ahora + 7 * DIA);
+  assert.equal(dec({ memoria: m, ahora: ahora + 6 * DIA }), false);
+  assert.equal(dec({ memoria: m, ahora: ahora + 8 * DIA }), true);
 });
-caso('el segundo «ahora no» espera 90 días', () => {
+caso('la segunda vez espera 30 días', () => {
   const m = L.descartar(L.descartar({}, ahora), ahora);
-  assert.equal(m.n, 2); assert.equal(m.hasta, ahora + 90 * DIA);
+  assert.equal(m.n, 2); assert.equal(m.hasta, ahora + 30 * DIA);
 });
 caso('descartar no pisa «ya suscripta»', () => assert.equal(L.descartar({ ok: true }, ahora).ok, true));
 

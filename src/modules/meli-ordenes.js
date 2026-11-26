@@ -329,7 +329,9 @@ const MeliOrdenes = {
       const d = await this._llamar(btn, 'meli_procesar_orden', { p_orden_id: id, p_cotizacion: cot },
         d => d.ya_procesada ? 'La orden ya estaba procesada.' : `Orden procesada: venta #${d.venta_id} creada y stock descontado.`);
       // La factura va DESPUÉS y aparte: si falla, la venta, el stock y la plata ya quedaron bien (se puede reintentar).
-      if (d && d.ya_procesada === false) await this.facturar(id, null, true);
+      // Procesar SOLO factura si la facturación automática de ventas está ENCENDIDA (si no se pudo leer el interruptor, no factura).
+      // Antes facturaba siempre y duplicaba las facturas que Mercado Libre ya emite (punto de venta 2). La factura queda en el botón «Factura».
+      if (d && d.ya_procesada === false && State.facturacionAuto && State.facturacionAuto.factura_auto === true) await this.facturar(id, null, true);
     } finally { if (btn) btn.disabled = false; this.cerrarCuadro(tok); }
   },
 
@@ -388,6 +390,20 @@ const MeliOrdenes = {
   async facturar(id, btn, auto) {
     const o = (State.meliOrdenes || []).find(x => x.id === id);
     if (!o || !o.orderId) return;
+    // Botón «Factura» (no el automático): si el CRM todavía no emitió ninguna para esta orden, se pide confirmar, porque Mercado Libre
+    // (punto de venta 2) probablemente ya la facturó. Si ya hay una emitida, el botón solo verifica y no duplica: no se pregunta.
+    if (!auto) {
+      // Si la lista de facturas todavía no cargó (o falló), NO se sabe si el CRM ya emitió la suya: se pregunta igual, pero sin dar por
+      // hecho que va a salir «otra» (el servidor no duplica una factura que el CRM ya emitió).
+      const cargadas = Array.isArray(State.meliFacturas) && !State.meliFacturasError;
+      const ya = cargadas && State.meliFacturas.some(f => String(f.orden_id) === String(o.orderId) && f.estado === 'emitida');
+      if (!ya) {
+        const texto = cargadas
+          ? 'Esta venta probablemente ya fue facturada por Mercado Libre (punto de venta 2). ¿Emitir otra factura igual?'
+          : 'Esta venta probablemente ya fue facturada por Mercado Libre (punto de venta 2). Todavía no se pudo comprobar si el CRM ya emitió la suya (si ya existe, solo se verifica y no se duplica). ¿Continuar?';
+        if (!confirm(texto)) return;
+      }
+    }
     if (btn) btn.disabled = true;
     try {
       const token = await window.Meli?._token?.();

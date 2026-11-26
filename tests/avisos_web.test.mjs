@@ -59,4 +59,21 @@ caso('el manifiesto es válido y apunta a íconos existentes', () => {
   assert.equal(m.display, 'standalone');
   for (const i of m.icons) assert.ok(fs.existsSync(RAIZ + i.src.slice(1)), i.src);
 });
+
+const UA_SAFARI = 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_4 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4 Mobile/15E148 Safari/604.1';
+const UA_INSTA = 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_4 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148 Instagram 320.0.0.12.108';
+const UA_CHROME_IOS = 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_4 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) CriOS/123.0.6312.52 Mobile/15E148 Safari/604.1';
+const UA_FB = 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_4 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148 [FBAN/FBIOS;FBAV/450.0]';
+caso('detecta los navegadores internos de Instagram y Facebook, no Safari ni Chrome', () => {
+  assert.equal(L.embebido(UA_INSTA), true); assert.equal(L.embebido(UA_FB), true);
+  assert.equal(L.embebido(UA_SAFARI), false); assert.equal(L.embebido(UA_CHROME_IOS), false); assert.equal(L.embebido(undefined), false);
+});
+caso('la flecha al botón Compartir sólo se marca en Safari de iPhone', () => {
+  assert.equal(L.safariIphone(UA_SAFARI), true);
+  for (const ua of [UA_CHROME_IOS, UA_INSTA, UA_FB, 'Mozilla/5.0 (iPad; CPU OS 17_4 like Mac OS X) AppleWebKit/605.1.15 Version/17.4 Mobile/15E148 Safari/604.1', 'Mozilla/5.0 (Linux; Android 14) Chrome/123 Mobile Safari/537.36']) assert.equal(L.safariIphone(ua), false, ua);
+});
+caso('con la app ya instalada se ofrece activar los avisos al segundo', () => {
+  assert.equal(dec({ tiempoMs: 1500, instalada: true }), true);
+  assert.equal(dec({ tiempoMs: 1500, instalada: false }), false);
+});
 console.log(`\n${n - fallos}/${n}`); process.exit(fallos ? 1 : 0);

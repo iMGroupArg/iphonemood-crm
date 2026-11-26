@@ -90,5 +90,5 @@
   const alUsar = typeof document !== 'undefined' && document.currentScript && document.currentScript.dataset && document.currentScript.dataset.registro === 'al-usar';
   if (!alUsar || instalada()) registro();
 
-  window.Push = { estado, activar, desactivar, suscripcion, motivo, esIOS: ES_IOS, instalada };
+  window.Push = { estado, activar, desactivar, suscripcion, motivo, esIOS: ES_IOS, instalada, registrar: registro };
 })();

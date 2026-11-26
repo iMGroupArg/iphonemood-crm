@@ -28,8 +28,12 @@
       if (memoria && memoria.ok) return false;                                 // ya se suscribió
       if (memoria && memoria.hasta && ahora < memoria.hasta) return false;     // dijo «ahora no» hace poco
       if (modalAbierto) return false;                                          // está mirando un producto o el Plan canje
-      return tiempoMs >= 4000 || scroll >= 0.1;
+      return tiempoMs >= 4000 || scroll >= 0.1 || (!!instalada && tiempoMs >= 1000);   // ya instalada: es el «último paso», se ofrece enseguida
     },
+    // iPhone/iPad dentro de Instagram, Facebook, TikTok, etc.: esos navegadores internos NO pueden guardar la tienda como app.
+    embebido(ua) { return /Instagram|FBAN|FBAV|FB_IAB|TikTok|musical_ly|Line\/|Snapchat|Twitter|LinkedInApp|GSA\//i.test(ua || ''); },
+    // Safari de iPhone (no Chrome/Firefox/Edge de iOS, no iPad): ahí el botón Compartir está abajo al centro y se puede señalar.
+    safariIphone(ua) { return /iPhone/.test(ua || '') && /Safari/.test(ua || '') && !/CriOS|FxiOS|EdgiOS|OPiOS|Instagram|FBAN|FBAV/i.test(ua || ''); },
     textoMotivo(motivo) {
       return ({
         bloqueado: 'Los avisos están bloqueados en este navegador. Activalos desde la configuración del sitio (el candado junto a la dirección) o desde los Ajustes del teléfono.',
@@ -59,7 +63,16 @@
 .av-btn.av-pri{background:#0071E3;border-color:#0071E3;color:#fff}
 .av-btn:disabled{opacity:.6;cursor:default}
 .av-link{display:block;margin-top:10px;font-size:12.5px;color:#0071E3;background:none;border:0;padding:0;cursor:pointer;font:inherit;font-size:12.5px}
-.av-pie a{color:inherit;font-size:11px}`;
+.av-pie a{color:inherit;font-size:11px}
+.av-pasos2{margin-top:4px}
+.av-paso{display:flex;gap:10px;align-items:center;margin-top:10px;font-size:13.5px;line-height:1.4}
+.av-num{flex:none;width:26px;height:26px;border-radius:50%;background:#F5F5F7;border:1px solid #D2D2D7;font-weight:700;font-size:13px;display:flex;align-items:center;justify-content:center}
+.av-paso svg{flex:none;width:28px;height:28px;color:#0071E3}
+.av-flecha{position:fixed;left:50%;bottom:calc(6px + env(safe-area-inset-bottom));z-index:451;margin-left:-16px;width:32px;height:32px;color:#0071E3;pointer-events:none;animation:av-rebote 1s ease-in-out infinite}
+@keyframes av-rebote{0%,100%{transform:translateY(-6px)}50%{transform:translateY(4px)}}
+@media (prefers-reduced-motion:reduce){.av-flecha{animation:none}}
+.av-inst{display:none;width:100%;margin-top:8px;min-height:44px;border-radius:12px;border:1px solid #0071E3;background:#fff;color:#0071E3;font:inherit;font-size:14.5px;font-weight:600;cursor:pointer}
+.av-inst.av-on{display:block}`;
 
   let tarjeta = null, instalable = null, cerrarTimer = null;
   const almacen = (() => { try { return window.localStorage; } catch { return { getItem() { return null; }, setItem() {} }; } })();
@@ -71,12 +84,24 @@
     for (const h of [].concat(hijos)) if (h) n.appendChild(h);
     return n;
   }
+  const NS = 'http://www.w3.org/2000/svg';
+  function icono(tipo) {
+    const svg = document.createElementNS(NS, 'svg'); svg.setAttribute('viewBox', '0 0 24 24'); svg.setAttribute('fill', 'none'); svg.setAttribute('stroke', 'currentColor'); svg.setAttribute('stroke-width', '1.8'); svg.setAttribute('stroke-linecap', 'round'); svg.setAttribute('stroke-linejoin', 'round'); svg.setAttribute('aria-hidden', 'true');
+    const d = { compartir: ['M12 15V3', 'M8 7l4-4 4 4', 'M6 11H5a1 1 0 0 0-1 1v8a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-8a1 1 0 0 0-1-1h-1'],
+      agregar: ['M5 3h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2z', 'M12 8v8', 'M8 12h8'],
+      flecha: ['M12 4v14', 'M6 13l6 6 6-6'], safari: ['M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18z', 'M15.5 8.5l-2 5-5 2 2-5z'] }[tipo] || [];
+    d.forEach((x) => { const p = document.createElementNS(NS, 'path'); p.setAttribute('d', x); svg.appendChild(p); });
+    return svg;
+  }
+  function paso(n, tipo, texto) { return el('div', { class: 'av-paso' }, [el('span', { class: 'av-num', texto: String(n) }), tipo ? icono(tipo) : null, el('span', { texto })]); }
+  let flecha = null;
+  function quitarFlecha() { if (flecha) { flecha.remove(); flecha = null; } }
   function inyectarEstilos() { if (document.getElementById('av-estilos')) return; const s = el('style', { id: 'av-estilos' }); s.textContent = estilos; document.head.appendChild(s); }
 
   function cerrar(recordar) {
     if (!tarjeta) return;
     if (recordar) logica.guardar(almacen, logica.descartar(logica.leer(almacen), Date.now()));
-    clearTimeout(cerrarTimer);
+    clearTimeout(cerrarTimer); quitarFlecha();
     const t = tarjeta; tarjeta = null; t.classList.remove('av-ver'); setTimeout(() => t.remove(), 300);
   }
   function mostrar(titulo, texto, botones, extra) {
@@ -88,8 +113,9 @@
         el('div', {}, [el('div', { class: 'av-t', texto: titulo }), el('div', { class: 'av-s', texto: texto }), extra && extra.pasos
           ? el('ol', { class: 'av-pasos' }, extra.pasos.map((p) => el('li', { texto: p }))) : null]),
       ]),
+      extra && extra.nodos ? el('div', { class: 'av-pasos2' }, extra.nodos) : null,
       botones && botones.lista && botones.lista.length ? el('div', { class: 'av-botones' }, botones.lista.map((b) => el('button', { type: 'button', class: 'av-btn' + (b.pri ? ' av-pri' : ''), texto: b.txt, al: b.fn }))) : null,
-      extra && extra.instalar && instalable ? el('button', { type: 'button', class: 'av-link', texto: '📲 Instalar la tienda como app', al: instalarApp }) : null,
+      extra && extra.instalar ? el('button', { type: 'button', class: 'av-inst' + (instalable ? ' av-on' : ''), texto: '📲 Instalar la tienda como app', al: instalarApp }) : null,
     ]);
     if (tarjeta) tarjeta.remove();
     tarjeta = t; document.body.appendChild(t);
@@ -99,9 +125,14 @@
 
   function instalarApp() {
     if (!instalable) return;
-    instalable.prompt(); instalable.userChoice.finally(() => { instalable = null; });
+    instalable.prompt(); instalable.userChoice.finally(() => { instalable = null; document.querySelectorAll('.av-inst').forEach((b) => b.classList.remove('av-on')); });
   }
 
+  function copiarEnlace(ev) {
+    const url = location.origin + '/', b = ev && ev.currentTarget;
+    const listo = () => { if (b) b.textContent = '¡Enlace copiado! Pegalo en Safari'; };
+    try { navigator.clipboard.writeText(url).then(listo, () => { if (b) b.textContent = url; }); } catch { if (b) b.textContent = url; }
+  }
   async function estado() { return window.Push ? window.Push.estado() : { soportado: false, motivo: 'no_soportado', ios: false }; }
 
   async function confirmadoEnServidor() {
@@ -122,8 +153,8 @@
     });
     if (r.ok) {
       logica.guardar(almacen, { ...logica.leer(almacen), ok: true });
-      mostrar('¡Listo! ✅', 'Te mandamos un aviso de bienvenida. Si no lo ves en un minuto, revisá que las notificaciones estén permitidas para este sitio.', { lista: [{ txt: 'Perfecto', pri: true, fn: () => cerrar(false) }] });
-      cerrarTimer = setTimeout(() => cerrar(false), 9000);
+      mostrar('¡Listo! ✅', 'Te mandamos un aviso de bienvenida. Si no lo ves en un minuto, revisá que las notificaciones estén permitidas para este sitio.', { lista: [{ txt: 'Perfecto', pri: true, fn: () => cerrar(false) }] }, { instalar: true });
+      if (!instalable) cerrarTimer = setTimeout(() => cerrar(false), 9000);
       return;
     }
     if (r.motivo === 'cancelado') logica.guardar(almacen, logica.descartar(logica.leer(almacen), Date.now()));
@@ -141,8 +172,22 @@
   async function abrir(manual) {
     const e = await estado();
     if (e.motivo === 'ios_sin_instalar') {
-      mostrar('Avisos en iPhone', 'En iPhone los avisos funcionan con la tienda guardada como app. Son 3 pasos y tardás 20 segundos:', { lista: [{ txt: 'Entendido', pri: true, fn: () => cerrar(false) }], recordarAlCerrar: !manual },
-        { pasos: ['Tocá el botón Compartir (el cuadrado con la flecha hacia arriba).', 'Elegí «Agregar a pantalla de inicio».', 'Abrí iPhone Mood desde el ícono nuevo y tocá 🔔 Avisos al final de la página.'] });
+      const ua = navigator.userAgent || '';
+      const cerrarBtn = { txt: 'Entendido', pri: true, fn: () => cerrar(false) };
+      if (logica.embebido(ua)) {
+        // Instagram, Facebook, TikTok…: su navegador interno no puede guardar la tienda. Hay que pasarse a Safari.
+        mostrar('Abrila en Safari', 'Desde acá no se puede instalar. Pasate a Safari en dos toques:', { lista: [{ txt: 'Copiar enlace', pri: true, fn: copiarEnlace }, { txt: 'Cerrar', fn: () => cerrar(!manual) }], recordarAlCerrar: !manual },
+          { nodos: [paso(1, null, 'Tocá los tres puntitos ⋯ (o el ícono de brújula) del navegador.'), paso(2, 'safari', 'Elegí «Abrir en Safari».')] });
+        return;
+      }
+      mostrar('Instalá la tienda y recibí avisos', 'En iPhone se hace en 2 pasos (20 segundos). Después abrís iPhone Mood desde el ícono nuevo y ahí activás los avisos con un toque.',
+        { lista: [cerrarBtn], recordarAlCerrar: !manual },
+        { nodos: [paso(1, 'compartir', 'Tocá Compartir' + (logica.safariIphone(ua) ? ' (la flecha de abajo señala el botón).' : ' en la barra del navegador.')), paso(2, 'agregar', 'Elegí «Agregar a pantalla de inicio» y confirmá.')] });
+      if (logica.safariIphone(ua)) { quitarFlecha(); flecha = el('div', { class: 'av-flecha', 'aria-hidden': 'true' }, [icono('flecha')]); document.body.appendChild(flecha); }
+      return;
+    }
+    if (e.instalada && !e.suscripta && e.motivo === null) {
+      mostrar('¡Ya tenés la app! Un último paso', 'Activá los avisos para enterarte primero de stock nuevo y ofertas. Como mucho 1 por día.', { lista: [{ txt: 'Activar avisos', pri: true, fn: suscribir }], recordarAlCerrar: true });
       return;
     }
     if (e.motivo === 'no_soportado') { if (manual) mostrar('Avisos', logica.textoMotivo('no_soportado'), { lista: [{ txt: 'Entendido', pri: true, fn: () => cerrar(false) }] }); return; }
@@ -178,7 +223,9 @@
       const p = el('div', { class: 'av-pie', style: 'margin-top:6px' }, [el('a', { href: '#avisos', texto: '🔔 Avisos de novedades', al: (ev) => { ev.preventDefault(); abrir(true); } })]);
       pie.appendChild(p);
     }
-    window.addEventListener('beforeinstallprompt', (ev) => { ev.preventDefault(); instalable = ev; });
+    window.addEventListener('beforeinstallprompt', (ev) => { ev.preventDefault(); instalable = ev; document.querySelectorAll('.av-inst').forEach((b) => b.classList.add('av-on')); });
+    // Android: se registra el service worker poco después de cargar (sin trabajo extra) para que Chrome ofrezca instalar con un toque.
+    if (!window.Push.esIOS) setTimeout(() => { try { window.Push.registrar(); } catch { /* sin service worker no hay instalación: los avisos igual se piden al tocar */ } }, 2500);
     window.addEventListener('appinstalled', () => { instalable = null; });
     window.addEventListener('scroll', alScroll, { passive: true });
     if (!logica.leer(almacen).ok) reloj = setInterval(intentarOfrecer, 3000);

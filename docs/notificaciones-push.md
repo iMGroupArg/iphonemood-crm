@@ -47,3 +47,9 @@ Primeros avisos: **venta nueva** (al equipo) y **reparación lista** (al cliente
 - **Base (script 34):** suscripción anónima `tipo='visitante'`, inactiva hasta que llega el aviso de bienvenida (si falla, se borra). RPC `push_suscribir_visitante`, `push_estado_visitante`, `push_baja_visitante` (anon) y `push_difundir`, `push_difusiones_resumen` (sólo el CRM autenticado). Máximo 1 difusión cada 20 h (`push_config.difusion_horas_min`), título ≤60 y texto ≤140, enlaces sólo a este sitio.
 - **CRM:** pantalla «Avisos a clientes» (`src/modules/avisos-clientes.js`): plantillas, vista previa, confirmación antes de enviar e historial.
 - **Pruebas:** `tests/avisos_web.test.mjs`, sección 6d de `tests/sql/push.sql.test.mjs`.
+
+### Instalación más fácil (rama claude/avisos-ios-facil)
+- **iPhone (Safari):** guía de 2 pasos con íconos y una flecha animada que señala el botón Compartir. Apple no permite instalar ni pedir avisos sin ese paso: no hay forma de saltearlo.
+- **iPhone dentro de Instagram/Facebook/TikTok:** esos navegadores internos no pueden instalar; se muestra «Abrila en Safari» con botón «Copiar enlace».
+- **App ya instalada, sin avisos:** al segundo de abrirla se ofrece «Último paso: Activar avisos».
+- **Android:** el service worker se registra ~2,5 s después de cargar para que Chrome ofrezca instalar; el botón «📲 Instalar la tienda como app» (un toque) aparece cuando Chrome lo permite.

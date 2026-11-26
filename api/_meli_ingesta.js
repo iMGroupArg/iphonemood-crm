@@ -14,6 +14,7 @@
 // bloquea la acreditación. Verificar con la primera orden real y ajustar.
 
 const M = require('./_meli.js');
+const { numerosDeOrden, guardarNumeros } = require('./_meli_numeros.js');
 
 // OJO: Number(null) y Number('') dan 0. Con un `Number(x)` pelado, un importe
 // AUSENTE se convertía en cero y se leía como un dato ("neto: 0", "completa: true").
@@ -246,6 +247,8 @@ async function procesarOrden(cuentaId, userId, orderId, ctx, pres, presFinal) {
     }, pres);
 
     if (id === null || id === undefined) return { estado: 'reintentar', motivo: 'se perdió el lease de la orden' };
+    // Número de venta (pack_id) y envío que muestra Mercado Libre (script 35). De mejor esfuerzo: si falla o el script no se corrió, no cambia nada.
+    { const n = numerosDeOrden(order); await guardarNumeros({ rpc: M.rpc, orden: orderId, pack: n.pack, envio: n.envio }, presFinal || pres); }
     if (!fin.financiera_ok) return { estado: 'reintentar', motivo: 'falló la consulta de algún pago: orden guardada parcial' };
     return { estado: 'ok' };
   } finally {

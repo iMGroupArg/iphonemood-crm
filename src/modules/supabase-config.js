@@ -317,7 +317,10 @@ const DB = {
       const faltaColumna = sondaCierre.error && (sondaCierre.error.code === '42703' || /cerrada_manual|column .* does not exist|Could not find/i.test(String(sondaCierre.error.message || '')));
       if (sondaCierre.error && !faltaColumna) { State.meliError = true; return; }
       State.meliCierre = !sondaCierre.error;    // false = el script 12 no está corrido: la pantalla no ofrece los botones de cierre
-      const COLS = sondaCierre.error ? COLS_BASE : COLS_BASE + ',cerrada_manual_en,cerrada_manual_por,cerrada_manual_motivo,cerrada_manual_nota,cerrada_manual_venta_id';
+      // Números de Mercado Libre (script 35): pack_id y envío. Son solo para MOSTRAR: si faltan (script sin correr) o la prueba falla por lo que sea, se sigue sin ellos.
+      const sondaNum = await supa.from('meli_ordenes').select('ml_pack_id').limit(1);
+      const COLS = (sondaCierre.error ? COLS_BASE : COLS_BASE + ',cerrada_manual_en,cerrada_manual_por,cerrada_manual_motivo,cerrada_manual_nota,cerrada_manual_venta_id')
+        + (sondaNum.error ? '' : ',ml_pack_id,ml_shipment_id');
       // Las 300 más nuevas para la pantalla, MÁS todas las que siguen abiertas sin importar
       // cuán viejas sean: "pendiente de liberar" y el Capital se calculan con esto, y una
       // orden vieja sin acreditar no puede desaparecer de la suma por quedar fuera del límite.
@@ -357,7 +360,7 @@ const DB = {
       }
       const num = x => (x === null || x === undefined ? null : Number(x));   // NULL se queda NULL: nunca 0
       State.meliOrdenes = filas.map(o => ({
-        id: o.id, orderId: o.meli_order_id, cuentaId: o.cuenta_id, estado: o.estado, comprador: o.comprador,
+        id: o.id, orderId: o.meli_order_id, packId: o.ml_pack_id || null, envioId: o.ml_shipment_id || null, cuentaId: o.cuenta_id, estado: o.estado, comprador: o.comprador,
         fechaOrden: o.fecha_orden, moneda: o.moneda || 'ARS',
         bruto: num(o.bruto), neto: num(o.neto), comisionEnvio: num(o.comision_envio),
         fechaLiberacion: o.fecha_liberacion, financieraCompleta: !!o.financiera_completa,

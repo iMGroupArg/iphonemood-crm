@@ -12,6 +12,7 @@
 // stock y tocar la caja es un botón por orden hasta que haya confianza.
 const MeliOrdenes = {
   _filtro: 'pendientes',
+  _buscar: '',      // texto del buscador: número de venta (pack), de orden o de envío de Mercado Libre
   _limite: 60,
 
   ERRORES: {
@@ -147,7 +148,10 @@ const MeliOrdenes = {
     const pend = State.meliPendienteLiberar();
     const FILTROS = { pendientes: 'Para procesar', acreditar: 'Para acreditar', revision: 'En revisión', cerradas: 'Cerradas', todas: 'Todas' };
     const cuenta = k => k === 'todas' ? todas.length : todas.filter(o => this._estadoDe(o).clave === k).length;
-    const lista = (this._filtro === 'todas' ? facturables : facturables.filter(o => this._estadoDe(o).clave === this._filtro));
+    // Con texto en el buscador se busca en TODAS las órdenes (ignora el filtro de estado: si no, una orden cerrada no aparecería desde «Para procesar»).
+    const q = this._normBusqueda(this._buscar);
+    const lista = q ? todas.filter(o => this._coincide(o, q))
+      : (this._filtro === 'todas' ? facturables : facturables.filter(o => this._estadoDe(o).clave === this._filtro));
     const visibles = lista.slice(0, this._limite);
 
     const tabs = Object.entries(FILTROS).map(([k, t]) =>
@@ -213,7 +217,8 @@ const MeliOrdenes = {
         <div class="card mo-card" style="margin-bottom:8px">
           <div class="mo-top" style="display:flex;gap:10px;align-items:flex-start;flex-wrap:wrap">
             <div style="flex:1;min-width:220px">
-              <div style="font-size:13px;font-weight:600">Orden ${e(o.orderId)} · ${e(o.comprador || 'comprador')}</div>
+              <div style="font-size:13px;font-weight:600">Orden ${e(o.packId || o.orderId)} · ${e(o.comprador || 'comprador')}</div>
+              ${(o.packId || o.envioId) ? `<div style="font-size:11px;color:var(--text-secondary)" title="Número de venta que muestra Mercado Libre arriba; abajo, el número de orden que usa el CRM y el del envío">${o.packId ? `Orden ${e(o.orderId)}` : ''}${o.packId && o.envioId ? ' · ' : ''}${o.envioId ? `Envío ${e(o.envioId)}` : ''}</div>` : ''}
               <div style="font-size:11.5px;color:var(--text-secondary)">${this._dia(o.fechaOrden)} · ${items || 'sin productos'}</div>
             </div>
             <span class="badge ${est.clase}">${est.txt}</span>
@@ -249,11 +254,25 @@ const MeliOrdenes = {
       </div>
       ${window.MeliFacturas && MeliFacturas.franja ? MeliFacturas.franja(todas) : ''}
       <div class="mo-tabs" style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px">${tabs}</div>
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:10px">
+        <input type="search" id="meliord-buscar" value="${e(this._buscar)}" placeholder="Buscar por número de venta, de orden o de envío" autocomplete="off" inputmode="numeric"
+          oninput="MeliOrdenes.buscar(this.value)" style="flex:1;min-width:220px;max-width:420px;font-size:13px;padding:7px 10px;border:1px solid var(--border-strong);border-radius:8px">
+        ${q ? `<span style="font-size:11.5px;color:var(--text-secondary)">Buscando en todas las órdenes: ${lista.length} resultado${lista.length === 1 ? '' : 's'}</span>` : ''}
+      </div>
       ${tarjetas || '<div class="card" style="font-size:13px;color:var(--text-secondary)">No hay órdenes en esta vista.</div>'}
       ${lista.length > visibles.length ? `<button class="btn btn-sm" onclick="MeliOrdenes.verMas()">Ver más (${lista.length - visibles.length} más)</button>` : ''}`;
   },
 
   filtrar(k) { this._filtro = k; this._limite = 60; this.pintar(); },
+  // Buscador: solo se tienen en cuenta los DÍGITOS (se puede pegar «#2000016191459325» o con espacios). Menos de 4 dígitos no busca (sería ruido).
+  _normBusqueda(t) { const d = String(t == null ? '' : t).replace(/\D/g, ''); return d.length >= 4 ? d : ''; },
+  // Coincide si el texto está en cualquiera de los TRES números. Es solo para MOSTRAR: las órdenes se siguen identificando por meli_order_id.
+  _coincide(o, q) { return [o.orderId, o.packId, o.envioId].some(v => v != null && String(v).includes(q)); },
+  buscar(texto) {
+    this._buscar = String(texto == null ? '' : texto).slice(0, 60); this._limite = 60; this.pintar();
+    const i = document.getElementById('meliord-buscar');       // pintar() rearma la pantalla: se devuelve el cursor al buscador
+    if (i) { i.focus(); try { i.setSelectionRange(i.value.length, i.value.length); } catch { /* sin cursor */ } }
+  },
   verMas() { this._limite += 60; this.pintar(); },
 
   // ── Acciones: cada una es UNA llamada a la base, que decide todo en una transacción ──
